@@ -1,31 +1,69 @@
-# Unity 自动生成的缓存和构建中间文件，均可由编辑器重新生成，不纳入版本控制。
-[Ll]ibrary/
-[Tt]emp/
-[Oo]bj/
-[Ll]ogs/
-[Bb]uild/
-[Bb]uilds/
-[Mm]emoryCaptures/
-[Rr]ecordings/
+# Unity 自动生成的缓存、中间文件和本地用户配置可由编辑器重新生成，不纳入版本控制。
+.utmp/
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Ll]ogs/
+/[Bb]uild/
+/[Bb]uilds/
+/[Uu]ser[Ss]ettings/
+/[Mm]emoryCaptures/
+/[Rr]ecordings/
 
-# IDE 生成的本地工程文件和用户工作区设置，不影响 Unity 项目源码。
+# Rider、Visual Studio、Gradle 等工具生成的本地工程文件和缓存。
 .vs/
 .idea/
+.gradle/
+ExportedObj/
+.consulo/
 *.csproj
+*.unityproj
 *.sln
+*.slnx
 *.suo
 *.user
 *.userprefs
 *.pidb
 *.booproj
 *.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+*.DotSettings.user
 
-# Unity 编辑器和构建过程生成的本地配置、崩溃转储与系统临时文件。
-[Uu]serSettings/
-sysinfo.txt
-*.stackdump
+# Unity 导入、崩溃处理和构建产生的临时文件。
+*.log
 *.tmp
 *.bak
 *.swp
+*.blend1
+*.blend1.meta
+*.pidb.meta
+*.pdb.meta
+*.mdb.meta
+mono_crash.*
+sysinfo.txt
+*.stackdump
 .DS_Store
 Thumbs.db
+
+# 大型构建产物与自动生成的资源，不应作为 Unity 工程源码提交。
+*.apk
+*.aab
+*.unitypackage
+*.unitypackage.meta
+*.app
+crashlytics-build.properties
+InitTestScene*.unity*
+/ServerData
+/[Aa]ssets/StreamingAssets/aa*
+/[Aa]ssets/AddressableAssetsData/link.xml*
+/[Aa]ssets/Addressables_Temp*
+/[Aa]ssets/AddressableAssetsData/*/*.bin*
+/[Aa]ssets/Unity.VisualScripting.Generated/VisualScripting.Flow/UnitOptions.db
+/[Aa]ssets/Unity.VisualScripting.Generated/VisualScripting.Flow/UnitOptions.db.meta
+/[Aa]ssets/Unity.VisualScripting.Generated/VisualScripting.Core/Property Providers
+/[Aa]ssets/Unity.VisualScripting.Generated/VisualScripting.Core/Property Providers.meta
+/[Aa]ssets/[Ii]nit[Tt]est[Ss]cene*.unity*
+/[Aa]ssets/[Ss]ceneDependencyCache*
