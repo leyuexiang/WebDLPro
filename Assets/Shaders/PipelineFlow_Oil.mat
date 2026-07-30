@@ -42,7 +42,6 @@ Material:
     m_Ints: []
     m_Floats:
     - _BumpScale: 1
-    # 与 PipelineFlowURP.shader 的整体透明度参数对应；默认保持原有不透明外观。
     - _Opacity: 1
     - _FlowAxis: 1
     - _FlowContrast: 3.2
