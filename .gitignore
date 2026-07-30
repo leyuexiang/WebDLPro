@@ -1,0 +1,31 @@
+# Unity 自动生成的缓存和构建中间文件，均可由编辑器重新生成，不纳入版本控制。
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Ll]ogs/
+[Bb]uild/
+[Bb]uilds/
+[Mm]emoryCaptures/
+[Rr]ecordings/
+
+# IDE 生成的本地工程文件和用户工作区设置，不影响 Unity 项目源码。
+.vs/
+.idea/
+*.csproj
+*.sln
+*.suo
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+
+# Unity 编辑器和构建过程生成的本地配置、崩溃转储与系统临时文件。
+[Uu]serSettings/
+sysinfo.txt
+*.stackdump
+*.tmp
+*.bak
+*.swp
+.DS_Store
+Thumbs.db
