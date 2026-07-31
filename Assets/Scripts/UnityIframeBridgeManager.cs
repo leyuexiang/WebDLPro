@@ -32,6 +32,7 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
     }
 
     private string _instanceId = "local-demo-001";
+    private PowerPlantProcessController _processController;
 
 #if UNITY_WEBGL && !UNITY_EDITOR
     /// <summary>初始化浏览器消息监听器，并让其在 Unity 可接收消息后发送 ready。</summary>
@@ -59,7 +60,7 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         public long timestamp;
     }
 
-    /// <summary>第一阶段所有消息需要的最小负载字段。</summary>
+    /// <summary>测试与燃气发电业务命令共享的固定负载字段。</summary>
     [Serializable]
     private sealed class BridgePayload
     {
@@ -67,6 +68,18 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         public string message;
         public string deviceCode;
         public string deviceName;
+        public string requestId;
+        public string processId;
+        public string stepId;
+        public string unitId;
+        public string nodeId;
+        public string nodeName;
+        public string routeId;
+        public string errorCode;
+        public string sceneState;
+        public bool isolate;
+        public bool enabled;
+        public float speed;
         public float width;
         public float height;
     }
@@ -92,12 +105,14 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         _instanceId = ReadQueryParameter("instanceId", _instanceId);
 
         TryBindTestObjectRenderer();
+        TryBindProcessController();
     }
 
     private void Start()
     {
         // Start 在场景全部 Awake 完成后执行；再次尝试绑定可规避根对象先于子对象初始化的顺序差异。
         TryBindTestObjectRenderer();
+        TryBindProcessController();
         if (_testObjectRenderer != null)
         {
             _testObjectRenderer.material.color = new Color(1f, 0.45f, 0.76f, 1f);
@@ -142,8 +157,7 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         switch (message.type)
         {
             case "init":
-                StatusText = "已完成父页面初始化。";
-                SendToParent("ack", new BridgePayload { message = "Unity 已完成初始化" });
+                HandleInitialize(message);
                 break;
             case "test-command":
                 HandleTestCommand(message.payload);
@@ -151,8 +165,23 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
             case "resize":
                 StatusText = $"收到容器尺寸：{message.payload?.width:0} × {message.payload?.height:0}";
                 break;
+            case "enterProcessStep":
+                HandleEnterProcessStep(message);
+                break;
+            case "resetScene":
+                HandleResetScene(message);
+                break;
+            case "focusNode":
+                HandleFocusNode(message);
+                break;
+            case "setNodeVisibility":
+                HandleSetNodeVisibility(message);
+                break;
+            case "setRouteFlow":
+                HandleSetRouteFlow(message);
+                break;
             default:
-                Debug.Log($"[UnityIframeBridge] 忽略当前测试阶段未实现的消息类型：{message.type}");
+                SendCommandResult(message, false, "unsupported-command", $"不支持的命令：{message.type}");
                 break;
         }
     }
@@ -162,6 +191,124 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
     {
         StatusText = $"已点击对象：{deviceName}";
         SendToParent("object-click", new BridgePayload { deviceCode = deviceCode, deviceName = deviceName });
+    }
+
+    /// <summary>由真实厂区对象点击交互调用，向父页面回传稳定业务节点 ID。</summary>
+    public void ReportObjectSelected(string nodeId, string nodeName)
+    {
+        StatusText = $"已选择对象：{nodeName}";
+        SendToParent("objectSelected", new BridgePayload
+        {
+            nodeId = nodeId,
+            nodeName = nodeName,
+            sceneState = _processController != null ? _processController.GetStateDescription() : string.Empty
+        });
+    }
+
+    private void HandleInitialize(BridgeMessage message)
+    {
+        StatusText = "已完成父页面初始化。";
+        TryBindProcessController();
+        SendToParent("ack", new BridgePayload
+        {
+            requestId = message.messageId,
+            message = "Unity 已完成初始化",
+            sceneState = _processController != null ? _processController.GetStateDescription() : string.Empty
+        });
+    }
+
+    private void HandleEnterProcessStep(BridgeMessage message)
+    {
+        if (!TryGetProcessController(message, out PowerPlantProcessController controller))
+        {
+            return;
+        }
+
+        BridgePayload payload = message.payload;
+        string processId = string.IsNullOrWhiteSpace(payload?.processId) ? "gas-power-generation" : payload.processId;
+        string stepId = payload?.stepId;
+        string unitId = payload?.unitId;
+        bool isolate = payload == null || payload.isolate;
+        bool success = controller.TryEnterProcessStep(processId, stepId, unitId, isolate, out string resultMessage);
+        StatusText = resultMessage;
+        SendCommandResult(message, success, success ? string.Empty : "invalid-process-step", resultMessage);
+    }
+
+    private void HandleResetScene(BridgeMessage message)
+    {
+        if (!TryGetProcessController(message, out PowerPlantProcessController controller))
+        {
+            return;
+        }
+
+        bool success = controller.TryResetScene(out string resultMessage);
+        StatusText = resultMessage;
+        SendCommandResult(message, success, success ? string.Empty : "reset-failed", resultMessage);
+    }
+
+    private void HandleFocusNode(BridgeMessage message)
+    {
+        if (!TryGetProcessController(message, out PowerPlantProcessController controller))
+        {
+            return;
+        }
+
+        BridgePayload payload = message.payload;
+        bool success = controller.TryFocusNode(payload?.nodeId, payload != null && payload.isolate, out string resultMessage);
+        StatusText = resultMessage;
+        SendCommandResult(message, success, success ? string.Empty : "invalid-node", resultMessage);
+    }
+
+    private void HandleSetNodeVisibility(BridgeMessage message)
+    {
+        if (!TryGetProcessController(message, out PowerPlantProcessController controller))
+        {
+            return;
+        }
+
+        BridgePayload payload = message.payload;
+        bool success = controller.TrySetNodeVisibility(payload?.nodeId, payload != null && payload.enabled, out string resultMessage);
+        StatusText = resultMessage;
+        SendCommandResult(message, success, success ? string.Empty : "invalid-node", resultMessage);
+    }
+
+    private void HandleSetRouteFlow(BridgeMessage message)
+    {
+        if (!TryGetProcessController(message, out PowerPlantProcessController controller))
+        {
+            return;
+        }
+
+        BridgePayload payload = message.payload;
+        float speed = payload != null && !Mathf.Approximately(payload.speed, 0f) ? payload.speed : 1f;
+        bool success = controller.TrySetRouteFlow(payload?.routeId, payload != null && payload.enabled, speed, out string resultMessage);
+        StatusText = resultMessage;
+        SendCommandResult(message, success, success ? string.Empty : "invalid-route", resultMessage);
+    }
+
+    private bool TryGetProcessController(BridgeMessage message, out PowerPlantProcessController controller)
+    {
+        TryBindProcessController();
+        controller = _processController;
+        if (controller != null)
+        {
+            return true;
+        }
+
+        StatusText = "场景流程控制器尚未配置。";
+        SendCommandResult(message, false, "controller-unavailable", StatusText);
+        return false;
+    }
+
+    private void SendCommandResult(BridgeMessage command, bool success, string errorCode, string resultMessage)
+    {
+        SendToParent("commandResult", new BridgePayload
+        {
+            requestId = command.messageId,
+            message = resultMessage,
+            errorCode = errorCode,
+            sceneState = _processController != null ? _processController.GetStateDescription() : string.Empty
+        });
     }
 
     private void HandleTestCommand(BridgePayload payload)
@@ -214,6 +361,14 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         _testObjectRenderer = testObject != null ? testObject.GetComponent<Renderer>() : null;
     }
 
+    private void TryBindProcessController()
+    {
+        if (_processController == null)
+        {
+            _processController = FindFirstObjectByType<PowerPlantProcessController>();
+        }
+    }
+
     private static string ReadQueryParameter(string key, string fallbackValue)
     {
         string url = Application.absoluteURL;
@@ -237,7 +392,9 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
 
     private void OnGUI()
     {
-        // 采用 OnGUI 构建零资源调试面板，第一阶段无需引入 UI Toolkit 或文本组件依赖。
+        // 正式包不呈现测试面板，开发阶段保留状态提示以方便 iframe 联调。
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
         GUI.Box(new Rect(12, 12, 500, 64), $"Unity iframe 通信测试\n{StatusText}");
+#endif
     }
 }

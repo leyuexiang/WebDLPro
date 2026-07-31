@@ -36,7 +36,13 @@ mergeInto(LibraryManager.library, {
     window.parent.postMessage({
       channel: 'power3d-unity', version: 1, instanceId: instanceId,
       messageId: Date.now() + '-ready', type: 'ready',
-      payload: { runtime: 'unity-webgl', capabilities: ['init', 'test-command', 'resize', 'object-click'] },
+      payload: {
+        runtime: 'unity-webgl',
+        capabilities: [
+          'init', 'resize', 'enterProcessStep', 'resetScene', 'focusNode',
+          'setNodeVisibility', 'setRouteFlow', 'commandResult', 'objectSelected'
+        ]
+      },
       timestamp: Date.now()
     }, parentOrigin);
   },
