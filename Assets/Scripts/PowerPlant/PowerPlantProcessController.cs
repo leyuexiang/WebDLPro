@@ -74,7 +74,7 @@ public sealed class PowerPlantProcessController : MonoBehaviour
     [SerializeField] private GameObject[] _groundObjects = Array.Empty<GameObject>();
 
     [Header("运行时相机")]
-    [SerializeField, Min(0.1f)] private float _cameraMoveSpeed = 4.5f;
+    [SerializeField, Min(0.15f)] private float _cameraTransitionDuration = 1.45f;
     [SerializeField, Range(25f, 80f)] private float _focusFieldOfView = 52f;
     [SerializeField] private Vector3 _cameraViewDirection = new Vector3(1f, 0.65f, -1f);
 
@@ -90,9 +90,14 @@ public sealed class PowerPlantProcessController : MonoBehaviour
     private readonly Dictionary<Renderer, ActiveContextFadeMaterials> _activeContextFades = new Dictionary<Renderer, ActiveContextFadeMaterials>();
     private readonly HashSet<GameObject> _groundObjectSet = new HashSet<GameObject>();
 
+    private Vector3 _cameraTransitionStartPosition;
+    private Quaternion _cameraTransitionStartRotation;
+    private float _cameraTransitionStartFieldOfView;
     private Vector3 _cameraTargetPosition;
     private Quaternion _cameraTargetRotation;
-    private bool _hasCameraTarget;
+    private float _cameraTargetFieldOfView;
+    private float _cameraTransitionElapsed;
+    private bool _hasCameraTransition;
     private string _currentProcessId = GasPowerGenerationProcessId;
     private string _currentStepId = OverviewStepId;
     private string _currentUnitId = AllUnitsId;
@@ -214,7 +219,7 @@ public sealed class PowerPlantProcessController : MonoBehaviour
             }
         }
 
-        FocusNode(focusNodeId);
+        FocusProcessTargets(focusNodeId, visibleNodeIds, normalizedUnitId);
         _currentProcessId = processId;
         _currentStepId = stepId;
         _currentUnitId = normalizedUnitId;
@@ -251,6 +256,14 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         FocusNode(nodeId);
         message = $"已聚焦节点：{nodeId}";
         return true;
+    }
+
+    /// <summary>
+    /// 由自由相机控制器在检测到手动输入时调用，防止流程镜头动画和玩家控制互相覆盖。
+    /// </summary>
+    public void CancelCameraTransition()
+    {
+        _hasCameraTransition = false;
     }
 
     /// <summary>
@@ -580,6 +593,17 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         }
     }
 
+    private void FocusProcessTargets(string focusNodeId, List<string> visibleNodeIds, string unitId)
+    {
+        if (unitId == AllUnitsId && TryCalculateBounds(visibleNodeIds, out Bounds processBounds))
+        {
+            BeginCameraTransition(processBounds);
+            return;
+        }
+
+        FocusNode(focusNodeId);
+    }
+
     private void FocusNode(string nodeId)
     {
         if (_interactionCamera == null || !_nodesById.TryGetValue(nodeId, out SceneNodeBinding node))
@@ -592,28 +616,52 @@ public sealed class PowerPlantProcessController : MonoBehaviour
             return;
         }
 
+        BeginCameraTransition(bounds);
+    }
+
+    private void BeginCameraTransition(Bounds bounds)
+    {
+        if (_interactionCamera == null)
+        {
+            return;
+        }
+
         Vector3 direction = _cameraViewDirection.sqrMagnitude > 0.001f ? _cameraViewDirection.normalized : new Vector3(1f, 0.65f, -1f).normalized;
         float verticalFovRadians = _focusFieldOfView * Mathf.Deg2Rad;
         float radius = Mathf.Max(bounds.extents.magnitude, 3f);
         float distance = radius / Mathf.Tan(verticalFovRadians * 0.5f) * 1.25f;
 
-        _interactionCamera.fieldOfView = _focusFieldOfView;
+        Transform cameraTransform = _interactionCamera.transform;
+        _cameraTransitionStartPosition = cameraTransform.position;
+        _cameraTransitionStartRotation = cameraTransform.rotation;
+        _cameraTransitionStartFieldOfView = _interactionCamera.fieldOfView;
         _cameraTargetPosition = bounds.center + direction * distance;
         _cameraTargetRotation = Quaternion.LookRotation(bounds.center - _cameraTargetPosition, Vector3.up);
-        _hasCameraTarget = true;
+        _cameraTargetFieldOfView = _focusFieldOfView;
+        _cameraTransitionElapsed = 0f;
+        _hasCameraTransition = true;
     }
 
     private void UpdateCameraTransition()
     {
-        if (!_hasCameraTarget || _interactionCamera == null)
+        if (!_hasCameraTransition || _interactionCamera == null)
         {
             return;
         }
 
-        float blend = 1f - Mathf.Exp(-_cameraMoveSpeed * Time.unscaledDeltaTime);
+        _cameraTransitionElapsed += Time.unscaledDeltaTime;
+        float duration = Mathf.Max(_cameraTransitionDuration, 0.15f);
+        float progress = Mathf.Clamp01(_cameraTransitionElapsed / duration);
+        float blend = progress * progress * (3f - 2f * progress);
         Transform cameraTransform = _interactionCamera.transform;
-        cameraTransform.position = Vector3.Lerp(cameraTransform.position, _cameraTargetPosition, blend);
-        cameraTransform.rotation = Quaternion.Slerp(cameraTransform.rotation, _cameraTargetRotation, blend);
+        cameraTransform.position = Vector3.Lerp(_cameraTransitionStartPosition, _cameraTargetPosition, blend);
+        cameraTransform.rotation = Quaternion.Slerp(_cameraTransitionStartRotation, _cameraTargetRotation, blend);
+        _interactionCamera.fieldOfView = Mathf.Lerp(_cameraTransitionStartFieldOfView, _cameraTargetFieldOfView, blend);
+
+        if (progress >= 1f)
+        {
+            _hasCameraTransition = false;
+        }
     }
 
     private void HandlePointerSelection()
@@ -878,6 +926,31 @@ public sealed class PowerPlantProcessController : MonoBehaviour
 
         normalizedUnitId = string.Empty;
         return false;
+    }
+
+    private bool TryCalculateBounds(IReadOnlyList<string> nodeIds, out Bounds bounds)
+    {
+        bounds = new Bounds();
+        bool hasBounds = false;
+        for (int nodeIndex = 0; nodeIndex < nodeIds.Count; nodeIndex++)
+        {
+            if (!_nodesById.TryGetValue(nodeIds[nodeIndex], out SceneNodeBinding node) || !TryCalculateBounds(node.Targets, out Bounds nodeBounds))
+            {
+                continue;
+            }
+
+            if (!hasBounds)
+            {
+                bounds = nodeBounds;
+                hasBounds = true;
+            }
+            else
+            {
+                bounds.Encapsulate(nodeBounds);
+            }
+        }
+
+        return hasBounds;
     }
 
     private static bool TryCalculateBounds(GameObject[] targets, out Bounds bounds)

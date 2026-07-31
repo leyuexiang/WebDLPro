@@ -1,6 +1,6 @@
 # 燃气发电 WebGL 三维交互与低代码 iframe 集成开发计划
 
-**文档状态：** 实施中（主流程交互、半透明上下文和 iframe 桥接已实现；Release 包已生成，待在具备正常 WebGL/URP 着色器支持的目标浏览器完成最终画面与指令回归）  
+**文档状态：** 已完成本期交付（主流程交互、半透明上下文、iframe 桥接、流程镜头、自由相机及最终 Brotli WebGL 包均已完成并通过本地 iframe 回归）  
 **场景：** `Assets/Scenes/SampleScene.unity`  
 **目标：** 将已摆放完成的燃气发电厂三维场景打包为 Unity WebGL，嵌入模拟低代码平台的 iframe 后，由平台指令驱动流程下钻、周边模型的半透明上下文显示、相应管线的流动材质效果，并将三维对象交互事件回传给平台。
 
@@ -227,7 +227,7 @@ flowchart LR
 
 - 以当前 URP 场景建立 **WebGL Development Build** 联调包和 **Release Build** 交付包。发布包关闭不需要的诊断与测试逻辑，保留结构化错误回传。
 - 已完成精确网格审计与复用：场景中识别出 13 组完全相同的网格，已将 `启动马达2`、`顶部2`、`管道9`、`娶她建筑2`、`建筑6`、`建筑2`、`启动马达外壳2` 等 7 个重复 FBX 的场景引用改为复用对应源网格；原始资产保留，不删除用户文件。该操作保持 Transform、材质与交互根节点不变。
-- 当前模型压缩策略为：`地面2`、`控制站2` 保持 **Mesh Compression: Off**；`配电变电站`、`控制站1` 已按要求改为 **High**；其余参与构建的模型保持 High。`webGLInitialMemorySize` 为 **960 MB**、最大值 **2048 MB**、增长模式为几何增长。若目标终端仍超限，优先实施 LOD、模型减面或按流程拆包/按需加载，不再单纯提高堆内存。
+- 当前四个关键模型均保持原始网格显示质量：`地面2`、`控制站1`、`控制站2`、`配电变电站` 的 **Mesh Compression 均为 Off**；其余参与构建模型维持既定压缩策略。`webGLInitialMemorySize` 为 **768 MB**、最大值 **2048 MB**、增长模式为几何增长。若目标终端仍超限，优先实施 LOD、模型减面或按流程拆包/按需加载，不再单纯提高堆内存。
 - Release 包使用 Brotli。`local-iframe-test/serve_webgl.py` 和正式服务器必须为 `.data.br`、`.framework.js.br` 返回 `Content-Encoding: br`，为 `.wasm.br` 同时返回 `Content-Type: application/wasm`；普通静态服务不可直接替代。
 - 首次实测记录：Build 体积、首屏加载时间、内存、概览与下钻状态帧率、Draw Calls / Batches、材质与纹理内存。以实测结果决定模型压缩、纹理尺寸、Mipmap、LOD、静态批处理和按需加载策略。
 - 流动 Shader 仅编译实际使用的 URP 变体；保证所有自定义材质在 WebGL 的 shader stripping 后仍被引用或收录到 Variant Collection。
@@ -238,14 +238,24 @@ flowchart LR
 | 项目 | 结果 |
 | --- | --- |
 | 重复网格复用 | 已解除 7 个重复 FBX 的场景构建依赖，复用完全相同源网格；未删除原始资产 |
-| 当前压缩策略 | `地面2`、`控制站2` 保持 Off；`控制站1`、`配电变电站` 为 High；其余模型为 High |
+| 当前压缩策略 | `地面2`、`控制站1`、`控制站2`、`配电变电站` 均为 Off；其余模型为 High |
 | Development 构建 | `Builds/WebGL-Development-960-Substation-ControlStation1Compressed` 成功，**286.74 MB**；此前 Development 运行时仍在 `GlobalMetadata` 阶段出现 `memory access out of bounds` |
-| 当前 Release 包 | `Builds/WebGL-Release-960-Substation-ControlStation1Compressed-Retry`，构建 `build-09ebbc8a77` 成功，**149.74 MB**，0 error、0 warning |
-| 静态服务校验 | `.data.br`=`application/octet-stream; Content-Encoding: br`，`.framework.js.br`=`application/javascript; Content-Encoding: br`，`.wasm.br`=`application/wasm; Content-Encoding: br` |
-| iframe 实测状态 | `5510` 的 Release iframe 文档已加载，但尚未发出新的 `ready`；先前页面的 `5501` 握手记录不得作为该包验收结果 |
-| 当前渲染阻塞 | 内嵌浏览器连续报告 `Hidden/Internal-GUITexture` 与 `Sprites/Default` 的 GLSL 编译失败、`GL.End requires material.SetPass before`，画布未进入场景；需在具备正常 WebGL/URP 着色器支持的目标 Chrome/Edge 或低代码运行容器复测，并据此决定是否调整 WebGL 图形/Shader 变体设置 |
+| 当前诊断包 | `Builds/WebGL-Release-768-AllOriginalModels-CameraDiagnostic`，构建 `build-0592557b13` 成功，**328.74 MB**，0 error、12 warning；为缩短验证周期临时关闭发布压缩，数据缓存关闭 |
+| 诊断包静态服务校验 | `5514` 下 `.wasm` 为 `application/wasm`、无 `Content-Encoding`；与关闭压缩配置一致 |
+| iframe 实测状态 | `5514` 已收到 `ready`、`init`、`ack`，并成功下发 `enterProcessStep(gas-turbine, all)`；画面进入包含半透明周边的燃机双机组流程视图 |
+| 已关闭的渲染阻塞 | 当前内嵌浏览器已创建 WebGL 2 上下文并渲染场景，不再出现阻塞场景进入的内存越界或压缩响应头错误；仍会输出不影响运行的 URP 内部调试 Shader 不支持提示 |
+| 最终 Release 包 | `Builds/WebGL-Release-768-AllOriginalModels-Camera`，构建 `build-a62bfa5606` 成功，**175.10 MB**，耗时 **1411.77 秒**，0 error、12 warning；四个关键模型保持 Mesh Compression Off，WebGL 初始内存为 768 MB，数据缓存关闭 |
+| 最终包静态服务校验 | `5515` 下 `.data.br`=`application/octet-stream; Content-Encoding: br`，`.framework.js.br`=`application/javascript; Content-Encoding: br`，`.wasm.br`=`application/wasm; Content-Encoding: br` |
+| 最终 iframe 回归 | `5515` 已完成 `ready → init → ack`；`enterProcessStep(gas-turbine, all)` 返回“已进入 gas-turbine（机组：all）”，`resetScene` 返回“已恢复全景场景”，场景可视画面正常 |
 
-本地联调时父页面运行于 `http://127.0.0.1:5500/`，当前 Release 包使用 `http://127.0.0.1:5510/`。端口仅作为本机测试记录，正式部署应改为低代码平台给定的 HTTPS Origin。
+本地联调时父页面运行于 `http://127.0.0.1:5500/`；诊断包使用 `http://127.0.0.1:5514/`，最终发布包使用 `http://127.0.0.1:5515/`。端口仅作为本机测试记录，正式部署应改为低代码平台给定的 HTTPS Origin。
+
+### 9.2 已实现的相机交互约定
+
+- 低代码平台下发有效 `enterProcessStep` 或 `resetScene` 后，`PowerPlantProcessController` 在 **1.45 秒**内以平滑缓入缓出曲线，将主相机推进到当前流程可见对象（单机组时为目标设备，双机组时为两套已显示设备的聚合边界）。不会直接跳转镜头。
+- 下钻目标之外的对象降为半透明，`地面1`、`地面2` 继续保持不透明显示；流程动画期间再收到新的步骤或复位命令时，新的转场会从当前相机状态重新开始，保证最终状态可预测。
+- `Main Camera` 已挂载 `PowerPlantFreeCameraController`。画布取得焦点后，`W/A/S/D` 为前/左/后/右，`Q/E` 为下降/上升，按住 `Shift` 为 3 倍移动速度；按住鼠标右键并移动可旋转视角。任意手动移动或右键旋转会取消尚未结束的流程转场，避免输入与镜头动画互相覆盖。
+- 已在 iframe 诊断中确认流程指令回执与可见的中间推进帧、结束帧；键盘组合可发送至已获焦的 Unity 画布。最终 Brotli 发布包亦已完成进入流程与复位回归。
 
 ## 10. 测试与验收清单
 

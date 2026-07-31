@@ -58,7 +58,13 @@ public static class PowerPlantSceneSetup
             Undo.AddComponent<UnityIframeBridgeManager>(runtimeRoot);
         }
 
-        controller.ConfigureForCurrentSampleScene(sceneRoot.transform, Camera.main, gasFlowMaterial, contextFadeMaterial);
+        Camera interactionCamera = Camera.main;
+        if (interactionCamera != null && interactionCamera.GetComponent<PowerPlantFreeCameraController>() == null)
+        {
+            Undo.AddComponent<PowerPlantFreeCameraController>(interactionCamera.gameObject);
+        }
+
+        controller.ConfigureForCurrentSampleScene(sceneRoot.transform, interactionCamera, gasFlowMaterial, contextFadeMaterial);
         EditorUtility.SetDirty(runtimeRoot);
         EditorSceneManager.MarkSceneDirty(activeScene);
         EditorSceneManager.SaveScene(activeScene);
