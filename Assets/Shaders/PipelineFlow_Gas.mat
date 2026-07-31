@@ -43,11 +43,10 @@ Material:
     m_Floats:
     - _BumpScale: 1
     - _Opacity: 1
-    - _FlowAxis: 1
     - _FlowContrast: 1.15
     - _FlowIntensity: 1.8
     - _FlowSpeed: 0.75
-    - _FlowTiling: 6
+    - _FlowTiling: 0.55
     - _FlowWidth: 0.18
     - _Metallic: 0.76
     - _MetallicGlossMapEnabled: 0

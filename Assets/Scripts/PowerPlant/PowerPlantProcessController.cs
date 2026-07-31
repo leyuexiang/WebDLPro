@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using HighlightPlus;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -37,18 +38,21 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         [SerializeField] private Renderer[] _renderers;
         [SerializeField] private Material _flowMaterialTemplate;
         [SerializeField] private float _speedMultiplier = 1f;
+        [SerializeField] private Vector3 _flowDirectionOS = Vector3.right;
 
         public string Id => _id;
         public Renderer[] Renderers => _renderers;
         public Material FlowMaterialTemplate => _flowMaterialTemplate;
         public float SpeedMultiplier => _speedMultiplier;
+        public Vector3 FlowDirectionOS => _flowDirectionOS.sqrMagnitude > 0.0001f ? _flowDirectionOS.normalized : Vector3.right;
 
-        public FlowRouteBinding(string id, Renderer[] renderers, Material flowMaterialTemplate, float speedMultiplier)
+        public FlowRouteBinding(string id, Renderer[] renderers, Material flowMaterialTemplate, float speedMultiplier, Vector3 flowDirectionOS)
         {
             _id = id;
             _renderers = renderers;
             _flowMaterialTemplate = flowMaterialTemplate;
             _speedMultiplier = speedMultiplier;
+            _flowDirectionOS = flowDirectionOS.sqrMagnitude > 0.0001f ? flowDirectionOS.normalized : Vector3.right;
         }
     }
 
@@ -89,6 +93,10 @@ public sealed class PowerPlantProcessController : MonoBehaviour
     private readonly Dictionary<string, List<ActiveFlowMaterials>> _activeFlowsByRoute = new Dictionary<string, List<ActiveFlowMaterials>>(StringComparer.Ordinal);
     private readonly Dictionary<Renderer, ActiveContextFadeMaterials> _activeContextFades = new Dictionary<Renderer, ActiveContextFadeMaterials>();
     private readonly HashSet<GameObject> _groundObjectSet = new HashSet<GameObject>();
+    private readonly HashSet<Renderer> _highlightRendererSet = new HashSet<Renderer>();
+
+    private HighlightEffect _processHighlightEffect;
+    private HighlightEffect _alarmHighlightEffect;
 
     private Vector3 _cameraTransitionStartPosition;
     private Quaternion _cameraTransitionStartRotation;
@@ -109,6 +117,7 @@ public sealed class PowerPlantProcessController : MonoBehaviour
     private void Awake()
     {
         CacheSceneBindings();
+        EnsureHighlightEffects();
     }
 
     private void Update()
@@ -119,6 +128,8 @@ public sealed class PowerPlantProcessController : MonoBehaviour
 
     private void OnDestroy()
     {
+        ClearProcessHighlight();
+        ClearAlarmHighlight();
         StopAllFlows();
         RestoreAllContextFades();
     }
@@ -171,8 +182,14 @@ public sealed class PowerPlantProcessController : MonoBehaviour
 
         _routes = new[]
         {
-            CreateRoute("route.exhaust-to-hrsg.1", FindRenderers(sceneRoot, "管道6"), gasFlowMaterial, 1f),
-            CreateRoute("route.exhaust-to-hrsg.2", FindRenderers(sceneRoot, "管道9"), gasFlowMaterial, 1f)
+            CreateRoute("route.steam-to-turbine.1", FindRenderers(sceneRoot, "管道1"), gasFlowMaterial, 1f, Vector3.right),
+            CreateRoute("route.turbine-to-condenser.1", FindRenderers(sceneRoot, "管道2"), gasFlowMaterial, 1f, Vector3.right),
+            CreateRoute("route.steam-to-turbine.2", FindRenderers(sceneRoot, "管道3"), gasFlowMaterial, 1f, Vector3.right),
+            CreateRoute("route.turbine-to-condenser.2", FindRenderers(sceneRoot, "管道4"), gasFlowMaterial, 1f, Vector3.right),
+            CreateRoute("route.inlet-to-gas-turbine.1", FindRenderers(sceneRoot, "管道5"), gasFlowMaterial, 1f, Vector3.right),
+            CreateRoute("route.exhaust-to-hrsg.1", FindRenderers(sceneRoot, "管道6"), gasFlowMaterial, 1f, Vector3.right),
+            CreateRoute("route.inlet-to-gas-turbine.2", FindRenderers(sceneRoot, "管道7"), gasFlowMaterial, 1f, Vector3.right),
+            CreateRoute("route.exhaust-to-hrsg.2", FindRenderers(sceneRoot, "管道9"), gasFlowMaterial, 1f, Vector3.right)
         };
 
         CacheSceneBindings();
@@ -201,6 +218,7 @@ public sealed class PowerPlantProcessController : MonoBehaviour
             return false;
         }
 
+        ClearProcessHighlight();
         StopAllFlows();
         if (isolate)
         {
@@ -219,6 +237,8 @@ public sealed class PowerPlantProcessController : MonoBehaviour
             }
         }
 
+        UpdateProcessHighlight(stepId, normalizedUnitId, routeIds);
+
         FocusProcessTargets(focusNodeId, visibleNodeIds, normalizedUnitId);
         _currentProcessId = processId;
         _currentStepId = stepId;
@@ -229,6 +249,8 @@ public sealed class PowerPlantProcessController : MonoBehaviour
 
     public bool TryResetScene(out string message)
     {
+        ClearProcessHighlight();
+        ClearAlarmHighlight();
         StopAllFlows();
         RestoreInitialVisibility();
         FocusNode("plant.overview");
@@ -249,6 +271,7 @@ public sealed class PowerPlantProcessController : MonoBehaviour
 
         if (isolate)
         {
+            ClearProcessHighlight();
             StopAllFlows();
             SetIsolatedVisibility(new List<string> { nodeId });
         }
@@ -299,6 +322,32 @@ public sealed class PowerPlantProcessController : MonoBehaviour
 
         message = visible ? $"已显示节点：{nodeId}" : $"已将节点调整为半透明上下文：{nodeId}";
         return true;
+    }
+
+    /// <summary>
+    /// 为后续平台告警指令预留的内部入口。当前 iframe 协议不调用此方法。
+    /// </summary>
+    public bool TrySetNodeAlarm(string nodeId, bool enabled, out string message)
+    {
+        if (!_nodesById.ContainsKey(nodeId))
+        {
+            message = $"未知场景节点：{nodeId}";
+            return false;
+        }
+
+        EnsureHighlightEffects();
+        if (!enabled)
+        {
+            ClearAlarmHighlight();
+            message = $"已关闭节点告警效果：{nodeId}";
+            return true;
+        }
+
+        _highlightRendererSet.Clear();
+        CollectNodeRenderers(nodeId, _highlightRendererSet);
+        ApplyHighlight(_alarmHighlightEffect, _highlightRendererSet);
+        message = _highlightRendererSet.Count > 0 ? $"已启用节点告警效果：{nodeId}" : $"节点没有可高亮的渲染器：{nodeId}";
+        return _highlightRendererSet.Count > 0;
     }
 
     public bool TrySetRouteFlow(string routeId, bool enabled, float speedMultiplier, out string message)
@@ -352,6 +401,12 @@ public sealed class PowerPlantProcessController : MonoBehaviour
                     runtimeMaterial.SetFloat("_FlowSpeed", runtimeMaterial.GetFloat("_FlowSpeed") * route.SpeedMultiplier * speedMultiplier);
                 }
 
+                if (runtimeMaterial.HasProperty("_FlowDirectionOS"))
+                {
+                    Vector3 flowDirection = route.FlowDirectionOS;
+                    runtimeMaterial.SetVector("_FlowDirectionOS", new Vector4(flowDirection.x, flowDirection.y, flowDirection.z, 0f));
+                }
+
                 runtimeMaterials[materialIndex] = runtimeMaterial;
             }
 
@@ -372,6 +427,220 @@ public sealed class PowerPlantProcessController : MonoBehaviour
     public string GetStateDescription()
     {
         return $"process={_currentProcessId};step={_currentStepId};unit={_currentUnitId}";
+    }
+
+    private void EnsureHighlightEffects()
+    {
+        // 仅在运行时创建效果组件：场景配置工具不应把 HighlightEffect 序列化到 SampleScene，
+        // 否则每次进入 Play Mode 都会额外保留一组组件和渲染资源。
+        if (!Application.isPlaying)
+        {
+            return;
+        }
+
+        if (_processHighlightEffect == null)
+        {
+            _processHighlightEffect = gameObject.AddComponent<HighlightEffect>();
+            _processHighlightEffect.hideFlags = HideFlags.DontSave;
+            ConfigureHighlightEffect(
+                _processHighlightEffect,
+                new Color(0f, 1f, 0.921f, 1f),
+                0.1f);
+        }
+
+        if (_alarmHighlightEffect == null)
+        {
+            _alarmHighlightEffect = gameObject.AddComponent<HighlightEffect>();
+            _alarmHighlightEffect.hideFlags = HideFlags.DontSave;
+            ConfigureHighlightEffect(
+                _alarmHighlightEffect,
+                new Color(1f, 0.018f, 0f, 1f),
+                0.3f);
+        }
+    }
+
+    private static void ConfigureHighlightEffect(HighlightEffect effect, Color outlineColor, float outlineWidth)
+    {
+        effect.profile = null;
+        effect.profileSync = false;
+        effect.previewInEditor = false;
+        effect.camerasLayerMask = -1;
+        effect.cullBackFaces = true;
+        effect.constantWidth = true;
+        effect.fadeInDuration = 0f;
+        effect.fadeOutDuration = 0f;
+        effect.outline = 1f;
+        effect.outlineColor = outlineColor;
+        effect.outlineWidth = outlineWidth;
+        effect.outlineQuality = HighlightPlus.QualityLevel.High;
+        effect.outlineDownsampling = 1;
+        effect.outlineVisibility = HighlightPlus.Visibility.Normal;
+        effect.outlineIndependent = false;
+        effect.glow = 0f;
+        effect.innerGlow = 0f;
+        effect.overlay = 0f;
+        effect.seeThrough = SeeThroughMode.Never;
+        effect.ignore = false;
+        effect.SetHighlighted(false);
+        effect.Refresh();
+    }
+
+    private void UpdateProcessHighlight(string stepId, string unitId, IReadOnlyList<string> routeIds)
+    {
+        EnsureHighlightEffects();
+        _highlightRendererSet.Clear();
+
+        List<string> nodeIds = ResolveHighlightNodeIds(stepId, unitId);
+        for (int nodeIndex = 0; nodeIndex < nodeIds.Count; nodeIndex++)
+        {
+            CollectNodeRenderers(nodeIds[nodeIndex], _highlightRendererSet);
+        }
+
+        for (int routeIndex = 0; routeIndex < routeIds.Count; routeIndex++)
+        {
+            CollectRouteRenderers(routeIds[routeIndex], _highlightRendererSet);
+        }
+
+        ApplyHighlight(_processHighlightEffect, _highlightRendererSet);
+    }
+
+    private static List<string> ResolveHighlightNodeIds(string stepId, string unitId)
+    {
+        List<string> nodeIds = new List<string>();
+        if (stepId == OverviewStepId)
+        {
+            return nodeIds;
+        }
+
+        if (stepId == "grid-output")
+        {
+            nodeIds.Add("node.grid");
+            return nodeIds;
+        }
+
+        string[] suffixes;
+        switch (stepId)
+        {
+            case "gas-network":
+            case "inlet-duct":
+                suffixes = new[] { "inlet" };
+                break;
+            case "gas-turbine":
+                suffixes = new[] { "gas-turbine" };
+                break;
+            case "hrsg":
+                suffixes = new[] { "hrsg" };
+                break;
+            case "steam-turbine":
+                suffixes = new[] { "steam-turbine" };
+                break;
+            case "generator":
+                suffixes = new[] { "gas-generator", "steam-generator" };
+                break;
+            default:
+                return nodeIds;
+        }
+
+        if (unitId == AllUnitsId || unitId == "1")
+        {
+            for (int suffixIndex = 0; suffixIndex < suffixes.Length; suffixIndex++)
+            {
+                nodeIds.Add($"node.{suffixes[suffixIndex]}.1");
+            }
+        }
+
+        if (unitId == AllUnitsId || unitId == "2")
+        {
+            for (int suffixIndex = 0; suffixIndex < suffixes.Length; suffixIndex++)
+            {
+                nodeIds.Add($"node.{suffixes[suffixIndex]}.2");
+            }
+        }
+
+        if (stepId == "generator")
+        {
+            nodeIds.Add("node.grid");
+        }
+
+        return nodeIds;
+    }
+
+    private void CollectNodeRenderers(string nodeId, ISet<Renderer> destination)
+    {
+        if (!_nodesById.TryGetValue(nodeId, out SceneNodeBinding node))
+        {
+            return;
+        }
+
+        GameObject[] targets = node.Targets;
+        for (int targetIndex = 0; targetIndex < targets.Length; targetIndex++)
+        {
+            GameObject target = targets[targetIndex];
+            if (target == null)
+            {
+                continue;
+            }
+
+            Renderer[] renderers = target.GetComponentsInChildren<Renderer>(true);
+            for (int rendererIndex = 0; rendererIndex < renderers.Length; rendererIndex++)
+            {
+                if (renderers[rendererIndex] != null)
+                {
+                    destination.Add(renderers[rendererIndex]);
+                }
+            }
+        }
+    }
+
+    private void CollectRouteRenderers(string routeId, ISet<Renderer> destination)
+    {
+        if (!_routesById.TryGetValue(routeId, out FlowRouteBinding route) || route.Renderers == null)
+        {
+            return;
+        }
+
+        for (int rendererIndex = 0; rendererIndex < route.Renderers.Length; rendererIndex++)
+        {
+            if (route.Renderers[rendererIndex] != null)
+            {
+                destination.Add(route.Renderers[rendererIndex]);
+            }
+        }
+    }
+
+    private void ApplyHighlight(HighlightEffect effect, ISet<Renderer> renderers)
+    {
+        if (effect == null)
+        {
+            return;
+        }
+
+        if (renderers == null || renderers.Count == 0)
+        {
+            effect.SetHighlighted(false);
+            return;
+        }
+
+        Renderer[] targets = new Renderer[renderers.Count];
+        renderers.CopyTo(targets, 0);
+        effect.SetTargets(transform, targets);
+        effect.SetHighlighted(true);
+    }
+
+    private void ClearProcessHighlight()
+    {
+        if (_processHighlightEffect != null)
+        {
+            _processHighlightEffect.SetHighlighted(false);
+        }
+    }
+
+    private void ClearAlarmHighlight()
+    {
+        if (_alarmHighlightEffect != null)
+        {
+            _alarmHighlightEffect.SetHighlighted(false);
+        }
     }
 
     private void CacheSceneBindings()
@@ -989,9 +1258,9 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         return new SceneNodeBinding(id, targets);
     }
 
-    private static FlowRouteBinding CreateRoute(string id, Renderer[] renderers, Material flowMaterialTemplate, float speedMultiplier)
+    private static FlowRouteBinding CreateRoute(string id, Renderer[] renderers, Material flowMaterialTemplate, float speedMultiplier, Vector3 flowDirectionOS)
     {
-        return new FlowRouteBinding(id, renderers, flowMaterialTemplate, speedMultiplier);
+        return new FlowRouteBinding(id, renderers, flowMaterialTemplate, speedMultiplier, flowDirectionOS);
     }
 
     private static GameObject[] GetDirectChildren(Transform root)

@@ -18,13 +18,12 @@ Shader "自定义/URP/管道流动"
         // 灰度流动纹理仅影响自发光遮罩，不会覆盖原始管壁贴图；未配置时仍使用程序化条带显示流向。
         _FlowTex("流动扰动纹理", 2D) = "white" {}
         [HDR] _FlowColor("流动颜色", Color) = (0, 0.85, 1, 1)
-        _FlowTiling("轴向平铺", Range(0.1, 30)) = 5
+        _FlowTiling("每单位流带数量", Range(0.05, 4)) = 0.6
         _FlowSpeed("流动速度", Range(-10, 10)) = 0.8
         _FlowWidth("条带宽度", Range(0.01, 0.95)) = 0.2
         _FlowContrast("纹理对比度", Range(0.1, 4)) = 1.25
         _FlowIntensity("流动亮度", Range(0, 8)) = 1.2
-        _FlowAxis("流动轴 (0=U, 1=V)", Range(0, 1)) = 1
-        _Spiral("环绕偏移", Range(-3, 3)) = 0.12
+        _FlowDirectionOS("局部流向", Vector) = (1, 0, 0, 0)
     }
 
     SubShader
@@ -67,8 +66,7 @@ Shader "自定义/URP/管道流动"
                 half _FlowWidth;
                 half _FlowContrast;
                 half _FlowIntensity;
-                half _FlowAxis;
-                half _Spiral;
+                float4 _FlowDirectionOS;
             CBUFFER_END
 
             TEXTURE2D(_BaseMap);          SAMPLER(sampler_BaseMap);
@@ -92,7 +90,7 @@ Shader "自定义/URP/管道流动"
                 half3 tangentWS : TEXCOORD2;
                 half3 bitangentWS : TEXCOORD3;
                 float2 baseUV : TEXCOORD4;
-                float2 flowUV : TEXCOORD5;
+                float3 positionOS : TEXCOORD5;
                 half fogFactor : TEXCOORD6;
             };
 
@@ -109,7 +107,7 @@ Shader "自定义/URP/管道流动"
                 output.tangentWS = normalInputs.tangentWS;
                 output.bitangentWS = normalInputs.bitangentWS;
                 output.baseUV = TRANSFORM_TEX(input.uv, _BaseMap);
-                output.flowUV = TRANSFORM_TEX(input.uv, _FlowTex);
+                output.positionOS = input.positionOS.xyz;
                 output.fogFactor = ComputeFogFactor(positionInputs.positionCS.z);
                 return output;
             }
@@ -144,13 +142,13 @@ Shader "自定义/URP/管道流动"
                     surfaceData.smoothness = _Smoothness;
                 #endif
 
-                // 插值选择 U 或 V 为管长方向；速度正负分别代表正向与反向，避免运行时脚本修改网格。
-                half flowAxis = lerp(input.flowUV.x, input.flowUV.y, _FlowAxis);
-                half sideAxis = lerp(input.flowUV.y, input.flowUV.x, _FlowAxis);
-                half phase = frac(flowAxis * _FlowTiling - _Time.y * _FlowSpeed + sideAxis * _Spiral);
+                // 使用网格局部坐标计算相位，因此即使 FBX 没有 UV0，流带仍会沿模型自身长度推进。
+                float3 flowDirectionOS = normalize(_FlowDirectionOS.xyz);
+                half flowAxis = dot(input.positionOS, flowDirectionOS);
+                half phase = frac(flowAxis * _FlowTiling - _Time.y * _FlowSpeed);
                 half triangleWave = 1.0h - abs(phase * 2.0h - 1.0h);
                 half proceduralBand = smoothstep(1.0h - _FlowWidth, 1.0h, triangleWave);
-                half textureNoise = SAMPLE_TEXTURE2D(_FlowTex, sampler_FlowTex, float2(phase, sideAxis)).r;
+                half textureNoise = SAMPLE_TEXTURE2D(_FlowTex, sampler_FlowTex, float2(phase, 0.5h)).r;
                 half flowMask = proceduralBand * pow(saturate(textureNoise), _FlowContrast);
                 surfaceData.emission = _FlowColor.rgb * flowMask * _FlowIntensity;
 

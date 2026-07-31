@@ -49,7 +49,13 @@ public sealed class PowerPlantFreeCameraController : MonoBehaviour
 
         Vector2 lookDelta = mouse.delta.ReadValue();
         bool isRotating = mouse.rightButton.isPressed;
-        bool hasLookInput = isRotating && lookDelta.sqrMagnitude > 0.0001f;
+        bool beganRotating = mouse.rightButton.wasPressedThisFrame;
+        if (beganRotating)
+        {
+            SyncLookAngles();
+        }
+
+        bool hasLookInput = isRotating && !beganRotating && lookDelta.sqrMagnitude > 0.0001f;
 
         Vector3 localMove = ReadMoveInput(keyboard);
         bool hasMoveInput = localMove.sqrMagnitude > 0.0001f;
@@ -79,6 +85,13 @@ public sealed class PowerPlantFreeCameraController : MonoBehaviour
 
             transform.position += worldMove * speed * Time.unscaledDeltaTime;
         }
+    }
+
+    private void SyncLookAngles()
+    {
+        Vector3 eulerAngles = transform.rotation.eulerAngles;
+        _yaw = eulerAngles.y;
+        _pitch = NormalizePitch(eulerAngles.x);
     }
 
     private static Vector3 ReadMoveInput(Keyboard keyboard)
