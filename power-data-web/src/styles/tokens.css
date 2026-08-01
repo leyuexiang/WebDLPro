@@ -1,0 +1,66 @@
+/*
+ * 全局设计令牌：组件只引用语义变量，主题切换只替换变量值。
+ * 间距与字号使用有限刻度，防止页面散落难以维护的魔法数。
+ */
+:root {
+  color-scheme: light;
+  font-family: Inter, "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+
+  --color-canvas: #f4f7fb;
+  --color-surface: #ffffff;
+  --color-surface-muted: #edf2f8;
+  --color-surface-strong: #15233f;
+  --color-text: #17233c;
+  --color-text-secondary: #64748b;
+  --color-text-inverse: #f8fafc;
+  --color-primary: #1769e0;
+  --color-primary-hover: #0f57be;
+  --color-primary-soft: #e7f0ff;
+  --color-border: #d9e2ef;
+  --color-focus: #6ea8fe;
+  --color-success: #16825d;
+  --color-warning: #ad6900;
+  --color-danger: #c43d3d;
+  --color-info: #236bb8;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --shadow-sm: 0 2px 8px rgb(20 40 70 / 8%);
+  --shadow-lg: 0 16px 40px rgb(20 40 70 / 16%);
+  --z-navigation: 20;
+  --z-drawer: 40;
+  --breakpoint-tablet: 1280px;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --color-canvas: #0c1424;
+  --color-surface: #142038;
+  --color-surface-muted: #1b2b47;
+  --color-surface-strong: #0d1729;
+  --color-text: #e9effa;
+  --color-text-secondary: #a9b8d0;
+  --color-text-inverse: #f8fafc;
+  --color-primary: #6ea8fe;
+  --color-primary-hover: #99c0ff;
+  --color-primary-soft: #1a345c;
+  --color-border: #2c4062;
+  --color-focus: #9bc3ff;
+  --color-success: #4cc38c;
+  --color-warning: #f3b646;
+  --color-danger: #ff8383;
+  --color-info: #74b4ff;
+}

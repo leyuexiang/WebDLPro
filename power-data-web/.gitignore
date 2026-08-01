@@ -1,0 +1,11 @@
+# 依赖目录和构建产物均可由包管理器或构建命令重新生成，不纳入源码版本管理。
+node_modules/
+dist/
+coverage/
+*.local
+
+# 本地编辑器与操作系统生成的临时文件不影响项目运行，不应进入仓库。
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
