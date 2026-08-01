@@ -18,7 +18,7 @@ export interface PermissionPolicy {
  * 不在此处虚构业务角色名称或后端字段，所有判断仅面向权限码。
  */
 const developmentPolicy: PermissionPolicy = {
-  page: ['portal.view', 'collect.view', 'data.view', 'visual.view', 'system.view', 'components.view'],
+  page: ['portal.view', 'collect.view', 'data.view', 'visual.view', 'visual.process.view', 'visual.topic.view', 'system.view', 'components.view'],
   data: [],
   scene: [],
 }

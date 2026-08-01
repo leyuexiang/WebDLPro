@@ -70,7 +70,7 @@ public static class PowerPlantSceneSetup
         EditorSceneManager.SaveScene(activeScene);
         Selection.activeGameObject = runtimeRoot;
 
-        Debug.Log("[PowerPlantSceneSetup] 已将 SampleScene 的模型映射、管道 1/2/3/4/5/6/7/9 流动路由和 iframe 运行时对象写入场景。", runtimeRoot);
+        Debug.Log("[PowerPlantSceneSetup] 已将 SampleScene 的模型映射与两条已确认的燃机排气至余热锅炉烟道流动路由写入场景。", runtimeRoot);
     }
 
     private static Material LoadOrCreateContextFadeMaterial()

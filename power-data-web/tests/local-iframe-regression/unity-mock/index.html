@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>网页图形运行时模拟器</title>
+  <style>
+    html, body { inline-size: 100%; block-size: 100%; margin: 0; overflow: hidden; color: #e0f2fe; font: 15px/1.5 system-ui, sans-serif; background: radial-gradient(circle at 50% 0, #155e75, #082f49 45%, #020617); }
+    main { display: grid; min-block-size: 100%; place-items: center; padding: 20px; }
+    section { inline-size: min(620px, 100%); padding: 28px; text-align: center; background: rgb(8 47 73 / 72%); border: 1px solid rgb(125 211 252 / 50%); border-radius: 12px; }
+    button { inline-size: 94px; block-size: 94px; margin: 22px auto; cursor: pointer; background: linear-gradient(135deg, #7dd3fc, #0e7490); border: 0; border-radius: 12px; transform: rotate(15deg); transition: transform .2s; }
+    button:hover { transform: rotate(25deg) scale(1.08); }
+    #message { min-block-size: 48px; padding: 10px; background: rgb(2 6 23 / 45%); border-radius: 5px; }
+  </style>
+</head>
+<body>
+  <main>
+    <section>
+      <h1>网页图形运行时模拟器</h1>
+      <button id="object-button" aria-label="模拟三维对象"></button>
+      <p>点击方块会回传稳定业务节点标识。</p>
+      <p id="message">正在初始化桥接。</p>
+    </section>
+  </main>
+
+  <script>
+    /**
+     * 模拟 Unity .jslib：在注册监听器后发送完整 ready，严格校验父窗口命令，
+     * 并对 init、resize、dispose 使用原始 messageId 作为 requestId 回执。
+     */
+    const channel = 'power3d-unity';
+    const version = 1;
+    const query = new URLSearchParams(window.location.search);
+    const parentOrigin = query.get('parentOrigin');
+    const instanceId = query.get('instanceId');
+    const runtimeKey = query.get('runtimeKey');
+    const buildId = query.get('buildId');
+    const sceneMappingVersion = query.get('sceneMappingVersion');
+    const resourceDigest = query.get('resourceDigest');
+    const commandCapabilities = ['init', 'resize', 'focusNode', 'dispose'];
+    const eventCapabilities = ['ready', 'ack', 'commandResult', 'objectSelected', 'disposed'];
+    const message = document.querySelector('#message');
+    let disposed = false;
+
+    /** 精确 Origin 是唯一允许的父页面地址；路径、查询和片段都会拒绝启动通信。 */
+    function isExactOrigin(value) {
+      try {
+        const url = new URL(value);
+        return ['http:', 'https:'].includes(url.protocol) && url.origin === value;
+      } catch {
+        return false;
+      }
+    }
+
+    /** 所有回传事件都使用精确父页面来源，且在释放后停止发送。 */
+    function post(type, payload = {}) {
+      if (disposed || !isExactOrigin(parentOrigin) || window.parent === window) return;
+      window.parent.postMessage({ channel, version, instanceId, messageId: `${Date.now()}-${crypto.randomUUID()}`, type, payload, timestamp: Date.now() }, parentOrigin);
+    }
+
+    /** 父页面命令只允许白名单类型，未知类型不会影响模拟场景。 */
+    function receive(event) {
+      const data = event.data;
+      if (disposed || event.origin !== parentOrigin || event.source !== window.parent) return;
+      if (!data || data.channel !== channel || data.version !== version || data.instanceId !== instanceId || !commandCapabilities.includes(data.type)) return;
+
+      if (data.type === 'init') {
+        message.textContent = '初始化确认完成。';
+        post('ack', { requestId: data.messageId, success: true, message: '模拟运行时已初始化。' });
+      } else if (data.type === 'resize') {
+        message.textContent = `已同步尺寸：${data.payload?.width || 0} × ${data.payload?.height || 0}`;
+        post('commandResult', { requestId: data.messageId, success: true, message: '尺寸已同步。' });
+      } else if (data.type === 'focusNode') {
+        post('commandResult', { requestId: data.messageId, success: true, message: '节点已聚焦。' });
+      } else if (data.type === 'dispose') {
+        post('disposed', { requestId: data.messageId, success: true, message: '模拟运行时已释放。' });
+        disposed = true;
+        window.removeEventListener('message', receive);
+        message.textContent = '运行时已释放。';
+      }
+    }
+
+    if (!isExactOrigin(parentOrigin) || !instanceId || !runtimeKey || !buildId || !sceneMappingVersion || !resourceDigest) {
+      message.textContent = '缺少精确父页面来源或运行时元数据，通信已禁用。';
+    } else {
+      window.addEventListener('message', receive);
+      post('ready', { runtimeKey, buildId, sceneMappingVersion, protocolVersion: version, resourceDigest, commandCapabilities, eventCapabilities });
+    }
+
+    /** 模拟 Unity 场景对象选中，仅发送稳定节点标识，禁止回传引擎对象引用。 */
+    document.querySelector('#object-button').addEventListener('click', () => {
+      post('objectSelected', { nodeId: 'gas-turbine-unit', nodeName: '燃气轮机' });
+    });
+  </script>
+</body>
+</html>

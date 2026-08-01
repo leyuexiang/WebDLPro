@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import PrimaryNavigation from '@/layouts/PrimaryNavigation.vue'
 import ShellHeader from '@/layouts/ShellHeader.vue'
+import VisualizationRuntimeHost from '@/modules/visual/runtime/VisualizationRuntimeHost.vue'
 import { useAppStore } from '@/stores/app.store'
 
 /**
@@ -17,7 +18,9 @@ const appStore = useAppStore()
       <PrimaryNavigation />
     </aside>
     <main class="visual-layout__content">
-      <RouterView />
+      <VisualizationRuntimeHost>
+        <RouterView />
+      </VisualizationRuntimeHost>
     </main>
   </div>
 </template>

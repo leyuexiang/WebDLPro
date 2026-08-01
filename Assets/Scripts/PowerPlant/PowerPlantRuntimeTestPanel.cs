@@ -23,26 +23,14 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
 
     private static readonly string[] RouteIds =
     {
-        "route.steam-to-turbine.1",
-        "route.turbine-to-condenser.1",
-        "route.steam-to-turbine.2",
-        "route.turbine-to-condenser.2",
-        "route.inlet-to-gas-turbine.1",
         "route.exhaust-to-hrsg.1",
-        "route.inlet-to-gas-turbine.2",
         "route.exhaust-to-hrsg.2"
     };
 
     private static readonly string[] RouteLabels =
     {
-        "管道 1：蒸汽→汽轮机（1）",
-        "管道 2：汽轮机→冷凝器（1）",
-        "管道 3：蒸汽→汽轮机（2）",
-        "管道 4：汽轮机→冷凝器（2）",
-        "管道 5：进气→燃机（1）",
-        "管道 6：燃机→余热锅炉（1）",
-        "管道 7：进气→燃机（2）",
-        "管道 9：燃机→余热锅炉（2）"
+        "管道 6：燃机排气→余热锅炉（1）",
+        "管道 9：燃机排气→余热锅炉（2）"
     };
 
     [SerializeField] private PowerPlantProcessController _processController;

@@ -182,13 +182,7 @@ public sealed class PowerPlantProcessController : MonoBehaviour
 
         _routes = new[]
         {
-            CreateRoute("route.steam-to-turbine.1", FindRenderers(sceneRoot, "管道1"), gasFlowMaterial, 1f, Vector3.right),
-            CreateRoute("route.turbine-to-condenser.1", FindRenderers(sceneRoot, "管道2"), gasFlowMaterial, 1f, Vector3.right),
-            CreateRoute("route.steam-to-turbine.2", FindRenderers(sceneRoot, "管道3"), gasFlowMaterial, 1f, Vector3.right),
-            CreateRoute("route.turbine-to-condenser.2", FindRenderers(sceneRoot, "管道4"), gasFlowMaterial, 1f, Vector3.right),
-            CreateRoute("route.inlet-to-gas-turbine.1", FindRenderers(sceneRoot, "管道5"), gasFlowMaterial, 1f, Vector3.right),
             CreateRoute("route.exhaust-to-hrsg.1", FindRenderers(sceneRoot, "管道6"), gasFlowMaterial, 1f, Vector3.right),
-            CreateRoute("route.inlet-to-gas-turbine.2", FindRenderers(sceneRoot, "管道7"), gasFlowMaterial, 1f, Vector3.right),
             CreateRoute("route.exhaust-to-hrsg.2", FindRenderers(sceneRoot, "管道9"), gasFlowMaterial, 1f, Vector3.right)
         };
 

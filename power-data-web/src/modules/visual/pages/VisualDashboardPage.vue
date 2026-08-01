@@ -1,20 +1,37 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+import { localProcessConfigDataset, localProcessConfigLoader } from '@/config/process/local-process-config'
+import { localTopicDefinitions } from '@/config/process/topic-config'
+
 /**
- * 可视化总览是后续配置中心的稳定入口。
- * 当前只呈现架构范围与路由入口，不读取或伪造实时监控数据。
+ * 可视化总览是配置中心的稳定入口。
+ * 卡片数量和首个工艺页均读取已发布配置，不读取或伪造实时监控数据。
  */
-const scopeCards = [
-  { title: '工艺工作台', detail: '34 个工艺页面共用配置驱动页面组件。', to: '/visual/process/gas-overview' },
-  { title: '专题场景', detail: '5 个专题入口由独立配置定义与发布。', to: '/visual/topic' },
-  { title: '网页图形运行时', detail: '同一时刻只允许一个已激活网页图形实例。', to: '/visual/process/gas-overview' },
-]
+const firstProcessPage = localProcessConfigLoader.getPage('gas-overview')
+const processPageCount = computed(() => localProcessConfigDataset.pages.length)
+const topicCount = computed(() => localTopicDefinitions.length)
+
+/** 卡片路由使用命名路由与稳定配置标识，避免嵌入字符串地址拼接。 */
+const scopeCards = computed(() => [
+  {
+    title: '工艺工作台',
+    detail: `${processPageCount.value} 个工艺页面共用配置驱动工作台。`,
+    to: firstProcessPage ? { name: 'visual-process', params: { processPageId: firstProcessPage.processPageId } } : { name: 'visual-dashboard' },
+  },
+  { title: '专题场景', detail: `${topicCount.value} 个专题入口由独立配置定义与发布。`, to: { name: 'visual-topic' } },
+  {
+    title: '网页图形运行时',
+    detail: '同一时刻只允许一个已登记的网页图形实例，缺少登记时安全降级。',
+    to: firstProcessPage ? { name: 'visual-process', params: { processPageId: firstProcessPage.processPageId } } : { name: 'visual-dashboard' },
+  },
+])
 </script>
 
 <template>
   <section class="visual-dashboard page-content">
     <p class="eyebrow">可视化入口</p>
     <h1 class="page-title">总览大屏</h1>
-    <p class="page-description">实时指标与告警等级待外部契约确认；当前提供可验证的路由与布局骨架。</p>
+    <p class="page-description">实时指标与告警等级待外部契约确认；当前提供可验证的配置路由、工作台和安全降级状态。</p>
     <div class="visual-dashboard__grid">
       <RouterLink v-for="card in scopeCards" :key="card.title" class="visual-dashboard__card" :to="card.to">
         <h2>{{ card.title }}</h2>

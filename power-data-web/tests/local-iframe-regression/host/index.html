@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>网页图形本地回归宿主</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; color: #e2e8f0; font: 14px/1.5 system-ui, sans-serif; background: #0f172a; }
+    main { display: grid; grid-template-columns: 310px minmax(0, 1fr); min-height: 100vh; }
+    aside { padding: 20px; background: #111c32; border-inline-end: 1px solid #334155; }
+    h1 { margin: 0 0 14px; font-size: 20px; } p { margin: 8px 0; }
+    button { inline-size: 100%; margin-block: 4px; padding: 9px; color: #082f49; font: inherit; font-weight: 700; cursor: pointer; background: #7dd3fc; border: 0; border-radius: 4px; }
+    button.secondary { color: #dbeafe; background: #334155; }
+    .hint { color: #94a3b8; font-size: 12px; }
+    .stage { display: grid; grid-template-rows: minmax(360px, 1fr) 230px; min-block-size: 100vh; }
+    #frame-container { position: relative; min-block-size: 360px; overflow: hidden; background: #020617; }
+    iframe { display: block; inline-size: 100%; block-size: 100%; border: 0; }
+    #state { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; color: #bae6fd; text-align: center; pointer-events: none; }
+    #state.error { color: #fecaca; background: rgb(127 29 29 / 35%); }
+    #logs { margin: 0; padding: 12px; overflow: auto; color: #cbd5e1; white-space: pre-wrap; background: #020617; border-block-start: 1px solid #334155; }
+    @media (max-width: 760px) { main { grid-template-columns: 1fr; } aside { border-inline-end: 0; border-block-end: 1px solid #334155; } .stage { min-block-size: 70vh; } }
+  </style>
+</head>
+<body>
+  <main>
+    <aside>
+      <h1>网页图形本地回归</h1>
+      <p id="result">等待创建运行时。</p>
+      <button id="create-button">创建或重新创建实例</button>
+      <button id="run-button">执行自动回归</button>
+      <button id="dispose-button" class="secondary">释放当前实例</button>
+      <button id="forgery-button" class="secondary">发送伪造消息</button>
+      <p class="hint">父页面来源：<span id="parent-origin"></span></p>
+      <p class="hint">模拟运行时来源固定为：http://127.0.0.1:5511</p>
+      <p class="hint">所有下行消息使用精确目标来源，所有上行消息都经过来源、窗口、协议、实例和事件白名单验证。</p>
+    </aside>
+    <section class="stage">
+      <div id="frame-container"><div id="state">尚未创建网页图形实例。</div></div>
+      <pre id="logs" aria-live="polite"></pre>
+    </section>
+  </main>
+
+  <script>
+    /**
+     * 本地回归宿主复用正式协议核心规则，用于在不启动 Unity 编辑器时验证跨来源 iframe 生命周期。
+     * 该文件仅是测试夹具；生产页面由可视化布局中的 VisualizationRuntimeHost 统一托管。
+     */
+    const channel = 'power3d-unity';
+    const version = 1;
+    const childOrigin = 'http://127.0.0.1:5511';
+    const runtime = {
+      runtimeKey: 'local-unity-mock',
+      buildId: 'mock-build-1',
+      sceneMappingVersion: 'mock-mapping-1',
+      resourceDigest: 'sha256:local-mock-v1',
+      commandCapabilities: ['init', 'resize', 'focusNode', 'dispose'],
+      eventCapabilities: ['ready', 'ack', 'commandResult', 'objectSelected', 'disposed']
+    };
+    const frameContainer = document.querySelector('#frame-container');
+    const state = document.querySelector('#state');
+    const result = document.querySelector('#result');
+    const logs = document.querySelector('#logs');
+    document.querySelector('#parent-origin').textContent = window.location.origin;
+
+    let iframe = null;
+    let instanceId = '';
+    let status = 'idle';
+    let sequence = 0;
+    const pending = new Map();
+
+    /** 日志上限固定为 80 行，持续运行回归时不会无限占用页面内存。 */
+    function writeLog(text) {
+      const lines = [`[${new Date().toLocaleTimeString()}] ${text}`, ...logs.textContent.split('\n').filter(Boolean)].slice(0, 80);
+      logs.textContent = lines.join('\n');
+    }
+
+    /** 每个请求标识只存在一个待确认项，并在 10 秒后自动清除。 */
+    function postCommand(type, payload = {}) {
+      if (!iframe?.contentWindow || status === 'disposed') throw new Error('当前实例不可接收命令。');
+      const messageId = `${instanceId}-${++sequence}`;
+      const timeout = window.setTimeout(() => {
+        if (pending.delete(messageId)) writeLog(`${type} 超时，已清理待确认项。`);
+      }, 10000);
+      pending.set(messageId, { type, timeout });
+      iframe.contentWindow.postMessage({ channel, version, instanceId, messageId, type, payload, timestamp: Date.now() }, childOrigin);
+      writeLog(`发送 ${type}：${messageId}`);
+      return messageId;
+    }
+
+    /** 使用完整运行时元数据创建新 iframe；每次进入都生成新 instanceId，旧消息不能串入。 */
+    function createInstance() {
+      releaseCurrent(false);
+      instanceId = `local-mock-${crypto.randomUUID()}`;
+      sequence = 0;
+      status = 'handshaking';
+      // 自动回归第二次进入时会复用状态提示节点，确保重新握手仍有可见反馈。
+      if (!state.isConnected) frameContainer.append(state);
+      state.className = '';
+      state.textContent = '正在等待模拟运行时 ready。';
+      iframe = document.createElement('iframe');
+      const url = new URL(`${childOrigin}/index.html`);
+      url.searchParams.set('parentOrigin', window.location.origin);
+      url.searchParams.set('instanceId', instanceId);
+      url.searchParams.set('runtimeKey', runtime.runtimeKey);
+      url.searchParams.set('buildId', runtime.buildId);
+      url.searchParams.set('sceneMappingVersion', runtime.sceneMappingVersion);
+      url.searchParams.set('resourceDigest', runtime.resourceDigest);
+      iframe.src = url;
+      iframe.title = '网页图形运行时模拟器';
+      frameContainer.append(iframe);
+      writeLog(`创建实例 ${instanceId}`);
+    }
+
+    /** 释放流程优先等待 disposed；自动回归超时后也会清空本地资源并记录失败。 */
+    function releaseCurrent(waitForAck = true) {
+      if (!iframe) return Promise.resolve();
+      if (!waitForAck || status !== 'ready') {
+        clearCurrentFrame();
+        return Promise.resolve();
+      }
+
+      status = 'releasing';
+      const requestId = postCommand('dispose', { reason: 'local-regression-release' });
+      return new Promise((resolve) => {
+        const timer = window.setTimeout(() => {
+          if (pending.delete(requestId)) {
+            writeLog('dispose 超时，执行本地兜底清理。');
+            clearCurrentFrame();
+          }
+          resolve();
+        }, 10000);
+        pending.get(requestId).resolve = () => {
+          window.clearTimeout(timer);
+          resolve();
+        };
+      });
+    }
+
+    /** 清除 iframe、全部待确认定时器与状态，确保重复进入不会保留旧实例资源。 */
+    function clearCurrentFrame() {
+      iframe?.remove();
+      iframe = null;
+      pending.forEach((entry) => window.clearTimeout(entry.timeout));
+      pending.clear();
+      status = 'disposed';
+      state.textContent = '当前实例已释放。';
+      result.textContent = '当前实例已释放。';
+    }
+
+    /** 就绪载荷必须逐项匹配登记元数据并覆盖登记的能力清单，不能凭事件内容猜测能力。 */
+    function isExpectedReady(payload) {
+      return payload &&
+        payload.runtimeKey === runtime.runtimeKey &&
+        payload.buildId === runtime.buildId &&
+        payload.sceneMappingVersion === runtime.sceneMappingVersion &&
+        payload.protocolVersion === version &&
+        payload.resourceDigest === runtime.resourceDigest &&
+        runtime.commandCapabilities.every((type) => payload.commandCapabilities?.includes(type)) &&
+        runtime.eventCapabilities.every((type) => payload.eventCapabilities?.includes(type));
+    }
+
+    /** 入站过滤按来源、窗口、信封、实例和白名单逐层执行；失败仅记录原因，不改变场景状态。 */
+    window.addEventListener('message', (event) => {
+      const data = event.data;
+      if (event.origin !== childOrigin || event.source !== iframe?.contentWindow) return writeLog('拒绝：来源或子窗口不匹配。');
+      if (!data || data.channel !== channel || data.version !== version || data.instanceId !== instanceId || !runtime.eventCapabilities.includes(data.type)) {
+        return writeLog('拒绝：协议、实例或事件类型不匹配。');
+      }
+
+      if (data.type === 'ready') {
+        if (status !== 'handshaking' || !isExpectedReady(data.payload)) {
+          status = 'failed';
+          state.className = 'error';
+          state.textContent = '握手元数据不匹配，已拒绝运行时。';
+          return writeLog('拒绝：ready 元数据或阶段不匹配。');
+        }
+        const initId = postCommand('init', { runtimeKey: runtime.runtimeKey, buildId: runtime.buildId });
+        writeLog(`ready 已验证，等待 init 确认：${initId}`);
+        return;
+      }
+
+      if (!data.payload?.requestId || !pending.has(data.payload.requestId)) return writeLog('拒绝：回执未命中原始请求标识。');
+      const entry = pending.get(data.payload.requestId);
+      window.clearTimeout(entry.timeout);
+      pending.delete(data.payload.requestId);
+
+      if (data.type === 'ack' && entry.type === 'init') {
+        status = 'ready';
+        state.remove();
+        result.textContent = '握手完成，运行时已就绪。';
+        writeLog('init 已确认，运行时已就绪。');
+        return;
+      }
+      if (data.type === 'disposed' && entry.type === 'dispose') {
+        entry.resolve?.();
+        clearCurrentFrame();
+        writeLog('dispose 已确认，旧实例已释放。');
+        return;
+      }
+      if (data.type === 'commandResult') writeLog(`${entry.type} 已确认。`);
+    });
+
+    /** 容器实际尺寸变化按动画帧合并为一次 resize，避免布局重排时发送命令风暴。 */
+    let resizeFrame = 0;
+    new ResizeObserver(() => {
+      if (resizeFrame || status !== 'ready') return;
+      resizeFrame = requestAnimationFrame(() => {
+        resizeFrame = 0;
+        postCommand('resize', { width: frameContainer.clientWidth, height: frameContainer.clientHeight, devicePixelRatio: window.devicePixelRatio });
+      });
+    }).observe(frameContainer);
+
+    /** 自动回归覆盖握手、尺寸回执、可确认释放和新实例创建。 */
+    async function runRegression() {
+      result.textContent = '自动回归执行中。';
+      createInstance();
+      await waitFor(() => status === 'ready', '握手超时');
+      postCommand('resize', { width: frameContainer.clientWidth, height: frameContainer.clientHeight, devicePixelRatio: window.devicePixelRatio });
+      await waitFor(() => pending.size === 0, '尺寸命令超时');
+      await releaseCurrent(true);
+      createInstance();
+      await waitFor(() => status === 'ready', '重复进入握手超时');
+      result.textContent = '自动回归通过：握手、尺寸、释放与重复进入均正常。';
+      writeLog('自动回归通过。');
+    }
+
+    /** 轮询时间上限 12 秒，失败时让调用方看到明确原因，不无限等待失联 iframe。 */
+    function waitFor(predicate, errorMessage) {
+      return new Promise((resolve, reject) => {
+        const deadline = Date.now() + 12000;
+        const check = () => {
+          if (predicate()) return resolve();
+          if (Date.now() >= deadline) return reject(new Error(errorMessage));
+          window.setTimeout(check, 30);
+        };
+        check();
+      });
+    }
+
+    document.querySelector('#create-button').addEventListener('click', createInstance);
+    document.querySelector('#run-button').addEventListener('click', () => runRegression().catch((error) => {
+      status = 'failed';
+      result.textContent = `自动回归失败：${error.message}`;
+      writeLog(`自动回归失败：${error.message}`);
+    }));
+    document.querySelector('#dispose-button').addEventListener('click', () => void releaseCurrent(true));
+    document.querySelector('#forgery-button').addEventListener('click', () => {
+      window.postMessage({ channel, version, instanceId, type: 'ready', payload: {} }, window.location.origin);
+    });
+    createInstance();
+  </script>
+</body>
+</html>

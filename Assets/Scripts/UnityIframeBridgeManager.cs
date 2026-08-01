@@ -33,6 +33,7 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
 
     private string _instanceId = "local-demo-001";
     private PowerPlantProcessController _processController;
+    private bool _releaseRequested;
 
 #if UNITY_WEBGL && !UNITY_EDITOR
     /// <summary>初始化浏览器消息监听器，并让其在 Unity 可接收消息后发送 ready。</summary>
@@ -42,6 +43,13 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
     /// <summary>将 Unity 生成的 JSON 消息交给浏览器桥接层并转发至父页面。</summary>
     [DllImport("__Internal")]
     private static extern void Power3dUnityBridge_SendToParent(string messageJson);
+
+    /// <summary>
+    /// 在发送 disposed 回执后调用浏览器桥接层释放 Unity WebGL 实例。
+    /// 浏览器桥接层内部具有幂等保护并会移除 message 监听器，避免重复释放产生异常。
+    /// </summary>
+    [DllImport("__Internal")]
+    private static extern void Power3dUnityBridge_Release();
 #endif
 
     /// <summary>
@@ -77,6 +85,7 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         public string routeId;
         public string errorCode;
         public string sceneState;
+        public bool success;
         public bool isolate;
         public bool enabled;
         public float speed;
@@ -154,6 +163,20 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
             return;
         }
 
+        // 释放已开始后不再执行任何场景命令；重复 dispose 仍返回成功回执，保证调用端可安全重试。
+        if (_releaseRequested)
+        {
+            if (message.type == "dispose")
+            {
+                SendDisposed(message, true, "Unity 实例已进入释放流程。");
+            }
+            else
+            {
+                SendCommandResult(message, false, "runtime-releasing", "Unity 实例正在释放，无法执行场景命令。");
+            }
+            return;
+        }
+
         switch (message.type)
         {
             case "init":
@@ -163,7 +186,8 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
                 HandleTestCommand(message.payload);
                 break;
             case "resize":
-                StatusText = $"收到容器尺寸：{message.payload?.width:0} × {message.payload?.height:0}";
+                // 统一通过处理器回填原始请求标识，避免父页面保留无界待确认项。
+                HandleResize(message);
                 break;
             case "enterProcessStep":
                 HandleEnterProcessStep(message);
@@ -179,6 +203,9 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
                 break;
             case "setRouteFlow":
                 HandleSetRouteFlow(message);
+                break;
+            case "dispose":
+                HandleDispose(message);
                 break;
             default:
                 SendCommandResult(message, false, "unsupported-command", $"不支持的命令：{message.type}");
@@ -196,6 +223,11 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
     /// <summary>由真实厂区对象点击交互调用，向父页面回传稳定业务节点 ID。</summary>
     public void ReportObjectSelected(string nodeId, string nodeName)
     {
+        // 释放流程开始后不再产生场景回调，避免已卸载父页面收到迟到的选中事件。
+        if (_releaseRequested)
+        {
+            return;
+        }
         StatusText = $"已选择对象：{nodeName}";
         SendToParent("objectSelected", new BridgePayload
         {
@@ -211,8 +243,53 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         TryBindProcessController();
         SendToParent("ack", new BridgePayload
         {
+            // init 的 ack 必须明确成功，否则父页面会将默认 false 判为握手失败。
+            success = true,
             requestId = message.messageId,
             message = "Unity 已完成初始化",
+            sceneState = _processController != null ? _processController.GetStateDescription() : string.Empty
+        });
+    }
+
+    /// <summary>
+    /// 尺寸命令不直接修改固定画布样式；Unity WebGL 运行时会依据容器 CSS 尺寸重建渲染目标。
+    /// 此处仅记录结果并回填原始请求标识，让父页面能及时清理待确认表。
+    /// </summary>
+    private void HandleResize(BridgeMessage message)
+    {
+        BridgePayload payload = message.payload;
+        StatusText = $"已同步场景容器尺寸：{payload?.width ?? 0f} × {payload?.height ?? 0f}";
+        SendCommandResult(message, true, string.Empty, StatusText);
+    }
+
+    /// <summary>
+    /// 先以 disposed 回填 dispose 原始 messageId，再请求浏览器桥接层退出 Unity 实例。
+    /// 这样父页面可确认远端已接收释放命令；重复调用由 _releaseRequested 和桥接层双重幂等保护。
+    /// </summary>
+    private void HandleDispose(BridgeMessage message)
+    {
+        _releaseRequested = true;
+        StatusText = "Unity 实例正在释放。";
+        SendDisposed(message, true, StatusText);
+
+#if UNITY_WEBGL && !UNITY_EDITOR
+        Power3dUnityBridge_Release();
+#else
+        Debug.Log("[UnityIframeBridge] 编辑器测试模式已完成模拟释放。");
+#endif
+    }
+
+    /// <summary>
+    /// disposed 是释放命令的最终回执，requestId 始终回填原始 dispose 消息标识。
+    /// 即使重复释放也会返回成功状态，避免父页面因网络重试而进入异常分支。
+    /// </summary>
+    private void SendDisposed(BridgeMessage command, bool success, string resultMessage)
+    {
+        SendToParent("disposed", new BridgePayload
+        {
+            requestId = command.messageId,
+            success = success,
+            message = resultMessage,
             sceneState = _processController != null ? _processController.GetStateDescription() : string.Empty
         });
     }
@@ -305,6 +382,8 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         SendToParent("commandResult", new BridgePayload
         {
             requestId = command.messageId,
+            // commandResult 与原始 messageId 一一对应；success 供父页面结束待确认记录。
+            success = success,
             message = resultMessage,
             errorCode = errorCode,
             sceneState = _processController != null ? _processController.GetStateDescription() : string.Empty
