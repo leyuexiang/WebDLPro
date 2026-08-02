@@ -214,6 +214,7 @@ GameObject:
   - component: {fileID: 44485862}
   - component: {fileID: 44485861}
   - component: {fileID: 44485864}
+  - component: {fileID: 44485865}
   m_Layer: 0
   m_Name: PowerPlantRuntime
   m_TagString: Untagged
@@ -474,9 +475,31 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   _processController: {fileID: 0}
   _bridgeManager: {fileID: 0}
+  _showcaseController: {fileID: 0}
   _showPanel: 1
   _autoTestInterval: 2.5
   _bridgeInstanceId: local-demo-001
+--- !u!114 &44485865
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 44485860}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d98758d5f17de7e4e91f1525febfc4d2, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _sceneRoot: {fileID: 1851373711}
+  _showcaseCamera: {fileID: 330585545}
+  _showOnStart: 1
+  _defaultDeviceId: "\u71C3\u6C14\u8F6E\u673A1"
+  _showcaseFieldOfView: 50
+  _stagePadding: 7
+  _minimumStageRadius: 16
+  _maximumStageRadius: 70
+  _arrowOrbitSpeed: 18
 --- !u!1001 &48885641
 PrefabInstance:
   m_ObjectHideFlags: 0

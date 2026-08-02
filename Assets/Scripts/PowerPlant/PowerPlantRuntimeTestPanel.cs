@@ -35,6 +35,7 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
 
     [SerializeField] private PowerPlantProcessController _processController;
     [SerializeField] private UnityIframeBridgeManager _bridgeManager;
+    [SerializeField] private DeviceShowcaseController _showcaseController;
 
     [Header("测试设置")]
     [SerializeField] private bool _showPanel = true;
@@ -56,6 +57,7 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
     private bool _isolate = true;
     private string _unitId = "all";
     private string _nodeId = "node.gas-turbine.1";
+    private string _showcaseDeviceId = "燃气轮机1";
     private string _routeId = "route.exhaust-to-hrsg.1";
     private float _flowSpeed = 1f;
     private string _lastResult = "尚未执行测试。";
@@ -86,6 +88,8 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
         public string stepId;
         public string unitId;
         public string nodeId;
+        public string deviceCode;
+        public string deviceId;
         public string routeId;
         public bool isolate;
         public bool enabled;
@@ -148,6 +152,7 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
 
         DrawProcessControls();
         DrawNodeControls();
+        DrawShowcaseControls();
         DrawRouteControls();
         DrawBridgeControls();
 
@@ -240,6 +245,44 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
         {
             RunNodeAction("关闭告警", () => _processController.TrySetNodeAlarm(_nodeId, false, out string message), out string result);
             Report(result);
+        }
+        GUILayout.EndHorizontal();
+    }
+
+    private void DrawShowcaseControls()
+    {
+        GUILayout.Space(4f);
+        GUILayout.Label("设备展台", _sectionStyle);
+        GUILayout.BeginHorizontal();
+        GUILayout.Label("设备名", GUILayout.Width(52f));
+        _showcaseDeviceId = GUILayout.TextField(_showcaseDeviceId);
+        GUILayout.EndHorizontal();
+
+        GUILayout.BeginHorizontal();
+        if (GUILayout.Button("展示设备"))
+        {
+            RunShowcaseAction(() => _showcaseController.TryShowDevice(_showcaseDeviceId, out string message), "展示设备");
+        }
+
+        if (GUILayout.Button("上一个 (F5)"))
+        {
+            RunShowcaseAction(() => _showcaseController.ShowPreviousDevice(out string message), "上一个设备");
+            _showcaseDeviceId = _showcaseController != null ? _showcaseController.CurrentDeviceId : _showcaseDeviceId;
+        }
+
+        if (GUILayout.Button("下一个 (F7)"))
+        {
+            RunShowcaseAction(() => _showcaseController.ShowNextDevice(out string message), "下一个设备");
+            _showcaseDeviceId = _showcaseController != null ? _showcaseController.CurrentDeviceId : _showcaseDeviceId;
+        }
+
+        if (GUILayout.Button("退出展台 (F6)"))
+        {
+            if (EnsureShowcaseController())
+            {
+                _showcaseController.ExitShowcase();
+                Report("已退出设备展台。");
+            }
         }
         GUILayout.EndHorizontal();
     }
@@ -446,6 +489,18 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
         GUILayout.EndHorizontal();
 
         GUILayout.BeginHorizontal();
+        if (GUILayout.Button("展示设备"))
+        {
+            SendBridgeCommand("showDevice", new TestBridgePayload { deviceId = _showcaseDeviceId, deviceCode = _showcaseDeviceId });
+        }
+
+        if (GUILayout.Button("退出展台"))
+        {
+            SendBridgeCommand("exitDeviceShowcase", new TestBridgePayload());
+        }
+        GUILayout.EndHorizontal();
+
+        GUILayout.BeginHorizontal();
         if (GUILayout.Button("旧测试指令"))
         {
             SendBridgeCommand("test-command", new TestBridgePayload { text = "runtime-test-panel" });
@@ -553,6 +608,17 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
         Report($"桥接 {type}：{_bridgeManager.StatusText}");
     }
 
+    private void RunShowcaseAction(Func<bool> action, string actionName)
+    {
+        if (!EnsureShowcaseController())
+        {
+            return;
+        }
+
+        bool success = action();
+        Report(success ? $"{actionName}测试通过。" : $"{actionName}测试失败。");
+    }
+
     private void RunNodeAction(string actionName, Func<bool> action, out string result)
     {
         if (!EnsureProcessController())
@@ -597,6 +663,22 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
         return false;
     }
 
+    private bool EnsureShowcaseController()
+    {
+        if (_showcaseController == null)
+        {
+            BindRuntimeReferences();
+        }
+
+        if (_showcaseController != null)
+        {
+            return true;
+        }
+
+        Report("未找到 DeviceShowcaseController。");
+        return false;
+    }
+
     private void BindRuntimeReferences()
     {
         if (_processController == null)
@@ -609,6 +691,11 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
             _bridgeManager = GetComponent<UnityIframeBridgeManager>();
         }
 
+        if (_showcaseController == null)
+        {
+            _showcaseController = GetComponent<DeviceShowcaseController>();
+        }
+
         if (_processController == null)
         {
             _processController = FindFirstObjectByType<PowerPlantProcessController>();
@@ -617,6 +704,11 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
         if (_bridgeManager == null)
         {
             _bridgeManager = FindFirstObjectByType<UnityIframeBridgeManager>();
+        }
+
+        if (_showcaseController == null)
+        {
+            _showcaseController = FindFirstObjectByType<DeviceShowcaseController>();
         }
     }
 

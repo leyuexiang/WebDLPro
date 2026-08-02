@@ -33,6 +33,7 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
 
     private string _instanceId = "local-demo-001";
     private PowerPlantProcessController _processController;
+    private DeviceShowcaseController _showcaseController;
     private bool _releaseRequested;
 
 #if UNITY_WEBGL && !UNITY_EDITOR
@@ -75,6 +76,7 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         public string text;
         public string message;
         public string deviceCode;
+        public string deviceId;
         public string deviceName;
         public string requestId;
         public string processId;
@@ -115,6 +117,7 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
 
         TryBindTestObjectRenderer();
         TryBindProcessController();
+        TryBindShowcaseController();
     }
 
     private void Start()
@@ -122,6 +125,7 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         // Start 在场景全部 Awake 完成后执行；再次尝试绑定可规避根对象先于子对象初始化的顺序差异。
         TryBindTestObjectRenderer();
         TryBindProcessController();
+        TryBindShowcaseController();
         if (_testObjectRenderer != null)
         {
             _testObjectRenderer.material.color = new Color(1f, 0.45f, 0.76f, 1f);
@@ -204,6 +208,12 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
             case "setRouteFlow":
                 HandleSetRouteFlow(message);
                 break;
+            case "showDevice":
+                HandleShowDevice(message);
+                break;
+            case "exitDeviceShowcase":
+                HandleExitDeviceShowcase(message);
+                break;
             case "dispose":
                 HandleDispose(message);
                 break;
@@ -241,13 +251,14 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
     {
         StatusText = "已完成父页面初始化。";
         TryBindProcessController();
+        TryBindShowcaseController();
         SendToParent("ack", new BridgePayload
         {
             // init 的 ack 必须明确成功，否则父页面会将默认 false 判为握手失败。
             success = true,
             requestId = message.messageId,
             message = "Unity 已完成初始化",
-            sceneState = _processController != null ? _processController.GetStateDescription() : string.Empty
+            sceneState = GetSceneState()
         });
     }
 
@@ -290,7 +301,7 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
             requestId = command.messageId,
             success = success,
             message = resultMessage,
-            sceneState = _processController != null ? _processController.GetStateDescription() : string.Empty
+            sceneState = GetSceneState()
         });
     }
 
@@ -377,6 +388,47 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         return false;
     }
 
+    private void HandleShowDevice(BridgeMessage message)
+    {
+        TryBindShowcaseController();
+        if (_showcaseController == null)
+        {
+            StatusText = "设备展台控制器尚未配置。";
+            SendCommandResult(message, false, "showcase-unavailable", StatusText);
+            return;
+        }
+
+        BridgePayload payload = message.payload;
+        string deviceId = !string.IsNullOrWhiteSpace(payload?.deviceId) ? payload.deviceId : payload?.deviceCode;
+        bool success = _showcaseController.TryShowDevice(deviceId, out string resultMessage);
+        StatusText = resultMessage;
+        SendCommandResult(message, success, success ? string.Empty : "invalid-device", resultMessage);
+    }
+
+    private void HandleExitDeviceShowcase(BridgeMessage message)
+    {
+        TryBindShowcaseController();
+        if (_showcaseController == null)
+        {
+            StatusText = "设备展台控制器尚未配置。";
+            SendCommandResult(message, false, "showcase-unavailable", StatusText);
+            return;
+        }
+
+        _showcaseController.ExitShowcase();
+        StatusText = "已退出设备展台。";
+        SendCommandResult(message, true, string.Empty, StatusText);
+    }
+
+    private string GetSceneState()
+    {
+        string processState = _processController != null ? _processController.GetStateDescription() : string.Empty;
+        string showcaseState = _showcaseController != null && _showcaseController.IsShowcaseActive
+            ? $";showcase={_showcaseController.CurrentDeviceId}"
+            : ";showcase=off";
+        return processState + showcaseState;
+    }
+
     private void SendCommandResult(BridgeMessage command, bool success, string errorCode, string resultMessage)
     {
         SendToParent("commandResult", new BridgePayload
@@ -386,7 +438,7 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
             success = success,
             message = resultMessage,
             errorCode = errorCode,
-            sceneState = _processController != null ? _processController.GetStateDescription() : string.Empty
+            sceneState = GetSceneState()
         });
     }
 
@@ -445,6 +497,14 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         if (_processController == null)
         {
             _processController = FindFirstObjectByType<PowerPlantProcessController>();
+        }
+    }
+
+    private void TryBindShowcaseController()
+    {
+        if (_showcaseController == null)
+        {
+            _showcaseController = FindFirstObjectByType<DeviceShowcaseController>();
         }
     }
 
