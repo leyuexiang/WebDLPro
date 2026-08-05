@@ -29,6 +29,7 @@
       <p id="result">等待创建运行时。</p>
       <button id="create-button">创建或重新创建实例</button>
       <button id="run-button">执行自动回归</button>
+      <button id="action-run-button">执行动作协议回归</button>
       <button id="dispose-button" class="secondary">释放当前实例</button>
       <button id="forgery-button" class="secondary">发送伪造消息</button>
       <p class="hint">父页面来源：<span id="parent-origin"></span></p>
@@ -54,8 +55,9 @@
       buildId: 'mock-build-1',
       sceneMappingVersion: 'mock-mapping-1',
       resourceDigest: 'sha256:local-mock-v1',
-      commandCapabilities: ['init', 'resize', 'focusNode', 'dispose'],
-      eventCapabilities: ['ready', 'ack', 'commandResult', 'objectSelected', 'disposed']
+      // 与 Unity 桥接白名单一致；夹具仅验证协议和关联，不以这些能力推断真实场景资源存在。
+      commandCapabilities: ['init', 'resize', 'switchScene', 'enterProcessStep', 'resetScene', 'focusNode', 'setNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
+      eventCapabilities: ['ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'disposed']
     };
     const frameContainer = document.querySelector('#frame-container');
     const state = document.querySelector('#state');
@@ -82,7 +84,8 @@
       const timeout = window.setTimeout(() => {
         if (pending.delete(messageId)) writeLog(`${type} 超时，已清理待确认项。`);
       }, 10000);
-      pending.set(messageId, { type, timeout });
+      // 保留受控下行载荷仅用于回传场景、事务关联校验；待确认项会在终态或超时后立即删除。
+      pending.set(messageId, { type, payload, timeout });
       iframe.contentWindow.postMessage({ channel, version, instanceId, messageId, type, payload, timestamp: Date.now() }, childOrigin);
       writeLog(`发送 ${type}：${messageId}`);
       return messageId;
@@ -182,6 +185,21 @@
 
       if (!data.payload?.requestId || !pending.has(data.payload.requestId)) return writeLog('拒绝：回执未命中原始请求标识。');
       const entry = pending.get(data.payload.requestId);
+
+      // switchScene 的 ack 仅表示 Unity 已接收请求；进度与完成必须继续保留同一待确认项。
+      if (data.type === 'ack' && entry.type === 'switchScene') {
+        writeLog('场景切换请求已确认接收。');
+        return;
+      }
+      if (data.type === 'sceneLoadProgress' && entry.type === 'switchScene') {
+        const payload = data.payload;
+        if (payload.sceneId !== entry.payload?.sceneId || payload.transitionId !== entry.payload?.transitionId ||
+            !Number.isFinite(payload.progress) || payload.progress < 0 || payload.progress > 1) {
+          return writeLog('拒绝：场景进度与原切换请求不一致或越界。');
+        }
+        writeLog(`场景加载进度：${Math.round(payload.progress * 100)}%。`);
+        return;
+      }
       window.clearTimeout(entry.timeout);
       pending.delete(data.payload.requestId);
 
@@ -196,6 +214,13 @@
         entry.resolve?.();
         clearCurrentFrame();
         writeLog('dispose 已确认，旧实例已释放。');
+        return;
+      }
+      if (data.type === 'sceneChanged' && entry.type === 'switchScene') {
+        if (data.payload.sceneId !== entry.payload?.sceneId || data.payload.transitionId !== entry.payload?.transitionId || data.payload.success !== true) {
+          return writeLog('拒绝：场景完成事件与原切换请求不一致。');
+        }
+        writeLog(`场景切换完成：${data.payload.sceneId}。`);
         return;
       }
       if (data.type === 'commandResult') writeLog(`${entry.type} 已确认。`);
@@ -218,11 +243,41 @@
       await waitFor(() => status === 'ready', '握手超时');
       postCommand('resize', { width: frameContainer.clientWidth, height: frameContainer.clientHeight, devicePixelRatio: window.devicePixelRatio });
       await waitFor(() => pending.size === 0, '尺寸命令超时');
+      postCommand('switchScene', { sceneId: 'gas-power', transitionId: `local-transition-${crypto.randomUUID()}`, sceneMappingVersion: runtime.sceneMappingVersion });
+      await waitFor(() => pending.size === 0, '场景切换命令超时');
       await releaseCurrent(true);
       createInstance();
       await waitFor(() => status === 'ready', '重复进入握手超时');
-      result.textContent = '自动回归通过：握手、尺寸、释放与重复进入均正常。';
+      result.textContent = '自动回归通过：握手、尺寸、场景切换、释放与重复进入均正常。';
       writeLog('自动回归通过。');
+    }
+
+    /**
+     * 使用固定稳定标识依次验证五类场景动作和复位的确认关联。
+     * 夹具不模拟真实燃气节点、材质或路径，仅证明白名单、载荷形态、回执关联与待确认清理；
+     * 真实存在性和材质复用由 Unity 运行模式测试及正式场景映射负责。
+     */
+    async function runActionProtocolRegression() {
+      result.textContent = '动作协议回归执行中。';
+      if (status !== 'ready') {
+        createInstance();
+        await waitFor(() => status === 'ready', '动作协议握手超时');
+      }
+      await waitFor(() => pending.size === 0, '已有命令尚未完成');
+      const commands = [
+        ['enterProcessStep', { processId: 'gas-power-generation', stepId: 'overview', unitId: 'all', isolate: true }],
+        ['focusNode', { sceneNodeId: 'gas-turbine', isolate: true }],
+        ['setNodeVisualState', { sceneNodeId: 'gas-turbine', visualState: 'alarm' }],
+        ['setRouteFlow', { routeId: 'route.gas-to-grid', enabled: true }],
+        ['setNodeVisibility', { sceneNodeId: 'gas-turbine', enabled: true }],
+        ['resetScene', {}]
+      ];
+      for (const [type, payload] of commands) {
+        postCommand(type, payload);
+        await waitFor(() => pending.size === 0, `${type} 命令超时`);
+      }
+      result.textContent = '动作协议回归通过：流程、聚焦、状态、路径、显隐与复位均已确认。';
+      writeLog('动作协议回归通过。');
     }
 
     /** 轮询时间上限 12 秒，失败时让调用方看到明确原因，不无限等待失联 iframe。 */
@@ -243,6 +298,11 @@
       status = 'failed';
       result.textContent = `自动回归失败：${error.message}`;
       writeLog(`自动回归失败：${error.message}`);
+    }));
+    document.querySelector('#action-run-button').addEventListener('click', () => runActionProtocolRegression().catch((error) => {
+      status = 'failed';
+      result.textContent = `动作协议回归失败：${error.message}`;
+      writeLog(`动作协议回归失败：${error.message}`);
     }));
     document.querySelector('#dispose-button').addEventListener('click', () => void releaseCurrent(true));
     document.querySelector('#forgery-button').addEventListener('click', () => {

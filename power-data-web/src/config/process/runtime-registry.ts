@@ -1,4 +1,7 @@
+import { toRuntimeKey } from '@/config/process/identifiers'
 import type { RuntimeKey } from '@/config/process/identifiers'
+import { LOCAL_PROCESS_CONFIG_VERSION } from '@/config/process/config-version'
+import { readDeploymentConfiguration, type DeploymentConfigurationLoadResult } from '@/config/deployment/deployment-config'
 import type { ProcessConfigValidationIssue, WebglRuntimeRegistration } from '@/config/process/types'
 import { isWebglCommandType, isWebglEventType, parseExactOrigin, WEBGL_PROTOCOL_VERSION } from '@/services/webgl/protocol'
 
@@ -27,11 +30,48 @@ export class ReadonlyWebglRuntimeRegistry {
 }
 
 /**
- * 本阶段不登记任何可启动的运行时。
- * 虽然 Unity WebGL 包已存在，但正式入口地址、父页面精确来源与部署资源版本尚未形成外部契约；
- * 空表会让页面明确降级，绝不会以本机路径或临时测试地址冒充生产运行时。
+ * 运行时地址、外层来源、Unity 直接父来源和清单地址统一从部署配置读取。
+ * 开发模式的本机地址只存在于部署配置读取器的编译期回退中；生产环境缺少正式配置时
+ * 不生成运行时登记，因此无法把本地端口或任意 iframe 地址带入正式运行。
  */
-export const localWebglRuntimeRegistry = new ReadonlyWebglRuntimeRegistry([])
+const deploymentConfigurationResult = readDeploymentConfiguration()
+
+/** 部署配置失败时保留稳定问题码，嵌入壳据此显示安全错误态而不输出原始环境变量。 */
+export const deploymentConfigurationIssues = deploymentConfigurationResult.issues
+
+/**
+ * 只有部署配置完整时才发布燃气基线登记；构造时不接受业务页面提供的 URL。
+ * 测试可显式传入受控读取结果，生产代码只能使用当前构建环境的全局读取结果。
+ */
+export function createRuntimeRegistry(configurationResult: DeploymentConfigurationLoadResult): ReadonlyWebglRuntimeRegistry {
+  const registrations: readonly WebglRuntimeRegistration[] = configurationResult.configuration
+    ? [
+      {
+        runtimeKey: toRuntimeKey('gas-plant-release'),
+        buildId: 'local-webgl-topology-link',
+        configVersion: LOCAL_PROCESS_CONFIG_VERSION,
+        sceneMappingVersion: LOCAL_PROCESS_CONFIG_VERSION,
+        protocolVersion: WEBGL_PROTOCOL_VERSION,
+        resourceDigest: 'local-webgl-topology-link',
+        entryUrl: configurationResult.configuration.unityEntryUrl,
+        childOrigin: configurationResult.configuration.unityChildOrigin,
+        // Unity iframe 的直接父窗口是本嵌入壳；必须使用独立精确来源，不能错误沿用外层宿主页来源。
+        allowedParentOrigin: configurationResult.configuration.unityParentOrigin,
+        capabilities: ['init', 'resize', 'switchScene', 'enterProcessStep', 'resetScene', 'focusNode', 'setNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
+        eventCapabilities: ['ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'disposed'],
+        resourceBudget: {
+          initialMemoryMb: 256,
+          maxConcurrentInstances: 1,
+          cacheMode: 'none',
+        },
+      },
+      ]
+    : []
+
+  return new ReadonlyWebglRuntimeRegistry(registrations)
+}
+
+export const localWebglRuntimeRegistry = createRuntimeRegistry(deploymentConfigurationResult)
 
 /** 校验单个登记项的安全边界和资源约束。 */
 export function validateRuntimeRegistration(runtime: WebglRuntimeRegistration): ProcessConfigValidationIssue[] {

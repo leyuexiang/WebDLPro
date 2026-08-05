@@ -4,7 +4,7 @@ import { useRoute } from 'vue-router'
 
 /**
  * 捕获子树同步渲染错误并渲染结构化兜底界面。
- * 路由发生变化时自动重置错误状态，使用户可以通过导航离开故障页面。
+ * 路由发生变化时自动重置错误状态，使嵌入壳和旧页面都能在下一次渲染时恢复。
  */
 const route = useRoute()
 const errorMessage = ref('')
@@ -35,7 +35,6 @@ function retry(): void {
       <p>{{ errorMessage }}</p>
       <div class="app-error-boundary__actions">
         <button type="button" class="button button--primary" @click="retry">重新尝试</button>
-        <RouterLink class="button button--secondary" to="/portal">返回门户</RouterLink>
       </div>
     </section>
   </main>

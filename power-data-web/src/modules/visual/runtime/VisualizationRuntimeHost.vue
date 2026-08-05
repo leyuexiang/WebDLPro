@@ -9,6 +9,7 @@ import type { WebglCommandType } from '@/services/webgl/protocol'
 import {
   visualizationRuntimeHostKey,
   type VisualizationObjectSelection,
+  type VisualizationRuntimeHostController,
   type VisualizationRuntimeLifecycle,
 } from '@/modules/visual/runtime/visualization-runtime-host'
 
@@ -19,6 +20,13 @@ const runtimeStatus = ref<VisualizationRuntimeLifecycle>('idle')
 const runtimeReason = ref<string | null>(null)
 const runtimeCapabilities = ref<readonly WebglCommandType[]>([])
 const selectedObjectListeners = new Set<(selection: VisualizationObjectSelection) => void>()
+/** 等待表与连接器待确认表使用同一 requestId，且其容量受连接器 64 条上限间接约束。 */
+const pendingCommandResultByRequestId = new Map<string, (result: { success: boolean }) => void>()
+/**
+ * 释放等待者只由外层 system.dispose（系统释放）使用，单实例宿主通常至多存在一个。
+ * 使用 Set 仍可安全处理重复释放：每个调用各自结算，清理完成后立即清空，不保留页面卸载后的闭包。
+ */
+const pendingReleaseResolvers = new Set<(result: { success: boolean }) => void>()
 
 let activeRuntime: WebglRuntimeRegistration | undefined
 let pendingRuntime: WebglRuntimeRegistration | undefined
@@ -72,9 +80,36 @@ function release(runtimeKey?: string): void {
   requestActiveRuntimeRelease()
 }
 
+/**
+ * 请求释放并等待 iframe、连接器、尺寸观察器和待确认表都完成清理。
+ * 它不把 Unity `disposed`（已释放）事件直接交给业务层：即使远端确认超时，宿主也会在连接器失败路径
+ * 执行本地兜底回收后结算成功，表达“资源已不再由当前页面持有”，而不是伪造远端业务成功。
+ */
+function releaseAndWait(runtimeKey?: string): Promise<{ success: boolean }> {
+  if (!connector || (runtimeKey && activeRuntime?.runtimeKey !== runtimeKey)) return Promise.resolve({ success: true })
+
+  return new Promise((resolve) => {
+    pendingReleaseResolvers.add(resolve)
+    release(runtimeKey)
+  })
+}
+
 /** 业务页面通过宿主转发白名单命令；连接器会再次验证运行时状态与协商能力。 */
 function sendCommand(command: Exclude<WebglCommandType, 'init'>, payload: unknown): string | undefined {
   return connector?.sendCommand(command, payload)
+}
+
+/**
+ * 向内层发送命令并等待连接器已验证的最终结果。
+ * 发送未成功、连接器失败或当前运行时释放时均返回失败；调用方不必接触跨窗口事件或自行管理超时器。
+ */
+function sendCommandAndWait(command: Exclude<WebglCommandType, 'init'>, payload: unknown): Promise<{ success: boolean }> {
+  const requestId = connector?.sendCommand(command, payload)
+  if (!requestId) return Promise.resolve({ success: false })
+
+  return new Promise((resolve) => {
+    pendingCommandResultByRequestId.set(requestId, resolve)
+  })
 }
 
 /**
@@ -86,16 +121,34 @@ function subscribeObjectSelected(listener: (selection: VisualizationObjectSelect
   return () => selectedObjectListeners.delete(listener)
 }
 
-provide(visualizationRuntimeHostKey, {
+/**
+ * 对内层组件与组合根公开的唯一运行时控制器。
+ * 对象在整个宿主生命周期内保持同一引用，且只暴露受控方法和只读响应式状态；iframe、连接器、等待表、
+ * 窗口对象和尺寸观察器仍严格封装在本组件中，外层桥无法越过该边界直接访问 Unity。
+ */
+const runtimeHostController: VisualizationRuntimeHostController = Object.freeze({
   status: readonly(runtimeStatus),
   reason: readonly(runtimeReason),
   capabilities: readonly(runtimeCapabilities),
   registerViewport,
   acquire,
   release,
+  releaseAndWait,
   sendCommand,
+  sendCommandAndWait,
   subscribeObjectSelected,
 })
+provide(visualizationRuntimeHostKey, runtimeHostController)
+
+/**
+ * 组合根通过组件引用获取同一个受控控制器，用于 task-033 的 `view.open` 端口接线。
+ * 这避免嵌入壳依赖插槽作用域或私有注入时序，也不会把 iframe/连接器实例暴露到父组件。
+ */
+function getRuntimeHostController(): VisualizationRuntimeHostController {
+  return runtimeHostController
+}
+
+defineExpose({ getRuntimeHostController })
 
 /**
  * 创建待启动运行时。入口地址、父页面来源与构建元数据都完全来自只读登记表，
@@ -134,6 +187,13 @@ function startPendingRuntime(): void {
     onCommandFailure: (command, reason) => {
       // 非致命命令失败不销毁已就绪场景，只保留可见诊断，避免一次聚焦失败导致画面闪退。
       runtimeReason.value = `${command} 命令失败：${reason}`
+    },
+    // 连接器只在原 requestId 的最终成功、失败或超时后通知；宿主据此一次性结算 Promise。
+    onCommandCompleted: (completion) => {
+      const resolve = pendingCommandResultByRequestId.get(completion.requestId)
+      if (!resolve) return
+      pendingCommandResultByRequestId.delete(completion.requestId)
+      resolve({ success: completion.success })
     },
   })
 
@@ -213,10 +273,13 @@ function cleanupActiveRuntime(startNext: boolean): void {
   iframeSource.value = null
   activeRuntime = undefined
   runtimeCapabilities.value = []
+  resolvePendingCommandResults(false)
   disconnectResizeObserver()
 
   // failed 状态的连接器已经自行移除监听；其余状态调用幂等 forceDispose 兜底清理。
   currentConnector?.forceDispose()
+  // 连接器正常确认与超时/失败兜底都会到达本清理点，因此等待者只在资源实际解除后结算。
+  resolvePendingReleaseWaiters()
 
   if (startNext && pendingRuntime) {
     startPendingRuntime()
@@ -233,9 +296,11 @@ function failBeforeConnector(reason: string): void {
   iframeSource.value = null
   activeRuntime = undefined
   pendingRuntime = undefined
+  resolvePendingCommandResults(false)
   connector?.forceDispose()
   connector = undefined
   disconnectResizeObserver()
+  resolvePendingReleaseWaiters()
 }
 
 /**
@@ -276,6 +341,21 @@ function disconnectResizeObserver(): void {
   }
 }
 
+/** 运行时切换、失败或卸载时结算全部等待项，避免事务处理器永久等待已销毁的 iframe。 */
+function resolvePendingCommandResults(success: boolean): void {
+  pendingCommandResultByRequestId.forEach((resolve) => resolve({ success }))
+  pendingCommandResultByRequestId.clear()
+}
+
+/**
+ * 将所有释放等待者一次性结算并清空集合。
+ * 此处不暴露连接器失败原因：外层协议只需知道当前页面已停止持有 Unity 资源，详细原因保留在受限运行时诊断中。
+ */
+function resolvePendingReleaseWaiters(): void {
+  pendingReleaseResolvers.forEach((resolve) => resolve({ success: true }))
+  pendingReleaseResolvers.clear()
+}
+
 /**
  * 从受审计登记项生成入口地址，只附加桥接必需的精确父来源、实例和构建一致性字段。
  * 子页面应逐项回传这些元数据，连接器会在 ready 阶段作精确比对。
@@ -305,12 +385,15 @@ onBeforeUnmount(() => {
   connector = undefined
   iframeSource.value = null
   disconnectResizeObserver()
+  resolvePendingCommandResults(false)
+  resolvePendingReleaseWaiters()
   selectedObjectListeners.clear()
 })
 </script>
 
 <template>
-  <slot />
+  <!-- 将只读状态作为插槽参数提供给嵌入壳；子组件仍必须通过注入的受控门面操作运行时。 -->
+  <slot :status="runtimeStatus" :reason="runtimeReason" />
   <!-- iframe 只由本布局宿主创建；Teleport 仅改变展示位置，不转移其所有权。 -->
   <Teleport v-if="iframeSource && viewportElement" :to="viewportElement">
     <iframe

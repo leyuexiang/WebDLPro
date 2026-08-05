@@ -1,0 +1,79 @@
+name: 电力可视化清单契约门禁
+
+on:
+  push:
+    paths:
+      - 'power-data-web/**'
+      - '.github/workflows/power-data-web-contract.yml'
+  pull_request:
+    paths:
+      - 'power-data-web/**'
+      - '.github/workflows/power-data-web-contract.yml'
+  workflow_dispatch:
+    inputs:
+      manifest_path:
+        description: '工作区内场景拓扑清单相对路径；不填时使用合成九场景夹具'
+        required: false
+        default: 'tests/fixtures/scene-topology-contract-valid.json'
+        type: string
+
+# 工作流只读取仓库内容和上传本次有限契约报告，不申请写入仓库、令牌或部署权限。
+permissions:
+  contents: read
+
+# 同一引用的新提交会取代旧检查，避免过时构建继续占用托管执行器。
+concurrency:
+  group: power-data-web-contract-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract-and-build:
+    name: 清单契约、视觉门禁与发布构建
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: power-data-web
+    env:
+      # 普通推送与拉取请求固定使用已提交合成夹具；手工运行可显式传入正式清单相对路径。
+      # 真实路径仍会由 validate:manifest 的工作区边界校验，不能借 GitHub 输入访问工作区外文件。
+      MANIFEST_PATH: ${{ inputs.manifest_path || 'tests/fixtures/scene-topology-contract-valid.json' }}
+      CONTRACT_REPORT_PATH: artifacts/scene-topology-contract-report.json
+
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@v4
+
+      - name: 设置与本地一致的 Node 运行时
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: power-data-web/package-lock.json
+
+      # 禁止依赖安装生命周期脚本，前端校验不需要执行任何第三方安装钩子。
+      - name: 安装锁定依赖
+        run: npm ci --ignore-scripts
+
+      - name: 执行全部单元与命令回归
+        run: npm run test:unit
+
+      - name: 校验版本化双容器视觉基准
+        run: npm run test:visual -- --baseline tests/visual-regression/baselines/double-container-1280x720.jpg --actual tests/visual-regression/baselines/double-container-1280x720.jpg
+
+      # 目录由流水线明确创建；契约命令本身不会创建路径，避免报告写入范围失控。
+      - name: 创建有限报告目录
+        run: mkdir -p artifacts
+
+      - name: 校验清单并执行发布构建
+        run: npm run build:release -- --manifest "$MANIFEST_PATH" --report "$CONTRACT_REPORT_PATH"
+
+      # 仅归档脱敏、有限的 JSON 报告；不上传场景清单、构建产物、Unity 资源或测试缓存。
+      - name: 归档清单契约报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scene-topology-contract-report
+          path: power-data-web/artifacts/scene-topology-contract-report.json
+          if-no-files-found: warn
+          retention-days: 14

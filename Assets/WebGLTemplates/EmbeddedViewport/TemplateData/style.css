@@ -1,0 +1,67 @@
+/*
+ * 嵌入式三维视口模板。
+ * 页面由前端 iframe 约束尺寸，因此所有根节点与画布必须占满宿主可视区域；
+ * 禁止内部滚动，避免 Unity 的默认 960×600 固定画布在 16:9 容器中出现黑边或滚动条。
+ */
+html,
+body {
+  inline-size: 100%;
+  block-size: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: #061323;
+}
+
+#unity-container,
+#unity-canvas {
+  inline-size: 100%;
+  block-size: 100%;
+}
+
+#unity-container {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+#unity-canvas {
+  display: block;
+  background: #061323;
+}
+
+/* 加载提示仅在资源下载阶段覆盖画布中央；运行完成后会立即隐藏，不占用三维显示空间。 */
+#unity-loading-bar {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  display: none;
+  inline-size: 180px;
+  transform: translate(-50%, -50%);
+}
+
+#unity-progress-bar-empty {
+  block-size: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 24%);
+}
+
+#unity-progress-bar-full {
+  inline-size: 0;
+  block-size: 100%;
+  border-radius: inherit;
+  background: #22d3ee;
+}
+
+/* iframe 内不显示 Unity 默认品牌页脚和内部全屏控件，场景画布独占全部可视面积。 */
+#unity-footer {
+  display: none;
+}
+
+#unity-warning {
+  position: absolute;
+  inset: 16px 16px auto;
+  display: none;
+  padding: 10px 12px;
+  color: #fff;
+  background: #b91c1c;
+}

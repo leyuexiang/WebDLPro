@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1">
+    <title>{{{ PRODUCT_NAME }}}</title>
+    <link rel="stylesheet" href="TemplateData/style.css">
+  </head>
+  <body>
+    <!-- 容器不含默认页脚，运行时画布会完整占据前端提供的 16:9 iframe 视口。 -->
+    <div id="unity-container">
+      <canvas id="unity-canvas" tabindex="-1"></canvas>
+      <div id="unity-loading-bar">
+        <div id="unity-progress-bar-empty">
+          <div id="unity-progress-bar-full"></div>
+        </div>
+      </div>
+      <div id="unity-warning"></div>
+    </div>
+    <script>
+      const canvas = document.querySelector('#unity-canvas');
+      const loadingBar = document.querySelector('#unity-loading-bar');
+      const progressBarFull = document.querySelector('#unity-progress-bar-full');
+      const warningBanner = document.querySelector('#unity-warning');
+
+      /** 将运行时错误限定为画布内提示，既不撑开 iframe，也不影响父页面布局。 */
+      function unityShowBanner(message, type) {
+        warningBanner.textContent = message;
+        warningBanner.style.display = 'block';
+        warningBanner.style.background = type === 'error' ? '#b91c1c' : '#a16207';
+      }
+
+      const buildUrl = 'Build';
+      const loaderUrl = `${buildUrl}/{{{ LOADER_FILENAME }}}`;
+      const config = {
+        dataUrl: `${buildUrl}/{{{ DATA_FILENAME }}}`,
+        frameworkUrl: `${buildUrl}/{{{ FRAMEWORK_FILENAME }}}`,
+        codeUrl: `${buildUrl}/{{{ CODE_FILENAME }}}`,
+        streamingAssetsUrl: 'StreamingAssets',
+        companyName: '{{{ COMPANY_NAME }}}',
+        productName: '{{{ PRODUCT_NAME }}}',
+        productVersion: '{{{ PRODUCT_VERSION }}}',
+        showBanner: unityShowBanner,
+      };
+
+      // 保持 Unity 渲染目标与 CSS 画布同步；像素比设上限，避免高分屏将显存开销无界放大。
+      config.matchWebGLToCanvasSize = true;
+      config.devicePixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+      loadingBar.style.display = 'block';
+
+      const script = document.createElement('script');
+      script.src = loaderUrl;
+      script.onload = () => {
+        createUnityInstance(canvas, config, (progress) => {
+          progressBarFull.style.width = `${Math.round(progress * 100)}%`;
+        }).then((unityInstance) => {
+          /*
+           * 父页面下发的握手字段在 Unity 初始化后固化到地址栏，.jslib 再据此校验精确来源、实例与版本。
+           * 这些字段全部来自受控运行时登记表，模板不接受任意业务页面自行拼接的来源或构建标识。
+           */
+          const bridgeQuery = new URLSearchParams(window.location.search);
+          const parentOrigin = bridgeQuery.get('parentOrigin');
+          if (parentOrigin) {
+            const bridgeMetadata = {
+              instanceId: bridgeQuery.get('instanceId') || 'local-demo-001',
+              parentOrigin,
+              runtimeKey: bridgeQuery.get('runtimeKey') || 'gas-plant-release',
+              buildId: bridgeQuery.get('buildId') || 'local-webgl-topology-link',
+              sceneMappingVersion: bridgeQuery.get('sceneMappingVersion') || '2026.08.01-local.2',
+              resourceDigest: bridgeQuery.get('resourceDigest') || 'local-webgl-topology-link',
+            };
+            history.replaceState(null, '', `${window.location.pathname}?${new URLSearchParams(bridgeMetadata)}`);
+          }
+
+          window.unityInstance = unityInstance;
+          loadingBar.style.display = 'none';
+        }).catch((error) => {
+          unityShowBanner(String(error), 'error');
+        });
+      };
+      document.body.appendChild(script);
+    </script>
+  </body>
+</html>

@@ -22,6 +22,11 @@ export interface VisualizationObjectSelection {
   messageId: string
 }
 
+/** 编排层等待内层命令时只得到成功或失败，不得到 iframe、消息信封或 Unity 回执正文。 */
+export interface VisualizationRuntimeCommandResult {
+  success: boolean
+}
+
 /**
  * 业务组件唯一可使用的运行时门面。
  * acquire、release 与 sendCommand 都由宿主进一步校验；页面层不拥有 iframe，也不能碰 postMessage。
@@ -33,7 +38,11 @@ export interface VisualizationRuntimeHostController {
   registerViewport: (viewport: HTMLElement) => () => void
   acquire: (runtime: WebglRuntimeRegistration) => void
   release: (runtimeKey?: string) => void
+  /** 等待内层确认释放或本地兜底清理完成；调用方只得到有限成功摘要，不访问 iframe 或连接器。 */
+  releaseAndWait: (runtimeKey?: string) => Promise<VisualizationRuntimeCommandResult>
   sendCommand: (command: Exclude<WebglCommandType, 'init'>, payload: unknown) => string | undefined
+  /** 基于连接器已经校验的原请求回执完成等待；失败、超时和释放都会结算，不保留悬挂 Promise。 */
+  sendCommandAndWait: (command: Exclude<WebglCommandType, 'init'>, payload: unknown) => Promise<VisualizationRuntimeCommandResult>
   subscribeObjectSelected: (listener: (selection: VisualizationObjectSelection) => void) => () => void
 }
 

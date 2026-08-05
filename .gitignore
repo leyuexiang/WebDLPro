@@ -5,6 +5,7 @@
 /[Oo]bj/
 /[Ll]ogs/
 /[Bb]uild/
+# Unity 构建产物目录：内容可由构建流程重新生成，不纳入 Git 版本管理。
 /[Bb]uilds/
 /[Uu]ser[Ss]ettings/
 /[Mm]emoryCaptures/

@@ -14,7 +14,7 @@ export default defineConfig({
     },
   },
   build: {
-    // 以模块边界拆分框架、图表与应用代码，减少首次进入普通页面时的下载量。
+    // 仅拆分当前仍使用的 Vue、路由和状态管理运行时，图表运行时随旧模块一并移除。
     rollupOptions: {
       output: {
         manualChunks(id) {
@@ -22,11 +22,6 @@ export default defineConfig({
           if (id.includes('node_modules/vue/') || id.includes('node_modules/vue-router/') || id.includes('node_modules/pinia/')) {
             return 'framework-runtime'
           }
-
-          if (id.includes('node_modules/echarts/')) {
-            return 'chart-runtime'
-          }
-
           return undefined
         },
       },

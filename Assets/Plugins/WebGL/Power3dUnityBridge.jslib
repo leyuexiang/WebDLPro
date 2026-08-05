@@ -33,10 +33,10 @@ mergeInto(LibraryManager.library, {
     }
 
     var commandCapabilities = [
-      'init', 'resize', 'enterProcessStep', 'resetScene', 'focusNode',
-      'setNodeVisibility', 'setRouteFlow', 'dispose'
+      'init', 'resize', 'switchScene', 'enterProcessStep', 'resetScene', 'focusNode',
+      'setNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'
     ];
-    var eventCapabilities = ['ready', 'ack', 'commandResult', 'objectSelected', 'disposed'];
+    var eventCapabilities = ['ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'disposed'];
     var isSupportedCommand = function (type) {
       return commandCapabilities.indexOf(type) !== -1;
     };
@@ -109,7 +109,7 @@ mergeInto(LibraryManager.library, {
     }
     try {
       var message = JSON.parse(UTF8ToString(messageJsonPointer));
-      var eventCapabilities = ['ready', 'ack', 'commandResult', 'objectSelected', 'disposed'];
+      var eventCapabilities = ['ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'disposed'];
       if (
         !message ||
         message.channel !== 'power3d-unity' ||

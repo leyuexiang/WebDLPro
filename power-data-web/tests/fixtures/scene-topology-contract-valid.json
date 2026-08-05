@@ -1,0 +1,40 @@
+{
+  "manifestVersion": "fixture-contract.1",
+  "unityBuildId": "fixture-unity-build.1",
+  "unityRuntimeKey": "fixture-unity-runtime",
+  "scenes": [
+    { "sceneId": "coal-power", "title": "测试燃煤场景", "unitySceneKey": "scene.coal-power", "defaultTopologyId": "topology.coal-power.overview", "topologyIds": ["topology.coal-power.overview"], "supportedActionIds": [], "sceneMappingVersion": "mapping.coal-power.1", "resourceVersion": "resource.coal-power.1", "switchStrategy": "unload-first" },
+    { "sceneId": "gas-power", "title": "测试燃气场景", "unitySceneKey": "scene.gas-power", "defaultTopologyId": "topology.gas-power.overview", "topologyIds": ["topology.gas-power.overview"], "supportedActionIds": [], "sceneMappingVersion": "mapping.gas-power.1", "resourceVersion": "resource.gas-power.1", "switchStrategy": "unload-first" },
+    { "sceneId": "wind-power", "title": "测试风电场景", "unitySceneKey": "scene.wind-power", "defaultTopologyId": "topology.wind-power.overview", "topologyIds": ["topology.wind-power.overview"], "supportedActionIds": [], "sceneMappingVersion": "mapping.wind-power.1", "resourceVersion": "resource.wind-power.1", "switchStrategy": "unload-first" },
+    { "sceneId": "solar-power", "title": "测试光伏场景", "unitySceneKey": "scene.solar-power", "defaultTopologyId": "topology.solar-power.overview", "topologyIds": ["topology.solar-power.overview"], "supportedActionIds": [], "sceneMappingVersion": "mapping.solar-power.1", "resourceVersion": "resource.solar-power.1", "switchStrategy": "unload-first" },
+    { "sceneId": "substation", "title": "测试变电站场景", "unitySceneKey": "scene.substation", "defaultTopologyId": "topology.substation.overview", "topologyIds": ["topology.substation.overview"], "supportedActionIds": [], "sceneMappingVersion": "mapping.substation.1", "resourceVersion": "resource.substation.1", "switchStrategy": "unload-first" },
+    { "sceneId": "distribution", "title": "测试配电网场景", "unitySceneKey": "scene.distribution", "defaultTopologyId": "topology.distribution.overview", "topologyIds": ["topology.distribution.overview"], "supportedActionIds": [], "sceneMappingVersion": "mapping.distribution.1", "resourceVersion": "resource.distribution.1", "switchStrategy": "unload-first" },
+    { "sceneId": "consumption", "title": "测试用能侧场景", "unitySceneKey": "scene.consumption", "defaultTopologyId": "topology.consumption.overview", "topologyIds": ["topology.consumption.overview"], "supportedActionIds": [], "sceneMappingVersion": "mapping.consumption.1", "resourceVersion": "resource.consumption.1", "switchStrategy": "unload-first" },
+    { "sceneId": "microgrid", "title": "测试微电网场景", "unitySceneKey": "scene.microgrid", "defaultTopologyId": "topology.microgrid.overview", "topologyIds": ["topology.microgrid.overview"], "supportedActionIds": [], "sceneMappingVersion": "mapping.microgrid.1", "resourceVersion": "resource.microgrid.1", "switchStrategy": "unload-first" },
+    { "sceneId": "dispatch", "title": "测试调度场景", "unitySceneKey": "scene.dispatch", "defaultTopologyId": "topology.dispatch.overview", "topologyIds": ["topology.dispatch.overview"], "supportedActionIds": [], "sceneMappingVersion": "mapping.dispatch.1", "resourceVersion": "resource.dispatch.1", "switchStrategy": "unload-first" }
+  ],
+  "topologies": [
+    { "topologyId": "topology.coal-power.overview", "sceneId": "coal-power", "title": "测试燃煤拓扑", "configVersion": "fixture-contract.1", "nodes": [], "edges": [] },
+    { "topologyId": "topology.gas-power.overview", "sceneId": "gas-power", "title": "测试燃气拓扑", "configVersion": "fixture-contract.1", "nodes": [], "edges": [] },
+    { "topologyId": "topology.wind-power.overview", "sceneId": "wind-power", "title": "测试风电拓扑", "configVersion": "fixture-contract.1", "nodes": [], "edges": [] },
+    { "topologyId": "topology.solar-power.overview", "sceneId": "solar-power", "title": "测试光伏拓扑", "configVersion": "fixture-contract.1", "nodes": [], "edges": [] },
+    { "topologyId": "topology.substation.overview", "sceneId": "substation", "title": "测试变电站拓扑", "configVersion": "fixture-contract.1", "nodes": [], "edges": [] },
+    { "topologyId": "topology.distribution.overview", "sceneId": "distribution", "title": "测试配电网拓扑", "configVersion": "fixture-contract.1", "nodes": [], "edges": [] },
+    { "topologyId": "topology.consumption.overview", "sceneId": "consumption", "title": "测试用能侧拓扑", "configVersion": "fixture-contract.1", "nodes": [], "edges": [] },
+    { "topologyId": "topology.microgrid.overview", "sceneId": "microgrid", "title": "测试微电网拓扑", "configVersion": "fixture-contract.1", "nodes": [], "edges": [] },
+    { "topologyId": "topology.dispatch.overview", "sceneId": "dispatch", "title": "测试调度拓扑", "configVersion": "fixture-contract.1", "nodes": [], "edges": [] }
+  ],
+  "actions": [],
+  "deviceMappings": [],
+  "unitySceneMappings": [
+    { "sceneId": "coal-power", "mappingVersion": "mapping.coal-power.1", "processSteps": [], "sceneNodeIds": [], "routeIds": [] },
+    { "sceneId": "gas-power", "mappingVersion": "mapping.gas-power.1", "processSteps": [], "sceneNodeIds": [], "routeIds": [] },
+    { "sceneId": "wind-power", "mappingVersion": "mapping.wind-power.1", "processSteps": [], "sceneNodeIds": [], "routeIds": [] },
+    { "sceneId": "solar-power", "mappingVersion": "mapping.solar-power.1", "processSteps": [], "sceneNodeIds": [], "routeIds": [] },
+    { "sceneId": "substation", "mappingVersion": "mapping.substation.1", "processSteps": [], "sceneNodeIds": [], "routeIds": [] },
+    { "sceneId": "distribution", "mappingVersion": "mapping.distribution.1", "processSteps": [], "sceneNodeIds": [], "routeIds": [] },
+    { "sceneId": "consumption", "mappingVersion": "mapping.consumption.1", "processSteps": [], "sceneNodeIds": [], "routeIds": [] },
+    { "sceneId": "microgrid", "mappingVersion": "mapping.microgrid.1", "processSteps": [], "sceneNodeIds": [], "routeIds": [] },
+    { "sceneId": "dispatch", "mappingVersion": "mapping.dispatch.1", "processSteps": [], "sceneNodeIds": [], "routeIds": [] }
+  ]
+}

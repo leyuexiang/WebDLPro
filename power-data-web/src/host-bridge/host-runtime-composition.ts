@@ -1,0 +1,278 @@
+import type { HostCommandExecutionResult, HostCommandLifecycleResult } from '@/host-bridge/host-command-lifecycle'
+import { HostCommandLifecycle } from '@/host-bridge/host-command-lifecycle'
+import { HostCommandDispatcher, type HostCommandCoordinatorPort, type HostDispatchableDomainCommand } from '@/host-bridge/host-command-dispatcher'
+import { HostEventSender } from '@/host-bridge/host-event-sender'
+import { HostHandshake, type HostInitializationResult } from '@/host-bridge/host-handshake'
+import { HOST_EVENT_TYPES, type HostCommandMessage, type HostCommandType, type HostDispatchableCommandType, type HostEventType, type HostProtocolError, type HostVisualizationContext, type SceneObjectSelectedPayload } from '@/host-bridge/host-protocol'
+import type { HostBridge } from '@/host-bridge/host-bridge'
+import type { VisualizationCoordinatorFacade } from '@/modules/visual/orchestration/visualization-coordinator-facade'
+import type { TopologyDeviceDoubleClickIntent } from '@/modules/visual/topology/topology-node-interaction'
+
+/**
+ * 原子打开视图端口仅接收任务-012已经收敛的领域命令。
+ * 它由任务-033的事务处理器实现，外层桥接组合根不接触拓扑画布、Unity iframe（内嵌网页框架）或状态仓库。
+ */
+export interface HostViewOpenPort {
+  submit(command: Extract<HostDispatchableDomainCommand, { type: 'view.open' }>): Promise<HostCommandExecutionResult>
+}
+
+/** 同场景流程动作端口与打开视图端口独立声明，未安装时不会向父页面暴露 `workflow.trigger` 能力。 */
+export interface HostWorkflowTriggerPort {
+  submit(command: Extract<HostDispatchableDomainCommand, { type: 'workflow.trigger' }>): Promise<HostCommandExecutionResult>
+}
+
+/** 设备状态端口只接收协议已验证的批量意图；实际二维、三维与诊断处理属于任务-038协调器。 */
+export interface HostDeviceStatesUpdatePort {
+  submit(command: Extract<HostDispatchableDomainCommand, { type: 'device.states.update' }>): Promise<HostCommandExecutionResult>
+  /** 组合根释放时清空有限状态诊断，不保留外层关联标识。 */
+  dispose(): void
+}
+
+/**
+ * 本版本真正对父页面声明的命令能力。
+ * 流程动作和设备状态只有在对应协调器实际注入时才声明；父页面无法借由协议直达未实现能力。
+ */
+const BASE_INSTALLED_COMMAND_CAPABILITIES: readonly HostDispatchableCommandType[] = Object.freeze([
+  'view.open',
+  'state.get',
+  'system.dispose',
+])
+
+/**
+ * 本版本真正安装的上行事件能力。
+ * `scene.object.selected`（三维对象选择）只由任务-037的受控映射方法发送；它先校验当前稳定上下文，
+ * 因而不会把 Unity 原始节点、层级路径或不稳定选择提前发布到父页面。
+ */
+const INSTALLED_EVENT_CAPABILITIES: readonly HostEventType[] = Object.freeze([...HOST_EVENT_TYPES])
+
+/**
+ * 外层桥、握手、命令生命周期、事件发送器和任务-033事务的唯一组合根。
+ * 它不拥有窗口监听器或 Unity 资源：前者仍由 HostBridge（外层桥）负责，后者仍由运行时宿主负责；
+ * 本类只维持有限的协议对象，并在释放时按握手、生命周期、桥接顺序清理全部引用。
+ */
+export class HostRuntimeComposition implements HostCommandCoordinatorPort {
+  private readonly eventSender: HostEventSender
+  private readonly dispatcher: HostCommandDispatcher
+  private readonly lifecycle: HostCommandLifecycle
+  private readonly handshake: HostHandshake
+  private disposed = false
+
+  public constructor(
+    private readonly bridge: HostBridge,
+    private readonly facade: VisualizationCoordinatorFacade,
+    private readonly viewOpen: HostViewOpenPort,
+    private readonly manifestVersion: string,
+    /**
+     * 由嵌入壳注入的内层资源释放端口。
+     * 它必须在连接器确认或本地兜底清理完成后才结算，组合根不会直接访问 iframe、Window 或 Unity 对象。
+     */
+    private readonly releaseInnerRuntime: () => Promise<{ success: boolean }> = async () => ({ success: true }),
+    /** 流程动作处理器仅在完整清单、运行时和同场景事务均已安装时注入，避免能力声明先于实现。 */
+    private readonly workflowTrigger?: HostWorkflowTriggerPort,
+    /** 批量状态协调器仅在唯一拓扑运行时与 Unity 状态端口均就绪时注入。 */
+    private readonly deviceStatesUpdate?: HostDeviceStatesUpdatePort,
+  ) {
+    this.eventSender = new HostEventSender(bridge)
+    this.dispatcher = new HostCommandDispatcher(facade, this, {
+      commandCapabilities: [
+        ...BASE_INSTALLED_COMMAND_CAPABILITIES,
+        ...(workflowTrigger ? ['workflow.trigger' as const] : []),
+        ...(deviceStatesUpdate ? ['device.states.update' as const] : []),
+      ],
+    })
+    this.lifecycle = new HostCommandLifecycle((command) => this.executeAfterHandshake(command))
+    this.handshake = new HostHandshake(bridge, {
+      manifestVersion,
+      // `system.init` 由握手层消费而非分派器消费，仍必须在 ready 能力中发布，父页面才能按协议启动会话。
+      commandCapabilities: ['system.init', ...this.dispatcher.getCommandCapabilities()] as readonly HostCommandType[],
+      eventCapabilities: INSTALLED_EVENT_CAPABILITIES,
+    }, {
+      onInitialize: (command) => this.initializeView(command),
+    })
+  }
+
+  /** 启动时先订阅安全桥接入口，再发送 ready（就绪）事件，避免极快的 system.init 丢失。 */
+  public start(): void {
+    if (this.disposed) return
+    this.bridge.start()
+    this.handshake.start()
+  }
+
+  /**
+   * 接收已经由 HostBridge 校验来源、父窗口、实例和会话的命令。
+   * 初始化命令由握手状态机专门处理；其余命令统一进入十秒超时、去重和 replyTo（回复关联）生命周期，
+   * 不允许 `system.init` 混入普通命令回包路径。
+   */
+  public async handleCommand(command: HostCommandMessage): Promise<void> {
+    if (this.disposed) return
+
+    if (command.type === 'system.init') {
+      const initialized = await this.handshake.handle(command)
+      if (initialized) this.reportCommittedView()
+      return
+    }
+
+    const result = await this.lifecycle.execute(command)
+    // system.dispose 的逻辑状态先由分派器置为 released，再等待内层单实例资源实际清理；
+    // 因此 command.result 不会在 iframe 仍存活时过早承诺“已释放”。
+    if (command.type === 'system.dispose' && result.payload.success && result.payload.status === 'disposed') {
+      await this.releaseInnerRuntime()
+    }
+    this.reportCommandSideEffects(command, result)
+    this.eventSender.sendCommandResult(result)
+
+    // `system.dispose` 的 command.result 必须先发出，否则过早释放桥接会丢失唯一确认；发送完成后再清理所有订阅与计时器。
+    if (command.type === 'system.dispose' && result.payload.success && result.payload.status === 'disposed') this.dispose()
+  }
+
+  /**
+   * 接收任务-027的正式设备双击意图。
+   * 仅在握手完成、稳定上下文就绪且场景/拓扑与当前提交值一致时上报，过期 Canvas（画布）回调、
+   * 等待态节点或切换中的目标节点均被静默拒绝，绝不依标题或坐标补全映射。
+   */
+  public reportTopologyDeviceDoubleClick(intent: TopologyDeviceDoubleClickIntent): boolean {
+    if (this.disposed || !this.handshake.isInitialized()) return false
+    const context = this.getReadyContext()
+    if (!context || context.sceneId !== intent.sceneId || context.topologyId !== intent.topologyId) return false
+    return this.eventSender.sendTopologyNodeDoubleClick(intent, context.contextRevision)
+  }
+
+  /**
+   * 接收任务-037已从当前原子清单解析出的三维反向选择。
+   * 方法再次核对握手、稳定场景、拓扑与上下文版本；即使壳层出现迟到回调，也不能将旧选择发给父页面。
+   */
+  public reportSceneObjectSelected(selection: SceneObjectSelectedPayload): boolean {
+    if (this.disposed || !this.handshake.isInitialized()) return false
+    const context = this.getReadyContext()
+    if (!context) return false
+    if (
+      selection.sceneId !== context.sceneId ||
+      selection.topologyId !== context.topologyId ||
+      selection.contextRevision !== context.contextRevision
+    ) return false
+    return this.eventSender.sendSceneObjectSelected(selection)
+  }
+
+  /**
+   * 仅由 HostCommandDispatcher 回调的领域命令端口。
+   * 当前安装 `view.open`、可选流程动作与可选批量状态协调器；未声明的状态命令在分派器能力门禁前已被拒绝，此处仍保留防御性失败，
+   * 防止未来组合错误绕过能力白名单。
+   */
+  public async submit(command: HostDispatchableDomainCommand): Promise<HostCommandExecutionResult> {
+    if (command.type === 'view.open') return this.viewOpen.submit(command)
+    if (command.type === 'workflow.trigger' && this.workflowTrigger) return this.workflowTrigger.submit(command)
+    if (command.type === 'device.states.update' && this.deviceStatesUpdate) return this.deviceStatesUpdate.submit(command)
+    return this.failure('protocol.capability.undeclared', 'validation', '当前发布版本未安装该外层业务命令能力。', true)
+  }
+
+  /** 释放有限协议对象并解除外层窗口监听；重复调用安全，业务协调器释放仍由调用方的统一生命周期负责。 */
+  public dispose(): void {
+    if (this.disposed) return
+    this.disposed = true
+    this.handshake.dispose()
+    this.lifecycle.dispose()
+    this.bridge.dispose()
+    this.deviceStatesUpdate?.dispose()
+  }
+
+  /**
+   * 只有握手完成后普通命令才可进入分派器。
+   * 早到命令仍经生命周期生成带 replyTo 的结构化失败，而不是无响应地丢弃或越过 system.init 直接修改运行时。
+   */
+  private async executeAfterHandshake(command: HostCommandMessage): Promise<HostCommandExecutionResult> {
+    if (!this.handshake.isInitialized()) {
+      return this.failure('action.execute.failed', 'validation', '外层会话尚未完成初始化，不能执行业务命令。', true)
+    }
+    return this.dispatcher.execute(command)
+  }
+
+  /** 将 system.init 的初始目标转换为与普通 view.open 完全相同的原子事务，避免产生第二套场景切换流程。 */
+  private async initializeView(command: Extract<HostCommandMessage, { type: 'system.init' }>): Promise<HostInitializationResult> {
+    const result = await this.viewOpen.submit({
+      type: 'view.open',
+      correlationId: command.messageId,
+      payload: {
+        sceneId: command.payload.sceneId,
+        topologyId: command.payload.topologyId,
+        ...(command.payload.actionId !== undefined ? { actionId: command.payload.actionId } : {}),
+      },
+    })
+
+    if (!result.success) {
+      return { success: false, error: result.error }
+    }
+
+    const context = this.getReadyContext()
+    return context
+      ? { success: true, context }
+      : { success: false, error: this.createError('topology.activate.failed', 'activating-topology', '初始化事务未产生可发布的稳定视图。', true) }
+  }
+
+  /** 成功命令只派生协议定义的两个附加事件；错误已由 command.result 安全表达，不重复外泄原始异常。 */
+  private reportCommandSideEffects(command: Exclude<HostCommandMessage, { type: 'system.init' }>, result: HostCommandLifecycleResult): void {
+    // 缓存回包与重复进行中消息只承担请求级确认，绝不再次发布全局视图/快照事件。
+    // 这样同一 messageId 的重试不会造成父页面收到重复 view.changed，也不会把状态查询变成无界事件源。
+    if (!result.payload.success || result.source !== 'executed') return
+
+    if (command.type === 'view.open' || command.type === 'workflow.trigger') {
+      this.reportCommittedView(result.payload.transitionId)
+      return
+    }
+
+    if (command.type === 'state.get') {
+      const context = this.getReadyContext()
+      if (!context) return
+      const snapshot = this.facade.getSnapshot()
+      this.eventSender.sendStateSnapshot(result.replyTo, {
+        manifestVersion: this.manifestVersion,
+        context,
+        // 协调器的 preparing（准备中）是事务内部阶段；外层协议将其统一命名为 initializing（初始化中）。
+        unityStatus: toHostUnityStatus(snapshot.unityStatus),
+        topologyStatus: snapshot.topologyStatus,
+      })
+    }
+  }
+
+  /** 读取只允许对外暴露的 ready 稳定上下文；进行中目标字段、诊断和选择均不进入视图事件。 */
+  private getReadyContext(): HostVisualizationContext | undefined {
+    const snapshot = this.facade.getSnapshot()
+    const stableContext = snapshot.stableContext
+    if (!stableContext || snapshot.runtimeStatus !== 'ready') return undefined
+
+    return { ...stableContext, status: 'ready' }
+  }
+
+  /** 只有事务已经提交后的稳定快照才触发 view.changed，严格避免半成品拓扑或场景对外可操作。 */
+  private reportCommittedView(transitionId?: HostCommandLifecycleResult['payload']['transitionId']): void {
+    const context = this.getReadyContext()
+    if (context) this.eventSender.sendViewChanged(context, transitionId)
+  }
+
+  /** 统一创建协议许可的有限错误，任何捕获异常均不在此层读取、拼接或传出。 */
+  private failure(
+    code: HostProtocolError['code'],
+    stage: HostProtocolError['stage'],
+    message: string,
+    recoverable: boolean,
+  ): HostCommandExecutionResult {
+    return { success: false, status: 'failed', error: this.createError(code, stage, message, recoverable) }
+  }
+
+  /** 错误构造集中在组合根，保证握手和普通命令的脱敏语义相同。 */
+  private createError(
+    code: HostProtocolError['code'],
+    stage: HostProtocolError['stage'],
+    message: string,
+    recoverable: boolean,
+  ): HostProtocolError {
+    return { code, stage, message, recoverable }
+  }
+}
+
+/**
+ * 将协调器 Unity 子状态映射到外层快照的有限枚举。
+ * 仅 `preparing` 需要术语转换；其余值均为双方共同允许的稳定状态，不能把切换细节或 Unity 原始阶段透出。
+ */
+function toHostUnityStatus(status: 'idle' | 'preparing' | 'ready' | 'failed' | 'disposed'): 'idle' | 'initializing' | 'ready' | 'failed' | 'disposed' {
+  return status === 'preparing' ? 'initializing' : status
+}

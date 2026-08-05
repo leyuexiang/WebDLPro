@@ -22,8 +22,12 @@ export type ConfigVersion = string
 /** 页面期望模式与最终生效模式分离，校验失败时只能向更安全的非三维模式降级。 */
 export type ProcessRuntimeMode = 'webgl' | 'static-preview' | 'empty'
 
-/** 拓扑连线证据状态，未确认关系可展示为二维概念关系，但绝不驱动三维流动效果。 */
-export type TopologyEvidenceStatus = 'verified' | 'pending-confirmation' | 'conceptual'
+/**
+ * 拓扑连线证据状态。
+ * `unclassified`（未分类）专供新原子清单投影到旧画布时使用：新清单尚未提供连线证据字段，
+ * 因而不能把它误标为“已确认”“待确认”或“概念连接”，更不能由此驱动三维流动效果。
+ */
+export type TopologyEvidenceStatus = 'verified' | 'pending-confirmation' | 'conceptual' | 'unclassified'
 
 /** 设备运行状态与用户选中状态分离；缺少、非法或超时状态必须归一为离线。 */
 export type TopologyDeviceStatus = 'normal' | 'alarm' | 'fault' | 'offline'
@@ -46,6 +50,8 @@ export type TopologyIconKey =
   | 'sis-system'
   | 'instrument'
   | 'circuit-breaker'
+  /** 未登记图元键的中性占位；画布只绘制轮廓，不按名称猜测设备类别或加载动态资源。 */
+  | 'generic'
 
 /** 分层背景只表达网络边界与显示顺序，不参与节点、三维对象或权限的稳定关联。 */
 export interface TopologyLayerDefinition {
@@ -128,9 +134,13 @@ export interface TopologyEdgeDefinition {
   sceneRouteIds: readonly RouteId[]
 }
 
-/** 拓扑定义与页面严格同版本发布，图形适配器只消费这份纯数据模型。 */
+/**
+ * 拓扑定义与页面严格同版本发布，图形适配器只消费这份纯数据模型。
+ * title（标题）属于拓扑配置而非组件常量，使九个场景和同场景多图能够复用同一个面板。
+ */
 export interface TopologyDefinition {
   topologyKey: TopologyKey
+  title: string
   configVersion: ConfigVersion
   layers?: readonly TopologyLayerDefinition[]
   nodes: readonly TopologyNodeDefinition[]

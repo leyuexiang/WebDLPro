@@ -1,0 +1,393 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text;
+using UnityEditor;
+using UnityEditor.Build;
+using UnityEngine;
+using WebDLPro.Unity.SceneRuntime;
+
+/// <summary>
+/// 构建九个业务场景的 WebGL 资产包，并生成可由运行时校验的场景目录与内容摘要。
+/// 该脚本不根据模型或文件名称推测业务归属，只读取已校验的 BusinessSceneCatalog；
+/// 业务场景各自成为独立包，两个及以上场景共同依赖的可打包资产只进入一个共享包。
+/// </summary>
+public static class PowerPlantSceneBundleBuild
+{
+    public const string BundleDirectoryName = "SceneBundles";
+    public const string CatalogFileName = "scene-catalog.json";
+    public const string ContentSummaryFileName = "scene-content-summary.json";
+    private const string CatalogAssetPath = "Assets/Configuration/BusinessSceneCatalog.asset";
+    private const string SharedBundleName = "scene-shared";
+
+    /// <summary>
+    /// 为指定发布目录创建不可依赖编辑器状态的场景资源产物。
+    /// releaseId 是发布与回滚边界的一部分，必须由调用方显式传入并通过受限字符校验；
+    /// 输出目录可存在但只会覆盖本次构建所管理的 SceneBundles 文件，正式发布目录的不可覆盖策略由上层构建入口负责。
+    /// </summary>
+    public static void BuildSceneBundles(string unityOutputPath, string releaseId)
+    {
+        if (string.IsNullOrWhiteSpace(unityOutputPath))
+        {
+            throw new BuildFailedException("场景资源构建缺少 Unity 发布目录。");
+        }
+        if (!IsSafeReleaseId(releaseId))
+        {
+            throw new BuildFailedException("发布标识只能包含字母、数字、点、下划线和连字符。");
+        }
+
+        BusinessSceneCatalog catalog = AssetDatabase.LoadAssetAtPath<BusinessSceneCatalog>(CatalogAssetPath);
+        if (catalog == null)
+        {
+            throw new BuildFailedException("未找到正式九场景目录资产，不能构建场景资源包。");
+        }
+        IReadOnlyList<BusinessSceneCatalogValidationIssue> issues = catalog.ValidateForRuntime();
+        if (issues.Count > 0)
+        {
+            throw new BuildFailedException($"正式九场景目录校验失败：{issues[0].Code}。");
+        }
+
+        List<SceneBuildInput> inputs = CreateBuildInputs(catalog);
+        string bundleOutputDirectory = Path.Combine(unityOutputPath, BundleDirectoryName);
+        Directory.CreateDirectory(bundleOutputDirectory);
+
+        Dictionary<string, HashSet<string>> sceneIdsByDependencyPath = CollectSceneDependencyUsage(inputs);
+        List<string> sharedDependencyPaths = sceneIdsByDependencyPath
+            .Where(pair => pair.Value.Count > 1 && IsBundleEligibleAsset(pair.Key))
+            .Select(pair => pair.Key)
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .ToList();
+
+        List<AssetBundleBuild> builds = CreateBundleBuilds(inputs, sharedDependencyPaths);
+        AssetBundleManifest manifest = BuildPipeline.BuildAssetBundles(
+            bundleOutputDirectory,
+            builds.ToArray(),
+            BuildAssetBundleOptions.ChunkBasedCompression | BuildAssetBundleOptions.DeterministicAssetBundle,
+            BuildTarget.WebGL);
+        if (manifest == null)
+        {
+            throw new BuildFailedException("Unity 未返回场景资产包构建清单。");
+        }
+
+        SceneBundleCatalogDocument catalogDocument = CreateCatalogDocument(releaseId, inputs, manifest, bundleOutputDirectory);
+        SceneContentSummaryDocument contentSummary = CreateContentSummaryDocument(releaseId, inputs, sceneIdsByDependencyPath, sharedDependencyPaths);
+        WriteJson(Path.Combine(bundleOutputDirectory, CatalogFileName), catalogDocument);
+        WriteJson(Path.Combine(bundleOutputDirectory, ContentSummaryFileName), contentSummary);
+        ValidateBuildOutput(catalogDocument, bundleOutputDirectory);
+    }
+
+    /// <summary>
+    /// 返回 Unity 主播放器构建所需的资产包清单文本路径。主播放器必须在代码裁剪前读取该文件，
+    /// 否则只出现在业务场景包中的控制器类型可能被错误移除，导致已下载场景无法初始化。
+    /// </summary>
+    public static string GetAssetBundleManifestPath(string unityOutputPath)
+    {
+        return Path.Combine(unityOutputPath, BundleDirectoryName, $"{BundleDirectoryName}.manifest");
+    }
+
+    /// <summary>
+    /// 根据正式目录建立构建输入，逐项确认每个路径确实是 SceneAsset。
+    /// 这一步阻止“目录存在但文件被移动或改成其他资产”的发布，不会扫描 Assets/Art 来猜测所属场景。
+    /// </summary>
+    private static List<SceneBuildInput> CreateBuildInputs(BusinessSceneCatalog catalog)
+    {
+        List<SceneBuildInput> inputs = new List<SceneBuildInput>(catalog.Entries.Count);
+        for (int index = 0; index < catalog.Entries.Count; index++)
+        {
+            BusinessSceneCatalogEntry entry = catalog.Entries[index];
+            if (entry == null || AssetDatabase.LoadAssetAtPath<SceneAsset>(entry.ScenePath) == null)
+            {
+                throw new BuildFailedException("正式目录中的业务场景文件不存在或类型错误。");
+            }
+            inputs.Add(new SceneBuildInput(entry.SceneId, entry.UnitySceneKey, entry.ScenePath, CreateSceneBundleName(entry.SceneId)));
+        }
+
+        if (inputs.Count != BusinessSceneCatalog.GetRequiredSceneIds().Count)
+        {
+            throw new BuildFailedException("场景资源构建必须且只能接收九个业务场景。");
+        }
+        return inputs;
+    }
+
+    /// <summary>
+    /// 读取 Unity 的递归依赖关系并只保留可实际写入资产包的 Assets 路径。
+    /// C# 脚本由播放器编译结果提供，目录和内置资源也不应被塞入业务包，避免无效条目或重复打包。
+    /// </summary>
+    private static Dictionary<string, HashSet<string>> CollectSceneDependencyUsage(IReadOnlyList<SceneBuildInput> inputs)
+    {
+        Dictionary<string, HashSet<string>> sceneIdsByDependencyPath = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        for (int index = 0; index < inputs.Count; index++)
+        {
+            SceneBuildInput input = inputs[index];
+            string[] dependencies = AssetDatabase.GetDependencies(input.ScenePath, true);
+            for (int dependencyIndex = 0; dependencyIndex < dependencies.Length; dependencyIndex++)
+            {
+                string dependencyPath = dependencies[dependencyIndex];
+                if (string.Equals(dependencyPath, input.ScenePath, StringComparison.Ordinal) || !IsBundleEligibleAsset(dependencyPath))
+                {
+                    continue;
+                }
+                if (!sceneIdsByDependencyPath.TryGetValue(dependencyPath, out HashSet<string> sceneIds))
+                {
+                    sceneIds = new HashSet<string>(StringComparer.Ordinal);
+                    sceneIdsByDependencyPath.Add(dependencyPath, sceneIds);
+                }
+                sceneIds.Add(input.SceneId);
+            }
+        }
+        return sceneIdsByDependencyPath;
+    }
+
+    /// <summary>
+    /// 显式声明共享包和九个场景包。非共享依赖由 Unity 随所属场景包收集；
+    /// 共享依赖被单独声明后，Unity 清单会把它们列为各场景包的依赖，避免同一资源复制九份。
+    /// </summary>
+    private static List<AssetBundleBuild> CreateBundleBuilds(IReadOnlyList<SceneBuildInput> inputs, List<string> sharedDependencyPaths)
+    {
+        List<AssetBundleBuild> builds = new List<AssetBundleBuild>(inputs.Count + 1);
+        if (sharedDependencyPaths.Count > 0)
+        {
+            builds.Add(new AssetBundleBuild
+            {
+                assetBundleName = SharedBundleName,
+                assetNames = sharedDependencyPaths.ToArray()
+            });
+        }
+
+        for (int index = 0; index < inputs.Count; index++)
+        {
+            SceneBuildInput input = inputs[index];
+            builds.Add(new AssetBundleBuild
+            {
+                assetBundleName = input.BundleName,
+                assetNames = new[] { input.ScenePath }
+            });
+        }
+        return builds;
+    }
+
+    /// <summary>
+    /// 将 Unity 生成的哈希、校验和依赖图转成运行时受限目录。
+    /// 目录不写入绝对路径、异常文本或构建机器信息，只保留发布标识、稳定场景标识和资源校验所需字段。
+    /// </summary>
+    private static SceneBundleCatalogDocument CreateCatalogDocument(
+        string releaseId,
+        IReadOnlyList<SceneBuildInput> inputs,
+        AssetBundleManifest manifest,
+        string bundleOutputDirectory)
+    {
+        string[] bundleNames = manifest.GetAllAssetBundles().OrderBy(name => name, StringComparer.Ordinal).ToArray();
+        List<SceneBundleDocument> bundles = new List<SceneBundleDocument>(bundleNames.Length);
+        for (int index = 0; index < bundleNames.Length; index++)
+        {
+            string bundleName = bundleNames[index];
+            string bundlePath = Path.Combine(bundleOutputDirectory, bundleName);
+            if (!File.Exists(bundlePath) || !BuildPipeline.GetCRCForAssetBundle(bundlePath, out uint crc))
+            {
+                throw new BuildFailedException($"无法读取场景资源包校验信息：{bundleName}。");
+            }
+            bundles.Add(new SceneBundleDocument
+            {
+                bundleName = bundleName,
+                fileName = bundleName,
+                hash = manifest.GetAssetBundleHash(bundleName).ToString(),
+                crc = crc,
+                dependencies = manifest.GetAllDependencies(bundleName).OrderBy(name => name, StringComparer.Ordinal).ToArray()
+            });
+        }
+
+        List<SceneBundleSceneDocument> scenes = new List<SceneBundleSceneDocument>(inputs.Count);
+        for (int index = 0; index < inputs.Count; index++)
+        {
+            SceneBuildInput input = inputs[index];
+            scenes.Add(new SceneBundleSceneDocument
+            {
+                sceneId = input.SceneId,
+                unitySceneKey = input.UnitySceneKey,
+                scenePath = input.ScenePath,
+                bundleName = input.BundleName
+            });
+        }
+
+        return new SceneBundleCatalogDocument
+        {
+            schemaVersion = 1,
+            releaseId = releaseId,
+            bundles = bundles.ToArray(),
+            scenes = scenes.ToArray()
+        };
+    }
+
+    /// <summary>
+    /// 内容摘要用于发布评审、独立校验和回滚追溯。它列出 Unity 实际解析到的依赖路径，
+    /// 并把共享依赖单列，方便确认新增场景不会意外复制已有公共材质、着色器或图集。
+    /// </summary>
+    private static SceneContentSummaryDocument CreateContentSummaryDocument(
+        string releaseId,
+        IReadOnlyList<SceneBuildInput> inputs,
+        Dictionary<string, HashSet<string>> sceneIdsByDependencyPath,
+        List<string> sharedDependencyPaths)
+    {
+        HashSet<string> sharedSet = new HashSet<string>(sharedDependencyPaths, StringComparer.Ordinal);
+        List<SceneContentSummaryEntry> scenes = new List<SceneContentSummaryEntry>(inputs.Count);
+        for (int index = 0; index < inputs.Count; index++)
+        {
+            SceneBuildInput input = inputs[index];
+            string[] dependencies = AssetDatabase.GetDependencies(input.ScenePath, true)
+                .Where(path => !string.Equals(path, input.ScenePath, StringComparison.Ordinal) && IsBundleEligibleAsset(path))
+                .OrderBy(path => path, StringComparer.Ordinal)
+                .ToArray();
+            scenes.Add(new SceneContentSummaryEntry
+            {
+                sceneId = input.SceneId,
+                bundleName = input.BundleName,
+                scenePath = input.ScenePath,
+                exclusiveDependencyPaths = dependencies.Where(path => !sharedSet.Contains(path)).ToArray(),
+                sharedDependencyPaths = dependencies.Where(sharedSet.Contains).ToArray()
+            });
+        }
+
+        return new SceneContentSummaryDocument
+        {
+            schemaVersion = 1,
+            releaseId = releaseId,
+            sharedDependencyPaths = sharedDependencyPaths.ToArray(),
+            scenes = scenes.ToArray()
+        };
+    }
+
+    /// <summary>
+    /// 构建结束后只检查本任务可证明的发布结构：九个场景均有独立包，目录中的哈希与文件齐全，
+    /// 每个场景包依赖项均能在目录中解析。实际浏览器下载和缓存命中由任务-051的 WebGL 构建回归覆盖。
+    /// </summary>
+    private static void ValidateBuildOutput(SceneBundleCatalogDocument catalog, string bundleOutputDirectory)
+    {
+        if (catalog.scenes == null || catalog.scenes.Length != BusinessSceneCatalog.GetRequiredSceneIds().Count)
+        {
+            throw new BuildFailedException("场景资源目录未包含完整九场景。");
+        }
+        HashSet<string> bundleNames = new HashSet<string>(catalog.bundles.Select(bundle => bundle.bundleName), StringComparer.Ordinal);
+        for (int index = 0; index < catalog.scenes.Length; index++)
+        {
+            SceneBundleSceneDocument scene = catalog.scenes[index];
+            if (!bundleNames.Contains(scene.bundleName) || !File.Exists(Path.Combine(bundleOutputDirectory, scene.bundleName)))
+            {
+                throw new BuildFailedException("场景资源目录存在缺失的独立场景包。");
+            }
+        }
+        for (int index = 0; index < catalog.bundles.Length; index++)
+        {
+            SceneBundleDocument bundle = catalog.bundles[index];
+            string[] dependencies = bundle.dependencies ?? Array.Empty<string>();
+            for (int dependencyIndex = 0; dependencyIndex < dependencies.Length; dependencyIndex++)
+            {
+                if (!bundleNames.Contains(dependencies[dependencyIndex]))
+                {
+                    throw new BuildFailedException("场景资源目录存在无法解析的共享依赖。");
+                }
+            }
+        }
+    }
+
+    private static bool IsBundleEligibleAsset(string assetPath)
+    {
+        if (string.IsNullOrWhiteSpace(assetPath) || !assetPath.StartsWith("Assets/", StringComparison.Ordinal))
+        {
+            return false;
+        }
+        UnityEngine.Object asset = AssetDatabase.LoadMainAssetAtPath(assetPath);
+        return asset != null && !(asset is MonoScript) && !(asset is SceneAsset) && !(asset is DefaultAsset);
+    }
+
+    private static string CreateSceneBundleName(string sceneId)
+    {
+        return $"scene-{sceneId}";
+    }
+
+    private static bool IsSafeReleaseId(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 64)
+        {
+            return false;
+        }
+        for (int index = 0; index < value.Length; index++)
+        {
+            char character = value[index];
+            if (!char.IsLetterOrDigit(character) && character != '.' && character != '_' && character != '-')
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static void WriteJson(string path, object value)
+    {
+        // UTF-8 无 BOM 保证 WebGL 静态服务器与浏览器可以直接按 JSON 读取，避免额外编码分支。
+        File.WriteAllText(path, JsonUtility.ToJson(value, true), new UTF8Encoding(false));
+    }
+
+    private sealed class SceneBuildInput
+    {
+        public string SceneId { get; }
+        public string UnitySceneKey { get; }
+        public string ScenePath { get; }
+        public string BundleName { get; }
+
+        public SceneBuildInput(string sceneId, string unitySceneKey, string scenePath, string bundleName)
+        {
+            SceneId = sceneId;
+            UnitySceneKey = unitySceneKey;
+            ScenePath = scenePath;
+            BundleName = bundleName;
+        }
+    }
+
+    [Serializable]
+    private sealed class SceneBundleCatalogDocument
+    {
+        public int schemaVersion;
+        public string releaseId;
+        public SceneBundleDocument[] bundles;
+        public SceneBundleSceneDocument[] scenes;
+    }
+
+    [Serializable]
+    private sealed class SceneBundleDocument
+    {
+        public string bundleName;
+        public string fileName;
+        public string hash;
+        public uint crc;
+        public string[] dependencies;
+    }
+
+    [Serializable]
+    private sealed class SceneBundleSceneDocument
+    {
+        public string sceneId;
+        public string unitySceneKey;
+        public string scenePath;
+        public string bundleName;
+    }
+
+    [Serializable]
+    private sealed class SceneContentSummaryDocument
+    {
+        public int schemaVersion;
+        public string releaseId;
+        public string[] sharedDependencyPaths;
+        public SceneContentSummaryEntry[] scenes;
+    }
+
+    [Serializable]
+    private sealed class SceneContentSummaryEntry
+    {
+        public string sceneId;
+        public string bundleName;
+        public string scenePath;
+        public string[] exclusiveDependencyPaths;
+        public string[] sharedDependencyPaths;
+    }
+}

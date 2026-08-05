@@ -31,38 +31,6 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         }
     }
 
-    [Serializable]
-    private sealed class FlowRouteBinding
-    {
-        [SerializeField] private string _id;
-        [SerializeField] private Renderer[] _renderers;
-        [SerializeField] private Material _flowMaterialTemplate;
-        [SerializeField] private float _speedMultiplier = 1f;
-        [SerializeField] private Vector3 _flowDirectionOS = Vector3.right;
-
-        public string Id => _id;
-        public Renderer[] Renderers => _renderers;
-        public Material FlowMaterialTemplate => _flowMaterialTemplate;
-        public float SpeedMultiplier => _speedMultiplier;
-        public Vector3 FlowDirectionOS => _flowDirectionOS.sqrMagnitude > 0.0001f ? _flowDirectionOS.normalized : Vector3.right;
-
-        public FlowRouteBinding(string id, Renderer[] renderers, Material flowMaterialTemplate, float speedMultiplier, Vector3 flowDirectionOS)
-        {
-            _id = id;
-            _renderers = renderers;
-            _flowMaterialTemplate = flowMaterialTemplate;
-            _speedMultiplier = speedMultiplier;
-            _flowDirectionOS = flowDirectionOS.sqrMagnitude > 0.0001f ? flowDirectionOS.normalized : Vector3.right;
-        }
-    }
-
-    private sealed class ActiveFlowMaterials
-    {
-        public Renderer Renderer;
-        public Material[] OriginalMaterials;
-        public Material[] RuntimeMaterials;
-    }
-
     private sealed class ActiveContextFadeMaterials
     {
         public Material[] OriginalMaterials;
@@ -72,10 +40,10 @@ public sealed class PowerPlantProcessController : MonoBehaviour
     [Header("场景引用")]
     [SerializeField] private Transform _sceneRoot;
     [SerializeField] private Camera _interactionCamera;
-    [SerializeField] private Material _gasFlowMaterial;
     [SerializeField] private Material _contextFadeMaterial;
     [SerializeField, Range(0.05f, 0.95f)] private float _contextOpacity = 0.22f;
     [SerializeField] private GameObject[] _groundObjects = Array.Empty<GameObject>();
+    [SerializeField] private GameObject[] _persistentFlowObjects = Array.Empty<GameObject>();
 
     [Header("运行时相机")]
     [SerializeField, Min(0.15f)] private float _cameraTransitionDuration = 1.45f;
@@ -84,15 +52,51 @@ public sealed class PowerPlantProcessController : MonoBehaviour
 
     [Header("由场景配置工具写入")]
     [SerializeField] private SceneNodeBinding[] _nodes = Array.Empty<SceneNodeBinding>();
-    [SerializeField] private FlowRouteBinding[] _routes = Array.Empty<FlowRouteBinding>();
+
+    public void ConfigureForCurrentSampleScene(
+        Transform sceneRoot,
+        Camera interactionCamera,
+        Material contextFadeMaterial,
+        GameObject[] groundObjects,
+        GameObject[] persistentFlowObjects,
+        GameObject[] overview,
+        GameObject[] hrsgSystem,
+        GameObject inletDuct,
+        GameObject gasTurbine,
+        GameObject hrsg,
+        GameObject steamTurbine,
+        GameObject generator,
+        GameObject gridOutput)
+    {
+        _sceneRoot = sceneRoot;
+        _interactionCamera = interactionCamera;
+        _contextFadeMaterial = contextFadeMaterial;
+        _groundObjects = groundObjects;
+        _persistentFlowObjects = persistentFlowObjects;
+        _nodes = new[]
+        {
+            CreateNode("plant.overview", overview),
+            CreateNode("unit.ccgt.1.gas-train", hrsgSystem),
+            CreateNode("unit.ccgt.2.gas-train", hrsgSystem),
+            CreateNode("node.hrsg.1", hrsgSystem),
+            CreateNode("node.hrsg.2", hrsgSystem),
+            CreateNode("inlet-duct", new[] { inletDuct }),
+            CreateNode("gas-turbine", new[] { gasTurbine }),
+            CreateNode("hrsg", new[] { hrsg }),
+            CreateNode("steam-turbine", new[] { steamTurbine }),
+            CreateNode("generator", new[] { generator }),
+            CreateNode("grid-output", new[] { gridOutput })
+        };
+
+        CacheSceneBindings();
+    }
 
     private readonly Dictionary<string, SceneNodeBinding> _nodesById = new Dictionary<string, SceneNodeBinding>(StringComparer.Ordinal);
-    private readonly Dictionary<string, FlowRouteBinding> _routesById = new Dictionary<string, FlowRouteBinding>(StringComparer.Ordinal);
     private readonly Dictionary<GameObject, bool> _initialRootActiveStates = new Dictionary<GameObject, bool>();
     private readonly Dictionary<GameObject, string> _selectionNodeByObject = new Dictionary<GameObject, string>();
-    private readonly Dictionary<string, List<ActiveFlowMaterials>> _activeFlowsByRoute = new Dictionary<string, List<ActiveFlowMaterials>>(StringComparer.Ordinal);
     private readonly Dictionary<Renderer, ActiveContextFadeMaterials> _activeContextFades = new Dictionary<Renderer, ActiveContextFadeMaterials>();
     private readonly HashSet<GameObject> _groundObjectSet = new HashSet<GameObject>();
+    private readonly HashSet<GameObject> _persistentFlowObjectSet = new HashSet<GameObject>();
     private readonly HashSet<Renderer> _highlightRendererSet = new HashSet<Renderer>();
 
     private HighlightEffect _processHighlightEffect;
@@ -130,67 +134,11 @@ public sealed class PowerPlantProcessController : MonoBehaviour
     {
         ClearProcessHighlight();
         ClearAlarmHighlight();
-        StopAllFlows();
         RestoreAllContextFades();
     }
 
     /// <summary>
-    /// 由编辑器配置命令写入与当前 SampleScene 对应的稳定绑定。运行时不依赖模型显示名称。
-    /// </summary>
-    public void ConfigureForCurrentSampleScene(Transform sceneRoot, Camera interactionCamera, Material gasFlowMaterial, Material contextFadeMaterial)
-    {
-        _sceneRoot = sceneRoot;
-        _interactionCamera = interactionCamera;
-        _gasFlowMaterial = gasFlowMaterial;
-        _contextFadeMaterial = contextFadeMaterial;
-        _groundObjects = FindObjects(sceneRoot, "地面1", "地面2");
-
-        GameObject[] overview = GetDirectChildren(sceneRoot);
-
-        _nodes = new[]
-        {
-            CreateNode("plant.overview", overview),
-            CreateNode("unit.ccgt.1.gas-train", FindObjects(sceneRoot,
-                "进气室1", "进气室1外壳", "进气室支架2", "燃气轮机1", "燃机发电机1", "余热锅炉1", "管道5", "管道6", "启动马达1", "启动马达1外壳", "控制站1")),
-            CreateNode("unit.ccgt.1.steam-train", FindObjects(sceneRoot,
-                "汽轮机1", "汽轮发电机1", "冷凝器1", "管道1", "管道2")),
-            CreateNode("unit.ccgt.2.gas-train", FindObjects(sceneRoot,
-                "进气室2", "进气室2外壳", "进气室支架1", "燃气轮机2", "燃机发电机2", "余热锅炉2", "管道7", "管道9", "启动马达2", "启动马达外壳2", "控制站2")),
-            CreateNode("unit.ccgt.2.steam-train", FindObjects(sceneRoot,
-                "汽轮机2", "汽轮发电机2", "冷凝器2", "管道3", "管道4")),
-            CreateNode("utility.grid", FindObjects(sceneRoot,
-                "升压站", "电网打组", "电网电线", "配电变电站", "开关站+降压站", "降压变电站")),
-
-            CreateNode("node.inlet.1", FindObjects(sceneRoot, "进气室1", "进气室1外壳", "进气室支架2", "管道5")),
-            CreateNode("node.gas-turbine.1", FindObjects(sceneRoot, "燃气轮机1")),
-            CreateNode("node.gas-generator.1", FindObjects(sceneRoot, "燃机发电机1", "启动马达1", "启动马达1外壳")),
-            CreateNode("node.hrsg.1", FindObjects(sceneRoot, "余热锅炉1", "管道6")),
-            CreateNode("node.steam-turbine.1", FindObjects(sceneRoot, "汽轮机1")),
-            CreateNode("node.steam-generator.1", FindObjects(sceneRoot, "汽轮发电机1", "管道1")),
-            CreateNode("node.condenser.1", FindObjects(sceneRoot, "冷凝器1", "管道2")),
-
-            CreateNode("node.inlet.2", FindObjects(sceneRoot, "进气室2", "进气室2外壳", "进气室支架1", "管道7")),
-            CreateNode("node.gas-turbine.2", FindObjects(sceneRoot, "燃气轮机2")),
-            CreateNode("node.gas-generator.2", FindObjects(sceneRoot, "燃机发电机2", "启动马达2", "启动马达外壳2")),
-            CreateNode("node.hrsg.2", FindObjects(sceneRoot, "余热锅炉2", "管道9")),
-            CreateNode("node.steam-turbine.2", FindObjects(sceneRoot, "汽轮机2")),
-            CreateNode("node.steam-generator.2", FindObjects(sceneRoot, "汽轮发电机2", "管道3")),
-            CreateNode("node.condenser.2", FindObjects(sceneRoot, "冷凝器2", "管道4")),
-            CreateNode("node.grid", FindObjects(sceneRoot,
-                "升压站", "电网打组", "电网电线", "配电变电站", "开关站+降压站", "降压变电站"))
-        };
-
-        _routes = new[]
-        {
-            CreateRoute("route.exhaust-to-hrsg.1", FindRenderers(sceneRoot, "管道6"), gasFlowMaterial, 1f, Vector3.right),
-            CreateRoute("route.exhaust-to-hrsg.2", FindRenderers(sceneRoot, "管道9"), gasFlowMaterial, 1f, Vector3.right)
-        };
-
-        CacheSceneBindings();
-    }
-
-    /// <summary>
-    /// 进入一个已配置流程步骤。成功时所有显隐与流动路由会以当前状态整体替换，不会叠加上一步效果。
+    /// 进入已配置流程步骤并更新场景显示与镜头；管道流动由场景静态材质持续播放，不参与步骤切换。
     /// </summary>
     public bool TryEnterProcessStep(string processId, string stepId, string unitId, bool isolate, out string message)
     {
@@ -206,14 +154,13 @@ public sealed class PowerPlantProcessController : MonoBehaviour
             return false;
         }
 
-        if (!TryResolveStep(stepId, normalizedUnitId, out List<string> visibleNodeIds, out string focusNodeId, out List<string> routeIds))
+        if (!TryResolveStep(stepId, normalizedUnitId, out List<string> visibleNodeIds, out string focusNodeId))
         {
             message = $"不支持或尚未配置的流程步骤：{stepId}";
             return false;
         }
 
         ClearProcessHighlight();
-        StopAllFlows();
         if (isolate)
         {
             SetIsolatedVisibility(visibleNodeIds);
@@ -223,15 +170,7 @@ public sealed class PowerPlantProcessController : MonoBehaviour
             RestoreInitialVisibility();
         }
 
-        for (int index = 0; index < routeIds.Count; index++)
-        {
-            if (!TrySetRouteFlow(routeIds[index], true, 1f, out string routeMessage))
-            {
-                Debug.LogWarning($"[{nameof(PowerPlantProcessController)}] {routeMessage}", this);
-            }
-        }
-
-        UpdateProcessHighlight(stepId, normalizedUnitId, routeIds);
+        ClearProcessHighlight();
 
         FocusProcessTargets(focusNodeId, visibleNodeIds, normalizedUnitId);
         _currentProcessId = processId;
@@ -245,7 +184,6 @@ public sealed class PowerPlantProcessController : MonoBehaviour
     {
         ClearProcessHighlight();
         ClearAlarmHighlight();
-        StopAllFlows();
         RestoreInitialVisibility();
         FocusNode("plant.overview");
         _currentProcessId = GasPowerGenerationProcessId;
@@ -263,13 +201,15 @@ public sealed class PowerPlantProcessController : MonoBehaviour
             return false;
         }
 
+        ClearProcessHighlight();
         if (isolate)
         {
-            ClearProcessHighlight();
-            StopAllFlows();
             SetIsolatedVisibility(new List<string> { nodeId });
         }
 
+        _highlightRendererSet.Clear();
+        CollectNodeRenderers(nodeId, _highlightRendererSet);
+        ApplyHighlight(_processHighlightEffect, _highlightRendererSet);
         FocusNode(nodeId);
         message = $"已聚焦节点：{nodeId}";
         return true;
@@ -344,80 +284,6 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         return _highlightRendererSet.Count > 0;
     }
 
-    public bool TrySetRouteFlow(string routeId, bool enabled, float speedMultiplier, out string message)
-    {
-        if (!_routesById.TryGetValue(routeId, out FlowRouteBinding route))
-        {
-            message = $"未知或尚未配置的流动路由：{routeId}";
-            return false;
-        }
-
-        StopRouteFlow(routeId);
-        if (!enabled)
-        {
-            message = $"已停止路由：{routeId}";
-            return true;
-        }
-
-        if (route.FlowMaterialTemplate == null)
-        {
-            message = $"路由未配置流动材质：{routeId}";
-            return false;
-        }
-
-        List<ActiveFlowMaterials> activeMaterials = new List<ActiveFlowMaterials>();
-        Renderer[] renderers = route.Renderers;
-        for (int rendererIndex = 0; rendererIndex < renderers.Length; rendererIndex++)
-        {
-            Renderer renderer = renderers[rendererIndex];
-            if (renderer == null)
-            {
-                continue;
-            }
-
-            RestoreContextFade(renderer);
-            Material[] originalMaterials = renderer.sharedMaterials;
-            Material[] runtimeMaterials = new Material[originalMaterials.Length];
-            for (int materialIndex = 0; materialIndex < originalMaterials.Length; materialIndex++)
-            {
-                if (originalMaterials[materialIndex] == null)
-                {
-                    continue;
-                }
-
-                Material runtimeMaterial = new Material(route.FlowMaterialTemplate)
-                {
-                    name = $"{route.FlowMaterialTemplate.name} (Runtime {routeId})"
-                };
-                CopyOriginalAppearance(originalMaterials[materialIndex], runtimeMaterial);
-                if (runtimeMaterial.HasProperty("_FlowSpeed"))
-                {
-                    runtimeMaterial.SetFloat("_FlowSpeed", runtimeMaterial.GetFloat("_FlowSpeed") * route.SpeedMultiplier * speedMultiplier);
-                }
-
-                if (runtimeMaterial.HasProperty("_FlowDirectionOS"))
-                {
-                    Vector3 flowDirection = route.FlowDirectionOS;
-                    runtimeMaterial.SetVector("_FlowDirectionOS", new Vector4(flowDirection.x, flowDirection.y, flowDirection.z, 0f));
-                }
-
-                runtimeMaterials[materialIndex] = runtimeMaterial;
-            }
-
-            renderer.sharedMaterials = runtimeMaterials;
-            activeMaterials.Add(new ActiveFlowMaterials
-            {
-                Renderer = renderer,
-                OriginalMaterials = originalMaterials,
-                RuntimeMaterials = runtimeMaterials
-            });
-        }
-
-        _activeFlowsByRoute[routeId] = activeMaterials;
-        message = $"已启用路由：{routeId}";
-        return true;
-    }
-
     public string GetStateDescription()
     {
         return $"process={_currentProcessId};step={_currentStepId};unit={_currentUnitId}";
@@ -439,7 +305,7 @@ public sealed class PowerPlantProcessController : MonoBehaviour
             ConfigureHighlightEffect(
                 _processHighlightEffect,
                 new Color(0f, 1f, 0.921f, 1f),
-                0.1f);
+                0.24f);
         }
 
         if (_alarmHighlightEffect == null)
@@ -479,86 +345,6 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         effect.Refresh();
     }
 
-    private void UpdateProcessHighlight(string stepId, string unitId, IReadOnlyList<string> routeIds)
-    {
-        EnsureHighlightEffects();
-        _highlightRendererSet.Clear();
-
-        List<string> nodeIds = ResolveHighlightNodeIds(stepId, unitId);
-        for (int nodeIndex = 0; nodeIndex < nodeIds.Count; nodeIndex++)
-        {
-            CollectNodeRenderers(nodeIds[nodeIndex], _highlightRendererSet);
-        }
-
-        for (int routeIndex = 0; routeIndex < routeIds.Count; routeIndex++)
-        {
-            CollectRouteRenderers(routeIds[routeIndex], _highlightRendererSet);
-        }
-
-        ApplyHighlight(_processHighlightEffect, _highlightRendererSet);
-    }
-
-    private static List<string> ResolveHighlightNodeIds(string stepId, string unitId)
-    {
-        List<string> nodeIds = new List<string>();
-        if (stepId == OverviewStepId)
-        {
-            return nodeIds;
-        }
-
-        if (stepId == "grid-output")
-        {
-            nodeIds.Add("node.grid");
-            return nodeIds;
-        }
-
-        string[] suffixes;
-        switch (stepId)
-        {
-            case "gas-network":
-            case "inlet-duct":
-                suffixes = new[] { "inlet" };
-                break;
-            case "gas-turbine":
-                suffixes = new[] { "gas-turbine" };
-                break;
-            case "hrsg":
-                suffixes = new[] { "hrsg" };
-                break;
-            case "steam-turbine":
-                suffixes = new[] { "steam-turbine" };
-                break;
-            case "generator":
-                suffixes = new[] { "gas-generator", "steam-generator" };
-                break;
-            default:
-                return nodeIds;
-        }
-
-        if (unitId == AllUnitsId || unitId == "1")
-        {
-            for (int suffixIndex = 0; suffixIndex < suffixes.Length; suffixIndex++)
-            {
-                nodeIds.Add($"node.{suffixes[suffixIndex]}.1");
-            }
-        }
-
-        if (unitId == AllUnitsId || unitId == "2")
-        {
-            for (int suffixIndex = 0; suffixIndex < suffixes.Length; suffixIndex++)
-            {
-                nodeIds.Add($"node.{suffixes[suffixIndex]}.2");
-            }
-        }
-
-        if (stepId == "generator")
-        {
-            nodeIds.Add("node.grid");
-        }
-
-        return nodeIds;
-    }
-
     private void CollectNodeRenderers(string nodeId, ISet<Renderer> destination)
     {
         if (!_nodesById.TryGetValue(nodeId, out SceneNodeBinding node))
@@ -582,22 +368,6 @@ public sealed class PowerPlantProcessController : MonoBehaviour
                 {
                     destination.Add(renderers[rendererIndex]);
                 }
-            }
-        }
-    }
-
-    private void CollectRouteRenderers(string routeId, ISet<Renderer> destination)
-    {
-        if (!_routesById.TryGetValue(routeId, out FlowRouteBinding route) || route.Renderers == null)
-        {
-            return;
-        }
-
-        for (int rendererIndex = 0; rendererIndex < route.Renderers.Length; rendererIndex++)
-        {
-            if (route.Renderers[rendererIndex] != null)
-            {
-                destination.Add(route.Renderers[rendererIndex]);
             }
         }
     }
@@ -640,10 +410,10 @@ public sealed class PowerPlantProcessController : MonoBehaviour
     private void CacheSceneBindings()
     {
         _nodesById.Clear();
-        _routesById.Clear();
         _selectionNodeByObject.Clear();
         _initialRootActiveStates.Clear();
         _groundObjectSet.Clear();
+        _persistentFlowObjectSet.Clear();
 
         if (_sceneRoot == null)
         {
@@ -667,6 +437,14 @@ public sealed class PowerPlantProcessController : MonoBehaviour
             if (_groundObjects[groundIndex] != null)
             {
                 _groundObjectSet.Add(_groundObjects[groundIndex]);
+            }
+        }
+
+        for (int flowIndex = 0; flowIndex < _persistentFlowObjects.Length; flowIndex++)
+        {
+            if (_persistentFlowObjects[flowIndex] != null)
+            {
+                _persistentFlowObjectSet.Add(_persistentFlowObjects[flowIndex]);
             }
         }
 
@@ -697,21 +475,11 @@ public sealed class PowerPlantProcessController : MonoBehaviour
                 EnsureClickCollider(target);
             }
         }
-
-        for (int routeIndex = 0; routeIndex < _routes.Length; routeIndex++)
-        {
-            FlowRouteBinding route = _routes[routeIndex];
-            if (route != null && !string.IsNullOrWhiteSpace(route.Id))
-            {
-                _routesById[route.Id] = route;
-            }
-        }
     }
 
-    private bool TryResolveStep(string stepId, string unitId, out List<string> visibleNodeIds, out string focusNodeId, out List<string> routeIds)
+    private bool TryResolveStep(string stepId, string unitId, out List<string> visibleNodeIds, out string focusNodeId)
     {
         visibleNodeIds = new List<string>();
-        routeIds = new List<string>();
         focusNodeId = string.Empty;
 
         if (string.Equals(stepId, OverviewStepId, StringComparison.Ordinal))
@@ -745,14 +513,12 @@ public sealed class PowerPlantProcessController : MonoBehaviour
 
             case "gas-turbine":
                 AddUnitNodeIds(visibleNodeIds, unitId, "gas-train");
-                AddExhaustRouteIds(routeIds, unitId);
                 focusNodeId = unitId == AllUnitsId ? "plant.overview" : $"node.gas-turbine.{unitId}";
                 return true;
 
             case "hrsg":
                 AddUnitNodeIds(visibleNodeIds, unitId, "gas-train");
-                AddExhaustRouteIds(routeIds, unitId);
-                focusNodeId = unitId == AllUnitsId ? "plant.overview" : $"node.hrsg.{unitId}";
+                focusNodeId = "node.hrsg.1";
                 return true;
 
             case "steam-turbine":
@@ -782,19 +548,6 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         if (unitId == AllUnitsId || unitId == "2")
         {
             destination.Add($"unit.ccgt.2.{trainName}");
-        }
-    }
-
-    private static void AddExhaustRouteIds(List<string> destination, string unitId)
-    {
-        if (unitId == AllUnitsId || unitId == "1")
-        {
-            destination.Add("route.exhaust-to-hrsg.1");
-        }
-
-        if (unitId == AllUnitsId || unitId == "2")
-        {
-            destination.Add("route.exhaust-to-hrsg.2");
         }
     }
 
@@ -833,7 +586,7 @@ public sealed class PowerPlantProcessController : MonoBehaviour
             }
 
             target.SetActive(true);
-            if (visibleObjects.Contains(target) || IsGroundObject(target))
+            if (visibleObjects.Contains(target) || IsGroundObject(target) || IsPersistentFlowObject(target))
             {
                 RestoreContextFade(target);
             }
@@ -981,42 +734,6 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         collider.size = renderer.localBounds.size;
     }
 
-    private void StopAllFlows()
-    {
-        List<string> routeIds = new List<string>(_activeFlowsByRoute.Keys);
-        for (int index = 0; index < routeIds.Count; index++)
-        {
-            StopRouteFlow(routeIds[index]);
-        }
-    }
-
-    private void StopRouteFlow(string routeId)
-    {
-        if (!_activeFlowsByRoute.TryGetValue(routeId, out List<ActiveFlowMaterials> activeMaterials))
-        {
-            return;
-        }
-
-        for (int assignmentIndex = 0; assignmentIndex < activeMaterials.Count; assignmentIndex++)
-        {
-            ActiveFlowMaterials assignment = activeMaterials[assignmentIndex];
-            if (assignment.Renderer != null)
-            {
-                assignment.Renderer.sharedMaterials = assignment.OriginalMaterials;
-            }
-
-            for (int materialIndex = 0; materialIndex < assignment.RuntimeMaterials.Length; materialIndex++)
-            {
-                if (assignment.RuntimeMaterials[materialIndex] != null)
-                {
-                    Destroy(assignment.RuntimeMaterials[materialIndex]);
-                }
-            }
-        }
-
-        _activeFlowsByRoute.Remove(routeId);
-    }
-
     private void ApplyContextFade(GameObject target)
     {
         if (target == null || IsGroundObject(target) || _contextFadeMaterial == null)
@@ -1110,6 +827,11 @@ public sealed class PowerPlantProcessController : MonoBehaviour
     private bool IsGroundObject(GameObject target)
     {
         return target != null && _groundObjectSet.Contains(target);
+    }
+
+    private bool IsPersistentFlowObject(GameObject target)
+    {
+        return target != null && _persistentFlowObjectSet.Contains(target);
     }
 
     private static void CopyOriginalAppearance(Material original, Material target)
@@ -1252,63 +974,4 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         return new SceneNodeBinding(id, targets);
     }
 
-    private static FlowRouteBinding CreateRoute(string id, Renderer[] renderers, Material flowMaterialTemplate, float speedMultiplier, Vector3 flowDirectionOS)
-    {
-        return new FlowRouteBinding(id, renderers, flowMaterialTemplate, speedMultiplier, flowDirectionOS);
-    }
-
-    private static GameObject[] GetDirectChildren(Transform root)
-    {
-        if (root == null)
-        {
-            return Array.Empty<GameObject>();
-        }
-
-        GameObject[] children = new GameObject[root.childCount];
-        for (int index = 0; index < root.childCount; index++)
-        {
-            children[index] = root.GetChild(index).gameObject;
-        }
-
-        return children;
-    }
-
-    private static GameObject[] FindObjects(Transform root, params string[] names)
-    {
-        List<GameObject> targets = new List<GameObject>();
-        if (root == null)
-        {
-            return targets.ToArray();
-        }
-
-        for (int nameIndex = 0; nameIndex < names.Length; nameIndex++)
-        {
-            Transform target = root.Find(names[nameIndex]);
-            if (target == null)
-            {
-                Debug.LogWarning($"[{nameof(PowerPlantProcessController)}] 找不到映射对象：{names[nameIndex]}");
-                continue;
-            }
-
-            targets.Add(target.gameObject);
-        }
-
-        return targets.ToArray();
-    }
-
-    private static Renderer[] FindRenderers(Transform root, params string[] names)
-    {
-        List<Renderer> renderers = new List<Renderer>();
-        GameObject[] objects = FindObjects(root, names);
-        for (int index = 0; index < objects.Length; index++)
-        {
-            Renderer renderer = objects[index].GetComponent<Renderer>();
-            if (renderer != null)
-            {
-                renderers.Add(renderer);
-            }
-        }
-
-        return renderers.ToArray();
-    }
 }

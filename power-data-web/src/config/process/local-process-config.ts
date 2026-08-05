@@ -13,7 +13,9 @@ import {
   toRuntimeKey,
   toTopologyKey,
 } from '@/config/process/identifiers'
+import { LOCAL_PROCESS_CONFIG_VERSION } from '@/config/process/config-version'
 import { ProcessConfigLoader, type ProcessConfigDataset } from '@/config/process/loader'
+import { localWebglRuntimeRegistry, type ReadonlyWebglRuntimeRegistry } from '@/config/process/runtime-registry'
 import type {
   DetailDefinition,
   ProcessDomainDefinition,
@@ -23,8 +25,8 @@ import type {
   TopologyDefinition,
 } from '@/config/process/types'
 
-/** 本地静态配置的统一发布版本；后续配置服务接入时必须整体替换，禁止混用版本。 */
-export const LOCAL_PROCESS_CONFIG_VERSION = '2026.08.01-local.2' as const
+// 保留从本模块导出，避免现有专题配置和调用方改变引用路径；真实版本值只在 config-version.ts 中维护。
+export { LOCAL_PROCESS_CONFIG_VERSION } from '@/config/process/config-version'
 
 /** 当前开发环境仅声明页面访问边界，真实角色和数据权限将在外部鉴权契约完成后注入。 */
 const processPagePermission = toPermissionCode('visual.process.view')
@@ -140,6 +142,8 @@ function createEmptyArtifacts(page: ProcessPageDefinition): {
   return {
     topology: {
       topologyKey: page.topologyKey,
+      // 空拓扑仍携带页面已发布标题，面板无需依赖燃气名称或从拓扑标识猜测显示文案。
+      title: page.title,
       configVersion: LOCAL_PROCESS_CONFIG_VERSION,
       nodes: [],
       edges: [],
@@ -185,6 +189,8 @@ const gasOverviewPage: ProcessPageDefinition = {
  */
 const gasTopology: TopologyDefinition = {
   topologyKey: gasOverviewPage.topologyKey,
+  // 标题是当前拓扑的配置数据；通用面板不再持有任何燃气领域文字。
+  title: '燃气发电分层通信关系',
   configVersion: LOCAL_PROCESS_CONFIG_VERSION,
   layers: [
     { layerId: 'enterprise-it', title: '企业 IT 层', y: 8, color: '#a8b4c7' },
@@ -330,5 +336,13 @@ export const localProcessConfigDataset: ProcessConfigDataset = {
   sceneMappings: [gasSceneMapping, ...emptySceneMappingsByProcessId.values()],
 }
 
-/** 全局单例仅缓存不可变本地配置结果，不保存 WebGL、Canvas 或其他运行时对象。 */
-export const localProcessConfigLoader = new ProcessConfigLoader(localProcessConfigDataset)
+/**
+ * 用指定运行时登记表创建加载器，测试可注入受控部署配置；生产壳只使用默认的构建环境登记表。
+ * 加载器只缓存不可变配置结果，不保存 WebGL、Canvas 或其他运行时对象。
+ */
+export function createLocalProcessConfigLoader(runtimeRegistry: ReadonlyWebglRuntimeRegistry = localWebglRuntimeRegistry): ProcessConfigLoader {
+  return new ProcessConfigLoader(localProcessConfigDataset, runtimeRegistry)
+}
+
+/** 全局单例只服务当前嵌入壳，不允许业务页面自行构造可写运行时登记。 */
+export const localProcessConfigLoader = createLocalProcessConfigLoader()

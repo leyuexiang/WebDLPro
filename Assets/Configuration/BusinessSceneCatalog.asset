@@ -1,0 +1,60 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 48436997a97b1354aa2ad09784e7a435, type: 3}
+  m_Name: BusinessSceneCatalog
+  m_EditorClassIdentifier: 
+  _entries:
+  - _sceneId: coal-power
+    _unitySceneKey: coal-power
+    _scenePath: Assets/Scenes/Business/CoalPower.unity
+    _availability: 1
+    _declaredCapabilities: 64
+  - _sceneId: gas-power
+    _unitySceneKey: gas-power
+    _scenePath: Assets/Scenes/Business/GasPower.unity
+    _availability: 1
+    _declaredCapabilities: 231
+  - _sceneId: wind-power
+    _unitySceneKey: wind-power
+    _scenePath: Assets/Scenes/Business/WindPower.unity
+    _availability: 1
+    _declaredCapabilities: 64
+  - _sceneId: solar-power
+    _unitySceneKey: solar-power
+    _scenePath: Assets/Scenes/Business/SolarPower.unity
+    _availability: 1
+    _declaredCapabilities: 64
+  - _sceneId: substation
+    _unitySceneKey: substation
+    _scenePath: Assets/Scenes/Business/Substation.unity
+    _availability: 1
+    _declaredCapabilities: 64
+  - _sceneId: distribution
+    _unitySceneKey: distribution
+    _scenePath: Assets/Scenes/Business/Distribution.unity
+    _availability: 1
+    _declaredCapabilities: 64
+  - _sceneId: consumption
+    _unitySceneKey: consumption
+    _scenePath: Assets/Scenes/Business/Consumption.unity
+    _availability: 1
+    _declaredCapabilities: 64
+  - _sceneId: microgrid
+    _unitySceneKey: microgrid
+    _scenePath: Assets/Scenes/Business/Microgrid.unity
+    _availability: 1
+    _declaredCapabilities: 64
+  - _sceneId: dispatch
+    _unitySceneKey: dispatch
+    _scenePath: Assets/Scenes/Business/Dispatch.unity
+    _availability: 1
+    _declaredCapabilities: 64

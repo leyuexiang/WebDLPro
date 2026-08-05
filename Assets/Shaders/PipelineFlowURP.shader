@@ -90,7 +90,7 @@ Shader "自定义/URP/管道流动"
                 half3 tangentWS : TEXCOORD2;
                 half3 bitangentWS : TEXCOORD3;
                 float2 baseUV : TEXCOORD4;
-                float3 positionOS : TEXCOORD5;
+                float2 flowUV : TEXCOORD5;
                 half fogFactor : TEXCOORD6;
             };
 
@@ -107,7 +107,7 @@ Shader "自定义/URP/管道流动"
                 output.tangentWS = normalInputs.tangentWS;
                 output.bitangentWS = normalInputs.bitangentWS;
                 output.baseUV = TRANSFORM_TEX(input.uv, _BaseMap);
-                output.positionOS = input.positionOS.xyz;
+                output.flowUV = input.uv;
                 output.fogFactor = ComputeFogFactor(positionInputs.positionCS.z);
                 return output;
             }
@@ -142,10 +142,8 @@ Shader "自定义/URP/管道流动"
                     surfaceData.smoothness = _Smoothness;
                 #endif
 
-                // 使用网格局部坐标计算相位，因此即使 FBX 没有 UV0，流带仍会沿模型自身长度推进。
-                float3 flowDirectionOS = normalize(_FlowDirectionOS.xyz);
-                half flowAxis = dot(input.positionOS, flowDirectionOS);
-                half phase = frac(flowAxis * _FlowTiling - _Time.y * _FlowSpeed);
+                // 流动坐标由管道网格烘焙为沿路径递增的 UV0 U 值。
+                half phase = frac(input.flowUV.x * _FlowTiling - _Time.y * _FlowSpeed);
                 half triangleWave = 1.0h - abs(phase * 2.0h - 1.0h);
                 half proceduralBand = smoothstep(1.0h - _FlowWidth, 1.0h, triangleWave);
                 half textureNoise = SAMPLE_TEXTURE2D(_FlowTex, sampler_FlowTex, float2(phase, 0.5h)).r;

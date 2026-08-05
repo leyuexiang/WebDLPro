@@ -1,20 +1,42 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { ProcessNodeId, RouteId } from '@/config/process/identifiers'
-import type { TopologyDefinition } from '@/config/process/types'
+import type { TopologyDefinition, TopologyDeviceStatus } from '@/config/process/types'
 import TopologyCanvas from '@/modules/visual/components/TopologyCanvas.vue'
+import { createTopologyPanelPresentation } from '@/modules/visual/components/topology-panel-presentation'
+import type { TopologyCanvasController } from '@/modules/visual/components/topology-canvas-controller'
 
 const props = defineProps<{
   topology: TopologyDefinition
   selectedNodeIds: readonly ProcessNodeId[]
   selectedRouteIds: readonly RouteId[]
+  /** 状态快照是独立运行时数据，不会改写当前拓扑定义或触发画布路径重建。 */
+  nodeStatuses?: ReadonlyMap<ProcessNodeId, TopologyDeviceStatus>
 }>()
 
 const emit = defineEmits<{
   selectNode: [nodeId: ProcessNodeId]
+  /** 双击只转发稳定二维节点标识；正式设备事件由上层运行时按清单明确映射。 */
+  doubleClickNode: [nodeId: ProcessNodeId]
 }>()
 
 const isFullscreen = ref(false)
+const topologyCanvas = ref<TopologyCanvasController | null>(null)
+
+/**
+ * 组合根只能取得当前已挂载画布的受控端口，不能越过面板创建第二个 Canvas（画布）。
+ * 空拓扑会保留同一个隐藏画布以避免切换时反复创建资源；调用方仍必须依据活动拓扑上下文判断是否可操作，
+ * 不能因为端口存在就猜测存在业务节点、设备或三维映射。
+ */
+function getCanvasController(): TopologyCanvasController | undefined {
+  return topologyCanvas.value ?? undefined
+}
+
+/** 仅暴露单画布端口；全屏状态和 DOM（文档对象模型）元素继续由面板内部管理。 */
+defineExpose({ getCanvasController })
+
+/** 展示模型只从当前拓扑计算，切换场景或拓扑时无需复制组件或维护燃气专用条件分支。 */
+const presentation = computed(() => createTopologyPanelPresentation(props.topology, props.nodeStatuses))
 
 /** 采用参考原型的视口遮罩模式，全屏时保留现有画布实例、选中状态和缩放平移状态。 */
 function toggleFullscreen(): void {
@@ -32,17 +54,17 @@ onBeforeUnmount(() => globalThis.removeEventListener('keydown', handleKeydown))
 </script>
 
 <template>
-  <section :class="['topology-panel', { 'topology-panel--fullscreen': isFullscreen }]" aria-label="燃气发电控制网络拓扑">
+  <section :class="['topology-panel', { 'topology-panel--fullscreen': isFullscreen }]" :aria-label="presentation.title">
     <header class="topology-panel__header">
       <div>
         <p class="eyebrow">控制网络拓扑</p>
-        <h2>燃气发电分层通信关系</h2>
+        <h2>{{ presentation.title }}</h2>
       </div>
       <div class="topology-panel__actions">
-        <div class="topology-panel__legend" aria-label="拓扑图例">
-          <span><i class="topology-panel__line topology-panel__line--verified" />已确认</span>
-          <span><i class="topology-panel__line topology-panel__line--pending" />待确认</span>
-          <span><i class="topology-panel__line topology-panel__line--conceptual" />概念连接</span>
+        <div v-if="presentation.legends.length > 0" class="topology-panel__legend" aria-label="当前拓扑连线图例">
+          <span v-for="legend in presentation.legends" :key="legend.modifier">
+            <i :class="['topology-panel__line', `topology-panel__line--${legend.modifier}`]" />{{ legend.label }}
+          </span>
         </div>
         <!-- 常规态显示放大图标；全屏态改为关闭图标，减少用户寻找退出入口的成本。 -->
         <button
@@ -57,17 +79,21 @@ onBeforeUnmount(() => globalThis.removeEventListener('keydown', handleKeydown))
         </button>
       </div>
     </header>
-    <!-- 实时状态契约尚未发布时明确提示，防止离线图元被误认为设备运行结论。 -->
-    <p v-if="props.topology.nodes.length > 0" class="topology-panel__status">设备实时状态待接入，当前图元按离线状态展示；青色描边仅表示当前选择。</p>
+    <!-- 状态摘要由当前拓扑节点的配置值计算，不把旧燃气离线提示套用到其他场景。 -->
+    <p class="topology-panel__status">{{ presentation.statusSummary }}</p>
     <TopologyCanvas
-      v-if="props.topology.nodes.length > 0"
+      ref="topologyCanvas"
+      v-show="!presentation.isEmpty"
       :topology="props.topology"
       :selected-node-ids="props.selectedNodeIds"
       :selected-route-ids="props.selectedRouteIds"
+      :node-statuses="props.nodeStatuses"
       :fullscreen="isFullscreen"
       @select-node="emit('selectNode', $event)"
+      @double-click-node="emit('doubleClickNode', $event)"
     />
-    <p v-else class="topology-panel__empty">该页面的二维拓扑尚未发布，未尝试根据页面标题或资源名称推断结构。</p>
+    <!-- 空态提示与隐藏的唯一预备画布独立渲染：保留实例避免切换时重建资源，提示仍准确说明尚无已激活拓扑。 -->
+    <p v-if="presentation.isEmpty" class="topology-panel__empty">{{ presentation.statusSummary }}</p>
     <!-- 与参考原型一致，提供键盘退出提示；按钮本身始终保留为可见的关闭入口。 -->
     <p v-if="isFullscreen" class="topology-panel__fullscreen-hint" role="status">按 Esc 键退出全屏</p>
   </section>
@@ -77,7 +103,9 @@ onBeforeUnmount(() => globalThis.removeEventListener('keydown', handleKeydown))
 .topology-panel {
   display: grid;
   min-block-size: 0;
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: var(--space-3);
+  overflow: hidden;
   padding: var(--space-4);
   border: 1px solid #0e7490;
   border-radius: var(--radius-md);
@@ -95,9 +123,15 @@ onBeforeUnmount(() => globalThis.removeEventListener('keydown', handleKeydown))
   gap: var(--space-3);
 }
 
+.topology-panel__header > div:first-child {
+  min-inline-size: 0;
+}
+
 .topology-panel__actions {
   display: flex;
   align-items: start;
+  flex-wrap: wrap;
+  justify-content: end;
   gap: var(--space-2);
 }
 
@@ -168,6 +202,12 @@ onBeforeUnmount(() => globalThis.removeEventListener('keydown', handleKeydown))
   border-color: #64748b;
 }
 
+/* 新原子清单未声明连线证据时使用中性虚线，不借用旧燃气的“已确认”视觉语义。 */
+.topology-panel__line--unclassified {
+  border-block-start-style: dashed;
+  border-color: #94a3b8;
+}
+
 .topology-panel__status {
   margin: 0;
   padding: 8px 10px;
@@ -176,6 +216,7 @@ onBeforeUnmount(() => globalThis.removeEventListener('keydown', handleKeydown))
   color: #b7d9e8;
   font-size: 0.75rem;
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .topology-panel__empty {
@@ -195,8 +236,8 @@ onBeforeUnmount(() => globalThis.removeEventListener('keydown', handleKeydown))
   position: fixed;
   inset: 12px;
   z-index: 1200;
-  block-size: calc(100dvh - 24px);
-  grid-template-rows: auto auto minmax(0, 1fr);
+  /* 尺寸完全由 inset 约束，避免不同浏览器的动态视口单位造成底部越界。 */
+  box-sizing: border-box;
   overflow: hidden;
   padding: clamp(12px, 1.5vw, 22px);
   border-color: rgba(34, 211, 238, 0.78);
@@ -239,7 +280,6 @@ onBeforeUnmount(() => globalThis.removeEventListener('keydown', handleKeydown))
 
   .topology-panel--fullscreen {
     inset: 6px;
-    block-size: calc(100dvh - 12px);
   }
 
   .topology-panel__fullscreen-hint {

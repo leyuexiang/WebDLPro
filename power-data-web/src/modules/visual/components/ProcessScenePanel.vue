@@ -1,11 +1,9 @@
 <script setup lang="ts">
-import { computed, inject, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ProcessConfigLoadResult } from '@/config/process/types'
 import {
   visualizationRuntimeHostKey,
-  type VisualizationRuntimeLifecycle,
 } from '@/modules/visual/runtime/visualization-runtime-host'
-import { useProcessContextStore } from '@/stores/process-context.store'
 import AppStatePanel from '@/shared/components/AppStatePanel.vue'
 
 const props = defineProps<{
@@ -16,9 +14,9 @@ const emit = defineEmits<{
   objectSelected: [nodeId: string, messageId: string]
 }>()
 
-const processContext = useProcessContextStore()
 const runtimeHost = inject(visualizationRuntimeHostKey, null)
 const sceneViewport = ref<HTMLElement | null>(null)
+const isSceneFullscreen = ref(false)
 let unregisterViewport: (() => void) | undefined
 let unsubscribeObjectSelection: (() => void) | undefined
 let leasedRuntimeKey: string | undefined
@@ -77,37 +75,49 @@ function releaseRuntimeLease(): void {
   leasedRuntimeKey = undefined
 }
 
-/** 将受控宿主状态写入可序列化工艺上下文，业务协调器只能在 ready 状态发出三维命令。 */
-function synchronizeSceneState(status: VisualizationRuntimeLifecycle, capabilities: readonly import('@/services/webgl/protocol').WebglCommandType[]): void {
-  const statusMapping: Record<VisualizationRuntimeLifecycle, import('@/stores/process-context.store').ProcessSceneStatus> = {
-    idle: 'idle',
-    creating: 'creating',
-    handshaking: 'handshaking',
-    ready: 'ready',
-    switching: 'switching',
-    releasing: 'releasing',
-    disposed: 'released',
-    failed: 'failed',
-  }
+/**
+ * 全屏状态始终以浏览器实际的全屏元素为准，而不是以点击结果推测。
+ * 这样用户按 Esc、浏览器拒绝请求或页面卸载时，右上角按钮都能立即恢复准确的可访问名称。
+ */
+function synchronizeFullscreenState(): void {
+  isSceneFullscreen.value = document.fullscreenElement === sceneViewport.value
+}
 
-  processContext.setSceneState(statusMapping[status], capabilities)
+/**
+ * 仅放大全部三维视口，不影响工作台的工艺导航与下方拓扑区域。
+ * 视口内的 iframe 会随浏览器全屏尺寸自动拉伸；再次点击按钮或按 Esc 均可退出。
+ */
+async function toggleSceneFullscreen(): Promise<void> {
+  const viewport = sceneViewport.value
+  if (!viewport) return
+
+  try {
+    if (document.fullscreenElement === viewport) {
+      await document.exitFullscreen()
+      return
+    }
+
+    await viewport.requestFullscreen()
+  } catch {
+    // 浏览器可能因权限策略或当前窗口状态拒绝请求；保留原视口，不中断三维运行时。
+    synchronizeFullscreenState()
+  }
 }
 
 watch(requestedRuntime, () => {
   void synchronizeRuntime()
 }, { immediate: true })
 
-watch(
-  () => [runtimeHost?.status.value, runtimeHost?.capabilities.value] as const,
-  ([status, capabilities]) => {
-    if (!requestedRuntime.value || !runtimeHost || !status || !capabilities) return
-    synchronizeSceneState(status, capabilities)
-  },
-  { immediate: true },
-)
+/** 监听 Esc 等浏览器原生退出动作，避免按钮图标与实际视口状态不同步。 */
+onMounted(() => {
+  document.addEventListener('fullscreenchange', synchronizeFullscreenState)
+})
 
 /** 组件销毁只交还自己的租约；真正 iframe 释放仍由布局宿主统一确认和回收。 */
-onBeforeUnmount(releaseRuntimeLease)
+onBeforeUnmount(() => {
+  document.removeEventListener('fullscreenchange', synchronizeFullscreenState)
+  releaseRuntimeLease()
+})
 </script>
 
 <template>
@@ -129,12 +139,22 @@ onBeforeUnmount(releaseRuntimeLease)
     </template>
     <template v-else>
       <div ref="sceneViewport" class="process-scene__runtime" aria-live="polite">
-        <AppStatePanel
-          v-if="runtimeHost?.status.value !== 'ready'"
-          kind="scene-connecting"
-          :reason="runtimeHost?.reason.value ?? '正在校验网页图形运行时与场景资源。'"
-          :primary-action-visible="false"
-        />
+        <!-- 按钮位于 iframe 之上，只请求当前三维视口全屏，避免恢复 Unity 模板页脚。 -->
+        <button
+          type="button"
+          class="process-scene__fullscreen"
+          :aria-label="isSceneFullscreen ? '退出三维全屏' : '进入三维全屏'"
+          :aria-pressed="isSceneFullscreen"
+          :title="isSceneFullscreen ? '退出全屏' : '全屏查看三维场景'"
+          @click="void toggleSceneFullscreen()"
+        >
+          <!-- 与二维拓扑共用图标语义：常规态放大，全屏态显示关闭入口。 -->
+          <span aria-hidden="true">{{ isSceneFullscreen ? '×' : '⛶' }}</span>
+        </button>
+        <!--
+          iframe 创建后由 Unity 模板独占加载反馈，避免前端状态卡覆盖画布并重复提示“正在加载”。
+          运行时失败会在上方 isRuntimeFailed 分支切换为明确的降级说明，因此此处无需额外空白占位。
+        -->
       </div>
     </template>
   </section>
@@ -146,17 +166,20 @@ onBeforeUnmount(releaseRuntimeLease)
 }
 
 /*
- * 三维场景与静态降级共用同一高度预算，避免运行时握手成功后将二维拓扑整体下推。
- * 桌面固定为 320 像素、窄屏固定为 300 像素，容器本身不依赖 iframe 的最终加载尺寸。
+ * 三维区域固定为标准 16:9 画幅：宽度始终由工作台主栏决定，高度由浏览器按比例计算。
+ * 这让 iframe、加载态和静态降级态共享同一稳定尺寸，避免 Unity 画布就绪后发生布局抖动，
+ * 同时移除旧的固定 320 像素高度，防止宽屏下场景被压扁。
  */
 .process-scene--reserved {
-  block-size: 320px;
-  min-block-size: 320px;
+  aspect-ratio: 16 / 9;
+  block-size: auto;
+  min-block-size: 0;
 }
 
 /* 容器由工作台网格约束尺寸；iframe 通过宿主 Teleport 填满此容器，不产生固定画布或双滚动条。 */
 .process-scene__runtime {
   position: relative;
+  isolation: isolate;
   display: grid;
   block-size: 100%;
   min-block-size: 0;
@@ -164,6 +187,44 @@ onBeforeUnmount(releaseRuntimeLease)
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-surface-strong);
+}
+
+/*
+ * 控件沿用二维拓扑图的青色描边、30 像素方形和悬停反馈，形成工作台一致的全屏入口。
+ * 它建立在独立层叠上下文的最高层，确保 Teleport 挂载的 Unity iframe 加载完成后也不会遮挡它。
+ */
+.process-scene__fullscreen {
+  position: absolute;
+  inset-block-start: var(--space-3);
+  inset-inline-end: var(--space-3);
+  z-index: 2;
+  display: inline-grid;
+  inline-size: 30px;
+  block-size: 30px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid rgba(103, 232, 249, 0.44);
+  border-radius: 5px;
+  background: rgba(8, 47, 73, 0.56);
+  color: #bff7ff;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+.process-scene__fullscreen:hover,
+.process-scene__fullscreen:focus-visible {
+  border-color: #67e8f9;
+  background: rgba(8, 145, 178, 0.42);
+  color: #ffffff;
+}
+
+/* 浏览器进入原生全屏后去除卡片边框，确保三维画布完整覆盖整个屏幕。 */
+.process-scene__runtime:fullscreen {
+  border: 0;
+  border-radius: 0;
+  background: #000;
 }
 
 .process-scene__preview {
@@ -200,11 +261,4 @@ onBeforeUnmount(releaseRuntimeLease)
   font-size: 0.875rem;
 }
 
-@media (width < 820px) {
-  /* 单栏布局保持可预测的场景高度，避免移动端过度占用首屏。 */
-  .process-scene--reserved {
-    block-size: 300px;
-    min-block-size: 300px;
-  }
-}
 </style>

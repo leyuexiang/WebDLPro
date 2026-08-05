@@ -19,7 +19,11 @@
       <h1>网页图形运行时模拟器</h1>
       <button id="object-button" aria-label="模拟三维对象"></button>
       <p>点击方块会回传稳定业务节点标识。</p>
-      <p id="message">正在初始化桥接。</p>
+      <!--
+        本地回归计数仅记录 focusNode（聚焦节点）命令次数，不记录节点标识、场景或任何业务载荷。
+        它用于验证二维重复点击不会重复向 Unity 下发聚焦；正式 WebGL 页面不依赖该测试属性。
+      -->
+      <p id="message" data-focus-node-count="0">正在初始化桥接。</p>
     </section>
   </main>
 
@@ -37,8 +41,17 @@
     const buildId = query.get('buildId');
     const sceneMappingVersion = query.get('sceneMappingVersion');
     const resourceDigest = query.get('resourceDigest');
-    const commandCapabilities = ['init', 'resize', 'focusNode', 'dispose'];
-    const eventCapabilities = ['ready', 'ack', 'commandResult', 'objectSelected', 'disposed'];
+    // 以下四项只由任务-014本地夹具入口传入，用于稳定复现“快速取代、外层超时、失败恢复”。
+    // 生产 Unity 构建不读取这些参数；未提供或不匹配场景时仍使用默认 40 毫秒成功完成路径。
+    const fastDelaySceneId = query.get('fastDelaySceneId');
+    const fastSceneDelayMs = Number(query.get('fastSceneDelayMs')) || 40;
+    const timeoutDelaySceneId = query.get('timeoutDelaySceneId');
+    const timeoutSceneDelayMs = Number(query.get('timeoutSceneDelayMs')) || 40;
+    const failedSceneId = query.get('failedSceneId');
+    // 本地夹具与正式内层协议同步声明全部受控动作；模拟页只回传结构化结果，
+    // 不伪造任何场景节点、材质或路径资源，从而不会把夹具误当成九场景业务实现。
+    const commandCapabilities = ['init', 'resize', 'switchScene', 'enterProcessStep', 'resetScene', 'focusNode', 'setNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'];
+    const eventCapabilities = ['ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'disposed'];
     const message = document.querySelector('#message');
     let disposed = false;
 
@@ -50,6 +63,42 @@
       } catch {
         return false;
       }
+    }
+
+    /** 动作夹具只验证稳定标识和固定四态，不保留任何模拟层级、材质或路径对象。 */
+    function isIdentifier(value) {
+      return typeof value === 'string' && value.length > 0 && value.length <= 128;
+    }
+
+    /** 夹具与正式协议共用四态集合，未知值必须明确失败而非作为任意渲染参数继续传递。 */
+    function isVisualState(value) {
+      return ['normal', 'alarm', 'fault', 'offline'].includes(value);
+    }
+
+    /** 对每种受控动作执行最小结构校验；真实节点、流程和路径是否存在仍由 Unity 场景控制器负责。 */
+    function isValidActionPayload(type, payload) {
+      if (type === 'enterProcessStep') {
+        return isIdentifier(payload?.processId) && isIdentifier(payload?.stepId) &&
+          (payload?.unitId === undefined || isIdentifier(payload.unitId)) && typeof payload?.isolate === 'boolean';
+      }
+      if (type === 'focusNode') return isIdentifier(payload?.sceneNodeId) && typeof payload?.isolate === 'boolean';
+      if (type === 'setNodeVisualState') return isIdentifier(payload?.sceneNodeId) && isVisualState(payload?.visualState);
+      if (type === 'setRouteFlow') return isIdentifier(payload?.routeId) && typeof payload?.enabled === 'boolean';
+      if (type === 'setNodeVisibility') return isIdentifier(payload?.sceneNodeId) && typeof payload?.enabled === 'boolean';
+      return type === 'resetScene';
+    }
+
+    /**
+     * 仅为三层回归返回可预测的最终完成延迟：风电用于快速取代，光伏用于超过外层十秒总超时。
+     * 非法、负数或过长延迟一律回退默认值，避免测试查询参数成为无界计时器来源。
+     */
+    function getSceneCompletionDelay(sceneId) {
+      const candidate = sceneId === timeoutDelaySceneId
+        ? timeoutSceneDelayMs
+        : sceneId === fastDelaySceneId
+          ? fastSceneDelayMs
+          : 40;
+      return Number.isFinite(candidate) && candidate >= 0 && candidate <= 15_000 ? candidate : 40;
     }
 
     /** 所有回传事件都使用精确父页面来源，且在释放后停止发送。 */
@@ -70,8 +119,55 @@
       } else if (data.type === 'resize') {
         message.textContent = `已同步尺寸：${data.payload?.width || 0} × ${data.payload?.height || 0}`;
         post('commandResult', { requestId: data.messageId, success: true, message: '尺寸已同步。' });
-      } else if (data.type === 'focusNode') {
-        post('commandResult', { requestId: data.messageId, success: true, message: '节点已聚焦。' });
+      } else if (['enterProcessStep', 'resetScene', 'focusNode', 'setNodeVisualState', 'setRouteFlow', 'setNodeVisibility'].includes(data.type)) {
+        if (!isValidActionPayload(data.type, data.payload)) {
+          post('commandResult', { requestId: data.messageId, success: false, errorCode: 'action-payload-invalid', message: '动作载荷缺少合法稳定标识或固定状态。' });
+          return;
+        }
+        // 测试页仅显示已确认的固定命令类型，便于浏览器回归区分“同场景动作”与 switchScene；不记录任何载荷或对象信息。
+        // focusNode 另以受限数字计数，供任务-028验证同一二维选择的幂等性，计数不会进入跨窗口协议。
+        if (data.type === 'focusNode') {
+          message.dataset.focusNodeCount = String(Number(message.dataset.focusNodeCount || '0') + 1);
+        }
+        message.textContent = `模拟运行时已确认 ${data.type}。`;
+        post('commandResult', { requestId: data.messageId, success: true, message: `模拟运行时已确认 ${data.type}。` });
+      } else if (data.type === 'switchScene') {
+        const payload = data.payload || {};
+        if (!payload.sceneId || !payload.transitionId || payload.sceneMappingVersion !== sceneMappingVersion) {
+          // 测试页只显示固定失败阶段，不回显完整命令或查询参数，便于三层夹具判断是否在最终完成事件前失败。
+          message.textContent = '场景切换载荷未通过受控映射版本校验。';
+          post('commandResult', { requestId: data.messageId, success: false, errorCode: 'scene-switch-payload-invalid', message: '场景切换载荷无效。' });
+          return;
+        }
+        // 先确认已接收原请求，再异步上报有限进度与最终成功事件，模拟 Unity 协调器的真实顺序。
+        message.textContent = '场景切换请求已确认，正在等待最终完成事件。';
+        post('ack', { requestId: data.messageId, success: true, message: '模拟运行时已接收场景切换。' });
+        const completionDelay = getSceneCompletionDelay(payload.sceneId);
+        window.setTimeout(() => post('sceneLoadProgress', {
+          requestId: data.messageId,
+          sceneId: payload.sceneId,
+          transitionId: payload.transitionId,
+          stageCode: 'loading-scene',
+          progress: 0.5
+        }), 20);
+        window.setTimeout(() => {
+          // 内层协议规定 sceneChanged 只能表示成功；失败必须通过关联原 requestId 的 commandResult 回传受控错误码。
+          if (payload.sceneId === failedSceneId) {
+            post('commandResult', { requestId: data.messageId, success: false, errorCode: 'scene-switch-simulated-failure', message: '模拟场景切换失败。' });
+            return;
+          }
+          post('sceneChanged', {
+            requestId: data.messageId,
+            sceneId: payload.sceneId,
+            transitionId: payload.transitionId,
+            success: true,
+            sceneState: `模拟场景 ${payload.sceneId} 已就绪。`
+          });
+        }, completionDelay);
+        // 仅在最终结果已排队后更新测试提示；它不参与协议校验或业务状态判断。
+        window.setTimeout(() => {
+          message.textContent = payload.sceneId === failedSceneId ? '场景切换最终失败事件已发送。' : '场景切换最终完成事件已发送。';
+        }, completionDelay);
       } else if (data.type === 'dispose') {
         post('disposed', { requestId: data.messageId, success: true, message: '模拟运行时已释放。' });
         disposed = true;
@@ -87,9 +183,12 @@
       post('ready', { runtimeKey, buildId, sceneMappingVersion, protocolVersion: version, resourceDigest, commandCapabilities, eventCapabilities });
     }
 
-    /** 模拟 Unity 场景对象选中，仅发送稳定节点标识，禁止回传引擎对象引用。 */
+    /**
+     * 模拟 Unity 场景对象选中，只发送本地任务-037清单已经显式登记的三维节点标识。
+     * 它不代表正式燃气映射，更不会回传引擎对象引用、对象名称、层级或坐标。
+     */
     document.querySelector('#object-button').addEventListener('click', () => {
-      post('objectSelected', { nodeId: 'gas-turbine-unit', nodeName: '燃气轮机' });
+      post('objectSelected', { nodeId: 'scene-node.gas-turbine' });
     });
   </script>
 </body>

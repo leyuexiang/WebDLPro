@@ -1,28 +1,17 @@
-import { createApp, watch } from 'vue'
+import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from '@/App.vue'
 import { router } from '@/router'
-import { installRouteGuards } from '@/router/guards'
-import { useAppStore } from '@/stores/app.store'
 import '@/styles/index.css'
 
 /**
- * 创建全局依赖并在挂载前完成路由守卫注册。
- * 主题仅保存为可序列化状态，DOM 属性由此处单向同步，避免状态仓库持有浏览器对象。
+ * 仅注册嵌入式可视化壳当前仍需使用的依赖。
+ *
+ * Pinia（状态管理）暂时保留：现有燃气工艺面板仍通过工艺上下文存储状态。
+ * 已移除旧门户主题同步与路由守卫注册，防止嵌入页继续加载权限、主题和门户配置职责。
  */
 const app = createApp(App)
 const pinia = createPinia()
-const appStore = useAppStore(pinia)
-
-watch(
-  () => appStore.theme,
-  (theme) => {
-    document.documentElement.dataset.theme = theme
-  },
-  { immediate: true },
-)
-
-installRouteGuards(router, pinia)
 app.use(pinia)
 app.use(router)
 app.mount('#app')

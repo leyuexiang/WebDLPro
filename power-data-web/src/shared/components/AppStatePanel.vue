@@ -1,9 +1,15 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-/** 六类可诊断状态与任务 010 一一对应，调用方不能用空容器代替状态反馈。 */
+/** 嵌入壳与遗留页面共用的可诊断状态；调用方不能用空容器代替状态反馈。 */
 export type AppStateKind =
   | 'loading'
+  | 'initializing'
+  | 'container-too-small'
+  | 'configuration-error'
+  | 'unity-error'
+  | 'topology-error'
+  | 'released'
   | 'scene-connecting'
   | 'scene-unavailable'
   | 'data-delayed'
@@ -15,11 +21,13 @@ const props = withDefaults(
     kind: AppStateKind
     reason?: string
     correlationId?: string
+    errorCode?: string
     primaryActionVisible?: boolean
   }>(),
   {
     reason: '',
     correlationId: '',
+    errorCode: '',
     primaryActionVisible: true,
   },
 )
@@ -37,6 +45,42 @@ const stateDefinition = computed(() => {
       title: '正在加载',
       description: '正在准备页面所需资源，请稍候。',
       action: '重新加载',
+      event: 'retry',
+    },
+    initializing: {
+      title: '正在初始化嵌入运行时',
+      description: '正在等待配置、容器和三维运行时完成就绪检查。',
+      action: '重新加载',
+      event: 'retry',
+    },
+    'container-too-small': {
+      title: '容器尺寸不足',
+      description: '父页面提供的可用区域未达到当前可视化模块的部署下限。',
+      action: '重新检测',
+      event: 'retry',
+    },
+    'configuration-error': {
+      title: '部署配置无效',
+      description: '当前子应用未获得完整且安全的部署地址配置。',
+      action: '重新加载',
+      event: 'retry',
+    },
+    'unity-error': {
+      title: '三维运行时异常',
+      description: 'Unity 三维运行时未能完成安全连接，二维拓扑不会伪装为三维已就绪。',
+      action: '重新连接',
+      event: 'retry',
+    },
+    'topology-error': {
+      title: '拓扑配置异常',
+      description: '当前拓扑未通过完整性校验，已阻止不完整视图进入运行时。',
+      action: '重新加载',
+      event: 'retry',
+    },
+    released: {
+      title: '运行时已释放',
+      description: '当前可视化实例已停止，不会继续保留窗口、画布或资源句柄。',
+      action: '重新初始化',
       event: 'retry',
     },
     'scene-connecting': {
@@ -98,6 +142,7 @@ function triggerPrimaryAction(): void {
     <p class="eyebrow">状态提示</p>
     <h2>{{ stateDefinition.title }}</h2>
     <p>{{ reason || stateDefinition.description }}</p>
+    <p v-if="errorCode" class="app-state-panel__error-code">错误代码：{{ errorCode }}</p>
     <p v-if="correlationId" class="app-state-panel__correlation">关联标识：{{ correlationId }}</p>
     <button v-if="primaryActionVisible" type="button" class="button button--secondary" @click="triggerPrimaryAction">
       {{ stateDefinition.action }}
@@ -126,6 +171,12 @@ function triggerPrimaryAction(): void {
 }
 
 .app-state-panel__correlation {
+  color: var(--color-text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+}
+
+.app-state-panel__error-code {
   color: var(--color-text-secondary);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.75rem;

@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>双容器视觉基准宿主</title>
+  <style>
+    /*
+     * 视觉基准页不渲染测试控制栏、时间戳或随机日志，只保留嵌入壳的实际可视区域。
+     * 这样截图差异只反映双容器布局、三维占位和二维拓扑的可见变化，不被外层调试文本干扰。
+     */
+    html, body, main, iframe {
+      inline-size: 100%;
+      block-size: 100%;
+      margin: 0;
+      border: 0;
+      overflow: hidden;
+    }
+
+    body {
+      background: #061323;
+    }
+
+    iframe {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <!--
+      此 iframe 使用与三层夹具相同的正式嵌入壳入口。视觉基准页不会直接向 Unity 模拟页发送消息，
+      所有初始化仍经过嵌入壳的来源、实例、会话和清单校验，避免截图绕开实际双容器运行边界。
+    -->
+    <iframe id="shell-frame" title="双容器视觉基准"></iframe>
+  </main>
+
+  <script>
+    /**
+     * 此页只提供固定的 `system.init`（系统初始化）路径，以得到稳定的燃气合成视图。
+     * instanceId（实例标识）仅用于协议隔离，不进入可视文字；页面不保存命令日志、载荷或 Unity 对象。
+     */
+    const shellOrigin = 'http://127.0.0.1:5174';
+    const channel = 'power-scene-topology-shell';
+    const version = 1;
+    const frame = document.querySelector('#shell-frame');
+    const instanceId = `visual-baseline-${crypto.randomUUID()}`;
+    let sessionId = '';
+    let initialized = false;
+
+    /**
+     * 发送前必须获得当前会话，且消息只投递给已配置的嵌入壳来源。
+     * 视觉基准不开放场景、拓扑或动作输入，避免测试页成为任意命令入口。
+     */
+    function initialize() {
+      if (!sessionId || !frame.contentWindow || initialized) return;
+      frame.contentWindow.postMessage({
+        channel,
+        version,
+        instanceId,
+        sessionId,
+        messageId: 'visual-baseline-init',
+        type: 'system.init',
+        timestamp: 0,
+        payload: {
+          sceneId: 'gas-power',
+          topologyId: 'topology.gas-power.overview',
+          expectedManifestVersion: 'local-shell-regression.1',
+        },
+      }, shellOrigin);
+    }
+
+    /**
+     * 仅接受当前 iframe、精确嵌入壳来源和当前实例的消息。
+     * 收到确认后以属性标记稳定画面，供无界面浏览器在截图前进行只读等待。
+     */
+    window.addEventListener('message', (event) => {
+      const message = event.data;
+      if (event.origin !== shellOrigin || event.source !== frame.contentWindow) return;
+      if (!message || message.channel !== channel || message.version !== version || message.instanceId !== instanceId) return;
+
+      if (message.type === 'system.ready' && typeof message.sessionId === 'string') {
+        sessionId = message.sessionId;
+        initialize();
+        return;
+      }
+
+      if (message.type === 'system.ack' && message.replyTo === 'visual-baseline-init' && message.payload?.success === true) {
+        initialized = true;
+        document.documentElement.dataset.visualBaselineReady = 'true';
+      }
+    });
+
+    /**
+     * 先注册消息监听器再设置地址，避免极速加载时漏掉嵌入壳的 `system.ready`（系统就绪）事件。
+     */
+    const shellUrl = new URL(`${shellOrigin}/`);
+    shellUrl.searchParams.set('parentOrigin', window.location.origin);
+    shellUrl.searchParams.set('instanceId', instanceId);
+    shellUrl.searchParams.set('protocolVersion', String(version));
+    frame.src = shellUrl.toString();
+  </script>
+</body>
+</html>

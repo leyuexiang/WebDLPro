@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>任务-014三层通信测试宿主</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; color: #e2e8f0; font: 14px/1.5 system-ui, sans-serif; background: #0f172a; }
+    main { position: relative; min-block-size: 100vh; }
+    /* 控制栏覆盖在测试页上方而不参与布局分栏，使 iframe 在 1280×720 回归中获得完整部署视口。 */
+    aside { position: absolute; z-index: 2; inset-block: 0; inset-inline-start: 0; inline-size: 300px; padding: 20px; overflow: auto; background: rgb(17 28 50 / 96%); border-inline-end: 1px solid #334155; }
+    h1 { margin: 0 0 12px; font-size: 19px; } p { margin: 8px 0; }
+    button { inline-size: 100%; margin-block: 4px; padding: 9px; color: #082f49; font: inherit; font-weight: 700; cursor: pointer; background: #7dd3fc; border: 0; border-radius: 4px; }
+    button.secondary { color: #dbeafe; background: #334155; }
+    .hint { color: #94a3b8; font-size: 12px; }
+    iframe { display: block; inline-size: 100%; block-size: 100vh; border: 0; background: #061323; }
+    #logs { margin: 0; padding: 12px; max-block-size: 330px; overflow: auto; color: #cbd5e1; white-space: pre-wrap; background: #020617; border-block-start: 1px solid #334155; }
+    @media (max-width: 760px) { aside { inline-size: min(300px, 88vw); border-inline-end: 1px solid #334155; } }
+  </style>
+</head>
+<body>
+  <main>
+    <aside>
+      <h1>任务-014三层通信测试</h1>
+      <p id="result">正在等待可视化子应用就绪。</p>
+      <button id="run-button">执行基础三层回归</button>
+      <button id="advanced-run-button">执行超时与恢复回归</button>
+      <button id="workflow-button">触发同场景流程动作</button>
+      <button id="cross-scene-workflow-button">触发跨场景流程动作</button>
+      <button id="device-state-button">发送合成设备状态</button>
+      <button id="state-button">查询有限状态快照</button>
+      <button id="dispose-button" class="secondary">释放子应用</button>
+      <p class="hint">链路：本宿主页 → 正式嵌入壳 → Unity 模拟页。</p>
+      <p class="hint">测试清单仅验证九场景闭集和燃气双击协议，不代表正式业务映射。</p>
+      <pre id="logs" aria-live="polite"></pre>
+    </aside>
+    <iframe id="shell-frame" title="可视化子应用测试实例"></iframe>
+  </main>
+
+  <script>
+    /**
+     * 此页是外层父页面测试夹具，只通过 power-scene-topology-shell（外层协议通道）与嵌入壳通信。
+     * 它不向 Unity 模拟页直发消息、不读取 iframe 内部状态，也不接受未校验的来源、窗口、实例或会话。
+     */
+    // 5173 已可能被用户的常驻开发服务占用；夹具固定使用独立 5174，避免重启或污染现有进程。
+    const shellOrigin = 'http://127.0.0.1:5174';
+    const channel = 'power-scene-topology-shell';
+    const version = 1;
+    const frame = document.querySelector('#shell-frame');
+    const result = document.querySelector('#result');
+    const logs = document.querySelector('#logs');
+    const instanceId = `local-shell-${crypto.randomUUID()}`;
+    let sessionId = '';
+    let sequence = 0;
+    let initialized = false;
+    /**
+     * 仅缓存固定数量的事件摘要，供本地自动回归等待关联事件。
+     * 不保存完整 payload（载荷）、异常文本或 Unity 对象，避免测试页成为不可信消息的旁路存储。
+     */
+    const observedEvents = [];
+
+    /** 日志限制为 80 行，只记录事件类型、受控标识和固定结果，不保存完整载荷。 */
+    function writeLog(text) {
+      logs.textContent = [`[${new Date().toLocaleTimeString()}] ${text}`, ...logs.textContent.split('\n').filter(Boolean)].slice(0, 80).join('\n');
+    }
+
+    /** 发送前必须已从 system.ready 获得当前会话；每个命令使用递增稳定标识，响应可精确关联。 */
+    function postCommand(type, payload) {
+      if (!sessionId || !frame.contentWindow) return undefined;
+      const messageId = `host-command-${++sequence}`;
+      frame.contentWindow.postMessage({
+        channel,
+        version,
+        instanceId,
+        sessionId,
+        messageId,
+        type,
+        timestamp: Date.now(),
+        payload,
+      }, shellOrigin);
+      writeLog(`已发送 ${type}：${messageId}`);
+      return messageId;
+    }
+
+    /** 只生成清单中固定的“场景 + 默认拓扑”组合，测试页不接受标题、路径或任意坐标作为切换依据。 */
+    function postViewOpen(sceneId) {
+      return postCommand('view.open', { sceneId, topologyId: `topology.${sceneId}.overview` });
+    }
+
+    /**
+     * 等待已收集的受控事件摘要。超时仅用于测试页显示失败，不会修改嵌入壳、Unity 或外层协议状态。
+     */
+    function waitForEvent(predicate, timeoutMessage, timeoutMs = 4000) {
+      const existing = observedEvents.find(predicate);
+      if (existing) return Promise.resolve(existing);
+
+      return new Promise((resolve, reject) => {
+        const deadline = Date.now() + timeoutMs;
+        const timer = window.setInterval(() => {
+          const event = observedEvents.find(predicate);
+          if (event) {
+            window.clearInterval(timer);
+            resolve(event);
+            return;
+          }
+          if (Date.now() >= deadline) {
+            window.clearInterval(timer);
+            reject(new Error(timeoutMessage));
+          }
+        }, 30);
+      });
+    }
+
+    /** 等待期间确认不存在错误会话的响应；旧会话若得到任何回包即表示隔离失效。 */
+    function expectNoReply(replyTo, timeoutMessage) {
+      return new Promise((resolve, reject) => {
+        const deadline = Date.now() + 500;
+        const timer = window.setInterval(() => {
+          if (observedEvents.some((event) => event.replyTo === replyTo)) {
+            window.clearInterval(timer);
+            reject(new Error(timeoutMessage));
+            return;
+          }
+          if (Date.now() >= deadline) {
+            window.clearInterval(timer);
+            resolve();
+          }
+        }, 30);
+      });
+    }
+
+    /** 等待符合谓词的事件达到指定数量，用于验证重复请求的确认重放与全局副作用隔离。 */
+    function waitForEventCount(predicate, expectedCount, timeoutMessage) {
+      return new Promise((resolve, reject) => {
+        const deadline = Date.now() + 4000;
+        const timer = window.setInterval(() => {
+          if (observedEvents.filter(predicate).length >= expectedCount) {
+            window.clearInterval(timer);
+            resolve();
+            return;
+          }
+          if (Date.now() >= deadline) {
+            window.clearInterval(timer);
+            reject(new Error(timeoutMessage));
+          }
+        }, 30);
+      });
+    }
+
+    /**
+     * 从同源但非当前父窗口的隐藏 iframe 发送一条完整消息。
+     * 该夹具刻意保留正确 Origin（来源）、实例与会话，只伪造 `event.source`（消息源窗口），
+     * 用于验证 HostBridge（外层桥）不会把“同源”错误地等同于“当前父页面”。
+     */
+    async function sendForgedSourceCommand(message) {
+      const attacker = document.createElement('iframe');
+      const token = `forged-source-dispatched-${++sequence}`;
+      attacker.hidden = true;
+      attacker.srcdoc = '<script>window.addEventListener("message", function (event) { parent.document.querySelector("#shell-frame").contentWindow.postMessage(event.data.message, event.data.targetOrigin); parent.postMessage({ channel: "local-shell-regression", type: "forged-source-dispatched", token: event.data.token }, event.data.parentOrigin); });<\/script>';
+      document.body.append(attacker);
+      await new Promise((resolve) => attacker.addEventListener('load', resolve, { once: true }));
+      await new Promise((resolve, reject) => {
+        const timer = window.setTimeout(() => {
+          window.removeEventListener('message', onConfirmation);
+          reject(new Error('伪造来源夹具未完成消息转发。'));
+        }, 2000);
+        function onConfirmation(event) {
+          if (event.source !== attacker.contentWindow || event.origin !== window.location.origin) return;
+          if (event.data?.channel !== 'local-shell-regression' || event.data?.type !== 'forged-source-dispatched' || event.data?.token !== token) return;
+          window.clearTimeout(timer);
+          window.removeEventListener('message', onConfirmation);
+          resolve();
+        }
+        window.addEventListener('message', onConfirmation);
+        attacker.contentWindow.postMessage({ message, targetOrigin: shellOrigin, parentOrigin: window.location.origin, token }, window.location.origin);
+      });
+      attacker.remove();
+    }
+
+    /** 初始化与普通命令共用精确的当前实例/会话，禁止标题、路径或任意 Unity 方法名进入外层消息。 */
+    function initialize() {
+      postCommand('system.init', {
+        sceneId: 'gas-power',
+        topologyId: 'topology.gas-power.overview',
+        expectedManifestVersion: 'local-shell-regression.1',
+      });
+    }
+
+    window.addEventListener('message', (event) => {
+      const message = event.data;
+      if (event.origin !== shellOrigin || event.source !== frame.contentWindow) return;
+      if (!message || message.channel !== channel || message.version !== version || message.instanceId !== instanceId) return;
+      if (typeof message.sessionId !== 'string' || typeof message.type !== 'string') return;
+
+      /*
+       * 自动回归只保留事件类型、关联标识、稳定场景/拓扑标识及受控结果码；不保存完整载荷、
+       * 原始异常或 Unity 对象。数组上限保证重复测试不会积累内存。
+       */
+      const payload = message.payload && typeof message.payload === 'object' ? message.payload : {};
+      const context = payload.context && typeof payload.context === 'object' ? payload.context : {};
+      observedEvents.push({
+        type: message.type,
+        replyTo: message.replyTo,
+        sessionId: message.sessionId,
+        sceneId: typeof payload.sceneId === 'string' ? payload.sceneId : typeof context.sceneId === 'string' ? context.sceneId : undefined,
+        topologyId: typeof payload.topologyId === 'string' ? payload.topologyId : typeof context.topologyId === 'string' ? context.topologyId : undefined,
+        success: typeof payload.success === 'boolean' ? payload.success : undefined,
+        status: typeof payload.status === 'string' ? payload.status : undefined,
+        errorCode: payload.error && typeof payload.error === 'object' && typeof payload.error.code === 'string' ? payload.error.code : undefined,
+      });
+      if (observedEvents.length > 120) observedEvents.shift();
+
+      if (message.type === 'system.ready') {
+        sessionId = message.sessionId;
+        writeLog('已收到 system.ready，开始 system.init。');
+        initialize();
+        return;
+      }
+
+      if (message.type === 'system.ack') {
+        initialized = message.payload?.success === true;
+        result.textContent = initialized ? '初始化已确认，稳定视图等待事件验证。' : '初始化被拒绝。';
+        // 失败时只记录协议错误码，不回显完整载荷、内部异常或 Unity 层级信息。
+        writeLog(`system.ack：${initialized ? '成功' : `失败（${message.payload?.error?.code ?? '未知错误码'}）`}，关联 ${message.replyTo ?? '缺失'}`);
+        return;
+      }
+
+      if (message.type === 'view.changed') {
+        result.textContent = `三层初始化通过：${message.payload.sceneId} / ${message.payload.topologyId}。`;
+        writeLog(`view.changed：版本 ${message.payload.contextRevision}`);
+        return;
+      }
+
+      if (message.type === 'state.snapshot') {
+        writeLog(`state.snapshot：Unity ${message.payload.unityStatus}，拓扑 ${message.payload.topologyStatus}，关联 ${message.replyTo ?? '缺失'}`);
+        return;
+      }
+
+      if (message.type === 'topology.node.dblclick') {
+        writeLog(`topology.node.dblclick：设备 ${message.payload.deviceId}`);
+        return;
+      }
+
+      // 任务-037回归只展示清单映射后的设备与二维节点数量；不显示 Unity 原始对象、节点名称或完整载荷。
+      if (message.type === 'scene.object.selected') {
+        writeLog(`scene.object.selected：设备 ${message.payload.deviceId ?? '未映射'}，二维节点 ${Array.isArray(message.payload.nodeIds) ? message.payload.nodeIds.length : 0}`);
+        return;
+      }
+
+      if (message.type === 'command.result') {
+        writeLog(`command.result：${message.payload.status}，关联 ${message.replyTo ?? '缺失'}`);
+      }
+    });
+
+    document.querySelector('#state-button').addEventListener('click', () => {
+      if (!initialized) return writeLog('初始化尚未完成，拒绝发送状态查询。');
+      postCommand('state.get', {});
+    });
+
+    /**
+     * 任务-038三层回归的固定测试批次。
+     * 此处只使用本地测试清单已登记的一个燃气设备和三维节点映射，验证“宿主→嵌入壳→Unity模拟页”的状态链路；
+     * 它不是正式燃气设备数据，也不会被生产构建或正式清单复用。
+     */
+    document.querySelector('#device-state-button').addEventListener('click', () => {
+      if (!initialized) return writeLog('初始化尚未完成，拒绝发送设备状态。');
+      postCommand('device.states.update', {
+        sourceRevision: Date.now(),
+        items: [{ deviceId: 'device.gas-turbine', deviceStatus: 'alarm', statusUpdatedAt: new Date().toISOString() }],
+      });
+    });
+    document.querySelector('#dispose-button').addEventListener('click', () => {
+      if (!initialized) return writeLog('初始化尚未完成，拒绝发送释放命令。');
+      postCommand('system.dispose', { reason: 'local-shell-regression' });
+    });
+
+    /**
+     * 本地夹具动作只对应清单中的 `action.gas.reset`，用于任务-034验证。
+     * 它不携带参数、不接受页面输入，也不代表正式燃气流程或设备映射。
+     */
+    document.querySelector('#workflow-button').addEventListener('click', () => {
+      if (!initialized) return writeLog('初始化尚未完成，拒绝发送流程动作。');
+      postCommand('workflow.trigger', { actionId: 'action.gas.reset' });
+    });
+
+    /** 合成风电重置动作专门验证任务-035的跨场景路径；目标由清单限定，页面不能传入场景名称或拓扑名称。 */
+    document.querySelector('#cross-scene-workflow-button').addEventListener('click', () => {
+      if (!initialized) return writeLog('初始化尚未完成，拒绝发送跨场景流程动作。');
+      postCommand('workflow.trigger', { actionId: 'action.wind.reset' });
+    });
+
+    /** 用只读状态快照确认异常或被取代的事务没有覆盖上一个稳定燃气上下文。 */
+    async function assertGasContext(description) {
+      const stateRequestId = postCommand('state.get', {});
+      if (!stateRequestId) throw new Error(`${description}：状态查询未能发送。`);
+      const snapshot = await waitForEvent(
+        (event) => event.type === 'state.snapshot' && event.replyTo === stateRequestId,
+        `${description}：未收到关联状态快照。`,
+      );
+      if (snapshot.sceneId !== 'gas-power' || snapshot.topologyId !== 'topology.gas-power.overview') {
+        throw new Error(`${description}：稳定上下文没有恢复为燃气场景。`);
+      }
+    }
+
+    /**
+     * 基础三层回归只覆盖可由外层宿主页真实触发的安全链路：状态查询关联、旧会话静默拒绝和释放确认。
+     * Canvas 双击需要命中真实二维坐标，保留给浏览器自动化执行，避免本页伪造 `topology.node.dblclick` 事件。
+     */
+    document.querySelector('#run-button').addEventListener('click', () => {
+      void (async () => {
+        if (!initialized) throw new Error('初始化尚未完成。');
+        result.textContent = '基础三层回归执行中。';
+
+        const stateRequestId = postCommand('state.get', {});
+        if (!stateRequestId) throw new Error('状态查询未能发送。');
+        await waitForEvent((event) => event.type === 'state.snapshot' && event.replyTo === stateRequestId, '状态快照未按原请求关联返回。');
+        await waitForEvent((event) => event.type === 'command.result' && event.replyTo === stateRequestId, '状态查询命令结果未按原请求关联返回。');
+
+        const duplicateMessageId = `host-duplicate-state-${++sequence}`;
+        const duplicateMessage = {
+          channel,
+          version,
+          instanceId,
+          sessionId,
+          messageId: duplicateMessageId,
+          type: 'state.get',
+          timestamp: Date.now(),
+          payload: {},
+        };
+        // 两次发送严格复用同一 messageId；生命周期应只执行一次，第二次仅重放关联确认。
+        frame.contentWindow.postMessage(duplicateMessage, shellOrigin);
+        frame.contentWindow.postMessage(duplicateMessage, shellOrigin);
+        await waitForEventCount((event) => event.type === 'command.result' && event.replyTo === duplicateMessageId, 2, '重复消息未得到两次关联确认。');
+        if (observedEvents.filter((event) => event.type === 'state.snapshot' && event.replyTo === duplicateMessageId).length !== 1) {
+          throw new Error('重复消息不应重复派生状态快照。');
+        }
+
+        const staleMessageId = `host-stale-session-${++sequence}`;
+        frame.contentWindow.postMessage({
+          channel,
+          version,
+          instanceId,
+          sessionId: 'old-session-local-01',
+          messageId: staleMessageId,
+          type: 'state.get',
+          timestamp: Date.now(),
+          payload: {},
+        }, shellOrigin);
+        await expectNoReply(staleMessageId, '旧会话命令不应得到外层响应。');
+
+        const forgedSourceMessageId = `host-forged-source-${++sequence}`;
+        await sendForgedSourceCommand({
+          channel,
+          version,
+          instanceId,
+          sessionId,
+          messageId: forgedSourceMessageId,
+          type: 'state.get',
+          timestamp: Date.now(),
+          payload: {},
+        });
+        await expectNoReply(forgedSourceMessageId, '同源但非当前父窗口的命令不应得到外层响应。');
+
+        const disposeRequestId = postCommand('system.dispose', { reason: 'local-shell-auto-regression' });
+        if (!disposeRequestId) throw new Error('释放命令未能发送。');
+        await waitForEvent((event) => event.type === 'command.result' && event.replyTo === disposeRequestId, '释放命令未收到关联确认。');
+        result.textContent = '基础三层回归通过：查询关联、旧会话拒绝、伪造来源拒绝与释放确认正常。';
+        writeLog('基础三层回归通过。');
+      })().catch((error) => {
+        // 仅显示本测试页主动构造的固定失败说明；不回显 iframe 事件、原始异常或完整命令。
+        result.textContent = `基础三层回归失败：${error instanceof Error ? error.message : '未知测试错误。'}`;
+        writeLog('基础三层回归失败。');
+      });
+    });
+
+    /**
+     * 高阶三层回归使用 Unity 模拟页的三类受控最终结果：风电短延迟、光伏超时延迟和配电失败回执。
+     * 每步都用新的固定清单目标触发真实 `view.open`，并只从外层回包及状态快照断言，不直接读取子 iframe。
+     */
+    document.querySelector('#advanced-run-button').addEventListener('click', () => {
+      void (async () => {
+        if (!initialized) throw new Error('初始化尚未完成。');
+        result.textContent = '超时与恢复三层回归执行中。';
+
+        const fastStartIndex = observedEvents.length;
+        const windRequestId = postViewOpen('wind-power');
+        if (!windRequestId) throw new Error('连续取代的首个请求未能发送。');
+        // 两条同目标短延迟切换各自拥有独立事务；最后燃气请求必须同时取代它们，验证连续三条命令只提交最后一次。
+        await new Promise((resolve) => window.setTimeout(resolve, 40));
+        const windReplacementId = postViewOpen('wind-power');
+        if (!windReplacementId) throw new Error('连续取代的第二个请求未能发送。');
+        await new Promise((resolve) => window.setTimeout(resolve, 40));
+        const fastRecoveryId = postViewOpen('gas-power');
+        if (!fastRecoveryId) throw new Error('连续取代的最终恢复请求未能发送。');
+        const fastRecovery = await waitForEvent(
+          (event) => event.type === 'command.result' && event.replyTo === fastRecoveryId,
+          '快速取代的恢复命令未得到关联结果。',
+        );
+        const windResult = await waitForEvent(
+          (event) => event.type === 'command.result' && event.replyTo === windRequestId,
+          '首个被取代的风电命令未得到关联结果。',
+        );
+        const windReplacementResult = await waitForEvent(
+          (event) => event.type === 'command.result' && event.replyTo === windReplacementId,
+          '第二个被取代的风电命令未得到关联结果。',
+        );
+        if (
+          fastRecovery.success !== true || fastRecovery.status !== 'completed'
+          || windResult.status !== 'superseded' || windResult.errorCode !== 'command.superseded'
+          || windReplacementResult.status !== 'superseded' || windReplacementResult.errorCode !== 'command.superseded'
+        ) {
+          throw new Error('连续三次切换未保持“最后事务成功、前两事务已取代”的结果语义。');
+        }
+        if (observedEvents.slice(fastStartIndex).some((event) => event.type === 'view.changed' && event.sceneId === 'wind-power')) {
+          throw new Error('被取代的风电事务不应发布稳定视图。');
+        }
+        await assertGasContext('连续三次取代后');
+
+        const failedRequestId = postViewOpen('distribution');
+        if (!failedRequestId) throw new Error('异常恢复的失败请求未能发送。');
+        const failedResult = await waitForEvent(
+          (event) => event.type === 'command.result' && event.replyTo === failedRequestId,
+          '模拟失败场景未得到关联结果。',
+        );
+        if (failedResult.success !== false || failedResult.errorCode !== 'scene.switch.failed') {
+          throw new Error('场景最终失败未收敛为受控场景切换错误。');
+        }
+        await assertGasContext('场景失败后');
+
+        const timeoutRequestId = postViewOpen('solar-power');
+        if (!timeoutRequestId) throw new Error('超时场景请求未能发送。');
+        const timeoutResult = await waitForEvent(
+          (event) => event.type === 'command.result' && event.replyTo === timeoutRequestId,
+          '十秒外层命令超时未得到关联结果。',
+          12_000,
+        );
+        if (timeoutResult.success !== false || timeoutResult.errorCode !== 'command.timeout') {
+          throw new Error('延迟场景未按十秒总上限返回受控超时。');
+        }
+
+        // 超时不会让旧异步任务重新获得提交权；立即提交燃气恢复事务，再等待光伏的迟到最终事件抵达。
+        const timeoutRecoveryId = postViewOpen('gas-power');
+        if (!timeoutRecoveryId) throw new Error('超时后的恢复请求未能发送。');
+        const timeoutRecovery = await waitForEvent(
+          (event) => event.type === 'command.result' && event.replyTo === timeoutRecoveryId,
+          '超时后的恢复命令未得到关联结果。',
+        );
+        if (timeoutRecovery.success !== true || timeoutRecovery.status !== 'completed') {
+          throw new Error('超时后的恢复命令未成功提交。');
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 1_000));
+        await assertGasContext('光伏迟到完成后');
+
+        const disposeRequestId = postCommand('system.dispose', { reason: 'local-shell-advanced-regression' });
+        if (!disposeRequestId) throw new Error('高阶回归释放命令未能发送。');
+        await waitForEvent((event) => event.type === 'command.result' && event.replyTo === disposeRequestId, '高阶回归释放命令未收到关联确认。');
+        result.textContent = '超时与恢复三层回归通过：连续三次取代、失败恢复、十秒超时、迟到回调隔离与释放确认正常。';
+        writeLog('超时与恢复三层回归通过。');
+      })().catch((error) => {
+        // 只显示本测试页预设的失败摘要，避免将来自 iframe 的任意异常或载荷回显到页面。
+        result.textContent = `超时与恢复三层回归失败：${error instanceof Error ? error.message : '未知测试错误。'}`;
+        writeLog('超时与恢复三层回归失败。');
+      });
+    });
+
+    /** 监听器先于 iframe 地址设置，保证嵌入壳的 ready 事件不会因快速加载丢失。 */
+    const shellUrl = new URL(`${shellOrigin}/`);
+    shellUrl.searchParams.set('parentOrigin', window.location.origin);
+    shellUrl.searchParams.set('instanceId', instanceId);
+    shellUrl.searchParams.set('protocolVersion', String(version));
+    frame.src = shellUrl.toString();
+  </script>
+</body>
+</html>

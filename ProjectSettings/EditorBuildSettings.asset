@@ -6,6 +6,33 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
-    path: Assets/Scenes/SampleScene.unity
+    path: Assets/Scenes/Bootstrap.unity
+    guid: 03c5f7021e314494ab7ed633133aca50
+  - enabled: 1
+    path: Assets/Scenes/Business/CoalPower.unity
+    guid: 1f8e1bd581131d448b618f21597ed68a
+  - enabled: 1
+    path: Assets/Scenes/Business/GasPower.unity
     guid: 99c9720ab356a0642a771bea13969a05
+  - enabled: 1
+    path: Assets/Scenes/Business/WindPower.unity
+    guid: bc6cac1c39bced745825846cd38ec715
+  - enabled: 1
+    path: Assets/Scenes/Business/SolarPower.unity
+    guid: 167c9a6eb9e2e624b899aa3b78c4c2b6
+  - enabled: 1
+    path: Assets/Scenes/Business/Substation.unity
+    guid: 321b0cd8f2f304b499f72c9caa52ca06
+  - enabled: 1
+    path: Assets/Scenes/Business/Distribution.unity
+    guid: 41681bba152bf2342b31bcd455e8d55a
+  - enabled: 1
+    path: Assets/Scenes/Business/Consumption.unity
+    guid: d124061a711d2f14cb6a8013c636b19b
+  - enabled: 1
+    path: Assets/Scenes/Business/Microgrid.unity
+    guid: cba8773b056783447bbb97ffa495a03e
+  - enabled: 1
+    path: Assets/Scenes/Business/Dispatch.unity
+    guid: a2e5d93b032920c49b90997090fcc506
   m_configObjects: {}

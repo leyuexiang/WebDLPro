@@ -10,7 +10,7 @@ readOnly: false
 aiMaintained: true
 explicitMaintenanceRules: true
 createdAt: 1785509885565
-updatedAt: 1785509885566
+updatedAt: 1785694474999
 ---
 
 # project-mistake-note
@@ -24,4 +24,5 @@ updatedAt: 1785509885566
 <!-- locus:maintain-rules:end -->
 
 <!-- locus:body:start -->
+- 复杂合并式管网 FBX 若缺少沿管线长度连续递增的 UV0，流动 Shader 只能按统一坐标轴投影，导致条带穿过弯头或与管线方向不一致。必须由模型导出提供路径 UV，或显式配置样条/中心线路径；不能依赖 Shader 自动推断管网拓扑。
 <!-- locus:body:end -->

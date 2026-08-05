@@ -11,7 +11,6 @@ public static class PowerPlantSceneSetup
 {
     private const string SceneRootName = "场景";
     private const string RuntimeRootName = "PowerPlantRuntime";
-    private const string GasFlowMaterialPath = "Assets/Shaders/PipelineFlow_Gas.mat";
     private const string ContextFadeShaderPath = "Assets/Shaders/PowerPlantContextFadeURP.shader";
     private const string ContextFadeMaterialPath = "Assets/Shaders/PowerPlant_ContextFade.mat";
 
@@ -23,13 +22,6 @@ public static class PowerPlantSceneSetup
         if (sceneRoot == null)
         {
             EditorUtility.DisplayDialog("无法配置燃气发电场景", $"当前场景中未找到根对象“{SceneRootName}”。", "确定");
-            return;
-        }
-
-        Material gasFlowMaterial = AssetDatabase.LoadAssetAtPath<Material>(GasFlowMaterialPath);
-        if (gasFlowMaterial == null)
-        {
-            EditorUtility.DisplayDialog("无法配置燃气发电场景", $"未找到流动材质：{GasFlowMaterialPath}", "确定");
             return;
         }
 
@@ -64,13 +56,62 @@ public static class PowerPlantSceneSetup
             Undo.AddComponent<PowerPlantFreeCameraController>(interactionCamera.gameObject);
         }
 
-        controller.ConfigureForCurrentSampleScene(sceneRoot.transform, interactionCamera, gasFlowMaterial, contextFadeMaterial);
+        controller.ConfigureForCurrentSampleScene(
+            sceneRoot.transform,
+            interactionCamera,
+            contextFadeMaterial,
+            new[] { GetRequiredObject(sceneRoot.transform, "地面") },
+            GetRequiredObjects(sceneRoot.transform,
+                "排水口管道002", "海水进水口管道", "排水口管道1", "管道5", "凝结水到锅炉管道2", "Circle001", "余热锅炉管道001", "汽轮机管道1", "取水泵站管道"),
+            GetDirectChildren(sceneRoot.transform),
+            GetRequiredObjects(sceneRoot.transform,
+                "余热锅炉管道001", "余热锅炉", "凝结水到锅炉管道2", "冷凝水泵2", "凝汽器", "冷凝水泵1",
+                "排水口管道1", "排水口管道002", "海水进水口管道", "海水进口管道支架", "取水泵站", "取水泵站管道", "Circle001"),
+            GetRequiredObject(sceneRoot.transform, "烟囱"),
+            GetRequiredObject(sceneRoot.transform, "燃气轮机"),
+            GetRequiredObject(sceneRoot.transform, "余热锅炉"),
+            GetRequiredObject(sceneRoot.transform, "低中高压汽轮机"),
+            GetRequiredObject(sceneRoot.transform, "发电机"),
+            GetRequiredObject(sceneRoot.transform, "变压站+电网"));
         EditorUtility.SetDirty(runtimeRoot);
         EditorSceneManager.MarkSceneDirty(activeScene);
         EditorSceneManager.SaveScene(activeScene);
         Selection.activeGameObject = runtimeRoot;
 
-        Debug.Log("[PowerPlantSceneSetup] 已将 SampleScene 的模型映射与两条已确认的燃机排气至余热锅炉烟道流动路由写入场景。", runtimeRoot);
+        Debug.Log("[PowerPlantSceneSetup] 已写入场景对象的直接绑定；管道流动由静态材质持续播放。", runtimeRoot);
+    }
+
+    private static GameObject GetRequiredObject(Transform root, string objectName)
+    {
+        Transform target = root.Find(objectName);
+        if (target == null)
+        {
+            throw new MissingReferenceException($"未找到场景对象：{objectName}");
+        }
+
+        return target.gameObject;
+    }
+
+    private static GameObject[] GetRequiredObjects(Transform root, params string[] objectNames)
+    {
+        GameObject[] objects = new GameObject[objectNames.Length];
+        for (int index = 0; index < objectNames.Length; index++)
+        {
+            objects[index] = GetRequiredObject(root, objectNames[index]);
+        }
+
+        return objects;
+    }
+
+    private static GameObject[] GetDirectChildren(Transform root)
+    {
+        GameObject[] objects = new GameObject[root.childCount];
+        for (int index = 0; index < root.childCount; index++)
+        {
+            objects[index] = root.GetChild(index).gameObject;
+        }
+
+        return objects;
     }
 
     private static Material LoadOrCreateContextFadeMaterial()

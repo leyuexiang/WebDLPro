@@ -1,17 +1,29 @@
 import type { WebglRuntimeRegistration } from '@/config/process/types'
 import {
   createWebglCommand,
+  WEBGL_PROTOCOL_CHANNEL,
   isWebglEventType,
+  isWebglEnterProcessStepPayload,
   isWebglMessageEnvelope,
   isWebglObjectSelectedPayload,
   isWebglReadyPayload,
   isWebglRequestAcknowledgementPayload,
+  isWebglSceneChangedPayload,
+  isWebglSceneLoadProgressPayload,
+  isWebglSceneNodeCommandPayload,
+  isWebglSetNodeVisibilityPayload,
+  isWebglSetNodeVisualStatePayload,
+  isWebglSetRouteFlowPayload,
+  isWebglSwitchScenePayload,
   type WebglCommandType,
   type WebglEventType,
   type WebglMessageEnvelope,
   type WebglObjectSelectedPayload,
   type WebglReadyPayload,
+  type WebglSceneChangedPayload,
+  type WebglSceneLoadProgressPayload,
 } from '@/services/webgl/protocol'
+import { windowMessageRouter } from '@/host-bridge/message-router'
 
 /** 单个网页图形运行时的连接阶段；宿主会将其映射为页面可见状态。 */
 export type WebglConnectorStatus = 'idle' | 'handshaking' | 'ready' | 'releasing' | 'disposed' | 'failed'
@@ -22,12 +34,26 @@ export interface WebglMessageRejection {
   timestamp: number
 }
 
+/**
+ * 已确认命令的受控完成摘要。
+ * 该摘要只保留命令类型、原请求标识和成功状态；不会将 Unity 返回的对象、场景层级或原始消息交给宿主。
+ */
+export interface WebglCommandCompletion {
+  command: WebglCommandType
+  requestId: string
+  success: boolean
+}
+
 /** 连接器向唯一宿主报告的事件；业务组件不得订阅 window.message 或直接调用 postMessage。 */
 export interface WebglRuntimeConnectorCallbacks {
   onStatusChange?: (status: WebglConnectorStatus, reason?: string) => void
   onReady?: (ready: WebglReadyPayload) => void
   onObjectSelected?: (payload: WebglObjectSelectedPayload, messageId: string) => void
+  onSceneLoadProgress?: (payload: WebglSceneLoadProgressPayload, messageId: string) => void
+  onSceneChanged?: (payload: WebglSceneChangedPayload, messageId: string) => void
   onCommandFailure?: (command: WebglCommandType, reason: string) => void
+  /** 普通命令、场景切换最终结果和超时都会回调，宿主据此结算有限等待表。 */
+  onCommandCompleted?: (completion: WebglCommandCompletion) => void
   onDisposed?: (requestId: string) => void
 }
 
@@ -35,9 +61,14 @@ interface PendingCommand {
   envelope: WebglMessageEnvelope<WebglCommandType, unknown>
   retryCount: number
   timeoutHandle: ReturnType<typeof setTimeout>
+  /** switchScene 已确认接收后等待最终 sceneChanged 的状态，进度会刷新该受限等待窗口。 */
+  awaitingSceneResult?: boolean
+  /** 同一事务进度不可倒退；仅保存一个数值，不缓存外部载荷或无界进度历史。 */
+  lastSceneProgress?: number
 }
 
 const COMMAND_TIMEOUT_MS = 10_000
+const SCENE_SWITCH_RESULT_TIMEOUT_MS = 30_000
 const HANDSHAKE_TIMEOUT_MS = 15_000
 const MAX_PENDING_COMMANDS = 64
 const MAX_REJECTION_LOGS = 50
@@ -51,8 +82,9 @@ const IDEMPOTENT_COMMANDS = new Set<WebglCommandType>([
   'resize',
   'resetScene',
   'focusNode',
-  'setNodeVisibility',
+  'setNodeVisualState',
   'setRouteFlow',
+  'setNodeVisibility',
   'dispose',
 ])
 
@@ -60,7 +92,7 @@ const IDEMPOTENT_COMMANDS = new Set<WebglCommandType>([
 export class WebglRuntimeConnector {
   private readonly pendingCommands = new Map<string, PendingCommand>()
   private readonly rejections: WebglMessageRejection[] = []
-  private readonly receiveMessageBound = (event: MessageEvent<unknown>) => this.receiveMessage(event)
+  private unsubscribeMessageRouter: (() => void) | undefined
   private readonly negotiatedCommandCapabilities = new Set<WebglCommandType>()
   private readonly negotiatedEventCapabilities = new Set<WebglEventType>()
   private childWindow: WindowProxy | null = null
@@ -81,7 +113,7 @@ export class WebglRuntimeConnector {
   public startListening(): void {
     if (this.status !== 'idle') return
 
-    window.addEventListener('message', this.receiveMessageBound)
+    this.unsubscribeMessageRouter = windowMessageRouter.subscribe(WEBGL_PROTOCOL_CHANNEL, (event) => this.receiveMessage(event))
   }
 
   /**
@@ -156,7 +188,8 @@ export class WebglRuntimeConnector {
   public forceDispose(): void {
     this.clearHandshakeTimeout()
     this.clearPendingCommands()
-    window.removeEventListener('message', this.receiveMessageBound)
+    this.unsubscribeMessageRouter?.()
+    this.unsubscribeMessageRouter = undefined
     this.childWindow = null
 
     // 失败是宿主可见终态，强制清理不能再将其伪装成已确认的远端 disposed。
@@ -214,6 +247,12 @@ export class WebglRuntimeConnector {
       case 'commandResult':
         this.handleAcknowledgement(envelope, 'commandResult')
         return
+      case 'sceneLoadProgress':
+        this.handleSceneLoadProgress(envelope)
+        return
+      case 'sceneChanged':
+        this.handleSceneChanged(envelope)
+        return
       case 'objectSelected':
         this.handleObjectSelected(envelope)
         return
@@ -264,7 +303,7 @@ export class WebglRuntimeConnector {
     })
   }
 
-  /** ack 只会确认 init 或已登记的常规命令；requestId 必须命中原始 messageId。 */
+  /** ack 只会确认 init 或已登记的常规命令；switchScene 的 ack 仅确认接收，最终结果仍须等待 sceneChanged 或 commandResult。 */
   private handleAcknowledgement(
     envelope: WebglMessageEnvelope<WebglEventType, unknown>,
     eventType: 'ack' | 'commandResult',
@@ -285,6 +324,20 @@ export class WebglRuntimeConnector {
       return
     }
 
+    if (pending.envelope.type === 'switchScene' && eventType === 'ack') {
+      if (envelope.payload.success === false) {
+        this.completePendingCommand(pending.envelope.messageId)
+        this.callbacks.onCommandFailure?.('switchScene', envelope.payload.message ?? '网页图形运行时拒绝场景切换请求。')
+        this.callbacks.onCommandCompleted?.({ command: 'switchScene', requestId: pending.envelope.messageId, success: false })
+        return
+      }
+
+      // 接收确认不等于场景可用：保留原 requestId，等待带同一事务的最终 sceneChanged。
+      pending.awaitingSceneResult = true
+      this.refreshSceneSwitchTimeout(pending)
+      return
+    }
+
     this.completePendingCommand(pending.envelope.messageId)
     if (envelope.payload.success === false) {
       const reason = envelope.payload.message ?? '网页图形运行时执行命令失败。'
@@ -294,13 +347,17 @@ export class WebglRuntimeConnector {
       }
 
       this.callbacks.onCommandFailure?.(pending.envelope.type, reason)
+      this.callbacks.onCommandCompleted?.({ command: pending.envelope.type, requestId: pending.envelope.messageId, success: false })
       return
     }
 
     if (pending.envelope.type === 'init') {
       this.clearHandshakeTimeout()
       this.changeStatus('ready')
+      return
     }
+
+    this.callbacks.onCommandCompleted?.({ command: pending.envelope.type, requestId: pending.envelope.messageId, success: true })
   }
 
   /** 对象选中仅在已就绪且协商声明该事件后才允许影响二维拓扑与详情联动。 */
@@ -316,6 +373,72 @@ export class WebglRuntimeConnector {
     }
 
     this.callbacks.onObjectSelected?.(envelope.payload, envelope.messageId)
+  }
+
+  /**
+   * 进度事件只能匹配仍待完成的 switchScene 命令，且场景、事务与原始下行载荷必须严格一致。
+   * 旧事务、伪造 requestId、越界/倒退进度均只记受限拒绝信息，绝不回调业务层。
+   */
+  private handleSceneLoadProgress(envelope: WebglMessageEnvelope<WebglEventType, unknown>): void {
+    if (this.status !== 'ready' || !this.negotiatedEventCapabilities.has('sceneLoadProgress')) {
+      this.reject('未就绪运行时不能上报场景加载进度。')
+      return
+    }
+    if (!isWebglSceneLoadProgressPayload(envelope.payload)) {
+      this.reject('场景加载进度载荷无效。')
+      return
+    }
+
+    const pending = this.pendingCommands.get(envelope.payload.requestId)
+    if (!pending || pending.envelope.type !== 'switchScene' || !pending.awaitingSceneResult) {
+      this.reject('场景加载进度未命中已确认的切换请求。')
+      return
+    }
+    if (!isWebglSwitchScenePayload(pending.envelope.payload) ||
+      pending.envelope.payload.sceneId !== envelope.payload.sceneId ||
+      pending.envelope.payload.transitionId !== envelope.payload.transitionId) {
+      this.reject('场景加载进度的场景或事务标识与原请求不一致。')
+      return
+    }
+    if (pending.lastSceneProgress !== undefined && envelope.payload.progress < pending.lastSceneProgress) {
+      this.reject('场景加载进度不能在同一事务内倒退。')
+      return
+    }
+
+    pending.lastSceneProgress = envelope.payload.progress
+    this.refreshSceneSwitchTimeout(pending)
+    this.callbacks.onSceneLoadProgress?.(envelope.payload, envelope.messageId)
+  }
+
+  /**
+   * sceneChanged 是 switchScene 的唯一成功终态。它必须回填原 requestId 并与原场景、事务完全一致；
+   * 验证成功后统一清理待确认项，避免旧完成事件在后续场景切换中被再次接收。
+   */
+  private handleSceneChanged(envelope: WebglMessageEnvelope<WebglEventType, unknown>): void {
+    if (this.status !== 'ready' || !this.negotiatedEventCapabilities.has('sceneChanged')) {
+      this.reject('未就绪运行时不能上报场景切换完成。')
+      return
+    }
+    if (!isWebglSceneChangedPayload(envelope.payload)) {
+      this.reject('场景切换完成载荷无效。')
+      return
+    }
+
+    const pending = this.pendingCommands.get(envelope.payload.requestId)
+    if (!pending || pending.envelope.type !== 'switchScene' || !pending.awaitingSceneResult) {
+      this.reject('场景切换完成事件未命中已确认的切换请求。')
+      return
+    }
+    if (!isWebglSwitchScenePayload(pending.envelope.payload) ||
+      pending.envelope.payload.sceneId !== envelope.payload.sceneId ||
+      pending.envelope.payload.transitionId !== envelope.payload.transitionId) {
+      this.reject('场景切换完成事件的场景或事务标识与原请求不一致。')
+      return
+    }
+
+    this.completePendingCommand(pending.envelope.messageId)
+    this.callbacks.onSceneChanged?.(envelope.payload, envelope.messageId)
+    this.callbacks.onCommandCompleted?.({ command: 'switchScene', requestId: pending.envelope.messageId, success: true })
   }
 
   /** disposed 必须回填 dispose 原始 messageId；收到确认后才让宿主移除 iframe。 */
@@ -352,6 +475,11 @@ export class WebglRuntimeConnector {
       return undefined
     }
 
+    if (!isValidWebglCommandPayload(command, payload)) {
+      this.callbacks.onCommandFailure?.(command, getWebglCommandPayloadError(command))
+      return undefined
+    }
+
     const messageId = `${this.instanceId}-${++this.nextMessageSequence}`
     const envelope = createWebglCommand(this.instanceId, messageId, command, payload)
     const timeoutHandle = setTimeout(() => this.handleCommandTimeout(messageId), COMMAND_TIMEOUT_MS)
@@ -378,13 +506,16 @@ export class WebglRuntimeConnector {
     }
 
     this.completePendingCommand(messageId)
-    const reason = `网页图形命令 ${pending.envelope.type} 确认超时。`
+    const reason = pending.envelope.type === 'switchScene' && pending.awaitingSceneResult
+      ? '网页图形场景切换完成事件超时。'
+      : `网页图形命令 ${pending.envelope.type} 确认超时。`
     if (pending.envelope.type === 'init' || pending.envelope.type === 'dispose') {
       this.fail(reason)
       return
     }
 
     this.callbacks.onCommandFailure?.(pending.envelope.type, reason)
+    this.callbacks.onCommandCompleted?.({ command: pending.envelope.type, requestId: pending.envelope.messageId, success: false })
   }
 
   /** 成功或失败后统一清理定时器与表项，避免同一 command 的后续消息再次影响状态。 */
@@ -396,11 +527,21 @@ export class WebglRuntimeConnector {
     this.pendingCommands.delete(messageId)
   }
 
+  /**
+   * switchScene 接收确认后需要等待异步加载完成。每次合法进度都会刷新 30 秒窗口，
+   * 防止大场景加载过程被普通命令的十秒确认超时误判，同时不会无限等待失联运行时。
+   */
+  private refreshSceneSwitchTimeout(pending: PendingCommand): void {
+    clearTimeout(pending.timeoutHandle)
+    pending.timeoutHandle = setTimeout(() => this.handleCommandTimeout(pending.envelope.messageId), SCENE_SWITCH_RESULT_TIMEOUT_MS)
+  }
+
   /** 失败是终态：清空本实例全部资源，旧窗口后续消息会因 source 或监听器缺失而失效。 */
   private fail(reason: string): void {
     this.clearHandshakeTimeout()
     this.clearPendingCommands()
-    window.removeEventListener('message', this.receiveMessageBound)
+    this.unsubscribeMessageRouter?.()
+    this.unsubscribeMessageRouter = undefined
     this.changeStatus('failed', reason)
   }
 
@@ -430,5 +571,49 @@ export class WebglRuntimeConnector {
   private clearPendingCommands(): void {
     this.pendingCommands.forEach((pending) => clearTimeout(pending.timeoutHandle))
     this.pendingCommands.clear()
+  }
+}
+
+/**
+ * 在创建待确认记录前校验场景动作载荷，避免无效稳定标识占用有限请求表。
+ * init、resize、resetScene 和 dispose 的结构分别由握手、尺寸观察器或释放流程固定生成，
+ * 此处只校验会被动作映射或交互层传入的场景相关命令。
+ */
+function isValidWebglCommandPayload(command: WebglCommandType, payload: unknown): boolean {
+  switch (command) {
+    case 'switchScene':
+      return isWebglSwitchScenePayload(payload)
+    case 'enterProcessStep':
+      return isWebglEnterProcessStepPayload(payload)
+    case 'focusNode':
+      return isWebglSceneNodeCommandPayload(payload)
+    case 'setNodeVisualState':
+      return isWebglSetNodeVisualStatePayload(payload)
+    case 'setRouteFlow':
+      return isWebglSetRouteFlowPayload(payload)
+    case 'setNodeVisibility':
+      return isWebglSetNodeVisibilityPayload(payload)
+    default:
+      return true
+  }
+}
+
+/** 返回不泄露原始载荷的稳定错误说明，供外层协调器映射为结构化命令失败。 */
+function getWebglCommandPayloadError(command: WebglCommandType): string {
+  switch (command) {
+    case 'switchScene':
+      return '场景切换命令缺少合法场景标识、事务标识或映射版本。'
+    case 'enterProcessStep':
+      return '流程命令缺少合法流程、步骤、机组或隔离标识。'
+    case 'focusNode':
+      return '聚焦命令缺少合法三维节点标识。'
+    case 'setNodeVisualState':
+      return '设备状态命令缺少合法三维节点标识或四态状态。'
+    case 'setRouteFlow':
+      return '路径命令缺少合法路径标识或开关值。'
+    case 'setNodeVisibility':
+      return '显隐命令缺少合法三维节点标识或开关值。'
+    default:
+      return '网页图形命令载荷无效。'
   }
 }

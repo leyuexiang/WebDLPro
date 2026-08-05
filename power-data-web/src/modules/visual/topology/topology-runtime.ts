@@ -1,0 +1,220 @@
+import type { NodeId, RouteId, SceneId, SceneNodeId, TopologyId, TransitionId } from '@/config/scene-topology/identifiers'
+import type { DeviceVisualStatus, TopologyDefinition } from '@/config/scene-topology/types'
+import type { TopologyRegistry } from '@/config/scene-topology/topology-registry'
+import { TopologyDeviceStateCache, type TopologyDeviceStateApplyResult, type TopologyDeviceStateBatch } from '@/modules/visual/topology/topology-device-state-cache'
+
+/** 单个拓扑的有限视图状态；不保存 Canvas、图片、事件回调或原始设备消息。 */
+export interface TopologyViewState {
+  zoom: number
+  offsetX: number
+  offsetY: number
+  selectedNodeIds: readonly NodeId[]
+  selectedRouteIds: readonly RouteId[]
+}
+
+/** 运行时已准备但尚未激活的轻量配置快照，不含任何隐藏画布或异步资源句柄。 */
+export interface PreparedTopology {
+  sceneId: SceneId
+  topologyId: TopologyId
+  topologyVersion: string
+  transitionId: TransitionId
+  topology: TopologyDefinition
+}
+
+/** 画布适配器只实现当前活动画布所需最小能力；运行时不拥有第二个 Canvas 实例。 */
+export interface TopologyCanvasPort {
+  setTopology(topology: TopologyDefinition): void
+  setSelection(nodeIds: readonly NodeId[], routeIds: readonly RouteId[]): void
+  /** 状态覆盖与选择、缩放、平移分离；实现方只能更新当前画布节点状态，不能替换拓扑定义。 */
+  setNodeStatuses(statuses: ReadonlyMap<NodeId, DeviceVisualStatus>): void
+  restoreViewState(state: TopologyViewState): void
+  dispose(): void
+}
+
+/**
+ * 单画布多拓扑运行时。
+ * prepare（准备）只查询、校验并缓存拓扑；activate（激活）只接受当前事务的准备结果，
+ * 从而避免旧事务或准备失败清空正在显示的拓扑。
+ */
+export class TopologyRuntime {
+  private readonly preparedByTopologyId = new Map<TopologyId, PreparedTopology>()
+  private readonly viewStateByTopologyId = new Map<TopologyId, TopologyViewState>()
+  /** 实时设备状态与准备缓存分离，状态更新不会改变拓扑定义、视图状态或活动事务。 */
+  private readonly deviceStateCache: TopologyDeviceStateCache
+  private activeTopology: PreparedTopology | undefined
+  private disposed = false
+
+  public constructor(
+    private readonly registry: TopologyRegistry,
+    private readonly canvas: TopologyCanvasPort,
+    private readonly maximumPreparedTopologies = 8,
+    private readonly maximumViewStates = 8,
+    maximumDeviceStates: number = 500,
+    maximumStatusSnapshots: number = 8,
+  ) {
+    this.deviceStateCache = new TopologyDeviceStateCache(registry, {
+      maximumDeviceStates,
+      maximumTopologySnapshots: maximumStatusSnapshots,
+      maximumSceneSnapshots: maximumStatusSnapshots,
+    })
+  }
+
+  /**
+   * 预解析目标拓扑但不操作画布。场景边界、拓扑版本和事务标识均显式保存在结果中，
+   * 调用方可在 Unity 场景与动作成功后才调用 activate，避免展示错误组合。
+   */
+  public prepare(sceneId: SceneId, topologyId: TopologyId, transitionId: TransitionId): PreparedTopology | undefined {
+    if (this.disposed) return undefined
+    const topology = this.registry.getTopologyForScene(sceneId, topologyId)
+    if (!topology) return undefined
+
+    const cached = this.preparedByTopologyId.get(topologyId)
+    const prepared = cached && cached.topologyVersion === topology.configVersion && cached.sceneId === sceneId
+      ? { ...cached, transitionId }
+      : { sceneId, topologyId, topologyVersion: topology.configVersion, transitionId, topology }
+
+    this.cachePreparedTopology(prepared)
+    return prepared
+  }
+
+  /**
+   * 仅激活属于当前事务的已准备拓扑。旧事务、已释放运行时和不存在的准备结果都不会影响活动画布。
+   * 成功时复用同一画布适配器，按缓存恢复缩放、平移和选择，而不是创建隐藏 Canvas 池。
+   */
+  public activate(prepared: PreparedTopology, activeTransitionId: TransitionId): boolean {
+    if (this.disposed || prepared.transitionId !== activeTransitionId) return false
+    const cached = this.preparedByTopologyId.get(prepared.topologyId)
+    if (!cached || cached.topologyVersion !== prepared.topologyVersion || cached.sceneId !== prepared.sceneId) return false
+
+    const previousTopology = this.activeTopology
+    if (previousTopology) this.cacheViewState(previousTopology.topologyId, this.getDefaultViewState())
+
+    try {
+      this.canvas.setTopology(prepared.topology)
+      const viewState = this.viewStateByTopologyId.get(prepared.topologyId) ?? this.getDefaultViewState()
+      this.canvas.restoreViewState(viewState)
+      this.canvas.setSelection(viewState.selectedNodeIds, viewState.selectedRouteIds)
+      // 新画布定义先恢复，再写当前拓扑的状态覆盖；状态缓存不会改动选择、缩放、平移或路径定义。
+      this.deviceStateCache.setActiveContext(prepared.sceneId, prepared.topologyId)
+      this.canvas.setNodeStatuses(this.deviceStateCache.getActiveTopologyNodeStatuses())
+      this.activeTopology = prepared
+      return true
+    } catch {
+      /*
+       * 画布端口可能在销毁、浏览器资源异常或适配器失败时抛错。
+       * 立即尝试回放上一个已知拓扑；即使该补偿也失败，activeTopology 仍不改写为目标值，
+       * 上层事务会据此执行三维回退或进入明确错误态，绝不提交混合上下文。
+       */
+      this.restorePreviousCanvas(previousTopology)
+      return false
+    }
+  }
+
+  /** 单次选择只更新当前画布，不重建拓扑、节点索引或路径缓存。 */
+  public setSelection(nodeIds: readonly NodeId[], routeIds: readonly RouteId[]): void {
+    if (this.disposed || !this.activeTopology) return
+    const viewState = { ...(this.viewStateByTopologyId.get(this.activeTopology.topologyId) ?? this.getDefaultViewState()), selectedNodeIds: [...nodeIds], selectedRouteIds: [...routeIds] }
+    this.cacheViewState(this.activeTopology.topologyId, viewState)
+    this.canvas.setSelection(nodeIds, routeIds)
+  }
+
+  /**
+   * 应用已由上层协议校验的设备状态批次。
+   * 当前活动二维快照会在同一调用内写入唯一画布；当前三维节点快照仅作为受控返回值提供给任务-038，
+   * 本任务不绕过能力协商直接向 Unity 发送 `setNodeVisualState`（设置节点视觉状态）命令。
+   */
+  public applyDeviceStates(batch: TopologyDeviceStateBatch): TopologyDeviceStateApplyResult {
+    if (this.disposed) {
+      return {
+        acceptedDeviceIds: [],
+        outdatedDeviceIds: [],
+        unmappedDeviceIds: [],
+        invalidTimestampDeviceIds: [],
+        activeTopologyNodeStatuses: new Map(),
+        activeSceneNodeStatuses: new Map(),
+      }
+    }
+
+    this.deviceStateCache.setActiveContext(this.activeTopology?.sceneId, this.activeTopology?.topologyId)
+    const result = this.deviceStateCache.apply(batch)
+    if (this.activeTopology) this.canvas.setNodeStatuses(result.activeTopologyNodeStatuses)
+    return result
+  }
+
+  /** 返回当前活动场景已显式映射的三维节点状态；调用方只能拿到防御性快照，不能访问缓存本体。 */
+  public getActiveSceneNodeStatuses(): ReadonlyMap<SceneNodeId, DeviceVisualStatus> {
+    return this.deviceStateCache.getActiveSceneNodeStatuses()
+  }
+
+  /** 当前画布报告视图后写入有限缓存；配置版本变更由 prepare 自动淘汰对应旧视图。 */
+  public saveActiveViewState(state: TopologyViewState): void {
+    if (this.disposed || !this.activeTopology) return
+    this.cacheViewState(this.activeTopology.topologyId, state)
+  }
+
+  /** 返回活动拓扑的不可变数据引用；无活动拓扑时明确返回 undefined。 */
+  public getActiveTopology(): PreparedTopology | undefined {
+    return this.activeTopology
+  }
+
+  /** 清理当前画布、准备缓存和视图状态；重复释放不会再次调用画布释放。 */
+  public dispose(): void {
+    if (this.disposed) return
+    this.disposed = true
+    this.activeTopology = undefined
+    this.preparedByTopologyId.clear()
+    this.viewStateByTopologyId.clear()
+    this.deviceStateCache.dispose()
+    this.canvas.dispose()
+  }
+
+  /** 最近使用缓存采用删除后重插入的 LRU（最近最少使用）顺序，容量固定且不保存资源对象。 */
+  private cachePreparedTopology(prepared: PreparedTopology): void {
+    this.preparedByTopologyId.delete(prepared.topologyId)
+    this.preparedByTopologyId.set(prepared.topologyId, prepared)
+    while (this.preparedByTopologyId.size > this.maximumPreparedTopologies) {
+      const oldestTopologyId = this.preparedByTopologyId.keys().next().value
+      if (!oldestTopologyId) break
+      this.preparedByTopologyId.delete(oldestTopologyId)
+      this.viewStateByTopologyId.delete(oldestTopologyId)
+    }
+  }
+
+  /** 视图状态同样受独立容量约束，避免用户切换大量图后保留无界选择和缩放历史。 */
+  private cacheViewState(topologyId: TopologyId, state: TopologyViewState): void {
+    this.viewStateByTopologyId.delete(topologyId)
+    this.viewStateByTopologyId.set(topologyId, {
+      zoom: state.zoom,
+      offsetX: state.offsetX,
+      offsetY: state.offsetY,
+      selectedNodeIds: [...state.selectedNodeIds],
+      selectedRouteIds: [...state.selectedRouteIds],
+    })
+    while (this.viewStateByTopologyId.size > this.maximumViewStates) {
+      const oldestTopologyId = this.viewStateByTopologyId.keys().next().value
+      if (!oldestTopologyId) break
+      this.viewStateByTopologyId.delete(oldestTopologyId)
+    }
+  }
+
+  /** 尽力恢复画布显示；该私有补偿不改变活动拓扑登记，成功与否都由 activate 的 false 交给事务层裁决。 */
+  private restorePreviousCanvas(previousTopology: PreparedTopology | undefined): void {
+    if (!previousTopology) return
+
+    try {
+      const viewState = this.viewStateByTopologyId.get(previousTopology.topologyId) ?? this.getDefaultViewState()
+      this.canvas.setTopology(previousTopology.topology)
+      this.canvas.restoreViewState(viewState)
+      this.canvas.setSelection(viewState.selectedNodeIds, viewState.selectedRouteIds)
+      this.deviceStateCache.setActiveContext(previousTopology.sceneId, previousTopology.topologyId)
+      this.canvas.setNodeStatuses(this.deviceStateCache.getActiveTopologyNodeStatuses())
+    } catch {
+      // 补偿失败不记录底层异常或重试；运行时的明确错误态会释放用户交互并避免无界恢复循环。
+    }
+  }
+
+  /** 新拓扑默认使用完整视图和空选择，且该对象不会被外部调用方修改。 */
+  private getDefaultViewState(): TopologyViewState {
+    return { zoom: 1, offsetX: 0, offsetY: 0, selectedNodeIds: [], selectedRouteIds: [] }
+  }
+}

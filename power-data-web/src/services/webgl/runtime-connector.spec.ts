@@ -21,8 +21,8 @@ describe('网页图形受控连接器', () => {
     entryUrl: `${childOrigin}/index.html`,
     childOrigin,
     allowedParentOrigin: 'https://platform.example.com',
-    capabilities: ['init', 'dispose', 'focusNode', 'resize'],
-    eventCapabilities: ['ready', 'ack', 'commandResult', 'objectSelected', 'disposed'],
+    capabilities: ['init', 'dispose', 'focusNode', 'resize', 'switchScene', 'setNodeVisualState', 'setRouteFlow'],
+    eventCapabilities: ['ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'disposed'],
     resourceBudget: { initialMemoryMb: 128, maxConcurrentInstances: 1, cacheMode: 'versioned' },
   } as const satisfies WebglRuntimeRegistration
 
@@ -113,7 +113,7 @@ describe('网页图形受控连接器', () => {
 
     expect(statuses).toEqual(['handshaking', 'ready'])
     expect(connector.supportsCommand('focusNode')).toBe(true)
-    expect(connector.sendCommand('focusNode', { nodeId: 'unit.demo.1' })).toContain('instance-1-2')
+    expect(connector.sendCommand('focusNode', { sceneNodeId: 'unit.demo.1' })).toContain('instance-1-2')
     expect(childWindow.postMessage).toHaveBeenLastCalledWith(
       expect.objectContaining({ type: 'focusNode' }),
       childOrigin,
@@ -122,9 +122,31 @@ describe('网页图形受控连接器', () => {
     connector.forceDispose()
   })
 
-  it('超时命令仅使用同一请求标识重试一次，并清理待确认记录', () => {
+  /** 无效动作载荷不得创建待确认项；固定四态和路径开关通过后才允许送入受控 iframe。 */
+  it('在发送前拒绝无效场景动作并允许合法四态和路径命令', () => {
     const onCommandFailure = vi.fn()
     const { connector } = createReadyConnector(onCommandFailure)
+
+    expect(connector.sendCommand('focusNode', { nodeId: 'legacy-node' })).toBeUndefined()
+    expect(connector.sendCommand('setNodeVisualState', { sceneNodeId: 'node.demo.1', visualState: 'unexpected' })).toBeUndefined()
+    expect(connector.sendCommand('setRouteFlow', { routeId: 'route.demo.1', enabled: true })).toContain('instance-1-2')
+    expect(connector.sendCommand('setNodeVisualState', { sceneNodeId: 'node.demo.1', visualState: 'alarm' })).toContain('instance-1-3')
+    expect(onCommandFailure).toHaveBeenCalledTimes(2)
+    expect(onCommandFailure).toHaveBeenNthCalledWith(1, 'focusNode', expect.stringContaining('三维节点'))
+    expect(onCommandFailure).toHaveBeenNthCalledWith(2, 'setNodeVisualState', expect.stringContaining('四态'))
+
+    connector.forceDispose()
+  })
+
+  it('超时命令仅使用同一请求标识重试一次，并清理待确认记录', () => {
+    const onCommandFailure = vi.fn()
+    const onCommandCompleted = vi.fn()
+    const connector = new WebglRuntimeConnector(runtime, 'instance-1', { onCommandFailure, onCommandCompleted })
+    connector.startListening()
+    connector.attachChildWindow(childWindow as unknown as WindowProxy)
+    emit(readyEnvelope())
+    const initMessage = childWindow.postMessage.mock.calls[0]?.[0] as WebglMessageEnvelope
+    emit({ channel: WEBGL_PROTOCOL_CHANNEL, version: WEBGL_PROTOCOL_VERSION, instanceId: 'instance-1', messageId: 'ack-init', type: 'ack', payload: { requestId: initMessage.messageId, success: true }, timestamp: 2 })
     const commandId = connector.sendCommand('resize', { width: 800, height: 600 })
 
     vi.advanceTimersByTime(10_000)
@@ -134,6 +156,7 @@ describe('网页图形受控连接器', () => {
 
     vi.advanceTimersByTime(10_000)
     expect(onCommandFailure).toHaveBeenCalledWith('resize', expect.stringContaining('超时'))
+    expect(onCommandCompleted).toHaveBeenCalledWith({ command: 'resize', requestId: commandId, success: false })
 
     emit({
       channel: WEBGL_PROTOCOL_CHANNEL,
@@ -162,5 +185,41 @@ describe('网页图形受控连接器', () => {
 
     expect(onDisposed).toHaveBeenCalledWith(disposeRequestId)
     expect(childWindow.postMessage).toHaveBeenLastCalledWith(expect.objectContaining({ type: 'dispose' }), childOrigin)
+    // 即使已收到远端 disposed，也显式释放测试连接器，避免单例消息路由器保留上一个伪窗口订阅。
+    connector.forceDispose()
+  })
+
+  /** 场景切换必须先收到接收确认，再由同一 requestId、sceneId、transitionId 的进度与完成事件驱动最终结果。 */
+  it('仅将匹配原请求的合法场景进度和完成事件交给当前前端', () => {
+    const onSceneLoadProgress = vi.fn()
+    const onSceneChanged = vi.fn()
+    const onCommandCompleted = vi.fn()
+    const connector = new WebglRuntimeConnector(runtime, 'instance-1', { onSceneLoadProgress, onSceneChanged, onCommandCompleted })
+    connector.startListening()
+    connector.attachChildWindow(childWindow as unknown as WindowProxy)
+    emit(readyEnvelope())
+    const initMessage = childWindow.postMessage.mock.calls[0]?.[0] as WebglMessageEnvelope
+    emit({ channel: WEBGL_PROTOCOL_CHANNEL, version: WEBGL_PROTOCOL_VERSION, instanceId: 'instance-1', messageId: 'ack-init', type: 'ack', payload: { requestId: initMessage.messageId, success: true }, timestamp: 2 })
+
+    const requestId = connector.sendCommand('switchScene', {
+      sceneId: 'gas-power',
+      transitionId: 'transition-gas-1',
+      sceneMappingVersion: runtime.sceneMappingVersion,
+    })
+    emit({ channel: WEBGL_PROTOCOL_CHANNEL, version: WEBGL_PROTOCOL_VERSION, instanceId: 'instance-1', messageId: 'ack-switch', type: 'ack', payload: { requestId, success: true }, timestamp: 3 })
+
+    // 进度越界和旧事务不能进入回调；它们只记录为受限拒绝诊断。
+    emit({ channel: WEBGL_PROTOCOL_CHANNEL, version: WEBGL_PROTOCOL_VERSION, instanceId: 'instance-1', messageId: 'progress-invalid', type: 'sceneLoadProgress', payload: { requestId, sceneId: 'gas-power', transitionId: 'transition-gas-1', stageCode: 'loading-scene', progress: 1.2 }, timestamp: 4 })
+    emit({ channel: WEBGL_PROTOCOL_CHANNEL, version: WEBGL_PROTOCOL_VERSION, instanceId: 'instance-1', messageId: 'progress-old', type: 'sceneLoadProgress', payload: { requestId, sceneId: 'gas-power', transitionId: 'transition-old', stageCode: 'loading-scene', progress: 0.2 }, timestamp: 5 })
+    expect(onSceneLoadProgress).not.toHaveBeenCalled()
+
+    emit({ channel: WEBGL_PROTOCOL_CHANNEL, version: WEBGL_PROTOCOL_VERSION, instanceId: 'instance-1', messageId: 'progress-current', type: 'sceneLoadProgress', payload: { requestId, sceneId: 'gas-power', transitionId: 'transition-gas-1', stageCode: 'loading-scene', progress: 0.6 }, timestamp: 6 })
+    emit({ channel: WEBGL_PROTOCOL_CHANNEL, version: WEBGL_PROTOCOL_VERSION, instanceId: 'instance-1', messageId: 'changed-current', type: 'sceneChanged', payload: { requestId, sceneId: 'gas-power', transitionId: 'transition-gas-1', success: true }, timestamp: 7 })
+
+    expect(onSceneLoadProgress).toHaveBeenCalledWith(expect.objectContaining({ progress: 0.6 }), 'progress-current')
+    expect(onSceneChanged).toHaveBeenCalledWith(expect.objectContaining({ transitionId: 'transition-gas-1' }), 'changed-current')
+    expect(onCommandCompleted).toHaveBeenCalledWith({ command: 'switchScene', requestId, success: true })
+    expect(connector.getRejections()).toHaveLength(2)
+    connector.forceDispose()
   })
 })

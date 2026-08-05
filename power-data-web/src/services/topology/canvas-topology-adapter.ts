@@ -1,6 +1,6 @@
 import type { ProcessNodeId, RouteId } from '@/config/process/identifiers'
-import type { TopologyDefinition, TopologyEdgeDefinition, TopologyNodeDefinition } from '@/config/process/types'
-import { getTopologyIconUrl } from '@/services/topology/topology-icon-registry'
+import type { TopologyDefinition, TopologyDeviceStatus, TopologyEdgeDefinition, TopologyNodeDefinition } from '@/config/process/types'
+import { getTopologyIconUrl, MAXIMUM_TOPOLOGY_ICON_ASSETS } from '@/services/topology/topology-icon-registry'
 import type { TopologyRenderer } from '@/services/topology/topology-renderer'
 
 /** Canvas 绘制所需的缓存布局，命中测试直接复用，避免点击时再次遍历计算坐标。 */
@@ -16,6 +16,18 @@ interface NodeLayout {
 interface IconImageCacheEntry {
   image: HTMLImageElement
   status: 'loading' | 'ready' | 'error'
+}
+
+/**
+ * 单画布可保存的最小视图快照。
+ *
+ * 快照只包含缩放与平移数值，不包含 Canvas（画布）、图片、事件回调或拓扑配置；
+ * 因此多拓扑运行时可以在切换后恢复用户视图，同时不会把浏览器资源写入可序列化状态。
+ */
+export interface CanvasTopologyViewState {
+  zoom: number
+  offsetX: number
+  offsetY: number
 }
 
 /** 正交线路中的单个拐点；点序列支持多端口和多通道，避免固定四点折线被迫重叠。 */
@@ -78,6 +90,8 @@ const edgeColorByEvidence = {
   verified: '#22d3ee',
   'pending-confirmation': '#f59e0b',
   conceptual: '#64748b',
+  // 新清单未携带连线证据时使用中性灰，避免渲染器把未知关系伪装为任何已知业务语义。
+  unclassified: '#94a3b8',
 } as const
 
 const deviceStatusColor = {
@@ -103,6 +117,8 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
   private readonly nodeById = new Map<string, TopologyNodeDefinition>()
   private readonly selectedNodeIds = new Set<string>()
   private readonly selectedRouteIds = new Set<string>()
+  /** 实时状态覆盖值独立于拓扑定义；仅保存与配置状态不同的节点，容量天然受当前拓扑节点数限制。 */
+  private readonly nodeStatusOverrideById = new Map<ProcessNodeId, TopologyDeviceStatus>()
   private readonly layoutByNodeId = new Map<string, NodeLayout>()
   /** 连线路径只在拓扑定义或画布尺寸变化时重建，选中态重绘直接复用，避免重复分组排序。 */
   private readonly routeByEdgeId = new Map<string, EdgeRoute>()
@@ -130,6 +146,7 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
   public setTopology(topology: TopologyDefinition): void {
     this.topology = topology
     this.nodeById.clear()
+    this.nodeStatusOverrideById.clear()
     this.routeByEdgeId.clear()
     this.routesDirty = true
     this.routeLayoutVersion = -1
@@ -150,6 +167,40 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
     for (const routeId of routeIds) this.selectedRouteIds.add(routeId)
 
     this.scheduleDraw()
+  }
+
+  /**
+   * 使用不可变状态快照增量更新当前节点图元。
+   * 只遍历输入快照和已有覆盖项，不触碰节点索引、布局、路径缓存或 ResizeObserver（尺寸观察器），
+   * 同一动画帧内的多次更新仍由 scheduleDraw 合并为一次重绘。
+   */
+  public setNodeStatuses(statusByNodeId: ReadonlyMap<ProcessNodeId, TopologyDeviceStatus>): void {
+    if (!this.topology) return
+
+    let changed = false
+
+    // 先移除新快照未再声明的旧覆盖值，使节点安全回退到拓扑发布时的基线状态。
+    for (const nodeId of this.nodeStatusOverrideById.keys()) {
+      if (!statusByNodeId.has(nodeId)) {
+        this.nodeStatusOverrideById.delete(nodeId)
+        changed = true
+      }
+    }
+
+    // 每个输入节点仅常数时间查询配置索引和已有覆盖值，未知节点不会被缓存或触发全图扫描。
+    for (const [nodeId, nextStatus] of statusByNodeId) {
+      const configuredNode = this.nodeById.get(nodeId)
+      if (!configuredNode) continue
+
+      const currentStatus = this.nodeStatusOverrideById.get(nodeId) ?? configuredNode.deviceStatus
+      if (currentStatus === nextStatus) continue
+
+      if (nextStatus === configuredNode.deviceStatus) this.nodeStatusOverrideById.delete(nodeId)
+      else this.nodeStatusOverrideById.set(nodeId, nextStatus)
+      changed = true
+    }
+
+    if (changed) this.scheduleDraw()
   }
 
   /** 依据容器 CSS 尺寸重设画布；像素比上限为 2，避免高分屏无界放大内存。 */
@@ -213,6 +264,39 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
     return this.viewScale
   }
 
+  /**
+   * 返回当前视图的值副本，调用方无法通过修改返回对象影响画布。
+   * 该读取不触发绘制、布局或路径重建，供拓扑运行时在真正切换前保存活动视图。
+   */
+  public getViewState(): CanvasTopologyViewState {
+    return {
+      zoom: this.viewScale,
+      offsetX: this.viewOffsetX,
+      offsetY: this.viewOffsetY,
+    }
+  }
+
+  /**
+   * 恢复已保存的缩放和平移；即使上层误传非有限数值，也会回退到安全默认值。
+   * 平移重新按当前画布尺寸和缩放上限裁剪，避免旧拓扑在不同容器尺寸下把视图带到不可见区域。
+   */
+  public restoreViewState(state: CanvasTopologyViewState): void {
+    const requestedScale = Number.isFinite(state.zoom) ? state.zoom : 1
+    const nextScale = Math.min(this.maximumViewScale, Math.max(this.minimumViewScale, requestedScale))
+    const maximumOffsetX = this.width * nextScale
+    const maximumOffsetY = this.height * nextScale
+    const requestedOffsetX = Number.isFinite(state.offsetX) ? state.offsetX : 0
+    const requestedOffsetY = Number.isFinite(state.offsetY) ? state.offsetY : 0
+    const nextOffsetX = Math.min(maximumOffsetX, Math.max(-maximumOffsetX, requestedOffsetX))
+    const nextOffsetY = Math.min(maximumOffsetY, Math.max(-maximumOffsetY, requestedOffsetY))
+
+    if (nextScale === this.viewScale && nextOffsetX === this.viewOffsetX && nextOffsetY === this.viewOffsetY) return
+    this.viewScale = nextScale
+    this.viewOffsetX = nextOffsetX
+    this.viewOffsetY = nextOffsetY
+    this.scheduleDraw()
+  }
+
   /** 使用绘制期缓存的节点矩形完成命中测试，点击操作不触发布局或配置扫描。 */
   public pickNodeAt(x: number, y: number): ProcessNodeId | undefined {
     // Canvas 绘制以中心点缩放，命中坐标必须逆变换后才能复用逻辑布局缓存。
@@ -244,11 +328,20 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
     this.nodeById.clear()
     this.selectedNodeIds.clear()
     this.selectedRouteIds.clear()
+    this.nodeStatusOverrideById.clear()
     this.layoutByNodeId.clear()
     this.routeByEdgeId.clear()
     this.routesDirty = true
     this.routeLayoutVersion = -1
     this.iconImageByUrl.clear()
+    /*
+     * Canvas（画布）元素可能在 Vue（渐进式网页框架）卸载前短暂保留于 DOM（文档对象模型）。
+     * 主动归零内部像素缓冲可立即释放高分屏缓冲区；随后组件卸载移除元素，不会留下上一拓扑的大尺寸位图。
+     */
+    this.canvas.width = 0
+    this.canvas.height = 0
+    this.canvas.style.width = ''
+    this.canvas.style.height = ''
     this.viewScale = 1
     this.viewOffsetX = 0
     this.viewOffsetY = 0
@@ -378,10 +471,19 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
     const densestLayerCount = Math.max(1, ...countByLayer.values())
     // 密集层额外预留 2.4 个节点宽度作为间隔，优先保证同层设备卡片之间始终有可见留白。
     // 下限同步收窄，避免窄视口中七个现场设备再次挤压成连续块。
-    const nodeWidth = Math.min(118, Math.max(40, Math.floor(this.width / (densestLayerCount + 2.4))))
-    // 卡片高度必须小于相邻层节点的最小纵向距离，才能在固定视口内保留层间留白。
-    // 通过较小下限兼顾低高度容器，细节由容器内缩放功能补足。
-    const nodeHeight = Math.min(42, Math.max(28, Math.floor(this.height / 10.5)))
+    // 约 1000 像素以下的可视工作区都采用紧凑排版；五层拓扑在中等宽度下同样可能出现长中文截断。
+    const isCompactViewport = this.width < 1000
+    /*
+     * 窄屏时优先保证现场设备层的完整中文标签可读：七个节点在最小容器宽度内仍使用 64 像素卡片，
+     * 并收窄额外间隔而非继续压缩文本区。常规宽度沿用原有密度策略，避免大屏卡片无意义膨胀。
+     */
+    const layoutGapWeight = isCompactViewport ? 1.05 : 2.4
+    const minimumNodeWidth = isCompactViewport ? 64 : 40
+    const nodeWidth = Math.min(118, Math.max(minimumNodeWidth, Math.floor(this.width / (densestLayerCount + layoutGapWeight))))
+    // 紧凑视口允许四行八号字，故提高最小高度；层级坐标会在下方约束至可视区域，避免首末层裁切。
+    const nodeHeight = isCompactViewport
+      ? Math.min(42, Math.max(34, Math.floor(this.height / 8.5)))
+      : Math.min(42, Math.max(28, Math.floor(this.height / 10.5)))
     const layerLabelGutter = this.getLayerLabelGutter()
     const rightPadding = Math.max(14, Math.round(this.width * 0.02))
     // 节点横坐标只在层级标题右侧的内容区内映射，避免最低坐标设备侵入左侧导视文字。
@@ -389,8 +491,11 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
     const topologyContentWidth = Math.max(1, this.width - layerLabelGutter - rightPadding)
 
     for (const node of this.topology.nodes) {
-      const x = Math.round(layerLabelGutter + (node.x / 100) * topologyContentWidth - nodeWidth / 2)
-      const y = Math.round((node.y / 100) * this.height - nodeHeight / 2)
+      const requestedX = Math.round(layerLabelGutter + (node.x / 100) * topologyContentWidth - nodeWidth / 2)
+      const requestedY = Math.round((node.y / 100) * this.height - nodeHeight / 2)
+      // 顶层与现场层都采用中心坐标；限制卡片边界后可防止 y=8 和 y=94 的标签被 Canvas（画布）裁掉。
+      const x = Math.min(this.width - rightPadding - nodeWidth, Math.max(layerLabelGutter, requestedX))
+      const y = Math.min(this.height - nodeHeight, Math.max(0, requestedY))
       this.layoutByNodeId.set(node.nodeId, { node, x, y, width: nodeWidth, height: nodeHeight })
     }
   }
@@ -952,7 +1057,8 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
   private drawNode(context: CanvasRenderingContext2D, layout: NodeLayout): void {
     const isSelected = this.selectedNodeIds.has(layout.node.nodeId)
     const layerColor = this.getLayerColor(layout.node.layerId)
-    const statusColor = deviceStatusColor[layout.node.deviceStatus]
+    const deviceStatus = this.nodeStatusOverrideById.get(layout.node.nodeId) ?? layout.node.deviceStatus
+    const statusColor = deviceStatusColor[deviceStatus]
 
     context.save()
     if (isSelected) {
@@ -971,10 +1077,14 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
     context.fill()
     context.stroke()
 
-    const iconSize = Math.min(layout.height - 10, Math.max(18, Math.floor(layout.width * 0.3)))
-    const iconX = layout.x + 5
+    const isCompactViewport = this.width < 1000
+    // 窄屏图元同步缩小，为中文文本预留稳定宽度；状态圆点仍固定在右上角，不影响文本可读性。
+    const iconSize = isCompactViewport
+      ? Math.min(layout.height - 14, Math.max(14, Math.floor(layout.width * 0.24)))
+      : Math.min(layout.height - 10, Math.max(18, Math.floor(layout.width * 0.3)))
+    const iconX = layout.x + (isCompactViewport ? 4 : 5)
     const iconY = layout.y + (layout.height - iconSize) / 2
-    const image = this.getIconImage(layout.node)
+    const image = this.getIconImage(layout.node, deviceStatus)
 
     if (image) {
       context.drawImage(image, iconX, iconY, iconSize, iconSize)
@@ -994,22 +1104,27 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
     context.arc(layout.x + layout.width - 7, layout.y + 7, 4, 0, Math.PI * 2)
     context.fill()
     context.stroke()
-    this.drawNodeTitle(context, layout, iconX + iconSize + 4)
+    this.drawNodeTitle(context, layout, iconX + iconSize + (isCompactViewport ? 3 : 4))
     context.restore()
   }
 
-  /** 将中文设备名按可用像素宽度截断为最多两行，避免密集现场层在中窄屏相互覆盖。 */
+  /**
+   * 中文节点名按实测像素宽度换行：常规视口保留两行，窄屏改为四行紧凑排版。
+   * 这比根据字数裁切稳定，且不改变节点、设备或场景映射；只有超过四行承载能力时才显示省略号。
+   */
   private drawNodeTitle(context: CanvasRenderingContext2D, layout: NodeLayout, startX: number): void {
     const availableWidth = layout.x + layout.width - startX - 6
 
     if (availableWidth < 12) return
-    const fontSize = this.width < 640 ? 9 : 10
+    const isCompactViewport = this.width < 1000
+    const fontSize = isCompactViewport ? 8 : 10
+    const maxLines = isCompactViewport ? 4 : 2
     context.fillStyle = '#e2f7ff'
     context.font = `600 ${fontSize}px Microsoft YaHei, sans-serif`
     context.textAlign = 'left'
     context.textBaseline = 'middle'
-    const lines = this.wrapText(context, layout.node.title, availableWidth, 2)
-    const lineHeight = fontSize + 2
+    const lines = this.wrapText(context, layout.node.title, availableWidth, maxLines)
+    const lineHeight = isCompactViewport ? fontSize + 1 : fontSize + 2
     const firstLineY = layout.y + layout.height / 2 - ((lines.length - 1) * lineHeight) / 2
 
     for (let index = 0; index < lines.length; index += 1) {
@@ -1053,11 +1168,16 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
   }
 
   /** 通过受控图元键与设备状态取得图片；同一地址只加载一次，完成后合并为下一帧重绘。 */
-  private getIconImage(node: TopologyNodeDefinition): HTMLImageElement | undefined {
-    const iconUrl = getTopologyIconUrl(node.iconKey, node.deviceStatus)
+  private getIconImage(node: TopologyNodeDefinition, deviceStatus: TopologyDeviceStatus): HTMLImageElement | undefined {
+    const iconUrl = getTopologyIconUrl(node.iconKey, deviceStatus)
+
+    // 中性图元没有资源地址；直接使用既有轮廓占位，不能根据外部图元键推测或请求图片。
+    if (!iconUrl) return undefined
     const cached = this.iconImageByUrl.get(iconUrl)
 
     if (cached) return cached.status === 'ready' ? cached.image : undefined
+    // URL 只能来自冻结的“图元键 × 四态”登记表；仍保留显式上限，防御未来错误扩展造成图片缓存无界增长。
+    if (this.iconImageByUrl.size >= MAXIMUM_TOPOLOGY_ICON_ASSETS) return undefined
     const image = new Image()
     const entry: IconImageCacheEntry = { image, status: 'loading' }
     image.decoding = 'async'

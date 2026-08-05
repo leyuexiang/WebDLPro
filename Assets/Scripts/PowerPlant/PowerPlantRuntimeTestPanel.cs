@@ -21,18 +21,6 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
         "generator"
     };
 
-    private static readonly string[] RouteIds =
-    {
-        "route.exhaust-to-hrsg.1",
-        "route.exhaust-to-hrsg.2"
-    };
-
-    private static readonly string[] RouteLabels =
-    {
-        "管道 6：燃机排气→余热锅炉（1）",
-        "管道 9：燃机排气→余热锅炉（2）"
-    };
-
     [SerializeField] private PowerPlantProcessController _processController;
     [SerializeField] private UnityIframeBridgeManager _bridgeManager;
 
@@ -56,12 +44,9 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
     private bool _isolate = true;
     private string _unitId = "all";
     private string _nodeId = "node.gas-turbine.1";
-    private string _routeId = "route.exhaust-to-hrsg.1";
-    private float _flowSpeed = 1f;
     private string _lastResult = "尚未执行测试。";
     private Vector2 _scrollPosition;
     private Coroutine _autoTestRoutine;
-    private Coroutine _routeTestRoutine;
     private GUIStyle _titleStyle;
     private GUIStyle _sectionStyle;
     private int _messageSequence;
@@ -86,10 +71,8 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
         public string stepId;
         public string unitId;
         public string nodeId;
-        public string routeId;
         public bool isolate;
         public bool enabled;
-        public float speed;
         public float width;
         public float height;
     }
@@ -102,7 +85,6 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
     private void OnDisable()
     {
         StopAutoTest();
-        StopRouteTest();
     }
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
@@ -148,7 +130,6 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
 
         DrawProcessControls();
         DrawNodeControls();
-        DrawRouteControls();
         DrawBridgeControls();
 
         GUILayout.Space(4f);
@@ -244,141 +225,6 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
         GUILayout.EndHorizontal();
     }
 
-    private void DrawRouteControls()
-    {
-        GUILayout.Space(4f);
-        GUILayout.Label("管道路由测试", _sectionStyle);
-        GUILayout.BeginHorizontal();
-        GUILayout.Label("路由", GUILayout.Width(52f));
-        for (int index = 0; index < RouteIds.Length; index++)
-        {
-            if (GUILayout.Toggle(_routeId == RouteIds[index], $"管{(index < 7 ? index + 1 : 9)}", "Button", GUILayout.Width(42f)) && _routeId != RouteIds[index])
-            {
-                _routeId = RouteIds[index];
-            }
-        }
-        GUILayout.EndHorizontal();
-        GUILayout.Label(GetRouteLabel(_routeId));
-
-        GUILayout.BeginHorizontal();
-        GUILayout.Label("路由 ID", GUILayout.Width(52f));
-        _routeId = GUILayout.TextField(_routeId);
-        GUILayout.EndHorizontal();
-
-        GUILayout.BeginHorizontal();
-        if (GUILayout.Button("全部开启"))
-        {
-            SetAllRouteFlows(true);
-        }
-
-        if (GUILayout.Button("全部停止"))
-        {
-            SetAllRouteFlows(false);
-        }
-
-        if (GUILayout.Button("自动轮巡"))
-        {
-            if (_routeTestRoutine == null)
-            {
-                _routeTestRoutine = StartCoroutine(RunRouteTest());
-            }
-            else
-            {
-                StopRouteTest();
-                Report("已停止管道路由轮巡。");
-            }
-        }
-        GUILayout.EndHorizontal();
-
-        GUILayout.BeginHorizontal();
-        GUILayout.Label("速度", GUILayout.Width(52f));
-        string speedText = GUILayout.TextField(_flowSpeed.ToString("0.##"), GUILayout.Width(72f));
-        if (float.TryParse(speedText, out float speed) && speed > 0f)
-        {
-            _flowSpeed = speed;
-        }
-
-        if (GUILayout.Button("开启流动"))
-        {
-            RunNodeAction("开启路由", () => _processController.TrySetRouteFlow(_routeId, true, _flowSpeed, out string message), out string result);
-            Report(result);
-        }
-
-        if (GUILayout.Button("停止流动"))
-        {
-            RunNodeAction("停止路由", () => _processController.TrySetRouteFlow(_routeId, false, _flowSpeed, out string message), out string result);
-            Report(result);
-        }
-        GUILayout.EndHorizontal();
-    }
-
-    private void SetAllRouteFlows(bool enabled)
-    {
-        if (!EnsureProcessController())
-        {
-            return;
-        }
-
-        int successCount = 0;
-        for (int index = 0; index < RouteIds.Length; index++)
-        {
-            if (_processController.TrySetRouteFlow(RouteIds[index], enabled, _flowSpeed, out _))
-            {
-                successCount++;
-            }
-        }
-
-        Report(enabled
-            ? $"已开启 {successCount}/{RouteIds.Length} 条管道路由。"
-            : $"已停止 {successCount}/{RouteIds.Length} 条管道路由。");
-    }
-
-    private static string GetRouteLabel(string routeId)
-    {
-        for (int index = 0; index < RouteIds.Length; index++)
-        {
-            if (RouteIds[index] == routeId)
-            {
-                return RouteLabels[index];
-            }
-        }
-
-        return "自定义路由 ID";
-    }
-
-    private IEnumerator RunRouteTest()
-    {
-        if (!EnsureProcessController())
-        {
-            _routeTestRoutine = null;
-            yield break;
-        }
-
-        SetAllRouteFlows(false);
-        for (int index = 0; index < RouteIds.Length; index++)
-        {
-            _routeId = RouteIds[index];
-            bool success = _processController.TrySetRouteFlow(_routeId, true, _flowSpeed, out string message);
-            Report(success ? $"轮巡 {GetRouteLabel(_routeId)}：{message}" : $"轮巡失败 {GetRouteLabel(_routeId)}：{message}");
-            yield return new WaitForSecondsRealtime(_autoTestInterval);
-            _processController.TrySetRouteFlow(_routeId, false, _flowSpeed, out _);
-        }
-
-        _routeTestRoutine = null;
-        Report("管道路由轮巡完成，已停止全部流动效果。");
-    }
-
-    private void StopRouteTest()
-    {
-        if (_routeTestRoutine == null)
-        {
-            return;
-        }
-
-        StopCoroutine(_routeTestRoutine);
-        _routeTestRoutine = null;
-    }
-
     private void DrawBridgeControls()
     {
         GUILayout.Space(4f);
@@ -429,16 +275,6 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
         GUILayout.EndHorizontal();
 
         GUILayout.BeginHorizontal();
-        if (GUILayout.Button("路由流动"))
-        {
-            SendBridgeCommand("setRouteFlow", new TestBridgePayload { routeId = _routeId, enabled = true, speed = _flowSpeed });
-        }
-
-        if (GUILayout.Button("路由停止"))
-        {
-            SendBridgeCommand("setRouteFlow", new TestBridgePayload { routeId = _routeId, enabled = false, speed = _flowSpeed });
-        }
-
         if (GUILayout.Button("尺寸消息"))
         {
             SendBridgeCommand("resize", new TestBridgePayload { width = Screen.width, height = Screen.height });
