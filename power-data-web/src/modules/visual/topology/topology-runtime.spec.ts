@@ -54,14 +54,15 @@ function createRegistry(): TopologyRegistry {
 }
 
 /** 伪画布只记录受控调用次数，证明 prepare 不会创建或替换画布。 */
-function createCanvas(): TopologyCanvasPort & { setTopology: ReturnType<typeof vi.fn>; setSelection: ReturnType<typeof vi.fn>; setNodeStatuses: ReturnType<typeof vi.fn>; restoreViewState: ReturnType<typeof vi.fn>; dispose: ReturnType<typeof vi.fn> } {
+function createCanvas(): TopologyCanvasPort & { setTopology: ReturnType<typeof vi.fn>; setSelection: ReturnType<typeof vi.fn>; setNodeStatuses: ReturnType<typeof vi.fn>; getViewState: ReturnType<typeof vi.fn>; restoreViewState: ReturnType<typeof vi.fn>; dispose: ReturnType<typeof vi.fn> } {
   return {
     setTopology: vi.fn(),
     setSelection: vi.fn(),
     setNodeStatuses: vi.fn(),
+    getViewState: vi.fn(),
     restoreViewState: vi.fn(),
     dispose: vi.fn(),
-  } as unknown as TopologyCanvasPort & { setTopology: ReturnType<typeof vi.fn>; setSelection: ReturnType<typeof vi.fn>; setNodeStatuses: ReturnType<typeof vi.fn>; restoreViewState: ReturnType<typeof vi.fn>; dispose: ReturnType<typeof vi.fn> }
+  } as unknown as TopologyCanvasPort & { setTopology: ReturnType<typeof vi.fn>; setSelection: ReturnType<typeof vi.fn>; setNodeStatuses: ReturnType<typeof vi.fn>; getViewState: ReturnType<typeof vi.fn>; restoreViewState: ReturnType<typeof vi.fn>; dispose: ReturnType<typeof vi.fn> }
 }
 
 describe('单画布多拓扑运行时', () => {
@@ -131,6 +132,35 @@ describe('单画布多拓扑运行时', () => {
     runtime.dispose()
 
     expect(canvas.dispose).toHaveBeenCalledTimes(1)
+  })
+
+  it('切换拓扑后恢复原图的缩放、平移和稳定选择', () => {
+    const canvas = createCanvas()
+    const runtime = new TopologyRuntime(createRegistry(), canvas)
+    const sceneId = toSceneId('gas-power')
+    const overviewId = toTopologyId('gas-power.overview')
+    const detailId = toTopologyId('gas-power.detail')
+    const selectedNodeId = toNodeId('node.gas-turbine')
+
+    const overview = runtime.prepare(sceneId, overviewId, toTransitionId('transition-overview'))
+    expect(runtime.activate(overview!, toTransitionId('transition-overview'))).toBe(true)
+    runtime.setSelection([selectedNodeId], [])
+    // 模拟用户在唯一画布内缩放、平移；切图前运行时必须读取真实视口，而不能回退默认值。
+    canvas.getViewState.mockReturnValue({ zoom: 1.6, offsetX: 42, offsetY: -18 })
+
+    const detail = runtime.prepare(sceneId, detailId, toTransitionId('transition-detail'))
+    expect(runtime.activate(detail!, toTransitionId('transition-detail'))).toBe(true)
+    canvas.getViewState.mockReturnValue({ zoom: 1, offsetX: 0, offsetY: 0 })
+
+    const restoredOverview = runtime.prepare(sceneId, overviewId, toTransitionId('transition-restore-overview'))
+    expect(runtime.activate(restoredOverview!, toTransitionId('transition-restore-overview'))).toBe(true)
+    expect(canvas.restoreViewState).toHaveBeenLastCalledWith({
+      zoom: 1.6,
+      offsetX: 42,
+      offsetY: -18,
+      selectedNodeIds: [selectedNodeId],
+      selectedRouteIds: [],
+    })
   })
 
   it('设备状态只增量写入当前画布，保留选择、缩放与拓扑定义', () => {

@@ -99,6 +99,8 @@ function createCanvas(): TopologyCanvasPort {
     setSelection: vi.fn(),
     // 状态覆盖独立于原子切换事务；替身保留该端口，确保任务-029扩展不会让旧切换回归绕过类型边界。
     setNodeStatuses: vi.fn(),
+    // 原子切换会在替换拓扑前读取唯一画布的视口；默认 undefined 表示测试未模拟用户缩放或平移，运行时应回退缓存或默认视图。
+    getViewState: vi.fn().mockReturnValue(undefined),
     restoreViewState: vi.fn(),
     dispose: vi.fn(),
   }

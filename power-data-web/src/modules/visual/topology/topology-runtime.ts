@@ -12,6 +12,13 @@ export interface TopologyViewState {
   selectedRouteIds: readonly RouteId[]
 }
 
+/**
+ * 画布可读取的视口状态只包含缩放与平移，不携带选择。
+ * 选择属于拓扑运行时的稳定业务状态，必须继续由运行时缓存，避免画布适配器把旧画布的临时选中结果
+ * 作为新拓扑输入；切换前将这三个值与运行时缓存的选择合并，即可在复用唯一画布时完整恢复视图。
+ */
+export type TopologyViewportState = Pick<TopologyViewState, 'zoom' | 'offsetX' | 'offsetY'>
+
 /** 运行时已准备但尚未激活的轻量配置快照，不含任何隐藏画布或异步资源句柄。 */
 export interface PreparedTopology {
   sceneId: SceneId
@@ -27,6 +34,8 @@ export interface TopologyCanvasPort {
   setSelection(nodeIds: readonly NodeId[], routeIds: readonly RouteId[]): void
   /** 状态覆盖与选择、缩放、平移分离；实现方只能更新当前画布节点状态，不能替换拓扑定义。 */
   setNodeStatuses(statuses: ReadonlyMap<NodeId, DeviceVisualStatus>): void
+  /** 在替换拓扑定义前读取唯一画布的当前缩放和平移，供有限运行时缓存保存。 */
+  getViewState(): TopologyViewportState | undefined
   restoreViewState(state: TopologyViewState): void
   dispose(): void
 }
@@ -87,7 +96,7 @@ export class TopologyRuntime {
     if (!cached || cached.topologyVersion !== prepared.topologyVersion || cached.sceneId !== prepared.sceneId) return false
 
     const previousTopology = this.activeTopology
-    if (previousTopology) this.cacheViewState(previousTopology.topologyId, this.getDefaultViewState())
+    if (previousTopology) this.cacheActiveViewState(previousTopology.topologyId)
 
     try {
       this.canvas.setTopology(prepared.topology)
@@ -195,6 +204,20 @@ export class TopologyRuntime {
       if (!oldestTopologyId) break
       this.viewStateByTopologyId.delete(oldestTopologyId)
     }
+  }
+
+  /**
+   * 在 setTopology（设置拓扑）替换画布定义前保存当前视口。
+   * 画布仅是缩放和平移的事实来源，运行时缓存才是选择的事实来源；二者合并后写回有限 LRU（最近最少使用）
+   * 缓存，确保用户在多套拓扑之间往返时不会丢失视图，同时不创建第二个画布或额外状态容器。
+   */
+  private cacheActiveViewState(topologyId: TopologyId): void {
+    const cachedState = this.viewStateByTopologyId.get(topologyId) ?? this.getDefaultViewState()
+    const viewportState = this.canvas.getViewState()
+    this.cacheViewState(topologyId, {
+      ...cachedState,
+      ...(viewportState ?? {}),
+    })
   }
 
   /** 尽力恢复画布显示；该私有补偿不改变活动拓扑登记，成功与否都由 activate 的 false 交给事务层裁决。 */

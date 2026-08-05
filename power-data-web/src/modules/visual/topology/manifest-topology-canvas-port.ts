@@ -5,7 +5,7 @@ import { projectTopologyForCanvas } from '@/config/scene-topology/topology-canva
 import type { NodeId, RouteId } from '@/config/scene-topology/identifiers'
 import type { DeviceVisualStatus } from '@/config/scene-topology/types'
 import type { TopologyCanvasController } from '@/modules/visual/components/topology-canvas-controller'
-import type { TopologyCanvasPort, TopologyViewState } from '@/modules/visual/topology/topology-runtime'
+import type { TopologyCanvasPort, TopologyViewportState, TopologyViewState } from '@/modules/visual/topology/topology-runtime'
 
 /**
  * 正式场景拓扑运行时到既有单画布的受控适配端口。
@@ -52,6 +52,16 @@ export class ManifestTopologyCanvasPort implements TopologyCanvasPort {
       projectedStatuses.set(toProcessNodeId(String(nodeId)), deviceStatus)
     }
     this.onNodeStatusesChanged(projectedStatuses)
+  }
+
+  /**
+   * 读取唯一旧画布的真实缩放和平移，再投影为正式运行时的有限视口状态。
+   * 选择不从旧画布读取：它由 TopologyRuntime（拓扑运行时）按稳定节点和路径标识单独维护，
+   * 防止切换期间的迟到画布回调覆盖当前事务已经提交的选择。
+   */
+  public getViewState(): TopologyViewportState | undefined {
+    const state = this.canvas.getViewState()
+    return state ? { zoom: state.zoom, offsetX: state.offsetX, offsetY: state.offsetY } : undefined
   }
 
   /**
