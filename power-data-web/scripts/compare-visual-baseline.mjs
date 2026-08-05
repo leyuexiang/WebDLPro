@@ -2,6 +2,7 @@ import { access, readFile, stat, writeFile } from 'node:fs/promises'
 import { constants as fileSystemConstants } from 'node:fs'
 import path from 'node:path'
 import { decode, encode } from 'jpeg-js'
+import { isCrossPlatformAbsolutePath } from './workspace-path-safety.mjs'
 
 const maximumImageBytes = 25 * 1024 * 1024
 const maximumPixels = 12_000_000
@@ -52,13 +53,14 @@ function parseArguments(argumentsList) {
 
 /**
  * 所有图片路径必须是前端工作区内的相对 JPEG 路径。
- * 视觉比对只读取或输出明确声明的截图，禁止借由测试命令访问绝对路径或上级目录中的文件。
+ * 视觉比对只读取或输出明确声明的截图；绝对路径会按 Windows 与 POSIX 规则共同拒绝，
+ * 防止 Linux 持续集成将 C:/... 等外部路径误当相对路径后拼接到工作区内。
  */
 function resolveJpegPath(workspaceRoot, inputPath, optionName) {
-  if (path.isAbsolute(inputPath)) throw new Error(`${optionName}必须使用工作区内相对路径。`)
+  if (isCrossPlatformAbsolutePath(inputPath)) throw new Error(`${optionName}必须使用工作区内相对路径。`)
   const resolvedPath = path.resolve(workspaceRoot, inputPath)
   const relativePath = path.relative(workspaceRoot, resolvedPath)
-  if (!relativePath || relativePath === '..' || relativePath.startsWith(`..${path.sep}`) || path.isAbsolute(relativePath)) {
+  if (!relativePath || relativePath === '..' || relativePath.startsWith(`..${path.sep}`) || isCrossPlatformAbsolutePath(relativePath)) {
     throw new Error(`${optionName}必须指向工作区内文件。`)
   }
   if (!['.jpg', '.jpeg'].includes(path.extname(resolvedPath).toLowerCase())) {

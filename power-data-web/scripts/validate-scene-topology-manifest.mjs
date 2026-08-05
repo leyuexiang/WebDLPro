@@ -1,6 +1,7 @@
 import { access, readFile, writeFile } from 'node:fs/promises'
 import { constants as fileSystemConstants } from 'node:fs'
 import path from 'node:path'
+import { isCrossPlatformAbsolutePath } from './workspace-path-safety.mjs'
 import { createServer } from 'vite'
 
 /**
@@ -31,13 +32,14 @@ function parseArguments(argumentsList) {
 
 /**
  * 将用户输入路径收敛到工作区内部的相对路径。
- * 契约校验只读取和输出项目发布物，禁止通过绝对路径或父目录跳转访问工作区外部文件。
+ * 契约校验只读取和输出项目发布物；绝对路径会按 Windows 与 POSIX 规则共同拒绝，
+ * 避免 Linux 持续集成将 Windows 驱动器或网络共享路径误拼接为工作区内路径。
  */
 function resolveWorkspacePath(workspaceRoot, inputPath, optionName) {
-  if (path.isAbsolute(inputPath)) throw new Error(`${optionName}必须使用工作区内的相对路径。`)
+  if (isCrossPlatformAbsolutePath(inputPath)) throw new Error(`${optionName}必须使用工作区内的相对路径。`)
   const resolvedPath = path.resolve(workspaceRoot, inputPath)
   const relativePath = path.relative(workspaceRoot, resolvedPath)
-  if (!relativePath || relativePath.startsWith(`..${path.sep}`) || relativePath === '..' || path.isAbsolute(relativePath)) {
+  if (!relativePath || relativePath.startsWith(`..${path.sep}`) || relativePath === '..' || isCrossPlatformAbsolutePath(relativePath)) {
     throw new Error(`${optionName}必须指向工作区内的文件。`)
   }
   return { resolvedPath, relativePath: relativePath.split(path.sep).join('/') }
