@@ -1,4 +1,4 @@
-import { validateStableIdentifier } from '@/config/scene-topology/identifiers'
+import { isSceneId, validateStableIdentifier } from '@/config/scene-topology/identifiers'
 
 /** 网页图形通信的固定通道与协议版本；业务模块不能覆盖这些安全边界。 */
 export const WEBGL_PROTOCOL_CHANNEL = 'power3d-unity' as const
@@ -58,16 +58,20 @@ export interface WebglRequestAcknowledgementPayload {
   message?: string
   errorCode?: string
   sceneState?: string
+  /** 仅场景切换失败但 Unity 已自动恢复旧场景时出现，表示恢复后的新物理场景实例。 */
+  sceneActivationId?: string
 }
 
 /**
- * 场景切换命令载荷同时绑定目标场景、外层已生成的切换事务与场景映射版本。
+ * 场景切换命令载荷同时绑定目标场景、外层已生成的切换事务、场景映射版本与物理重载语义。
  * 协议版本由信封的 version 表达；映射版本单独校验，避免同一协议下新旧场景目录混用。
  */
 export interface WebglSwitchScenePayload {
   sceneId: string
   transitionId: string
   sceneMappingVersion: string
+  /** 为 true 时禁止 Unity 使用同场景快速完成路径，必须卸载并重建物理场景实例。 */
+  forceReload: boolean
 }
 
 /**
@@ -82,19 +86,30 @@ export interface WebglEnterProcessStepPayload {
   isolate: boolean
 }
 
-/** 聚焦和显隐都使用独立的三维节点标识，禁止误把二维 nodeId 透传给 Unity。 */
-export interface WebglSceneNodeCommandPayload {
+/**
+ * 聚焦命令同时携带三维节点、选择事务和明确隔离开关。
+ * Unity 使用 selectionId（选择标识）进行幂等处理；它不能由消息标识或场景切换事务隐式替代。
+ */
+export interface WebglFocusNodePayload {
   sceneNodeId: string
-  isolate?: boolean
+  selectionId: string
+  isolate: boolean
 }
 
 /** 与拓扑状态保持一致的四态字符串；浏览器端和 Unity 端均拒绝未知状态。 */
 export type WebglNodeVisualState = 'normal' | 'alarm' | 'fault' | 'offline'
 
-/** 设备状态增量只指定映射节点和固定四态，具体材质或材质属性由 Unity 场景控制器内部决定。 */
+/**
+ * 设备状态增量只指定映射节点、固定四态和规范化因果二元组，具体材质由 Unity 场景控制器内部决定。
+ * `hasSourceRevision + sourceRevision` 始终同时发送：前者区分外层未提供修订号与显式修订号零，后者只在
+ * 相同状态时间下裁决新旧；这样不会把父页面其他业务字段或任意渲染参数暴露给 Unity。
+ */
 export interface WebglSetNodeVisualStatePayload {
   sceneNodeId: string
   visualState: WebglNodeVisualState
+  statusUpdatedAt: string
+  hasSourceRevision: boolean
+  sourceRevision: number
 }
 
 /** 路径动作仅允许受控路径标识与开关值；速度、着色器与资源参数不得由网页下发。 */
@@ -129,15 +144,22 @@ export interface WebglSceneChangedPayload {
   requestId: string
   sceneId: string
   transitionId: string
+  /** Unity 每次真实提交或恢复业务场景时生成的新实例标识；同场景拓扑切换保持不变。 */
+  sceneActivationId: string
   success: true
   sceneState?: string
 }
 
-/** 对象选中事件只传回稳定业务节点标识和可选场景状态，不传 Unity 层级或任意对象引用。 */
+/**
+ * 对象选中事件只传回场景、稳定三维节点和物理场景激活标识，不传名称、状态、层级或任意对象引用。
+ * `sceneActivationId`（物理场景激活标识）用于阻断“场景 A → B → 场景 A”中的首个 A 迟到事件；
+ * 它与普通 `transitionId`（视图切换事务标识）不同，同场景拓扑切换不会改变它。二维 `nodeId`
+ * （拓扑节点标识）仍只能由前端通过已发布设备映射反查，禁止 Unity 隐式写入或互换。
+ */
 export interface WebglObjectSelectedPayload {
-  nodeId: string
-  nodeName?: string
-  sceneState?: string
+  sceneId: string
+  sceneNodeId: string
+  sceneActivationId: string
 }
 
 /** 统一信封将通道、版本、实例、消息、类型、载荷和时间戳绑定，避免跨 iframe 与跨版本串扰。 */
@@ -228,10 +250,16 @@ export function isWebglReadyPayload(value: unknown): value is WebglReadyPayload 
 
 /** 确认、结果和释放事件都必须携带原命令标识，以安全地从有限待确认表中移除。 */
 export function isWebglRequestAcknowledgementPayload(value: unknown): value is WebglRequestAcknowledgementPayload {
-  return Boolean(value && typeof value === 'object' && typeof (value as Record<string, unknown>).requestId === 'string')
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return isBoundedIdentifier(candidate.requestId) &&
+    (candidate.sceneActivationId === undefined || (
+      isBoundedIdentifier(candidate.sceneActivationId) &&
+      validateStableIdentifier(candidate.sceneActivationId).length === 0
+    ))
 }
 
-/** 验证 switchScene 的稳定标识与映射版本；空标识不得进入受控 iframe 命令通道。 */
+/** 验证 switchScene 的稳定标识、映射版本和明确重载开关；缺省布尔值不得跨协议边界。 */
 export function isWebglSwitchScenePayload(value: unknown): value is WebglSwitchScenePayload {
   if (!value || typeof value !== 'object') return false
 
@@ -239,7 +267,8 @@ export function isWebglSwitchScenePayload(value: unknown): value is WebglSwitchS
   return (
     isBoundedIdentifier(candidate.sceneId) &&
     isBoundedIdentifier(candidate.transitionId) &&
-    isBoundedIdentifier(candidate.sceneMappingVersion)
+    isBoundedIdentifier(candidate.sceneMappingVersion) &&
+    typeof candidate.forceReload === 'boolean'
   )
 }
 
@@ -256,21 +285,30 @@ export function isWebglEnterProcessStepPayload(value: unknown): value is WebglEn
   )
 }
 
-/** 验证聚焦载荷中的三维节点标识，避免把空值或二维 nodeId 作为隐式兼容输入。 */
-export function isWebglSceneNodeCommandPayload(value: unknown): value is WebglSceneNodeCommandPayload {
+/** 验证聚焦载荷的三维节点、选择标识和隔离开关，缺失字段不能进入 Unity 幂等执行链。 */
+export function isWebglFocusNodePayload(value: unknown): value is WebglFocusNodePayload {
   if (!value || typeof value !== 'object') return false
 
   const candidate = value as Record<string, unknown>
   return isBoundedIdentifier(candidate.sceneNodeId) &&
-    (candidate.isolate === undefined || typeof candidate.isolate === 'boolean')
+    isBoundedIdentifier(candidate.selectionId) &&
+    typeof candidate.isolate === 'boolean'
 }
 
-/** 验证四态视觉更新，状态值必须是有限枚举而非可写材质或颜色。 */
+/**
+ * 验证四态视觉更新。修订号二元组必须完整且无歧义：未提供修订时固定为 false/0，提供时为 true/非负安全整数。
+ * 这让 Unity 的 JsonUtility 即使把缺失数值初始化为零，也不能把“缺失”和“显式修订零”混为同一语义。
+ */
 export function isWebglSetNodeVisualStatePayload(value: unknown): value is WebglSetNodeVisualStatePayload {
   if (!value || typeof value !== 'object') return false
 
   const candidate = value as Record<string, unknown>
-  return isBoundedIdentifier(candidate.sceneNodeId) && isWebglNodeVisualState(candidate.visualState)
+  return isBoundedIdentifier(candidate.sceneNodeId) &&
+    isWebglNodeVisualState(candidate.visualState) &&
+    isWebglStatusUpdatedAt(candidate.statusUpdatedAt) &&
+    typeof candidate.hasSourceRevision === 'boolean' &&
+    isNonNegativeSafeInteger(candidate.sourceRevision) &&
+    (candidate.hasSourceRevision || candidate.sourceRevision === 0)
 }
 
 /** 验证路径流动命令；只允许稳定路径标识与布尔开关。 */
@@ -318,18 +356,30 @@ export function isWebglSceneChangedPayload(value: unknown): value is WebglSceneC
     isBoundedIdentifier(candidate.requestId) &&
     isBoundedIdentifier(candidate.sceneId) &&
     isBoundedIdentifier(candidate.transitionId) &&
+    isBoundedIdentifier(candidate.sceneActivationId) &&
+    validateStableIdentifier(candidate.sceneActivationId).length === 0 &&
     candidate.success === true &&
     (candidate.sceneState === undefined || typeof candidate.sceneState === 'string')
   )
 }
 
-/** 对象选中事件必须提供稳定节点标识；缺失节点标识的事件不允许联动二维拓扑和详情。 */
+/**
+ * 对象选中事件必须提供固定目录内的场景标识、稳定三维节点标识与物理激活标识；缺失、混入旧字段
+ * 或误传二维节点标识的事件不允许联动二维拓扑和详情。
+ * 此处不保留旧 `nodeId`（二维节点标识）兼容分支，避免旧 Unity 构建在未完成协议升级时被误解释为三维选择。
+ */
 export function isWebglObjectSelectedPayload(value: unknown): value is WebglObjectSelectedPayload {
   if (!value || typeof value !== 'object') return false
   const candidate = value as Record<string, unknown>
-  // 三维反向选择会以 nodeId 映射正式 sceneNodeId（三维节点标识），因此此处必须与清单标识规则一致；
-  // 不接受对象名称、层级路径、空格或超长字符串，避免其进入选择诊断、状态仓库和外层事件。
-  return isBoundedIdentifier(candidate.nodeId) && validateStableIdentifier(candidate.nodeId).length === 0
+  // 协议升级后只接受这三个字段。拒绝对象名称、场景状态、层级路径、旧二维字段和任意扩展字段，
+  // 避免旧构建或不可信子页面把未经映射的数据带入诊断、状态仓库或外层事件。
+  const allowedKeys = new Set(['sceneId', 'sceneNodeId', 'sceneActivationId'])
+  return isSceneId(candidate.sceneId) &&
+    isBoundedIdentifier(candidate.sceneNodeId) &&
+    validateStableIdentifier(candidate.sceneNodeId).length === 0 &&
+    isBoundedIdentifier(candidate.sceneActivationId) &&
+    validateStableIdentifier(candidate.sceneActivationId).length === 0 &&
+    Object.keys(candidate).every((key) => allowedKeys.has(key))
 }
 
 /**
@@ -352,9 +402,22 @@ function isBoundedIdentifier(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.length <= 128
 }
 
+/**
+ * 内层状态时间沿用外层的受限 ISO 语义：只允许有界、可解析的时间文本。
+ * 此处不接受数值秒数或任意日期对象，确保 iframe 消息可序列化、可比较且不会成为绕过字段校验的旁路。
+ */
+function isWebglStatusUpdatedAt(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= 128 && Number.isFinite(Date.parse(value))
+}
+
 /** 统一识别四态，避免各调用方各自维护字符串集合而导致跨端协议漂移。 */
 function isWebglNodeVisualState(value: unknown): value is WebglNodeVisualState {
   return value === 'normal' || value === 'alarm' || value === 'fault' || value === 'offline'
+}
+
+/** 来源修订号与外层协议共用 JavaScript 安全整数边界，避免跨语言传输后发生精度截断。 */
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
 }
 
 /** 场景加载生命周期只允许协调器实际产生的固定阶段，未知阶段不能影响宿主进度展示。 */

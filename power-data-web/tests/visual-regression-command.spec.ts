@@ -4,11 +4,12 @@ import { describe, expect, it } from 'vitest'
 
 const commandPath = 'scripts/compare-visual-baseline.mjs'
 const standardBaselinePath = 'tests/visual-regression/baselines/double-container-1280x720.jpg'
-const ultraWideBaselinePath = 'tests/visual-regression/baselines/double-container-3440x1440.jpg'
+const minimumBaselinePath = 'tests/visual-regression/baselines/double-container-600x600.jpg'
 
 /**
  * 视觉比对只通过真实命令入口测试，确保参数限制、JPEG 解码、有限 JSON（JavaScript对象表示法）报告和退出码保持一致。
- * 差异图用例只创建并删除自己的固定隐藏临时文件；两个已提交基准分别用于同图通过和尺寸不一致失败。
+ * 差异图用例只创建并删除自己的固定隐藏临时文件；两个实际尺寸已核验的已提交基准
+ * 分别用于同图通过和尺寸不一致失败，测试不再依赖曾被错误标记为3440×1440的裁剪图片。
  */
 function runVisualComparison(argumentsList: string[]): { status: number | null; stdout: string; stderr: string } {
   try {
@@ -58,8 +59,8 @@ describe('双容器视觉基准比对命令', () => {
     }
   })
 
-  it('尺寸不同的带鱼屏截图必须以非零退出码失败', () => {
-    const result = runVisualComparison(['--baseline', standardBaselinePath, '--actual', ultraWideBaselinePath])
+  it('尺寸不同的最小画布截图必须以非零退出码失败', () => {
+    const result = runVisualComparison(['--baseline', standardBaselinePath, '--actual', minimumBaselinePath])
     const report = JSON.parse(result.stdout) as { status: string; comparison: { compatible: boolean; changedPixelRatio: number } }
 
     expect(result.status).toBe(1)

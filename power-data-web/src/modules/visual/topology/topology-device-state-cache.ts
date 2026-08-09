@@ -12,6 +12,18 @@ export interface TopologyDeviceStateUpdate {
   statusUpdatedAt: string
 }
 
+/**
+ * 本次真正变化且属于当前 Unity 场景的三维状态投影。
+ * `statusUpdatedAt` 已在缓存层完成解析并规范化为 UTC ISO 时间；可选来源修订号与时间共同组成因果顺序，
+ * 用于任务-038在相同业务时间下仍能识别更高修订。该投影不是原始父页面对象，也不会包含设备名称、
+ * Unity 层级或任意附加字段。
+ */
+export interface TopologySceneNodeVisualStateUpdate {
+  visualState: DeviceVisualStatus
+  statusUpdatedAt: string
+  sourceRevision?: number
+}
+
 /** 单次批量更新可附带来源修订号，用于在同一时间戳下稳定拒绝重复或旧来源重放。 */
 export interface TopologyDeviceStateBatch {
   sourceRevision?: number
@@ -26,12 +38,16 @@ export interface TopologyDeviceStateApplyResult {
   invalidTimestampDeviceIds: readonly DeviceId[]
   activeTopologyNodeStatuses: ReadonlyMap<NodeId, DeviceVisualStatus>
   activeSceneNodeStatuses: ReadonlyMap<SceneNodeId, DeviceVisualStatus>
+  /** 仅包含当前批次新接受的、映射到当前 Unity 场景的节点增量，供动画帧合并下发使用。 */
+  activeSceneNodeStateUpdates: ReadonlyMap<SceneNodeId, TopologySceneNodeVisualStateUpdate>
 }
 
 /** 最近设备状态仅用于时间比较与被淘汰快照的按需恢复，不保存外层消息或任意设备对象。 */
 interface CachedDeviceState {
   deviceStatus: DeviceVisualStatus
   updatedAtMilliseconds: number
+  /** 规范化后的 UTC 时间只为三维端防止迟到回包覆盖服务，不保存父页面原始时间文本。 */
+  statusUpdatedAt: string
   sourceRevision?: number
 }
 
@@ -92,7 +108,8 @@ export class TopologyDeviceStateCache {
       }
 
       const current = latestItemByDeviceId.get(item.deviceId)
-      // Map 覆盖保留数组中的最后一项，满足“同一帧同一设备只保留最新值”；相同时间使用后项作为本批最终状态。
+      // Map 覆盖保留输入批次中的最后一项，确保同批同设备只进入一次映射更新；
+      // 同一动画帧内的多次画布绘制由 CanvasTopologyAdapter 继续合并，避免在状态缓存层重复持有帧调度器。
       if (!current || updatedAtMilliseconds >= current.updatedAtMilliseconds) {
         latestItemByDeviceId.set(item.deviceId, { item, updatedAtMilliseconds })
       }
@@ -101,6 +118,7 @@ export class TopologyDeviceStateCache {
     const acceptedDeviceIds: DeviceId[] = []
     const outdatedDeviceIds: DeviceId[] = []
     const unmappedDeviceIds: DeviceId[] = []
+    const activeSceneNodeStateUpdates = new Map<SceneNodeId, TopologySceneNodeVisualStateUpdate>()
 
     for (const [deviceId, candidate] of latestItemByDeviceId) {
       const previous = this.latestStateByDeviceId.get(deviceId)
@@ -119,10 +137,13 @@ export class TopologyDeviceStateCache {
       const state: CachedDeviceState = {
         deviceStatus: normalizeDeviceVisualStatus(candidate.item.deviceStatus),
         updatedAtMilliseconds: candidate.updatedAtMilliseconds,
+        // 统一输出 UTC ISO 时间，避免同一时刻的多种时区写法在后续内层协议中形成不必要的字符串差异。
+        statusUpdatedAt: new Date(candidate.updatedAtMilliseconds).toISOString(),
         ...(batch.sourceRevision !== undefined ? { sourceRevision: batch.sourceRevision } : {}),
       }
       this.cacheDeviceState(deviceId, state)
       this.applyMappedDeviceState(deviceId, state.deviceStatus)
+      this.collectActiveSceneNodeStateUpdate(deviceId, state, activeSceneNodeStateUpdates)
       acceptedDeviceIds.push(deviceId)
     }
 
@@ -133,6 +154,7 @@ export class TopologyDeviceStateCache {
       invalidTimestampDeviceIds,
       activeTopologyNodeStatuses: this.getActiveTopologyNodeStatuses(),
       activeSceneNodeStatuses: this.getActiveSceneNodeStatuses(),
+      activeSceneNodeStateUpdates,
     }
   }
 
@@ -185,6 +207,30 @@ export class TopologyDeviceStateCache {
       sceneSnapshot.set(mapping.sceneNodeId, deviceStatus)
       this.touchSceneSnapshot(mapping.sceneId, sceneSnapshot)
     }
+  }
+
+  /**
+   * 只投影本批已接受设备在当前活动场景中的显式三维节点。
+   * 同一节点若被两个正式设备映射命中（发布校验通常会阻止此配置），仍按较新的时间保留最终状态，
+   * 使后续动画帧合并始终是确定性的常数时间覆盖而不是依赖遍历顺序的猜测。
+   */
+  private collectActiveSceneNodeStateUpdate(
+    deviceId: DeviceId,
+    state: CachedDeviceState,
+    target: Map<SceneNodeId, TopologySceneNodeVisualStateUpdate>,
+  ): void {
+    const mapping = this.registry.getDeviceMapping(deviceId)
+    if (!mapping || mapping.sceneId !== this.activeSceneId || !mapping.sceneNodeId) return
+
+    const previous = target.get(mapping.sceneNodeId)
+    if (previous && Date.parse(previous.statusUpdatedAt) > state.updatedAtMilliseconds) return
+
+    target.set(mapping.sceneNodeId, {
+      visualState: state.deviceStatus,
+      statusUpdatedAt: state.statusUpdatedAt,
+      // 来源修订号只在父页面显式提供且已通过缓存时序校验后透传；缺失时保持可选兼容语义。
+      ...(state.sourceRevision !== undefined ? { sourceRevision: state.sourceRevision } : {}),
+    })
   }
 
   /**
@@ -304,12 +350,22 @@ export class TopologyDeviceStateCache {
     this.evictSnapshot(this.sceneNodeStatusesBySceneId, this.maximumSceneSnapshots, this.activeSceneId)
   }
 
-  /** 淘汰最早的非活动快照；若容量为一且唯一条目正是活动项，则保留该项而不破坏当前可见状态。 */
+  /**
+   * 淘汰最早的非活动快照；若容量为一且唯一条目正是活动项，则保留该项而不破坏当前可见状态。
+   * 直接遍历 Map（映射）迭代器，不为最多八项的淘汰路径创建临时键数组，避免高频状态流产生无意义短命对象。
+   */
   private evictSnapshot<TKey, TValue>(cache: Map<TKey, TValue>, maximumSize: number, protectedKey: TKey | undefined): void {
     while (cache.size > maximumSize) {
-      const keyToDelete = [...cache.keys()].find((key) => key !== protectedKey)
-      if (keyToDelete === undefined) return
-      cache.delete(keyToDelete)
+      let deleted = false
+
+      for (const key of cache.keys()) {
+        if (key === protectedKey) continue
+        cache.delete(key)
+        deleted = true
+        break
+      }
+
+      if (!deleted) return
     }
   }
 }

@@ -35,6 +35,12 @@ export class UnityObjectSelectionCoordinator {
       return undefined
     }
     if (this.handledIncomingMessageIds.has(incomingMessageId)) return undefined
+    /*
+     * 基础消息标识合法后立即登记，而不是等映射成功才登记。
+     * 无映射、上下文失配和旧实例事件同样是“已处理”的输入：允许它们重放会反复制造诊断，
+     * 且可能在新稳定上下文出现后把旧选择误当成可重试业务意图。
+     */
+    this.rememberIncomingMessageId(incomingMessageId)
     const correlationId = this.createCorrelationId()
 
     const snapshot = this.facade.getSnapshot()
@@ -48,12 +54,24 @@ export class UnityObjectSelectionCoordinator {
       this.recordDiagnostic('unity.selection.topology.mismatch', correlationId)
       return undefined
     }
-    if (validateStableIdentifier(selection.payload.nodeId).length > 0) {
+    // Unity 自报场景必须与当前稳定上下文一致。场景切换后的迟到事件不能借用新上下文解析同名三维节点。
+    if (selection.payload.sceneId !== context.sceneId) {
+      this.recordDiagnostic('unity.selection.scene.mismatch', correlationId)
+      return undefined
+    }
+    // 场景名称相同不足以证明来自同一个 Unity 实例：A→B→A 的首个 A 迟到事件必须被精确阻断。
+    if (!snapshot.sceneActivationId || selection.payload.sceneActivationId !== snapshot.sceneActivationId) {
+      this.recordDiagnostic('unity.selection.activation.mismatch', correlationId)
+      return undefined
+    }
+    if (validateStableIdentifier(selection.payload.sceneNodeId).length > 0) {
       this.recordDiagnostic('unity.selection.node.invalid', correlationId)
       return undefined
     }
 
-    const sceneNodeId = toSceneNodeId(selection.payload.nodeId)
+    // 协议字段已经明确为三维节点标识，只做受检字符串到品牌类型的转换；
+    // 绝不从二维 nodeId（拓扑节点标识）、对象名称或层级路径推导三维目标。
+    const sceneNodeId = toSceneNodeId(selection.payload.sceneNodeId)
     const mapping = this.registry.getDeviceMappingForSceneNode(context.sceneId, sceneNodeId)
     if (!mapping) {
       this.recordDiagnostic('unity.selection.mapping.missing', correlationId)
@@ -93,7 +111,6 @@ export class UnityObjectSelectionCoordinator {
 
     // 同一场景的唯一画布只更新选择增量；不会重建拓扑、发起聚焦命令或影响设备状态快照。
     this.topologyRuntime.setSelection(nodeIds, routeIds)
-    this.rememberIncomingMessageId(incomingMessageId)
     return {
       sceneId: context.sceneId,
       sceneNodeId,

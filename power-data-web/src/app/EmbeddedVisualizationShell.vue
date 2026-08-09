@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, provide, ref, shallowRef, watch } from 'vue'
 import { readDeploymentConfiguration } from '@/config/deployment/deployment-config'
+import { toSceneId, toTransitionId } from '@/config/scene-topology/identifiers'
 import { createEmbeddedShellCorrelationId, createEmbeddedShellDiagnostic } from '@/app/embedded-shell-diagnostics'
 import { RemoteSceneTopologyManifestLoader, type SceneTopologyManifestRequestFailureCode } from '@/config/scene-topology/remote-manifest-loader'
 import type { SceneTopologyManifest } from '@/config/scene-topology/types'
@@ -18,6 +19,7 @@ import { getVisualizationTransitionOverlayState } from '@/modules/visual/orchest
 import { ViewOpenTransactionHandler } from '@/modules/visual/orchestration/view-open-transaction-handler'
 import { WorkflowTriggerTransactionHandler } from '@/modules/visual/orchestration/workflow-trigger-transaction-handler'
 import { WorkflowTriggerTransactionRouter } from '@/modules/visual/orchestration/workflow-trigger-transaction-router'
+import { shouldInstallWorkflowTrigger } from '@/modules/visual/orchestration/workflow-trigger-capability'
 import { DeviceStatesUpdateCoordinator } from '@/modules/visual/orchestration/device-states-update-coordinator'
 import { UnityObjectSelectionCoordinator } from '@/modules/visual/orchestration/unity-object-selection-coordinator'
 import { VisualizationRuntimeViewOpenPort } from '@/modules/visual/runtime/visualization-runtime-view-open-port'
@@ -46,6 +48,8 @@ const topologyRuntime = shallowRef<TopologyRuntime | undefined>()
 let hostRuntimeComposition: HostRuntimeComposition | undefined
 /** 三维反向选择订阅只在组合根存在期间保留；壳层释放时必须解除，不能让旧 Unity 回调存活。 */
 let unsubscribeUnityObjectSelected: (() => void) | undefined
+/** 跨场景加载反馈只在壳层存在期间订阅；卸载时撤销，避免旧 Unity 事件更新新壳。 */
+let unsubscribeUnitySceneLoadProgress: (() => void) | undefined
 /** 反向选择协调器保留至壳层卸载，以便释放其固定容量去重表。 */
 let unityObjectSelectionCoordinator: UnityObjectSelectionCoordinator | undefined
 
@@ -78,6 +82,7 @@ const transitionOverlay = computed(() => getVisualizationTransitionOverlayState(
   targetSceneId: visualizationStore.targetSceneId,
   targetTopologyId: visualizationStore.targetTopologyId,
   runtimeStatus: visualizationStore.runtimeStatus,
+  sceneLoadProgress: visualizationStore.sceneLoadProgress,
 }))
 
 /**
@@ -248,26 +253,21 @@ function startHostRuntimeCompositionIfReady(): void {
     new VisualizationRuntimeViewOpenPort(runtimeHost),
     visualizationCoordinatorFacade,
   )
-  /** 同场景流程触发只复用上方同一个原子切换处理器；它不会取得运行时宿主的 release 或 iframe 访问权。 */
-  const sameSceneWorkflowTrigger = new WorkflowTriggerTransactionHandler(
-    registry,
-    viewOpen,
-    visualizationCoordinatorFacade,
-  )
-  /** 跨场景流程动作使用相同原子处理器，但范围校验独立，避免同场景失败策略错误应用于跨场景物理回退。 */
-  const crossSceneWorkflowTrigger = new WorkflowTriggerTransactionHandler(
-    registry,
-    viewOpen,
-    visualizationCoordinatorFacade,
-    'cross-scene',
-  )
-  /** 路由只读取显式动作目标和当前稳定场景，真正的参数、事务和失败校验仍由范围处理器完成。 */
-  const workflowTrigger = new WorkflowTriggerTransactionRouter(
-    registry,
-    visualizationCoordinatorFacade,
-    sameSceneWorkflowTrigger,
-    crossSceneWorkflowTrigger,
-  )
+  /*
+   * 只有清单实际登记动作时，才构造流程路由并向外层组合根注入能力。
+   * 空动作清单（如当前燃气联调发布包）保留 view.open 和状态能力，但不会错误发布
+   * `workflow.trigger`，从握手阶段阻止“已声明、却没有任何可执行动作”的伪能力。
+   */
+  const workflowTrigger = shouldInstallWorkflowTrigger(manifest)
+    ? new WorkflowTriggerTransactionRouter(
+      registry,
+      visualizationCoordinatorFacade,
+      // 同场景流程触发只复用同一个原子切换处理器；它不会取得运行时宿主的 release 或 iframe 访问权。
+      new WorkflowTriggerTransactionHandler(registry, viewOpen, visualizationCoordinatorFacade),
+      // 跨场景流程动作的范围校验独立，避免同场景失败策略错误应用于跨场景物理回退。
+      new WorkflowTriggerTransactionHandler(registry, viewOpen, visualizationCoordinatorFacade, 'cross-scene'),
+    )
+    : undefined
   /**
    * 批量状态协调器复用已经就绪的唯一拓扑运行时与 Unity 宿主端口。
    * 它不会创建第二画布或第二 Unity 实例；未协商四态能力时由协调器返回受控失败并记录有限摘要。
@@ -299,6 +299,19 @@ function startHostRuntimeCompositionIfReady(): void {
     const selected = unityObjectSelectionCoordinator?.resolve(selection)
     if (selected) composition?.reportSceneObjectSelected(selected)
   })
+  /**
+   * Unity 加载反馈已经由内层连接器按来源、原请求、场景、事务和数值范围校验。
+   * 此处仍转换为稳定标识并只交给协调器；协调器会拒绝过期、错场景或非活动事务反馈，目标拓扑不会因此提前激活。
+   */
+  unsubscribeUnitySceneLoadProgress = runtimeHost.subscribeSceneLoadProgress(({ payload }) => {
+    visualizationCoordinatorFacade.submit({
+      type: 'unity.load-progress.reported',
+      transitionId: toTransitionId(payload.transitionId),
+      sceneId: toSceneId(payload.sceneId),
+      stageCode: payload.stageCode,
+      progress: payload.progress,
+    })
+  })
   hostRuntimeComposition = composition
   composition.start()
 }
@@ -329,6 +342,8 @@ onBeforeUnmount(() => {
   manifestAbortController = undefined
   unsubscribeUnityObjectSelected?.()
   unsubscribeUnityObjectSelected = undefined
+  unsubscribeUnitySceneLoadProgress?.()
+  unsubscribeUnitySceneLoadProgress = undefined
   unityObjectSelectionCoordinator?.dispose()
   unityObjectSelectionCoordinator = undefined
   // 先解除外层窗口监听和命令计时器，再释放协调器；避免迟到的父页面命令观察到已销毁的运行时门面。
@@ -429,6 +444,23 @@ onBeforeUnmount(() => {
         <div class="embedded-visualization-shell__transition-card">
           <span class="embedded-visualization-shell__transition-indicator" aria-hidden="true" />
           <p>{{ transitionOverlay.message }}</p>
+          <!-- 只有 Unity 回传当前事务的有效进度时渲染进度条；等待首条反馈时不伪造百分比。 -->
+          <div
+            v-if="transitionOverlay.progressPercent !== null"
+            class="embedded-visualization-shell__transition-progress"
+            role="progressbar"
+            aria-label="三维场景切换进度"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            :aria-valuenow="transitionOverlay.progressPercent"
+          >
+            <span class="embedded-visualization-shell__transition-progress-track" aria-hidden="true">
+              <span
+                class="embedded-visualization-shell__transition-progress-value"
+                :style="{ inlineSize: `${transitionOverlay.progressPercent}%` }"
+              />
+            </span>
+          </div>
         </div>
       </div>
     </div>
@@ -510,6 +542,27 @@ onBeforeUnmount(() => {
 
 .embedded-visualization-shell__transition-card p {
   margin: 0;
+}
+
+/* 进度条仅由 transform/宽度在小型遮罩卡片中变化，不触发 Unity iframe 或拓扑画布的布局重算。 */
+.embedded-visualization-shell__transition-progress {
+  inline-size: min(12rem, 36cqw);
+}
+
+.embedded-visualization-shell__transition-progress-track {
+  display: block;
+  block-size: 0.375rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgb(186 230 253 / 28%);
+}
+
+.embedded-visualization-shell__transition-progress-value {
+  display: block;
+  block-size: 100%;
+  border-radius: inherit;
+  background: #67e8f9;
+  transition: inline-size 120ms ease-out;
 }
 
 /* 轻量旋转指示器仅使用合成层动画，不触发拓扑画布或 Unity iframe 的重排。 */

@@ -89,6 +89,44 @@ describe('VisualizationCoordinator', () => {
     expect(store.latestDiagnostic).toBeNull()
   })
 
+  it('跨场景加载反馈只接受当前目标，且事务结束后不遗留到稳定视图', () => {
+    const store = useVisualizationStore()
+    const coordinator = new VisualizationCoordinator(store)
+    const transitionId = toTransitionId('transition.progress')
+    const sceneId = toSceneId('wind-power')
+    const topologyId = toTopologyId('topology.wind.overview')
+
+    coordinator.submit({ type: 'transition.begin', transitionId, sceneId, topologyId, actionId: null })
+    expect(coordinator.submit({
+      type: 'unity.load-progress.reported',
+      transitionId: toTransitionId('transition.obsolete'),
+      sceneId,
+      stageCode: 'loading-scene',
+      progress: 0.5,
+    })).toEqual({ status: 'ignored', reason: 'stale-transition' })
+    expect(coordinator.submit({
+      type: 'unity.load-progress.reported',
+      transitionId,
+      sceneId,
+      stageCode: 'loading-scene',
+      progress: 0.5,
+    })).toMatchObject({ status: 'accepted', transitionId })
+    expect(store.sceneLoadProgress).toEqual({ stageCode: 'loading-scene', progress: 0.5 })
+
+    // 进度倒退不能覆盖已显示阶段；失败清空瞬态值，旧稳定视图也不会被进度卡住。
+    expect(coordinator.submit({
+      type: 'unity.load-progress.reported',
+      transitionId,
+      sceneId,
+      stageCode: 'initializing-scene',
+      progress: 0.4,
+    })).toEqual({ status: 'ignored', reason: 'idempotent' })
+    coordinator.submit({ type: 'transition.fail', transitionId, diagnostic: {
+      code: 'scene.switch.failed', correlationId: 'correlation.progress', occurredAt: '2026-08-08T00:00:00.000Z',
+    } })
+    expect(store.sceneLoadProgress).toBeNull()
+  })
+
   it('事务失败后恢复上一个稳定上下文与两个子系统就绪状态', () => {
     const store = useVisualizationStore()
     const coordinator = new VisualizationCoordinator(store)

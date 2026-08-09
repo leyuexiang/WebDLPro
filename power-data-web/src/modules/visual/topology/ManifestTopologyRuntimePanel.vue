@@ -2,6 +2,7 @@
 import { inject, nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import { toTopologyKey, type ProcessNodeId, type RouteId as ProcessRouteId } from '@/config/process/identifiers'
 import type { TopologyDefinition as CanvasTopologyDefinition, TopologyDeviceStatus } from '@/config/process/types'
+import { toSelectionId, type SelectionId } from '@/config/scene-topology/identifiers'
 import type { TopologyRegistry } from '@/config/scene-topology/topology-registry'
 import type { TopologyRuntime } from '@/modules/visual/topology/topology-runtime'
 import { TopologyRuntime as TopologyRuntimeImplementation } from '@/modules/visual/topology/topology-runtime'
@@ -58,8 +59,8 @@ let topologySelectionSequence = 0
  */
 const topologySelectionFocusCoordinator = new TopologySelectionFocusCoordinator({
   supportsFocusNode: () => visualizationRuntimeHost?.capabilities.value.includes('focusNode') ?? false,
-  focusNode: (sceneNodeId) => visualizationRuntimeHost
-    ? visualizationRuntimeHost.sendCommandAndWait('focusNode', { sceneNodeId, isolate: false })
+  focusNode: (sceneNodeId, selectionId) => visualizationRuntimeHost
+    ? visualizationRuntimeHost.sendCommandAndWait('focusNode', { sceneNodeId, selectionId, isolate: false })
     : Promise.resolve({ success: false }),
 })
 
@@ -130,16 +131,19 @@ function handleSelectNode(processNodeId: string): void {
   // 同一 DOM 单击只生成一个受限关联标识；三维失败不会影响已提交的二维描边、路径和选择状态。
   void topologySelectionFocusCoordinator.requestFocus({
     source: 'topology',
-    correlationId: createTopologySelectionCorrelationId(),
+    selectionId: createTopologySelectionId(),
     ...(node.sceneNodeId ? { sceneNodeId: node.sceneNodeId } : {}),
   })
 }
 
-/** 关联标识只在当前组件生命周期内用于焦点去重，不写入状态仓库、外层协议或无界历史。 */
-function createTopologySelectionCorrelationId(): string {
+/**
+ * 每次已接受的二维选择创建一个跨前端与 Unity 的选择标识（selectionId）。
+ * 该值只用于聚焦幂等关联，不写入状态仓库或外层协议；长度固定受 128 字符协议边界约束。
+ */
+function createTopologySelectionId(): SelectionId {
   topologySelectionSequence += 1
   const randomPart = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
-  return `topology-selection-${topologySelectionSequence}-${randomPart}`.slice(0, 128)
+  return toSelectionId(`selection.topology.${topologySelectionSequence}.${randomPart}`.slice(0, 128))
 }
 
 /**
@@ -166,8 +170,9 @@ onMounted(() => {
   void createTopologyRuntime()
 })
 
-/** 组件销毁时只释放自身创建的运行时；底层画布端口清理是幂等的，不会保留隐藏图元或动画帧。 */
+/** 组件销毁时同步释放聚焦去重历史与拓扑运行时，不保留隐藏图元、动画帧或选择关联记录。 */
 onBeforeUnmount(() => {
+  topologySelectionFocusCoordinator.dispose()
   topologyRuntime?.dispose()
   topologyRuntime = undefined
 })

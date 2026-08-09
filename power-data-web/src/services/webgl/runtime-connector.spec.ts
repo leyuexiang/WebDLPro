@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { toRuntimeKey } from '@/config/process/identifiers'
 import type { WebglRuntimeRegistration } from '@/config/process/types'
-import { WEBGL_PROTOCOL_CHANNEL, WEBGL_PROTOCOL_VERSION, type WebglMessageEnvelope } from './protocol'
+import { WEBGL_PROTOCOL_CHANNEL, WEBGL_PROTOCOL_VERSION, type WebglMessageEnvelope, type WebglObjectSelectedPayload } from './protocol'
 import { WebglRuntimeConnector } from './runtime-connector'
 
 /**
@@ -71,11 +71,16 @@ describe('网页图形受控连接器', () => {
   }
 
   /** 完成 ready 与 init 确认，使后续用例从严格协商后的 ready 状态开始。 */
-  function createReadyConnector(onCommandFailure = vi.fn()) {
+  function createReadyConnector(
+    onCommandFailure = vi.fn(),
+    onObjectSelected?: (payload: WebglObjectSelectedPayload, messageId: string) => void,
+  ) {
     const statuses: string[] = []
     const connector = new WebglRuntimeConnector(runtime, 'instance-1', {
       onStatusChange: (status) => statuses.push(status),
       onCommandFailure,
+      // 测试按正式回调签名注入，确保连接器不会自行把二维节点字段转换为三维节点字段。
+      onObjectSelected,
     })
     connector.startListening()
     connector.attachChildWindow(childWindow as unknown as WindowProxy)
@@ -113,7 +118,7 @@ describe('网页图形受控连接器', () => {
 
     expect(statuses).toEqual(['handshaking', 'ready'])
     expect(connector.supportsCommand('focusNode')).toBe(true)
-    expect(connector.sendCommand('focusNode', { sceneNodeId: 'unit.demo.1' })).toContain('instance-1-2')
+    expect(connector.sendCommand('focusNode', { sceneNodeId: 'unit.demo.1', selectionId: 'selection.topology.01', isolate: false })).toContain('instance-1-2')
     expect(childWindow.postMessage).toHaveBeenLastCalledWith(
       expect.objectContaining({ type: 'focusNode' }),
       childOrigin,
@@ -127,14 +132,53 @@ describe('网页图形受控连接器', () => {
     const onCommandFailure = vi.fn()
     const { connector } = createReadyConnector(onCommandFailure)
 
-    expect(connector.sendCommand('focusNode', { nodeId: 'legacy-node' })).toBeUndefined()
+    expect(connector.sendCommand('focusNode', { sceneNodeId: 'node.demo.1', isolate: false })).toBeUndefined()
     expect(connector.sendCommand('setNodeVisualState', { sceneNodeId: 'node.demo.1', visualState: 'unexpected' })).toBeUndefined()
     expect(connector.sendCommand('setRouteFlow', { routeId: 'route.demo.1', enabled: true })).toContain('instance-1-2')
-    expect(connector.sendCommand('setNodeVisualState', { sceneNodeId: 'node.demo.1', visualState: 'alarm' })).toContain('instance-1-3')
+    expect(connector.sendCommand('setNodeVisualState', {
+      sceneNodeId: 'node.demo.1',
+      visualState: 'alarm',
+      statusUpdatedAt: '2026-08-08T10:00:00.000Z',
+      hasSourceRevision: true,
+      sourceRevision: 1,
+    })).toContain('instance-1-3')
     expect(onCommandFailure).toHaveBeenCalledTimes(2)
     expect(onCommandFailure).toHaveBeenNthCalledWith(1, 'focusNode', expect.stringContaining('三维节点'))
     expect(onCommandFailure).toHaveBeenNthCalledWith(2, 'setNodeVisualState', expect.stringContaining('四态'))
 
+    connector.forceDispose()
+  })
+
+  it('对象选择只接受明确的三维节点字段，旧二维字段不能被隐式转换', () => {
+    const onObjectSelected = vi.fn()
+    const { connector } = createReadyConnector(vi.fn(), onObjectSelected)
+
+    emit({
+      channel: WEBGL_PROTOCOL_CHANNEL,
+      version: WEBGL_PROTOCOL_VERSION,
+      instanceId: 'instance-1',
+      messageId: 'object-selected-canonical',
+      type: 'objectSelected',
+      payload: { sceneId: 'gas-power', sceneNodeId: 'scene-node.gas-turbine', sceneActivationId: 'scene-activation.gas-1' },
+      timestamp: 3,
+    })
+    emit({
+      channel: WEBGL_PROTOCOL_CHANNEL,
+      version: WEBGL_PROTOCOL_VERSION,
+      instanceId: 'instance-1',
+      messageId: 'object-selected-legacy',
+      type: 'objectSelected',
+      // 该字段曾被错误地当作三维节点标识；回归用例确保升级后不能再通过协议边界。
+      payload: { sceneId: 'gas-power', nodeId: 'scene-node.gas-turbine' },
+      timestamp: 4,
+    })
+
+    expect(onObjectSelected).toHaveBeenCalledTimes(1)
+    expect(onObjectSelected).toHaveBeenCalledWith(
+      { sceneId: 'gas-power', sceneNodeId: 'scene-node.gas-turbine', sceneActivationId: 'scene-activation.gas-1' },
+      'object-selected-canonical',
+    )
+    expect(connector.getRejections()).toHaveLength(1)
     connector.forceDispose()
   })
 
@@ -205,6 +249,7 @@ describe('网页图形受控连接器', () => {
       sceneId: 'gas-power',
       transitionId: 'transition-gas-1',
       sceneMappingVersion: runtime.sceneMappingVersion,
+      forceReload: false,
     })
     emit({ channel: WEBGL_PROTOCOL_CHANNEL, version: WEBGL_PROTOCOL_VERSION, instanceId: 'instance-1', messageId: 'ack-switch', type: 'ack', payload: { requestId, success: true }, timestamp: 3 })
 
@@ -214,12 +259,52 @@ describe('网页图形受控连接器', () => {
     expect(onSceneLoadProgress).not.toHaveBeenCalled()
 
     emit({ channel: WEBGL_PROTOCOL_CHANNEL, version: WEBGL_PROTOCOL_VERSION, instanceId: 'instance-1', messageId: 'progress-current', type: 'sceneLoadProgress', payload: { requestId, sceneId: 'gas-power', transitionId: 'transition-gas-1', stageCode: 'loading-scene', progress: 0.6 }, timestamp: 6 })
-    emit({ channel: WEBGL_PROTOCOL_CHANNEL, version: WEBGL_PROTOCOL_VERSION, instanceId: 'instance-1', messageId: 'changed-current', type: 'sceneChanged', payload: { requestId, sceneId: 'gas-power', transitionId: 'transition-gas-1', success: true }, timestamp: 7 })
+    emit({ channel: WEBGL_PROTOCOL_CHANNEL, version: WEBGL_PROTOCOL_VERSION, instanceId: 'instance-1', messageId: 'changed-current', type: 'sceneChanged', payload: { requestId, sceneId: 'gas-power', transitionId: 'transition-gas-1', sceneActivationId: 'scene-activation.gas-1', success: true }, timestamp: 7 })
 
     expect(onSceneLoadProgress).toHaveBeenCalledWith(expect.objectContaining({ progress: 0.6 }), 'progress-current')
     expect(onSceneChanged).toHaveBeenCalledWith(expect.objectContaining({ transitionId: 'transition-gas-1' }), 'changed-current')
-    expect(onCommandCompleted).toHaveBeenCalledWith({ command: 'switchScene', requestId, success: true })
+    expect(onCommandCompleted).toHaveBeenCalledWith({ command: 'switchScene', requestId, success: true, sceneActivationId: 'scene-activation.gas-1' })
     expect(connector.getRejections()).toHaveLength(2)
+    connector.forceDispose()
+  })
+
+  it('场景切换失败但 Unity 已自动恢复时，将恢复后的物理场景标识交给原请求等待者', () => {
+    const onCommandCompleted = vi.fn()
+    const connector = new WebglRuntimeConnector(runtime, 'instance-1', { onCommandCompleted })
+    connector.startListening()
+    connector.attachChildWindow(childWindow as unknown as WindowProxy)
+    emit(readyEnvelope())
+    const initMessage = childWindow.postMessage.mock.calls[0]?.[0] as WebglMessageEnvelope
+    emit({ channel: WEBGL_PROTOCOL_CHANNEL, version: WEBGL_PROTOCOL_VERSION, instanceId: 'instance-1', messageId: 'ack-init', type: 'ack', payload: { requestId: initMessage.messageId, success: true }, timestamp: 2 })
+
+    const requestId = connector.sendCommand('switchScene', {
+      sceneId: 'wind-power',
+      transitionId: 'transition-wind-failed',
+      sceneMappingVersion: runtime.sceneMappingVersion,
+      forceReload: false,
+    })
+    emit({ channel: WEBGL_PROTOCOL_CHANNEL, version: WEBGL_PROTOCOL_VERSION, instanceId: 'instance-1', messageId: 'ack-switch', type: 'ack', payload: { requestId, success: true }, timestamp: 3 })
+    emit({
+      channel: WEBGL_PROTOCOL_CHANNEL,
+      version: WEBGL_PROTOCOL_VERSION,
+      instanceId: 'instance-1',
+      messageId: 'result-switch-failed-recovered',
+      type: 'commandResult',
+      payload: {
+        requestId,
+        success: false,
+        errorCode: 'scene-content-unavailable',
+        sceneActivationId: 'scene-activation.gas-restored',
+      },
+      timestamp: 4,
+    })
+
+    expect(onCommandCompleted).toHaveBeenCalledWith({
+      command: 'switchScene',
+      requestId,
+      success: false,
+      sceneActivationId: 'scene-activation.gas-restored',
+    })
     connector.forceDispose()
   })
 })

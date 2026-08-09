@@ -3,6 +3,7 @@ import type {
   DeviceId,
   NodeId,
   RouteId,
+  SceneActivationId,
   SceneId,
   SceneNodeId,
   TopologyId,
@@ -10,10 +11,14 @@ import type {
 } from '@/config/scene-topology/identifiers'
 import type {
   VisualizationDiagnostic,
+  VisualizationSceneLoadProgress,
+  VisualizationSceneLoadStage,
   VisualizationRuntimeStatus,
   VisualizationSelectionSource,
   VisualizationStableContext,
   VisualizationSubsystemStatus,
+  VisualizationTransitionOutcome,
+  VisualizationTransitionSummary,
 } from '@/modules/visual/orchestration/visualization.store'
 
 /**
@@ -28,8 +33,17 @@ export type VisualizationDomainCommand =
       topologyId: TopologyId
       actionId: ActionId | null
       expectedContextRevision?: number
+      /** 补偿恢复时即使逻辑稳定场景相同，也必须要求 Unity 重新确认物理场景。 */
+      forceSceneSwitch?: boolean
     }
   | { type: 'unity.status.reported'; transitionId: TransitionId | null; status: VisualizationSubsystemStatus }
+  | {
+      type: 'unity.load-progress.reported'
+      transitionId: TransitionId
+      sceneId: SceneId
+      stageCode: VisualizationSceneLoadStage
+      progress: number
+    }
   | { type: 'topology.status.reported'; transitionId: TransitionId | null; status: VisualizationSubsystemStatus }
   | {
       type: 'transition.commit'
@@ -37,8 +51,18 @@ export type VisualizationDomainCommand =
       sceneId: SceneId
       topologyId: TopologyId
       actionId: ActionId | null
+      /** 真实 Unity 场景实例标识；同场景拓扑切换沿用上一个稳定上下文的值。 */
+      sceneActivationId?: SceneActivationId | null
     }
-  | { type: 'transition.fail'; transitionId: TransitionId; diagnostic: VisualizationDiagnostic }
+  | {
+      type: 'transition.fail'
+      transitionId: TransitionId
+      diagnostic: VisualizationDiagnostic
+      /** 只有补偿恢复成功才可显式标记为 recovered（已恢复）；普通失败仍保持 failed。 */
+      outcome?: Extract<VisualizationTransitionOutcome, 'failed' | 'recovered'>
+      /** 仅 recovered 路径可传入，表示 Unity 已物理恢复到此前稳定场景的新实例。 */
+      restoredSceneActivationId?: SceneActivationId
+    }
   | { type: 'transition.recovery.fail'; transitionId: TransitionId; diagnostic: VisualizationDiagnostic }
   | {
       type: 'selection.replace'
@@ -85,6 +109,8 @@ export type VisualizationCoordinatorResult =
  */
 export interface VisualizationCoordinatorStatePort {
   readonly stableContext: VisualizationStableContext | null
+  /** 与稳定上下文绑定的真实 Unity 场景实例；旧测试替身缺失时视为不可证明。 */
+  readonly sceneActivationId?: SceneActivationId | null
   readonly activeTransitionId: TransitionId | null
   readonly targetSceneId: SceneId | null
   readonly targetTopologyId: TopologyId | null
@@ -92,17 +118,37 @@ export interface VisualizationCoordinatorStatePort {
   readonly runtimeStatus: VisualizationRuntimeStatus
   readonly unityStatus: VisualizationSubsystemStatus
   readonly topologyStatus: VisualizationSubsystemStatus
+  readonly sceneLoadProgress: VisualizationSceneLoadProgress | null
   readonly selectedNodeIds: readonly NodeId[]
   readonly selectedRouteIds: readonly RouteId[]
   readonly selectedDeviceId: DeviceId | null
   readonly selectedSceneNodeId: SceneNodeId | null
   readonly selectionSource: VisualizationSelectionSource
   readonly latestDiagnostic: VisualizationDiagnostic | null
-  beginTransition(transitionId: TransitionId, sceneId: SceneId, topologyId: TopologyId, actionId: ActionId | null): void
+  readonly recentTransitionSummaries?: readonly VisualizationTransitionSummary[]
+  beginTransition(
+    transitionId: TransitionId,
+    sceneId: SceneId,
+    topologyId: TopologyId,
+    actionId: ActionId | null,
+    forceSceneSwitch?: boolean,
+  ): void
   setUnityStatus(status: VisualizationSubsystemStatus): void
   setTopologyStatus(status: VisualizationSubsystemStatus): void
-  commitStableContext(transitionId: TransitionId, sceneId: SceneId, topologyId: TopologyId, actionId: ActionId | null): boolean
-  failTransition(transitionId: TransitionId, diagnostic: VisualizationDiagnostic): boolean
+  setSceneLoadProgress(progress: VisualizationSceneLoadProgress | null): void
+  commitStableContext(
+    transitionId: TransitionId,
+    sceneId: SceneId,
+    topologyId: TopologyId,
+    actionId: ActionId | null,
+    sceneActivationId?: SceneActivationId | null,
+  ): boolean
+  failTransition(
+    transitionId: TransitionId,
+    diagnostic: VisualizationDiagnostic,
+    outcome?: Extract<VisualizationTransitionOutcome, 'failed' | 'recovered'>,
+    restoredSceneActivationId?: SceneActivationId,
+  ): boolean
   failTransitionToError(transitionId: TransitionId, diagnostic: VisualizationDiagnostic): boolean
   setSelection(
     nodeIds: readonly NodeId[],
@@ -118,6 +164,8 @@ export interface VisualizationCoordinatorStatePort {
 /** 只读快照全部由原始值和数组副本组成，不暴露响应式引用或可修改的仓库对象。 */
 export interface VisualizationCoordinatorSnapshot {
   stableContext: VisualizationStableContext | null
+  /** 当前稳定 Unity 物理实例标识；缺失时对象选择协调器会安全拒绝。 */
+  sceneActivationId?: SceneActivationId | null
   activeTransitionId: TransitionId | null
   targetSceneId: SceneId | null
   targetTopologyId: TopologyId | null
@@ -125,12 +173,19 @@ export interface VisualizationCoordinatorSnapshot {
   runtimeStatus: VisualizationRuntimeStatus
   unityStatus: VisualizationSubsystemStatus
   topologyStatus: VisualizationSubsystemStatus
+  /**
+   * 新版协调器快照始终提供该字段；可选标记保留旧测试替身和只读适配器的兼容性。
+   * 消费方必须把 undefined 与 null 同等视为“当前没有可显示的加载反馈”。
+   */
+  sceneLoadProgress?: VisualizationSceneLoadProgress | null
   selectedNodeIds: readonly NodeId[]
   selectedRouteIds: readonly RouteId[]
   selectedDeviceId: DeviceId | null
   selectedSceneNodeId: SceneNodeId | null
   selectionSource: VisualizationSelectionSource
   latestDiagnostic: VisualizationDiagnostic | null
+  /** 新版快照提供固定容量终态摘要；旧测试替身缺失时按空数组处理。 */
+  recentTransitionSummaries?: readonly VisualizationTransitionSummary[]
 }
 
 /**
@@ -150,12 +205,14 @@ export class VisualizationCoordinator {
         return this.beginTransition(command)
       case 'unity.status.reported':
         return this.reportSubsystemStatus('unity', command.transitionId, command.status)
+      case 'unity.load-progress.reported':
+        return this.reportUnityLoadProgress(command)
       case 'topology.status.reported':
         return this.reportSubsystemStatus('topology', command.transitionId, command.status)
       case 'transition.commit':
         return this.commitTransition(command)
       case 'transition.fail':
-        return this.failTransition(command.transitionId, command.diagnostic)
+        return this.failTransition(command.transitionId, command.diagnostic, command.outcome, command.restoredSceneActivationId)
       case 'transition.recovery.fail':
         return this.failTransitionToError(command.transitionId, command.diagnostic)
       case 'selection.replace':
@@ -173,6 +230,7 @@ export class VisualizationCoordinator {
   public getSnapshot(): VisualizationCoordinatorSnapshot {
     return {
       stableContext: this.state.stableContext ? { ...this.state.stableContext } : null,
+      sceneActivationId: this.state.sceneActivationId ?? null,
       activeTransitionId: this.state.activeTransitionId,
       targetSceneId: this.state.targetSceneId,
       targetTopologyId: this.state.targetTopologyId,
@@ -180,12 +238,16 @@ export class VisualizationCoordinator {
       runtimeStatus: this.state.runtimeStatus,
       unityStatus: this.state.unityStatus,
       topologyStatus: this.state.topologyStatus,
+      sceneLoadProgress: this.state.sceneLoadProgress ? { ...this.state.sceneLoadProgress } : null,
       selectedNodeIds: [...this.state.selectedNodeIds],
       selectedRouteIds: [...this.state.selectedRouteIds],
       selectedDeviceId: this.state.selectedDeviceId,
       selectedSceneNodeId: this.state.selectedSceneNodeId,
       selectionSource: this.state.selectionSource,
       latestDiagnostic: this.state.latestDiagnostic ? { ...this.state.latestDiagnostic } : null,
+      recentTransitionSummaries: this.state.recentTransitionSummaries
+        ? this.state.recentTransitionSummaries.map((summary) => ({ ...summary }))
+        : [],
     }
   }
 
@@ -209,8 +271,14 @@ export class VisualizationCoordinator {
     }
 
     const supersededTransitionId = this.state.activeTransitionId ?? undefined
-    const requiresSceneSwitch = this.state.stableContext?.sceneId !== command.sceneId
-    this.state.beginTransition(command.transitionId, command.sceneId, command.topologyId, command.actionId)
+    const requiresSceneSwitch = command.forceSceneSwitch || this.state.stableContext?.sceneId !== command.sceneId
+    this.state.beginTransition(
+      command.transitionId,
+      command.sceneId,
+      command.topologyId,
+      command.actionId,
+      command.forceSceneSwitch,
+    )
 
     // 首次进入或跨场景切换必须重新等待 Unity 就绪；同场景事务保留当前 Unity ready 状态。
     if (requiresSceneSwitch) this.state.setUnityStatus('preparing')
@@ -237,6 +305,39 @@ export class VisualizationCoordinator {
   }
 
   /**
+   * 仅当前跨场景事务可以写入 Unity 加载反馈。
+   * 连接器已经校验来源、原请求、场景、事务、阶段和数值范围；协调器仍再次核对活动目标与单调性，
+   * 防止迟到回调、错误场景或进度回退改变遮罩内容。该反馈仅供本地诊断和脱敏界面显示，不会提前提交目标视图。
+   */
+  private reportUnityLoadProgress(
+    command: Extract<VisualizationDomainCommand, { type: 'unity.load-progress.reported' }>,
+  ): VisualizationCoordinatorResult {
+    if (
+      command.transitionId !== this.state.activeTransitionId
+      || command.sceneId !== this.state.targetSceneId
+      || this.state.runtimeStatus !== 'switching'
+    ) {
+      return { status: 'ignored', reason: 'stale-transition' }
+    }
+    if (!Number.isFinite(command.progress) || command.progress < 0 || command.progress > 1) {
+      // 不把无效进度写入诊断；连接器应已拒绝它，此处只保留领域层防御边界。
+      return { status: 'ignored', reason: 'idempotent' }
+    }
+
+    const previous = this.state.sceneLoadProgress
+    if (previous && command.progress < previous.progress) {
+      // 进度回退不能覆盖已显示的加载状态；下一事务会在 begin 时清空该单条快照。
+      return { status: 'ignored', reason: 'idempotent' }
+    }
+    if (previous?.stageCode === command.stageCode && previous.progress === command.progress) {
+      return { status: 'ignored', reason: 'idempotent' }
+    }
+
+    this.state.setSceneLoadProgress({ stageCode: command.stageCode, progress: command.progress })
+    return { status: 'accepted', transitionId: command.transitionId }
+  }
+
+  /**
    * 提交时同时验证事务、场景、拓扑、动作和两个子系统状态。
    * 任一条件不满足都不会递增上下文版本，从而避免“新场景 + 旧拓扑”等混合状态。
    */
@@ -258,6 +359,7 @@ export class VisualizationCoordinator {
       command.sceneId,
       command.topologyId,
       command.actionId,
+      command.sceneActivationId,
     )
     if (!committed) return { status: 'ignored', reason: 'stale-transition' }
 
@@ -269,9 +371,14 @@ export class VisualizationCoordinator {
   }
 
   /** 当前事务失败时恢复上一个稳定上下文；旧事务失败不会覆盖新事务或新诊断。 */
-  private failTransition(transitionId: TransitionId, diagnostic: VisualizationDiagnostic): VisualizationCoordinatorResult {
+  private failTransition(
+    transitionId: TransitionId,
+    diagnostic: VisualizationDiagnostic,
+    outcome: Extract<VisualizationTransitionOutcome, 'failed' | 'recovered'> = 'failed',
+    restoredSceneActivationId: SceneActivationId | undefined = undefined,
+  ): VisualizationCoordinatorResult {
     if (transitionId !== this.state.activeTransitionId) return { status: 'ignored', reason: 'stale-transition' }
-    return this.state.failTransition(transitionId, diagnostic)
+    return this.state.failTransition(transitionId, diagnostic, outcome, restoredSceneActivationId)
       ? { status: 'accepted', transitionId, contextRevision: this.state.stableContext?.contextRevision ?? 0 }
       : { status: 'ignored', reason: 'stale-transition' }
   }

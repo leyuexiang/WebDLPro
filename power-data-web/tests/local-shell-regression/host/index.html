@@ -54,6 +54,8 @@
     let sessionId = '';
     let sequence = 0;
     let initialized = false;
+    // 保存本页主动发送的初始化命令标识，只用于验证 system.ack 与首个 view.changed 都归属同一父命令。
+    let initializationRequestId;
     /**
      * 仅缓存固定数量的事件摘要，供本地自动回归等待关联事件。
      * 不保存完整 payload（载荷）、异常文本或 Unity 对象，避免测试页成为不可信消息的旁路存储。
@@ -180,7 +182,7 @@
 
     /** 初始化与普通命令共用精确的当前实例/会话，禁止标题、路径或任意 Unity 方法名进入外层消息。 */
     function initialize() {
-      postCommand('system.init', {
+      initializationRequestId = postCommand('system.init', {
         sceneId: 'gas-power',
         topologyId: 'topology.gas-power.overview',
         expectedManifestVersion: 'local-shell-regression.1',
@@ -228,7 +230,7 @@
 
       if (message.type === 'view.changed') {
         result.textContent = `三层初始化通过：${message.payload.sceneId} / ${message.payload.topologyId}。`;
-        writeLog(`view.changed：版本 ${message.payload.contextRevision}`);
+        writeLog(`view.changed：版本 ${message.payload.contextRevision}，关联 ${message.replyTo ?? '缺失'}`);
         return;
       }
 
@@ -277,7 +279,7 @@
 
     /**
      * 本地夹具动作只对应清单中的 `action.gas.reset`，用于任务-034验证。
-     * 它不携带参数、不接受页面输入，也不代表正式燃气流程或设备映射。
+     * 它会从燃气总览切至空的燃气明细拓扑，但不携带参数、不接受页面输入，也不代表正式燃气流程或设备映射。
      */
     document.querySelector('#workflow-button').addEventListener('click', () => {
       if (!initialized) return writeLog('初始化尚未完成，拒绝发送流程动作。');
@@ -311,6 +313,12 @@
       void (async () => {
         if (!initialized) throw new Error('初始化尚未完成。');
         result.textContent = '基础三层回归执行中。';
+
+        if (!initializationRequestId) throw new Error('初始化命令缺少可验证的关联标识。');
+        await waitForEvent(
+          (event) => event.type === 'view.changed' && event.replyTo === initializationRequestId,
+          '初始化后的视图变更未按原 system.init 命令关联返回。',
+        );
 
         const stateRequestId = postCommand('state.get', {});
         if (!stateRequestId) throw new Error('状态查询未能发送。');
@@ -439,23 +447,22 @@
           throw new Error('延迟场景未按十秒总上限返回受控超时。');
         }
 
-        // 超时不会让旧异步任务重新获得提交权；立即提交燃气恢复事务，再等待光伏的迟到最终事件抵达。
-        const timeoutRecoveryId = postViewOpen('gas-power');
-        if (!timeoutRecoveryId) throw new Error('超时后的恢复请求未能发送。');
-        const timeoutRecovery = await waitForEvent(
-          (event) => event.type === 'command.result' && event.replyTo === timeoutRecoveryId,
-          '超时后的恢复命令未得到关联结果。',
-        );
-        if (timeoutRecovery.success !== true || timeoutRecovery.status !== 'completed') {
-          throw new Error('超时后的恢复命令未成功提交。');
+        /*
+         * 此处刻意不发送任何后续 view.open（打开视图）命令。
+         * 任务-036要求超时本身撤销旧事务并启动受控补偿恢复；若立刻再发燃气命令，
+         * 只能证明“新命令取代旧命令”，会掩盖“超时后迟到 Unity 成功仍可提交”的根因。
+         * 光伏最终事件在十秒超时后约一秒抵达，等待两秒可同时观察补偿完成与迟到回调隔离。
+         */
+        await new Promise((resolve) => window.setTimeout(resolve, 2_000));
+        if (observedEvents.slice(fastStartIndex).some((event) => event.type === 'view.changed' && event.sceneId === 'solar-power')) {
+          throw new Error('超时后的光伏迟到回调不应发布稳定视图。');
         }
-        await new Promise((resolve) => window.setTimeout(resolve, 1_000));
         await assertGasContext('光伏迟到完成后');
 
         const disposeRequestId = postCommand('system.dispose', { reason: 'local-shell-advanced-regression' });
         if (!disposeRequestId) throw new Error('高阶回归释放命令未能发送。');
         await waitForEvent((event) => event.type === 'command.result' && event.replyTo === disposeRequestId, '高阶回归释放命令未收到关联确认。');
-        result.textContent = '超时与恢复三层回归通过：连续三次取代、失败恢复、十秒超时、迟到回调隔离与释放确认正常。';
+        result.textContent = '超时与恢复三层回归通过：连续三次取代、失败恢复、超时自主补偿、迟到回调隔离与释放确认正常。';
         writeLog('超时与恢复三层回归通过。');
       })().catch((error) => {
         // 只显示本测试页预设的失败摘要，避免将来自 iframe 的任意异常或载荷回显到页面。

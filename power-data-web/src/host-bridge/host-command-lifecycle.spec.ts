@@ -62,6 +62,33 @@ describe('外层命令生命周期', () => {
     expect(lifecycle.getRecentResults()).toHaveLength(1)
   })
 
+  it('超时时先通知领域端口撤销提交权，迟到执行器不能绕过该撤销', async () => {
+    vi.useFakeTimers()
+    let resolveExecution: ((value: { success: true; status: 'completed' }) => void) | undefined
+    const onTimeout = vi.fn()
+    const command = createStateGetCommand('parent-command-timeout-cancel')
+    const lifecycle = new HostCommandLifecycle(
+      () => new Promise((resolve) => { resolveExecution = resolve }),
+      globalThis,
+      HOST_COMMAND_TIMEOUT_MS,
+      64,
+      256,
+      onTimeout,
+    )
+
+    const resultPromise = lifecycle.execute(command)
+    vi.advanceTimersByTime(HOST_COMMAND_TIMEOUT_MS)
+    const result = await resultPromise
+    resolveExecution?.({ success: true, status: 'completed' })
+    await Promise.resolve()
+
+    // 超时观察器只接收已验证命令；它在超时回包前同步调用一次，领域层可据此启动补偿恢复。
+    expect(onTimeout).toHaveBeenCalledTimes(1)
+    expect(onTimeout).toHaveBeenCalledWith(command)
+    expect(result.payload.error?.code).toBe('command.timeout')
+    expect(lifecycle.getRecentResults()).toHaveLength(1)
+  })
+
   it('达到待确认容量或释放后不会接纳新命令', async () => {
     let resolveExecution: ((value: { success: true; status: 'completed' }) => void) | undefined
     const lifecycle = new HostCommandLifecycle(() => new Promise((resolve) => { resolveExecution = resolve }), globalThis, HOST_COMMAND_TIMEOUT_MS, 1)

@@ -46,6 +46,7 @@ namespace WebDLPro.Unity.SceneRuntime
     {
         private const string CatalogFileName = "scene-catalog.json";
         private const string BundleDirectoryName = "SceneBundles";
+        private const int SupportedCatalogSchemaVersion = 2;
 
         private readonly Dictionary<string, AssetBundle> _loadedBundles = new Dictionary<string, AssetBundle>(StringComparer.Ordinal);
         private readonly Dictionary<string, List<string>> _bundleNamesBySceneId = new Dictionary<string, List<string>>(StringComparer.Ordinal);
@@ -184,6 +185,19 @@ namespace WebDLPro.Unity.SceneRuntime
             _bundleNamesBySceneId.Clear();
             _bundleByName = null;
             _catalog = null;
+        }
+
+        /// <summary>
+        /// 判断资源目录发布标识是否精确匹配当前主播放器。
+        /// 发布构建会把 releaseId（发布标识）临时写入 PlayerSettings.bundleVersion，
+        /// 而运行时的 Application.version（应用版本）即为该嵌入值；只接受完全相等的标识，
+        /// 不能按目录名称、场景名称或相近版本号降级匹配，防止主播放器与资源包被错误混用。
+        /// </summary>
+        public static bool IsExpectedCatalogReleaseId(string expectedReleaseId, string catalogReleaseId)
+        {
+            return !string.IsNullOrWhiteSpace(expectedReleaseId) &&
+                !string.IsNullOrWhiteSpace(catalogReleaseId) &&
+                string.Equals(expectedReleaseId, catalogReleaseId, StringComparison.Ordinal);
         }
 
         private IEnumerator LoadEditorSceneAsync(BusinessSceneCatalogEntry entry, Action<SceneBundleLoadResult> completed)
@@ -372,29 +386,50 @@ namespace WebDLPro.Unity.SceneRuntime
         private static bool TryBuildCatalogIndex(SceneBundleCatalogDocument catalog, out Dictionary<string, SceneBundleDocument> bundleByName)
         {
             bundleByName = null;
-            if (catalog == null || string.IsNullOrWhiteSpace(catalog.releaseId) || catalog.bundles == null || catalog.scenes == null)
+            if (catalog == null || catalog.schemaVersion != SupportedCatalogSchemaVersion ||
+                !IsExpectedCatalogReleaseId(Application.version, catalog.releaseId) || catalog.bundles == null || catalog.scenes == null)
             {
                 return false;
             }
 
             Dictionary<string, SceneBundleDocument> result = new Dictionary<string, SceneBundleDocument>(StringComparer.Ordinal);
+            HashSet<string> fileNames = new HashSet<string>(StringComparer.Ordinal);
             for (int index = 0; index < catalog.bundles.Length; index++)
             {
                 SceneBundleDocument document = catalog.bundles[index];
                 if (document == null || !IsSafeBundleSegment(document.bundleName) || !IsSafeBundleSegment(document.fileName) ||
-                    string.IsNullOrWhiteSpace(document.hash) || result.ContainsKey(document.bundleName))
+                    document.sizeBytes <= 0 || !TryParseBundleHash(document.hash, out _) ||
+                    result.ContainsKey(document.bundleName) || !fileNames.Add(document.fileName))
                 {
                     return false;
                 }
                 result.Add(document.bundleName, document);
             }
 
+            // 目录加载前一次性验证依赖名称、存在性和重复项，避免下载阶段才逐层发现畸形目录；
+            // 循环依赖仍由加载时的访问集合阻断，确保任何远端异常清单都不会无限递归。
+            foreach (SceneBundleDocument document in result.Values)
+            {
+                HashSet<string> dependencyNames = new HashSet<string>(StringComparer.Ordinal);
+                string[] dependencies = document.dependencies ?? Array.Empty<string>();
+                for (int index = 0; index < dependencies.Length; index++)
+                {
+                    string dependencyName = dependencies[index];
+                    if (!IsSafeBundleSegment(dependencyName) || !result.ContainsKey(dependencyName) ||
+                        string.Equals(dependencyName, document.bundleName, StringComparison.Ordinal) || !dependencyNames.Add(dependencyName))
+                    {
+                        return false;
+                    }
+                }
+            }
+
             HashSet<string> sceneIds = new HashSet<string>(StringComparer.Ordinal);
+            HashSet<string> sceneBundleNames = new HashSet<string>(StringComparer.Ordinal);
             for (int index = 0; index < catalog.scenes.Length; index++)
             {
                 SceneBundleSceneDocument scene = catalog.scenes[index];
                 if (scene == null || !BusinessSceneCatalog.IsRequiredSceneId(scene.sceneId) || !sceneIds.Add(scene.sceneId) ||
-                    !result.ContainsKey(scene.bundleName ?? string.Empty))
+                    !result.ContainsKey(scene.bundleName ?? string.Empty) || !sceneBundleNames.Add(scene.bundleName))
                 {
                     return false;
                 }
@@ -473,6 +508,7 @@ namespace WebDLPro.Unity.SceneRuntime
         [Serializable]
         private sealed class SceneBundleCatalogDocument
         {
+            public int schemaVersion;
             public string releaseId;
             public SceneBundleDocument[] bundles;
             public SceneBundleSceneDocument[] scenes;
@@ -485,6 +521,7 @@ namespace WebDLPro.Unity.SceneRuntime
             public string fileName;
             public string hash;
             public uint crc;
+            public long sizeBytes;
             public string[] dependencies;
         }
 

@@ -14,6 +14,11 @@ import type { TopologyDeviceDoubleClickIntent } from '@/modules/visual/topology/
  */
 export interface HostViewOpenPort {
   submit(command: Extract<HostDispatchableDomainCommand, { type: 'view.open' }>): Promise<HostCommandExecutionResult>
+  /**
+   * 外层命令超时时按关联标识撤销对应原子事务的提交权。
+   * 这是可选端口，便于旧的只读测试替身继续使用；正式组合根始终注入任务-036处理器实现。
+   */
+  cancelTimedOutCommand?(correlationId: string): void
 }
 
 /** 同场景流程动作端口与打开视图端口独立声明，未安装时不会向父页面暴露 `workflow.trigger` 能力。 */
@@ -80,7 +85,14 @@ export class HostRuntimeComposition implements HostCommandCoordinatorPort {
         ...(deviceStatesUpdate ? ['device.states.update' as const] : []),
       ],
     })
-    this.lifecycle = new HostCommandLifecycle((command) => this.executeAfterHandshake(command))
+    this.lifecycle = new HostCommandLifecycle(
+      (command) => this.executeAfterHandshake(command),
+      globalThis,
+      undefined,
+      undefined,
+      undefined,
+      (command) => this.cancelTimedOutDomainTransaction(command),
+    )
     this.handshake = new HostHandshake(bridge, {
       manifestVersion,
       // `system.init` 由握手层消费而非分派器消费，仍必须在 ready 能力中发布，父页面才能按协议启动会话。
@@ -108,7 +120,9 @@ export class HostRuntimeComposition implements HostCommandCoordinatorPort {
 
     if (command.type === 'system.init') {
       const initialized = await this.handshake.handle(command)
-      if (initialized) this.reportCommittedView()
+      // 初始化成功后的 view.changed（视图变更）仍属于原 system.init（系统初始化）命令，
+      // 必须使用同一 messageId 作为 replyTo，父页面才能把确认与最终稳定视图归入同一次初始化事务。
+      if (initialized) this.reportCommittedView(undefined, command.messageId)
       return
     }
 
@@ -145,6 +159,8 @@ export class HostRuntimeComposition implements HostCommandCoordinatorPort {
     if (this.disposed || !this.handshake.isInitialized()) return false
     const context = this.getReadyContext()
     if (!context) return false
+    // 正常路径由任务-037协调器在显式设备映射成功后才构造事件；组合根仍拒绝直接绕过该路径的空设备或空二维节点。
+    if (!selection.deviceId || selection.nodeIds.length === 0) return false
     if (
       selection.sceneId !== context.sceneId ||
       selection.topologyId !== context.topologyId ||
@@ -186,6 +202,14 @@ export class HostRuntimeComposition implements HostCommandCoordinatorPort {
     return this.dispatcher.execute(command)
   }
 
+  /**
+   * 生命周期只知道外层消息；原子事务处理器才掌握“关联标识 → 事务 → 上一稳定上下文”的受控映射。
+   * 因此超时只委托给该端口，不在组合根猜测场景、拓扑、动作或 Unity 恢复策略。
+   */
+  private cancelTimedOutDomainTransaction(command: HostCommandMessage): void {
+    this.viewOpen.cancelTimedOutCommand?.(command.messageId)
+  }
+
   /** 将 system.init 的初始目标转换为与普通 view.open 完全相同的原子事务，避免产生第二套场景切换流程。 */
   private async initializeView(command: Extract<HostCommandMessage, { type: 'system.init' }>): Promise<HostInitializationResult> {
     const result = await this.viewOpen.submit({
@@ -215,7 +239,7 @@ export class HostRuntimeComposition implements HostCommandCoordinatorPort {
     if (!result.payload.success || result.source !== 'executed') return
 
     if (command.type === 'view.open' || command.type === 'workflow.trigger') {
-      this.reportCommittedView(result.payload.transitionId)
+      this.reportCommittedView(result.payload.transitionId, result.replyTo)
       return
     }
 
@@ -242,10 +266,16 @@ export class HostRuntimeComposition implements HostCommandCoordinatorPort {
     return { ...stableContext, status: 'ready' }
   }
 
-  /** 只有事务已经提交后的稳定快照才触发 view.changed，严格避免半成品拓扑或场景对外可操作。 */
-  private reportCommittedView(transitionId?: HostCommandLifecycleResult['payload']['transitionId']): void {
+  /**
+   * 只有事务已经提交后的稳定快照才触发 view.changed，严格避免半成品拓扑或场景对外可操作。
+   * 由父命令触发时同步传递 replyTo；该参数仅为未来内部自发视图事件保留可选边界，当前生产命令链始终提供。
+   */
+  private reportCommittedView(
+    transitionId?: HostCommandLifecycleResult['payload']['transitionId'],
+    replyTo?: string,
+  ): void {
     const context = this.getReadyContext()
-    if (context) this.eventSender.sendViewChanged(context, transitionId)
+    if (context) this.eventSender.sendViewChanged(context, transitionId, replyTo)
   }
 
   /** 统一创建协议许可的有限错误，任何捕获异常均不在此层读取、拼接或传出。 */

@@ -19,6 +19,13 @@ export interface HostCommandLifecycleResult {
 /** 执行器由后续命令分派器提供；生命周期管理器不依赖 Unity、画布或状态仓库。 */
 export type HostCommandExecutor = (command: HostCommandMessage) => Promise<HostCommandExecutionResult>
 
+/**
+ * 外层超时通知只传递已经过来源与协议校验的命令对象。
+ * 回调必须同步撤销领域事务的提交权；耗时的物理回退由领域端口自行异步收尾，不能阻塞
+ * `command.timeout`（命令超时）回包，也不能让生命周期管理器持有 Unity 或画布资源。
+ */
+export type HostCommandTimeoutObserver = (command: HostCommandMessage) => void
+
 /** 计时器可注入，保证超时和释放在单元测试中可精确验证。 */
 interface LifecycleTimer {
   setTimeout(callback: () => void, delay: number): ReturnType<typeof setTimeout>
@@ -47,6 +54,7 @@ export class HostCommandLifecycle {
     private readonly timeoutMs: number = HOST_COMMAND_TIMEOUT_MS,
     private readonly maximumPending: number = HOST_PROTOCOL_LIMITS.pendingCommands,
     private readonly maximumRecentResults: number = HOST_PROTOCOL_LIMITS.recentMessageIds,
+    private readonly onTimeout?: HostCommandTimeoutObserver,
   ) {}
 
   /**
@@ -73,6 +81,13 @@ export class HostCommandLifecycle {
           if (pending.settled) return
           pending.settled = true
           this.pendingByMessageId.delete(command.messageId)
+          // 先撤销领域提交权，再向父页面回传超时。即使三维最终回调晚到，也不能继续提交旧场景或旧拓扑。
+          // 观察器属于可选领域扩展；它自身的实现错误绝不能阻断已定义的超时回包和待确认表清理。
+          try {
+            this.onTimeout?.(command)
+          } catch {
+            // 生命周期不读取或外泄观察器异常，继续返回协议规定的 command.timeout。
+          }
           const timeoutResult = this.createFailure(command.messageId, 'timeout', 'command.timeout', '外层命令等待执行结果超时。')
           this.cacheResult(timeoutResult)
           resolve(timeoutResult)

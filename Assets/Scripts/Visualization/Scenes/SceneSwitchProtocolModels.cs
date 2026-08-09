@@ -4,6 +4,49 @@ using UnityEngine;
 namespace WebDLPro.Unity.SceneRuntime
 {
     /// <summary>
+    /// Unity 运行时、网页桥接与构建元数据共享的协议契约。
+    /// 构建门禁读取由这些常量生成的小型元数据，避免通过二进制字符串是否出现来猜测运行时能力。
+    /// </summary>
+    public static class WebGlProtocolContract
+    {
+        public const string Channel = "power3d-unity";
+        public const int ProtocolVersion = 1;
+        // 第二版元数据新增失败恢复标识与四态复合因果水位声明；旧构建必须由发布门禁拒绝。
+        public const int MetadataSchemaVersion = 2;
+        // 第二版场景完成结构新增物理 sceneActivationId；全局信封版本保持不变，避免无关命令被迫升级。
+        public const int SceneChangedSchemaVersion = 2;
+        // 第一版失败恢复声明要求 commandResult 在自动恢复成功时携带新的物理场景激活标识。
+        public const int SwitchSceneRecoverySchemaVersion = 1;
+        // 第二版四态命令在来源时间之外增加显式修订二元组，保证同时间高修订不会被误判为重试。
+        public const int SetNodeVisualStateSchemaVersion = 2;
+        public const string MetadataFileName = "webgl-protocol-capabilities.json";
+
+        /// <summary>返回新数组，防止编辑器构建代码意外改写运行时共享的必填字段集合。</summary>
+        public static string[] CreateSceneChangedRequiredFields()
+        {
+            return new[] { "requestId", "sceneId", "transitionId", "sceneActivationId", "success" };
+        }
+
+        /// <summary>强制重载是超时补偿的物理恢复保证，必须作为切换命令的显式必填字段发布。</summary>
+        public static string[] CreateSwitchSceneRequiredFields()
+        {
+            return new[] { "sceneId", "transitionId", "sceneMappingVersion", "forceReload" };
+        }
+
+        /// <summary>自动恢复成功的失败结果必须声明原请求、失败状态和恢复后的物理场景激活标识。</summary>
+        public static string[] CreateSwitchSceneRecoveryRequiredFields()
+        {
+            return new[] { "requestId", "success", "sceneActivationId" };
+        }
+
+        /// <summary>四态命令的修订二元组始终必填，避免 Unity JSON 默认值把“缺失”和“显式零”混淆。</summary>
+        public static string[] CreateSetNodeVisualStateRequiredFields()
+        {
+            return new[] { "sceneNodeId", "visualState", "statusUpdatedAt", "hasSourceRevision", "sourceRevision" };
+        }
+    }
+
+    /// <summary>
     /// 浏览器发往 Unity 的场景切换载荷。字段名保持协议小写形式，
     /// 使 JsonUtility 能直接匹配网页端 JSON，而不需要把不可信原始 JSON 暴露给业务场景。
     /// </summary>
@@ -13,6 +56,8 @@ namespace WebDLPro.Unity.SceneRuntime
         public string sceneId;
         public string transitionId;
         public string sceneMappingVersion;
+        // true 时协调器不能使用同场景快速路径，必须重建物理实例以清除超时动作的未知副作用。
+        public bool forceReload;
     }
 
     /// <summary>
@@ -39,6 +84,8 @@ namespace WebDLPro.Unity.SceneRuntime
         public string requestId;
         public string sceneId;
         public string transitionId;
+        // 每次真实场景提交或恢复提交都会生成新标识；同场景快速完成不会改写它，供对象选择阻断 ABA 迟到回调。
+        public string sceneActivationId;
         public bool success;
         public string sceneState;
     }
@@ -52,7 +99,10 @@ namespace WebDLPro.Unity.SceneRuntime
         /// <summary>单条跨窗口稳定标识最大长度与前端协议一致，避免有限请求表接受超长键。</summary>
         public const int MaxIdentifierLength = 128;
 
-        /// <summary>验证请求的三个不可拆分字段；场景映射版本不能由缺省值或旧构建绕过。</summary>
+        /// <summary>
+        /// 验证请求的三个稳定标识；forceReload 是 JsonUtility 直接解析的固定布尔字段，
+        /// 场景映射版本不能由缺省值或旧构建绕过。
+        /// </summary>
         public static bool IsValidCommand(SceneSwitchCommandPayload payload, string expectedSceneMappingVersion)
         {
             return payload != null &&
@@ -83,6 +133,7 @@ namespace WebDLPro.Unity.SceneRuntime
                    IsBoundedIdentifier(payload.requestId) &&
                    IsBoundedIdentifier(payload.sceneId) &&
                    IsBoundedIdentifier(payload.transitionId) &&
+                   IsBoundedIdentifier(payload.sceneActivationId) &&
                    payload.success;
         }
 
@@ -121,6 +172,15 @@ namespace WebDLPro.Unity.SceneRuntime
         public static bool IsValidSceneNodeId(string sceneNodeId)
         {
             return SceneSwitchProtocolValidator.IsBoundedIdentifier(sceneNodeId);
+        }
+
+        /// <summary>
+        /// 聚焦选择标识用于跨前端与 Unity 的幂等关联。它只校验统一长度和非空边界，
+        /// 不与 messageId（消息标识）或 transitionId（场景切换事务标识）隐式互换。
+        /// </summary>
+        public static bool IsValidSelectionId(string selectionId)
+        {
+            return SceneSwitchProtocolValidator.IsBoundedIdentifier(selectionId);
         }
 
         /// <summary>路径流动只接受受控路径标识，路径是否存在由当前场景控制器返回明确业务错误。</summary>

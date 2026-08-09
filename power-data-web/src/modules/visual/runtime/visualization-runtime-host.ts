@@ -1,6 +1,6 @@
 import type { InjectionKey, Ref } from 'vue'
 import type { WebglRuntimeRegistration } from '@/config/process/types'
-import type { WebglCommandType, WebglObjectSelectedPayload } from '@/services/webgl/protocol'
+import type { WebglCommandType, WebglObjectSelectedPayload, WebglSceneLoadProgressPayload } from '@/services/webgl/protocol'
 
 /**
  * 可视化布局唯一宿主对外公开的生命周期状态。
@@ -22,9 +22,17 @@ export interface VisualizationObjectSelection {
   messageId: string
 }
 
+/** 加载反馈只保留已由连接器校验过的有限场景、阶段、进度和原事件关联，不暴露 Unity 资源细节。 */
+export interface VisualizationSceneLoadProgressEvent {
+  payload: WebglSceneLoadProgressPayload
+  messageId: string
+}
+
 /** 编排层等待内层命令时只得到成功或失败，不得到 iframe、消息信封或 Unity 回执正文。 */
 export interface VisualizationRuntimeCommandResult {
   success: boolean
+  /** 场景成功时表示目标实例；失败时仅表示 Unity 已自动恢复出的新物理实例。普通命令不包含该字段。 */
+  sceneActivationId?: string
 }
 
 /**
@@ -44,6 +52,8 @@ export interface VisualizationRuntimeHostController {
   /** 基于连接器已经校验的原请求回执完成等待；失败、超时和释放都会结算，不保留悬挂 Promise。 */
   sendCommandAndWait: (command: Exclude<WebglCommandType, 'init'>, payload: unknown) => Promise<VisualizationRuntimeCommandResult>
   subscribeObjectSelected: (listener: (selection: VisualizationObjectSelection) => void) => () => void
+  /** 订阅当前 Unity 场景切换的受控进度；返回值必须在壳层卸载时执行，防止旧组合根保留回调。 */
+  subscribeSceneLoadProgress: (listener: (progress: VisualizationSceneLoadProgressEvent) => void) => () => void
 }
 
 /** 可视化布局提供的单例依赖键；工艺页只能通过该键获取受控门面。 */

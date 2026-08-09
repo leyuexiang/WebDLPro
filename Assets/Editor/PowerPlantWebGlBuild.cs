@@ -1,9 +1,11 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Text;
 using UnityEditor;
 using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
+using UnityEngine;
 using WebDLPro.Unity.SceneRuntime;
 
 /// <summary>
@@ -13,6 +15,26 @@ using WebDLPro.Unity.SceneRuntime;
 /// </summary>
 public static class PowerPlantWebGlBuild
 {
+    /// <summary>
+    /// 随每个成功 Unity 构建写出的版本化协议声明。字段由运行时共享契约生成，
+    /// 前端发布脚本只需读取该小文件即可拒绝旧构建，无需解压和扫描大型二进制资源。
+    /// </summary>
+    [Serializable]
+    private sealed class WebGlProtocolCompatibilityMetadata
+    {
+        public int schemaVersion;
+        public string unityReleaseId;
+        public string channel;
+        public int protocolVersion;
+        public int sceneChangedSchemaVersion;
+        public string[] sceneChangedRequiredFields;
+        public string[] switchSceneRequiredFields;
+        public int switchSceneRecoverySchemaVersion;
+        public string[] switchSceneRecoveryRequiredFields;
+        public int setNodeVisualStateSchemaVersion;
+        public string[] setNodeVisualStateRequiredFields;
+    }
+
     public const string DevelopmentOutputPath = "Builds/WebGL-Development";
     public const string ProductionOutputPath = "Builds/Releases";
     private const string BootstrapScenePath = "Assets/Scenes/Bootstrap.unity";
@@ -74,38 +96,84 @@ public static class PowerPlantWebGlBuild
         ValidateBuildSettings();
         ValidateEmbeddedViewportTemplate();
 
-        string absoluteOutputPath = Path.GetFullPath(outputPath);
-        Directory.CreateDirectory(absoluteOutputPath);
-        // 先生成资产包和文本清单，再让播放器在裁剪阶段读取该清单，保留只存在于业务场景包中的控制器类型。
-        // 若此步骤失败，正式构建仍停留在暂存目录，不会覆盖任何已发布版本。
-        PowerPlantSceneBundleBuild.BuildSceneBundles(outputPath, releaseId);
-        string assetBundleManifestPath = PowerPlantSceneBundleBuild.GetAssetBundleManifestPath(outputPath);
-        if (!File.Exists(assetBundleManifestPath))
+        // Application.version（应用版本）由 PlayerSettings.bundleVersion（播放器设置版本）生成。
+        // 因此构建期间必须把当前发布标识嵌入主播放器，运行时才能拒绝与自身不属于同一发布事务的 SceneBundles（场景资源包）目录。
+        // finally 无条件恢复编辑器原设置，既避免污染用户项目版本，也保证构建失败不会遗留隐藏的项目配置修改。
+        string originalBundleVersion = PlayerSettings.bundleVersion;
+        bool bundleVersionChanged = !string.Equals(originalBundleVersion, releaseId, StringComparison.Ordinal);
+        try
         {
-            throw new BuildFailedException("场景资源构建未生成播放器所需的资产包清单。");
-        }
+            if (bundleVersionChanged)
+            {
+                PlayerSettings.bundleVersion = releaseId;
+            }
 
-        BuildPlayerOptions options = new BuildPlayerOptions
+            string absoluteOutputPath = Path.GetFullPath(outputPath);
+            Directory.CreateDirectory(absoluteOutputPath);
+            // 先生成资产包和文本清单，再让播放器在裁剪阶段读取该清单，保留只存在于业务场景包中的控制器类型。
+            // 若此步骤失败，正式构建仍停留在暂存目录，不会覆盖任何已发布版本。
+            PowerPlantSceneBundleBuild.BuildSceneBundles(outputPath, releaseId);
+            string assetBundleManifestPath = PowerPlantSceneBundleBuild.GetAssetBundleManifestPath(outputPath);
+            if (!File.Exists(assetBundleManifestPath))
+            {
+                throw new BuildFailedException("场景资源构建未生成播放器所需的资产包清单。");
+            }
+
+            BuildPlayerOptions options = new BuildPlayerOptions
+            {
+                // 主播放器只打入轻量 Bootstrap。九个业务场景由紧随其后的资产包构建写入同级 SceneBundles，
+                // 这样首屏不再把九个场景资源收敛进单一 WebGL 数据文件。
+                scenes = new[] { BootstrapScenePath },
+                locationPathName = outputPath,
+                target = BuildTarget.WebGL,
+                assetBundleManifestPath = assetBundleManifestPath,
+                // 严格模式同时适用于开发包和正式包；只有开发入口才附加 Development。
+                options = isDevelopmentBuild ? BuildOptions.Development | BuildOptions.StrictMode : BuildOptions.StrictMode
+            };
+
+            BuildReport report = BuildPipeline.BuildPlayer(options);
+            if (report.summary.result != BuildResult.Succeeded)
+            {
+                throw new BuildFailedException(
+                    $"WebGL 构建失败：{report.summary.result}，共 {report.summary.totalErrors} 个错误、{report.summary.totalWarnings} 个警告。详情见 Editor.log。");
+            }
+
+            WriteProtocolCompatibilityMetadata(absoluteOutputPath, releaseId);
+
+            Console.WriteLine(
+                $"WebGL{(isDevelopmentBuild ? "开发" : "正式")}构建成功：{absoluteOutputPath}；大小 {report.summary.totalSize / (1024f * 1024f):F1} MB；耗时 {report.summary.totalTime}；发布标识 {releaseId}。");
+        }
+        finally
         {
-            // 主播放器只打入轻量 Bootstrap。九个业务场景由紧随其后的资产包构建写入同级 SceneBundles，
-            // 这样首屏不再把九个场景资源收敛进单一 WebGL 数据文件。
-            scenes = new[] { BootstrapScenePath },
-            locationPathName = outputPath,
-            target = BuildTarget.WebGL,
-            assetBundleManifestPath = assetBundleManifestPath,
-            // 严格模式同时适用于开发包和正式包；只有开发入口才附加 Development。
-            options = isDevelopmentBuild ? BuildOptions.Development | BuildOptions.StrictMode : BuildOptions.StrictMode
+            if (bundleVersionChanged)
+            {
+                PlayerSettings.bundleVersion = originalBundleVersion;
+            }
+        }
+    }
+
+    /// <summary>
+    /// 元数据仅在播放器成功后生成，并与发布标识绑定；正式目录移动会把它与对应 Unity 文件原子固化。
+    /// UTF-8 无字节顺序标记便于网页构建脚本跨平台读取，也避免本地默认编码改变 JSON 内容。
+    /// </summary>
+    private static void WriteProtocolCompatibilityMetadata(string absoluteOutputPath, string releaseId)
+    {
+        WebGlProtocolCompatibilityMetadata metadata = new WebGlProtocolCompatibilityMetadata
+        {
+            schemaVersion = WebGlProtocolContract.MetadataSchemaVersion,
+            unityReleaseId = releaseId,
+            channel = WebGlProtocolContract.Channel,
+            protocolVersion = WebGlProtocolContract.ProtocolVersion,
+            sceneChangedSchemaVersion = WebGlProtocolContract.SceneChangedSchemaVersion,
+            sceneChangedRequiredFields = WebGlProtocolContract.CreateSceneChangedRequiredFields(),
+            switchSceneRequiredFields = WebGlProtocolContract.CreateSwitchSceneRequiredFields(),
+            switchSceneRecoverySchemaVersion = WebGlProtocolContract.SwitchSceneRecoverySchemaVersion,
+            switchSceneRecoveryRequiredFields = WebGlProtocolContract.CreateSwitchSceneRecoveryRequiredFields(),
+            setNodeVisualStateSchemaVersion = WebGlProtocolContract.SetNodeVisualStateSchemaVersion,
+            setNodeVisualStateRequiredFields = WebGlProtocolContract.CreateSetNodeVisualStateRequiredFields()
         };
-
-        BuildReport report = BuildPipeline.BuildPlayer(options);
-        if (report.summary.result != BuildResult.Succeeded)
-        {
-            throw new BuildFailedException(
-                $"WebGL 构建失败：{report.summary.result}，共 {report.summary.totalErrors} 个错误、{report.summary.totalWarnings} 个警告。详情见 Editor.log。");
-        }
-
-        Console.WriteLine(
-            $"WebGL{(isDevelopmentBuild ? "开发" : "正式")}构建成功：{absoluteOutputPath}；大小 {report.summary.totalSize / (1024f * 1024f):F1} MB；耗时 {report.summary.totalTime}；发布标识 {releaseId}。");
+        string metadataPath = Path.Combine(absoluteOutputPath, WebGlProtocolContract.MetadataFileName);
+        File.WriteAllText(metadataPath, JsonUtility.ToJson(metadata, true), new UTF8Encoding(false));
     }
 
     /// <summary>

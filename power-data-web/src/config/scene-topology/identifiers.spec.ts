@@ -7,12 +7,13 @@ import {
   toNodeId,
   toSceneId,
   toSceneNodeId,
+  toSelectionId,
   toSessionId,
   toTopologyId,
   toTransitionId,
   validateStableIdentifier,
 } from './identifiers'
-import type { ActionId, DeviceId, NodeId, SceneId, SceneNodeId, SessionId, TopologyId, TransitionId } from './identifiers'
+import type { ActionId, DeviceId, NodeId, SceneId, SceneNodeId, SelectionId, SessionId, TopologyId, TransitionId } from './identifiers'
 
 /** 仅用于编译期断言：任意一类业务标识若可赋值给另一类，类型检查会立即失败。 */
 type Expect<TValue extends true> = TValue
@@ -23,6 +24,7 @@ export type StableIdentifierBrandContract = [
   Expect<IsAssignable<TopologyId, SceneId> extends false ? true : false>,
   Expect<IsAssignable<ActionId, DeviceId> extends false ? true : false>,
   Expect<IsAssignable<NodeId, SceneNodeId> extends false ? true : false>,
+  Expect<IsAssignable<SelectionId, TransitionId> extends false ? true : false>,
   Expect<IsAssignable<SessionId, TransitionId> extends false ? true : false>,
 ]
 
@@ -49,6 +51,7 @@ describe('场景拓扑稳定标识', () => {
     expect(toNodeId('gas-power.turbine-node')).toBe('gas-power.turbine-node')
     expect(toDeviceId('device.gas-turbine.01')).toBe('device.gas-turbine.01')
     expect(toSceneNodeId('gas-turbine')).toBe('gas-turbine')
+    expect(toSelectionId('selection.topology.01')).toBe('selection.topology.01')
     expect(toActionId('gas-power.turbine')).toBe('gas-power.turbine')
     expect(toTopologyId('gas-power.overview')).toBe('gas-power.overview')
     expect(toSessionId('session.embed.01')).toBe('session.embed.01')

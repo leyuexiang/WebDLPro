@@ -103,6 +103,7 @@ describe('外层运行时组合根', () => {
     expect(sent[1]).toEqual(expect.objectContaining({ type: 'system.ack', replyTo: 'parent-init-01' }))
     expect(sent[2]).toEqual(expect.objectContaining({
       type: 'view.changed',
+      replyTo: 'parent-init-01',
       payload: expect.objectContaining({ sceneId: 'gas-power', topologyId: 'topology.gas-power', contextRevision: 1 }),
     }))
     composition.dispose()
@@ -181,9 +182,19 @@ describe('外层运行时组合根', () => {
       contextRevision: 1,
       correlationId: 'unity-object-select-stale',
     })
+    // 组合根不信任直接调用者：即使场景和拓扑看似匹配，没有显式设备映射也不得对父页面声明对象已选中。
+    const unmapped = composition.reportSceneObjectSelected({
+      sceneId: toSceneId('gas-power'),
+      sceneNodeId: toSceneNodeId('scene-node.unmapped'),
+      topologyId: toTopologyId('topology.gas-power'),
+      nodeIds: [toNodeId('node.turbine')],
+      contextRevision: 1,
+      correlationId: 'unity-object-select-unmapped',
+    })
 
     expect(reported).toBe(true)
     expect(rejected).toBe(false)
+    expect(unmapped).toBe(false)
     expect(sent.find((event) => event.type === 'system.ready')).toEqual(expect.objectContaining({
       payload: expect.objectContaining({ eventCapabilities: expect.arrayContaining(['scene.object.selected']) }),
     }))
@@ -237,6 +248,10 @@ describe('外层运行时组合根', () => {
 
     expect(openCalls).toEqual(['parent-init-duplicate', 'parent-view-duplicate'])
     expect(sent.filter((event) => event.type === 'view.changed')).toHaveLength(2)
+    expect(sent.filter((event) => event.type === 'view.changed').map((event) => event.replyTo)).toEqual([
+      'parent-init-duplicate',
+      'parent-view-duplicate',
+    ])
     expect(sent.filter((event) => event.type === 'command.result' && event.replyTo === 'parent-view-duplicate')).toHaveLength(2)
     composition.dispose()
   })
@@ -263,6 +278,46 @@ describe('外层运行时组合根', () => {
     }))
     expect(sent.some((event) => event.type === 'command.result' && event.replyTo === 'parent-workflow-01')).toBe(true)
     expect(sent.filter((event) => event.type === 'view.changed')).toHaveLength(2)
+    expect(sent.filter((event) => event.type === 'view.changed').at(-1)).toEqual(expect.objectContaining({
+      replyTo: 'parent-workflow-01',
+    }))
+    composition.dispose()
+  })
+
+  it('未注入流程端口时不发布 workflow.trigger，并将伪能力调用受控拒绝', async () => {
+    /*
+     * 正式燃气联调清单当前 actions 为空，壳层不会构造流程路由，也就不会把端口注入组合根。
+     * 这里同时锁定握手能力表和后续命令门禁，避免未来只修复其中一端而向父页面宣称不可执行的能力。
+     */
+    const { composition, sent } = createComposition()
+    composition.start()
+
+    const ready = sent.find((event) => event.type === 'system.ready')
+    expect(ready).toEqual(expect.objectContaining({
+      payload: expect.objectContaining({
+        commandCapabilities: expect.not.arrayContaining(['workflow.trigger']),
+      }),
+    }))
+
+    /*
+     * 能力门禁位于已初始化业务命令路径；先完成 system.init，避免把“尚未初始化”的合法拒绝
+     * 误判为能力门禁回包。这样才与真实父页面先协商、后发送 workflow.trigger 的时序一致。
+     */
+    await composition.handleCommand(createCommand('system.init', {
+      sceneId: toSceneId('gas-power'),
+      topologyId: toTopologyId('topology.gas-power'),
+    }, 'parent-init-without-workflow'))
+
+    await composition.handleCommand(createCommand('workflow.trigger', {
+      actionId: toActionId('action.gas.reset'),
+      expectedContextRevision: 1,
+    }, 'parent-workflow-undeclared'))
+
+    expect(sent.find((event) => event.type === 'command.result' && event.replyTo === 'parent-workflow-undeclared')).toEqual(
+      expect.objectContaining({
+        payload: expect.objectContaining({ success: false, error: expect.objectContaining({ code: 'protocol.capability.undeclared' }) }),
+      }),
+    )
     composition.dispose()
   })
 

@@ -71,6 +71,10 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
         public string stepId;
         public string unitId;
         public string nodeId;
+        // 正式桥接动作只接受 sceneNodeId（三维节点标识）；保留 nodeId 字段仅供旧测试命令的数据模型兼容。
+        public string sceneNodeId;
+        // 每次测试聚焦生成唯一 selectionId（选择标识），用于验证 Unity 端幂等协议。
+        public string selectionId;
         public bool isolate;
         public bool enabled;
         public float width;
@@ -260,17 +264,22 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
         GUILayout.BeginHorizontal();
         if (GUILayout.Button("聚焦节点"))
         {
-            SendBridgeCommand("focusNode", new TestBridgePayload { nodeId = _nodeId, isolate = _isolate });
+            SendBridgeCommand("focusNode", new TestBridgePayload
+            {
+                sceneNodeId = _nodeId,
+                selectionId = $"selection.runtime-test.{_messageSequence + 1}",
+                isolate = _isolate
+            });
         }
 
         if (GUILayout.Button("节点显示"))
         {
-            SendBridgeCommand("setNodeVisibility", new TestBridgePayload { nodeId = _nodeId, enabled = true });
+            SendBridgeCommand("setNodeVisibility", new TestBridgePayload { sceneNodeId = _nodeId, enabled = true });
         }
 
         if (GUILayout.Button("节点半透明"))
         {
-            SendBridgeCommand("setNodeVisibility", new TestBridgePayload { nodeId = _nodeId, enabled = false });
+            SendBridgeCommand("setNodeVisibility", new TestBridgePayload { sceneNodeId = _nodeId, enabled = false });
         }
         GUILayout.EndHorizontal();
 

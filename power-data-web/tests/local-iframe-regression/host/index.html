@@ -217,7 +217,7 @@
         return;
       }
       if (data.type === 'sceneChanged' && entry.type === 'switchScene') {
-        if (data.payload.sceneId !== entry.payload?.sceneId || data.payload.transitionId !== entry.payload?.transitionId || data.payload.success !== true) {
+        if (data.payload.sceneId !== entry.payload?.sceneId || data.payload.transitionId !== entry.payload?.transitionId || typeof data.payload.sceneActivationId !== 'string' || data.payload.sceneActivationId.length === 0 || data.payload.success !== true) {
           return writeLog('拒绝：场景完成事件与原切换请求不一致。');
         }
         writeLog(`场景切换完成：${data.payload.sceneId}。`);
@@ -243,7 +243,13 @@
       await waitFor(() => status === 'ready', '握手超时');
       postCommand('resize', { width: frameContainer.clientWidth, height: frameContainer.clientHeight, devicePixelRatio: window.devicePixelRatio });
       await waitFor(() => pending.size === 0, '尺寸命令超时');
-      postCommand('switchScene', { sceneId: 'gas-power', transitionId: `local-transition-${crypto.randomUUID()}`, sceneMappingVersion: runtime.sceneMappingVersion });
+      postCommand('switchScene', {
+        sceneId: 'gas-power',
+        transitionId: `local-transition-${crypto.randomUUID()}`,
+        sceneMappingVersion: runtime.sceneMappingVersion,
+        // 普通联调切换显式关闭物理重载，确保夹具与正式必填协议字段一致。
+        forceReload: false
+      });
       await waitFor(() => pending.size === 0, '场景切换命令超时');
       await releaseCurrent(true);
       createInstance();
@@ -253,7 +259,8 @@
     }
 
     /**
-     * 使用固定稳定标识依次验证五类场景动作和复位的确认关联。
+     * 使用受控稳定标识依次验证五类场景动作和复位的确认关联；每轮聚焦生成新的选择标识，
+     * 避免重复运行测试时被正式 Unity 幂等边界误判为同一次选择。
      * 夹具不模拟真实燃气节点、材质或路径，仅证明白名单、载荷形态、回执关联与待确认清理；
      * 真实存在性和材质复用由 Unity 运行模式测试及正式场景映射负责。
      */
@@ -266,8 +273,9 @@
       await waitFor(() => pending.size === 0, '已有命令尚未完成');
       const commands = [
         ['enterProcessStep', { processId: 'gas-power-generation', stepId: 'overview', unitId: 'all', isolate: true }],
-        ['focusNode', { sceneNodeId: 'gas-turbine', isolate: true }],
-        ['setNodeVisualState', { sceneNodeId: 'gas-turbine', visualState: 'alarm' }],
+        ['focusNode', { sceneNodeId: 'gas-turbine', selectionId: `selection.local-action-focus.${crypto.randomUUID()}`, isolate: true }],
+        // 直接内层命令使用与生产适配器相同的固定修订二元组；false/0 表示外层没有提供可选修订号。
+        ['setNodeVisualState', { sceneNodeId: 'gas-turbine', visualState: 'alarm', statusUpdatedAt: '2026-08-08T10:00:00.000Z', hasSourceRevision: false, sourceRevision: 0 }],
         ['setRouteFlow', { routeId: 'route.gas-to-grid', enabled: true }],
         ['setNodeVisibility', { sceneNodeId: 'gas-turbine', enabled: true }],
         ['resetScene', {}]

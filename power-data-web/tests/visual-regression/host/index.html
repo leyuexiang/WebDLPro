@@ -24,6 +24,39 @@
     iframe {
       display: block;
     }
+
+    /*
+     * 截图工具运行在桌面应用内时，可见浏览器宽度可能小于带鱼屏目标宽度。
+     * 测试页只接受下方三个已登记尺寸，并把完整嵌入链固定到对应画布；全页截图因此能采集真实
+     * 3440×1440 布局，而不会把桌面应用裁剪后的图片误标为带鱼屏基准。
+     */
+    html[data-visual-baseline-size='600x600'],
+    html[data-visual-baseline-size='600x600'] body,
+    html[data-visual-baseline-size='600x600'] main,
+    html[data-visual-baseline-size='600x600'] iframe {
+      inline-size: 600px;
+      block-size: 600px;
+    }
+
+    html[data-visual-baseline-size='1280x720'],
+    html[data-visual-baseline-size='1280x720'] body,
+    html[data-visual-baseline-size='1280x720'] main,
+    html[data-visual-baseline-size='1280x720'] iframe {
+      inline-size: 1280px;
+      block-size: 720px;
+    }
+
+    html[data-visual-baseline-size='3440x1440'],
+    html[data-visual-baseline-size='3440x1440'] body,
+    html[data-visual-baseline-size='3440x1440'] main,
+    html[data-visual-baseline-size='3440x1440'] iframe {
+      inline-size: 3440px;
+      block-size: 1440px;
+    }
+
+    html[data-visual-baseline-size] {
+      overflow: visible;
+    }
   </style>
 </head>
 <body>
@@ -36,6 +69,16 @@
   </main>
 
   <script>
+    /**
+     * 固定截图尺寸采用显式白名单，不把查询参数直接写入样式。
+     * 未提供或不受支持的值继续使用真实浏览器视口，避免测试入口演变为任意超大画布分配器。
+     */
+    const registeredVisualBaselineSizes = new Set(['600x600', '1280x720', '3440x1440']);
+    const requestedVisualBaselineSize = new URLSearchParams(window.location.search).get('size');
+    if (requestedVisualBaselineSize && registeredVisualBaselineSizes.has(requestedVisualBaselineSize)) {
+      document.documentElement.dataset.visualBaselineSize = requestedVisualBaselineSize;
+    }
+
     /**
      * 此页只提供固定的 `system.init`（系统初始化）路径，以得到稳定的燃气合成视图。
      * instanceId（实例标识）仅用于协议隔离，不进入可视文字；页面不保存命令日志、载荷或 Unity 对象。

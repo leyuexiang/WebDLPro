@@ -9,6 +9,7 @@ import type { WebglCommandType } from '@/services/webgl/protocol'
 import {
   visualizationRuntimeHostKey,
   type VisualizationObjectSelection,
+  type VisualizationSceneLoadProgressEvent,
   type VisualizationRuntimeHostController,
   type VisualizationRuntimeLifecycle,
 } from '@/modules/visual/runtime/visualization-runtime-host'
@@ -20,8 +21,10 @@ const runtimeStatus = ref<VisualizationRuntimeLifecycle>('idle')
 const runtimeReason = ref<string | null>(null)
 const runtimeCapabilities = ref<readonly WebglCommandType[]>([])
 const selectedObjectListeners = new Set<(selection: VisualizationObjectSelection) => void>()
+/** 加载反馈监听器属于嵌入壳生命周期，不随单次 Unity 场景切换重建；壳层卸载时统一清空。 */
+const sceneLoadProgressListeners = new Set<(progress: VisualizationSceneLoadProgressEvent) => void>()
 /** 等待表与连接器待确认表使用同一 requestId，且其容量受连接器 64 条上限间接约束。 */
-const pendingCommandResultByRequestId = new Map<string, (result: { success: boolean }) => void>()
+const pendingCommandResultByRequestId = new Map<string, (result: { success: boolean; sceneActivationId?: string }) => void>()
 /**
  * 释放等待者只由外层 system.dispose（系统释放）使用，单实例宿主通常至多存在一个。
  * 使用 Set 仍可安全处理重复释放：每个调用各自结算，清理完成后立即清空，不保留页面卸载后的闭包。
@@ -103,7 +106,7 @@ function sendCommand(command: Exclude<WebglCommandType, 'init'>, payload: unknow
  * 向内层发送命令并等待连接器已验证的最终结果。
  * 发送未成功、连接器失败或当前运行时释放时均返回失败；调用方不必接触跨窗口事件或自行管理超时器。
  */
-function sendCommandAndWait(command: Exclude<WebglCommandType, 'init'>, payload: unknown): Promise<{ success: boolean }> {
+function sendCommandAndWait(command: Exclude<WebglCommandType, 'init'>, payload: unknown): Promise<{ success: boolean; sceneActivationId?: string }> {
   const requestId = connector?.sendCommand(command, payload)
   if (!requestId) return Promise.resolve({ success: false })
 
@@ -122,6 +125,15 @@ function subscribeObjectSelected(listener: (selection: VisualizationObjectSelect
 }
 
 /**
+ * 将连接器已经验证的有限加载反馈转交给唯一协调器。
+ * 宿主仍不暴露 connector（连接器）、iframe 或窗口对象；订阅者只能读取稳定标识、阶段和归一化进度。
+ */
+function subscribeSceneLoadProgress(listener: (progress: VisualizationSceneLoadProgressEvent) => void): () => void {
+  sceneLoadProgressListeners.add(listener)
+  return () => sceneLoadProgressListeners.delete(listener)
+}
+
+/**
  * 对内层组件与组合根公开的唯一运行时控制器。
  * 对象在整个宿主生命周期内保持同一引用，且只暴露受控方法和只读响应式状态；iframe、连接器、等待表、
  * 窗口对象和尺寸观察器仍严格封装在本组件中，外层桥无法越过该边界直接访问 Unity。
@@ -137,6 +149,7 @@ const runtimeHostController: VisualizationRuntimeHostController = Object.freeze(
   sendCommand,
   sendCommandAndWait,
   subscribeObjectSelected,
+  subscribeSceneLoadProgress,
 })
 provide(visualizationRuntimeHostKey, runtimeHostController)
 
@@ -184,6 +197,10 @@ function startPendingRuntime(): void {
     onObjectSelected: (payload, messageId) => {
       selectedObjectListeners.forEach((listener) => listener({ payload, messageId }))
     },
+    // 进度先由连接器绑定原 switchScene 请求校验，再由壳层协调器复核当前事务；宿主不直接改领域状态。
+    onSceneLoadProgress: (payload, messageId) => {
+      sceneLoadProgressListeners.forEach((listener) => listener({ payload, messageId }))
+    },
     onCommandFailure: (command, reason) => {
       // 非致命命令失败不销毁已就绪场景，只保留可见诊断，避免一次聚焦失败导致画面闪退。
       runtimeReason.value = `${command} 命令失败：${reason}`
@@ -193,7 +210,12 @@ function startPendingRuntime(): void {
       const resolve = pendingCommandResultByRequestId.get(completion.requestId)
       if (!resolve) return
       pendingCommandResultByRequestId.delete(completion.requestId)
-      resolve({ success: completion.success })
+      // 等待表只保留场景实例的稳定标识，不缓存 Unity 原始场景状态或消息载荷；
+      // 该标识来自已校验的 sceneChanged，或来自“目标失败但旧场景自动恢复成功”的 commandResult。
+      resolve({
+        success: completion.success,
+        ...(completion.sceneActivationId ? { sceneActivationId: completion.sceneActivationId } : {}),
+      })
     },
   })
 
@@ -343,6 +365,7 @@ function disconnectResizeObserver(): void {
 
 /** 运行时切换、失败或卸载时结算全部等待项，避免事务处理器永久等待已销毁的 iframe。 */
 function resolvePendingCommandResults(success: boolean): void {
+  // 连接器失效或释放时没有可信的物理场景实例，故只能结算失败，不能沿用先前的激活标识。
   pendingCommandResultByRequestId.forEach((resolve) => resolve({ success }))
   pendingCommandResultByRequestId.clear()
 }
@@ -388,6 +411,7 @@ onBeforeUnmount(() => {
   resolvePendingCommandResults(false)
   resolvePendingReleaseWaiters()
   selectedObjectListeners.clear()
+  sceneLoadProgressListeners.clear()
 })
 </script>
 

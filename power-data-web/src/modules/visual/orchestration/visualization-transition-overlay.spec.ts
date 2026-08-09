@@ -9,9 +9,10 @@ describe('getVisualizationTransitionOverlayState', () => {
       targetSceneId: toSceneId('gas-power'),
       targetTopologyId: toTopologyId('topology.gas.overview'),
       runtimeStatus: 'preparing',
+      sceneLoadProgress: null,
     })
 
-    expect(state).toEqual({ visible: true, message: '正在准备拓扑视图，请稍候。' })
+    expect(state).toEqual({ visible: true, message: '正在准备拓扑视图，请稍候。', progressPercent: null })
     expect(state.message).not.toContain('gas-power')
   })
 
@@ -21,14 +22,16 @@ describe('getVisualizationTransitionOverlayState', () => {
       targetSceneId: toSceneId('wind-power'),
       targetTopologyId: toTopologyId('topology.wind.overview'),
       runtimeStatus: 'switching',
-    })).toEqual({ visible: true, message: '正在切换三维场景与拓扑，请稍候。' })
+      sceneLoadProgress: { stageCode: 'loading-scene', progress: 0.6 },
+    })).toEqual({ visible: true, message: '正在加载目标三维场景（60%），请稍候。', progressPercent: 60 })
 
     expect(getVisualizationTransitionOverlayState({
       activeTransitionId: null,
       targetSceneId: null,
       targetTopologyId: null,
       runtimeStatus: 'ready',
-    })).toEqual({ visible: false, message: '' })
+      sceneLoadProgress: null,
+    })).toEqual({ visible: false, message: '', progressPercent: null })
   })
 
   it('不完整或迟到的事务状态不能锁住已恢复的稳定视图', () => {
@@ -37,6 +40,7 @@ describe('getVisualizationTransitionOverlayState', () => {
       targetSceneId: toSceneId('solar-power'),
       targetTopologyId: null,
       runtimeStatus: 'switching',
-    })).toEqual({ visible: false, message: '' })
+      sceneLoadProgress: { stageCode: 'loading-scene', progress: 0.5 },
+    })).toEqual({ visible: false, message: '', progressPercent: null })
   })
 })

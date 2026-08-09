@@ -13,6 +13,7 @@ public sealed class GasPowerBusinessSceneControllerAdapter : IBusinessSceneContr
     private const string GasPowerSceneId = "gas-power";
 
     private readonly PowerPlantProcessController _controller;
+    private readonly BusinessSceneResourceScope _resourceScope = new BusinessSceneResourceScope();
     private bool _released;
 
     public string SceneId => GasPowerSceneId;
@@ -28,6 +29,12 @@ public sealed class GasPowerBusinessSceneControllerAdapter : IBusinessSceneContr
     public GasPowerBusinessSceneControllerAdapter(PowerPlantProcessController controller)
     {
         _controller = controller;
+        if (_controller != null)
+        {
+            // 控制器拥有运行时半透明材质和高亮组件；在 Unity 场景卸载前主动清理，
+            // 避免只依赖延后的 OnDestroy，导致连续切换时旧场景资源短时叠加。
+            _resourceScope.TrackReleaseAction(_controller.ReleaseOwnedRuntimeResources);
+        }
     }
 
     /// <summary>在场景载入前登记适配工厂；注册表只保存工厂，不跨场景缓存燃气控制器对象。</summary>
@@ -50,7 +57,12 @@ public sealed class GasPowerBusinessSceneControllerAdapter : IBusinessSceneContr
             yield break;
         }
 
-        _released = false;
+        if (_released)
+        {
+            completed?.Invoke(BusinessSceneCommandResult.Failed("scene-controller-released", "燃气业务场景控制器已经释放，不能重新初始化。"));
+            yield break;
+        }
+
         completed?.Invoke(BusinessSceneCommandResult.Completed("燃气业务场景控制器初始化完成。"));
     }
 
@@ -119,8 +131,8 @@ public sealed class GasPowerBusinessSceneControllerAdapter : IBusinessSceneContr
     }
 
     /// <summary>
-    /// 场景卸载会触发现有控制器 OnDestroy 清理材质和高亮资源；适配器只做幂等生命周期封口，
-    /// 不在卸载前重置场景或重建材质，避免额外峰值与用户改动冲突。
+    /// 在场景卸载前主动清理控制器拥有的运行时材质和高亮资源，并保持幂等。
+    /// 这里只释放明确登记的运行时资源，不重置场景、不扫描层级，也不调用全局未使用资源卸载。
     /// </summary>
     public BusinessSceneCommandResult ReleaseScene()
     {
@@ -130,7 +142,16 @@ public sealed class GasPowerBusinessSceneControllerAdapter : IBusinessSceneContr
         }
 
         _released = true;
-        return BusinessSceneCommandResult.Completed("燃气业务场景控制器已进入场景卸载流程。");
+        BusinessSceneResourceReleaseReport report = _resourceScope.ReleaseAll();
+        if (report.FailureCount > 0)
+        {
+            return BusinessSceneCommandResult.Failed(
+                "resource-release-failed",
+                $"燃气业务场景资源释放存在 {report.FailureCount} 项失败。已继续完成其余清理。");
+        }
+
+        return BusinessSceneCommandResult.Completed(
+            $"燃气业务场景控制器已释放 {report.ReleasedResourceCount} 项资源并进入卸载流程。");
     }
 
     public string GetStateDescription()

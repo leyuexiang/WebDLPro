@@ -30,8 +30,15 @@ export type ActionId = StableIdentifier<'action'>
 export type NodeId = StableIdentifier<'topology-node'>
 export type DeviceId = StableIdentifier<'device'>
 export type SceneNodeId = StableIdentifier<'scene-node'>
+/** 一次二维选择事务的稳定关联标识；它与场景切换事务、消息标识均不可互换。 */
+export type SelectionId = StableIdentifier<'selection'>
 export type SessionId = StableIdentifier<'session'>
 export type TransitionId = StableIdentifier<'transition'>
+/**
+ * 物理场景激活标识与视图切换事务标识不能混用。
+ * 同一场景的拓扑切换不会重建 Unity 场景，而失败恢复会重建旧场景；该标识只描述后者的真实实例。
+ */
+export type SceneActivationId = StableIdentifier<'scene-activation'>
 export type ProcessId = StableIdentifier<'process'>
 export type StepId = StableIdentifier<'step'>
 export type RouteId = StableIdentifier<'route'>
@@ -105,8 +112,10 @@ export const toActionId = (value: string): ActionId => createStableIdentifier('a
 export const toNodeId = (value: string): NodeId => createStableIdentifier('topology-node', value)
 export const toDeviceId = (value: string): DeviceId => createStableIdentifier('device', value)
 export const toSceneNodeId = (value: string): SceneNodeId => createStableIdentifier('scene-node', value)
+export const toSelectionId = (value: string): SelectionId => createStableIdentifier('selection', value)
 export const toSessionId = (value: string): SessionId => createStableIdentifier('session', value)
 export const toTransitionId = (value: string): TransitionId => createStableIdentifier('transition', value)
+export const toSceneActivationId = (value: string): SceneActivationId => createStableIdentifier('scene-activation', value)
 export const toProcessId = (value: string): ProcessId => createStableIdentifier('process', value)
 export const toStepId = (value: string): StepId => createStableIdentifier('step', value)
 export const toRouteId = (value: string): RouteId => createStableIdentifier('route', value)

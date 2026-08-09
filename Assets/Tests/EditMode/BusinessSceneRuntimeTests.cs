@@ -10,6 +10,17 @@ namespace WebDLPro.Unity.Tests
     /// <summary>验证九场景目录、能力登记和事务过滤的纯逻辑，不依赖用户正在编辑的 SampleScene。</summary>
     public sealed class BusinessSceneRuntimeTests
     {
+        /// <summary>记录资源句柄的精确释放次数，用于验证幂等与释放后迟到登记行为。</summary>
+        private sealed class TrackingDisposable : System.IDisposable
+        {
+            public int DisposeCount { get; private set; }
+
+            public void Dispose()
+            {
+                DisposeCount++;
+            }
+        }
+
         [Test]
         public void 完整且唯一的九场景测试目录通过运行时校验()
         {
@@ -94,6 +105,124 @@ namespace WebDLPro.Unity.Tests
             Assert.That(initializationResult.ErrorCode, Is.EqualTo("capability-not-implemented"));
             Assert.That(controller.ReleaseScene().Success, Is.True);
             Assert.That(controller.ReleaseScene().Success, Is.True);
+
+            Object.DestroyImmediate(runtimeRoot);
+        }
+
+        /// <summary>
+        /// 四态视觉适配器必须只修改显式登记渲染器的材质属性块，并在高频状态切换中保持共享材质引用不变。
+        /// 该测试使用 Unity 内置立方体的现有共享材质，不创建业务材质或猜测正式场景颜色；
+        /// 同时覆盖未知节点和释放后调用的结构化失败，避免桥接收到静默成功。
+        /// </summary>
+        [Test]
+        public void 四态视觉适配器复用材质属性且未知节点返回明确错误()
+        {
+            GameObject visualRoot = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            Renderer renderer = visualRoot.GetComponent<Renderer>();
+            Assert.That(renderer, Is.Not.Null);
+            Material originalSharedMaterial = renderer.sharedMaterial;
+            Assert.That(originalSharedMaterial, Is.Not.Null);
+
+            string colorPropertyName = originalSharedMaterial.HasProperty("_BaseColor")
+                ? "_BaseColor"
+                : originalSharedMaterial.HasProperty("_Color") ? "_Color" : string.Empty;
+            Assert.That(colorPropertyName, Is.Not.Empty, "测试共享材质必须提供一个可由材质属性块覆盖的颜色属性。");
+
+            Color normalColor = new Color(0.15f, 0.75f, 0.95f, 1f);
+            Color alarmColor = new Color(1f, 0.65f, 0.1f, 1f);
+            Color faultColor = new Color(1f, 0.15f, 0.15f, 1f);
+            Color offlineColor = new Color(0.35f, 0.35f, 0.35f, 1f);
+            BusinessSceneVisualStateRegistry registry = new BusinessSceneVisualStateRegistry();
+            BusinessSceneCommandResult registerResult = registry.Register(new BusinessSceneVisualStateBinding(
+                "scene-node.test",
+                new[] { renderer },
+                colorPropertyName,
+                new BusinessSceneVisualStatePalette(normalColor, alarmColor, faultColor, offlineColor)));
+
+            Assert.That(registerResult.Success, Is.True, registerResult.Message);
+            Assert.That(registry.RegisteredNodeCount, Is.EqualTo(1));
+            BusinessSceneNodeVisualState[] states =
+            {
+                BusinessSceneNodeVisualState.Normal,
+                BusinessSceneNodeVisualState.Alarm,
+                BusinessSceneNodeVisualState.Fault,
+                BusinessSceneNodeVisualState.Offline
+            };
+            for (int updateIndex = 0; updateIndex < 128; updateIndex++)
+            {
+                BusinessSceneCommandResult updateResult = registry.UpdateNodeVisualState(
+                    "scene-node.test",
+                    states[updateIndex % states.Length]);
+                Assert.That(updateResult.Success, Is.True, updateResult.Message);
+            }
+
+            // 共享材质引用不变可证明状态更新没有调用 Renderer.material 或替换共享材质数组。
+            Assert.That(renderer.sharedMaterial, Is.SameAs(originalSharedMaterial));
+            MaterialPropertyBlock inspectionBlock = new MaterialPropertyBlock();
+            renderer.GetPropertyBlock(inspectionBlock);
+            Color appliedColor = inspectionBlock.GetColor(Shader.PropertyToID(colorPropertyName));
+            Assert.That(appliedColor.r, Is.EqualTo(offlineColor.r).Within(0.001f));
+            Assert.That(appliedColor.g, Is.EqualTo(offlineColor.g).Within(0.001f));
+            Assert.That(appliedColor.b, Is.EqualTo(offlineColor.b).Within(0.001f));
+            Assert.That(appliedColor.a, Is.EqualTo(offlineColor.a).Within(0.001f));
+
+            BusinessSceneCommandResult missingNodeResult = registry.UpdateNodeVisualState("scene-node.missing", BusinessSceneNodeVisualState.Alarm);
+            Assert.That(missingNodeResult.Success, Is.False);
+            Assert.That(missingNodeResult.ErrorCode, Is.EqualTo("invalid-node"));
+
+            registry.Release();
+            registry.Release();
+            BusinessSceneCommandResult releasedResult = registry.UpdateNodeVisualState("scene-node.test", BusinessSceneNodeVisualState.Normal);
+            Assert.That(releasedResult.Success, Is.False);
+            Assert.That(releasedResult.ErrorCode, Is.EqualTo("scene-controller-released"));
+
+            Object.DestroyImmediate(visualRoot);
+        }
+
+        /// <summary>
+        /// 资源作用域必须按场景所有权释放动画、渲染纹理、句柄和退订动作；
+        /// 单项异常不能阻断其余资源，重复释放与释放后迟到登记也不能重新打开作用域。
+        /// </summary>
+        [Test]
+        public void 场景资源作用域逆序幂等释放且单项失败不阻断后续清理()
+        {
+            GameObject runtimeRoot = new GameObject("BusinessSceneResourceScopeTestRoot");
+            Animator animator = runtimeRoot.AddComponent<Animator>();
+            Animation legacyAnimation = runtimeRoot.AddComponent<Animation>();
+            RenderTexture ownedRenderTexture = new RenderTexture(8, 8, 0);
+            ownedRenderTexture.Create();
+            TrackingDisposable disposable = new TrackingDisposable();
+            TrackingDisposable lateDisposable = new TrackingDisposable();
+            int releaseActionCount = 0;
+            BusinessSceneResourceScope scope = new BusinessSceneResourceScope();
+
+            Assert.That(scope.TrackDisposable(disposable), Is.True);
+            Assert.That(scope.TrackDisposable(disposable), Is.False, "同一资源句柄不能重复登记。");
+            Assert.That(scope.TrackAnimator(animator), Is.True);
+            Assert.That(scope.TrackLegacyAnimation(legacyAnimation), Is.True);
+            Assert.That(scope.TrackOwnedRenderTexture(ownedRenderTexture), Is.True);
+            Assert.That(scope.TrackReleaseAction(() => throw new System.InvalidOperationException("测试释放失败")), Is.True);
+            Assert.That(scope.TrackReleaseAction(() => releaseActionCount++), Is.True);
+            Assert.That(scope.RegisteredResourceCount, Is.EqualTo(6));
+
+            BusinessSceneResourceReleaseReport firstReport = scope.ReleaseAll();
+
+            Assert.That(firstReport.AlreadyReleased, Is.False);
+            Assert.That(firstReport.RegisteredResourceCount, Is.EqualTo(6));
+            Assert.That(firstReport.ReleasedResourceCount, Is.EqualTo(5));
+            Assert.That(firstReport.FailureCount, Is.EqualTo(1));
+            Assert.That(releaseActionCount, Is.EqualTo(1));
+            Assert.That(disposable.DisposeCount, Is.EqualTo(1));
+            Assert.That(animator.enabled, Is.False);
+            Assert.That(legacyAnimation.enabled, Is.False);
+            Assert.That(ownedRenderTexture == null, Is.True, "独占渲染纹理必须释放底层缓冲并销毁对象。");
+            Assert.That(scope.RegisteredResourceCount, Is.EqualTo(0), "释放后不得继续保留资源强引用。");
+
+            BusinessSceneResourceReleaseReport repeatedReport = scope.ReleaseAll();
+            Assert.That(repeatedReport.AlreadyReleased, Is.True);
+            Assert.That(disposable.DisposeCount, Is.EqualTo(1));
+            Assert.That(scope.TrackDisposable(lateDisposable), Is.False, "释放后迟到资源不能重新打开作用域。");
+            Assert.That(lateDisposable.DisposeCount, Is.EqualTo(1), "释放后迟到资源必须立即清理。");
 
             Object.DestroyImmediate(runtimeRoot);
         }
@@ -184,9 +313,14 @@ namespace WebDLPro.Unity.Tests
                 requestId = "request.1",
                 sceneId = "gas-power",
                 transitionId = "transition.gas.1",
+                sceneActivationId = "scene-activation-1",
                 success = true
             };
             Assert.That(SceneSwitchProtocolValidator.IsValidChanged(changed), Is.True);
+            // 成功完成事件没有物理场景实例标识时，网页端无法阻断同场景往返后的 ABA 迟到对象选择。
+            changed.sceneActivationId = string.Empty;
+            Assert.That(SceneSwitchProtocolValidator.IsValidChanged(changed), Is.False);
+            changed.sceneActivationId = "scene-activation-1";
             changed.success = false;
             Assert.That(SceneSwitchProtocolValidator.IsValidChanged(changed), Is.False);
         }
@@ -202,6 +336,8 @@ namespace WebDLPro.Unity.Tests
             Assert.That(SceneActionProtocolValidator.IsValidProcessStep("gas-power-generation", string.Empty, "unit-01"), Is.False);
             Assert.That(SceneActionProtocolValidator.IsValidSceneNodeId("node.gas-turbine"), Is.True);
             Assert.That(SceneActionProtocolValidator.IsValidSceneNodeId(string.Empty), Is.False);
+            Assert.That(SceneActionProtocolValidator.IsValidSelectionId("selection.topology.01"), Is.True);
+            Assert.That(SceneActionProtocolValidator.IsValidSelectionId(string.Empty), Is.False);
             Assert.That(SceneActionProtocolValidator.IsValidRouteId("route.gas-to-grid"), Is.True);
             Assert.That(SceneActionProtocolValidator.IsValidRouteId(string.Empty), Is.False);
             Assert.That(SceneActionProtocolValidator.TryParseVisualState("alarm", out BusinessSceneNodeVisualState alarmState), Is.True);
@@ -319,10 +455,12 @@ namespace WebDLPro.Unity.Tests
             string bundleBuildScriptPath = Path.Combine(Application.dataPath, "Editor", "PowerPlantSceneBundleBuild.cs");
             string coordinatorPath = Path.Combine(Application.dataPath, "Scripts", "Visualization", "Scenes", "MultiSceneCoordinator.cs");
             string bundleLoaderPath = Path.Combine(Application.dataPath, "Scripts", "Visualization", "Scenes", "SceneBundleRuntimeLoader.cs");
+            string resourceScopePath = Path.Combine(Application.dataPath, "Scripts", "Visualization", "Scenes", "BusinessSceneResourceScope.cs");
             string buildScriptSource = File.ReadAllText(buildScriptPath);
             string bundleBuildScriptSource = File.ReadAllText(bundleBuildScriptPath);
             string coordinatorSource = File.ReadAllText(coordinatorPath);
             string bundleLoaderSource = File.ReadAllText(bundleLoaderPath);
+            string resourceScopeSource = File.ReadAllText(resourceScopePath);
 
             Assert.That(buildScriptSource, Does.Contain("DevelopmentOutputPath"));
             Assert.That(buildScriptSource, Does.Contain("ProductionOutputPath"));
@@ -336,6 +474,10 @@ namespace WebDLPro.Unity.Tests
             Assert.That(bundleBuildScriptSource, Does.Contain("scene-catalog.json"));
             Assert.That(bundleBuildScriptSource, Does.Contain("scene-content-summary.json"));
             Assert.That(bundleBuildScriptSource, Does.Contain("SharedBundleName"));
+            Assert.That(bundleBuildScriptSource, Does.Contain("schemaVersion = 2"));
+            Assert.That(bundleBuildScriptSource, Does.Contain("sizeBytes = new FileInfo(bundlePath).Length"));
+            Assert.That(bundleBuildScriptSource, Does.Contain("contentVersion = ComputeSceneContentVersion(sceneBundles)"));
+            Assert.That(bundleBuildScriptSource, Does.Contain("transferSizeBytes = sceneBundles.Sum"));
             Assert.That(bundleBuildScriptSource, Does.Not.Contain("Addressables"));
             Assert.That(coordinatorSource, Does.Contain("RecordRuntimeStage"));
             Assert.That(coordinatorSource, Does.Contain("_sceneBundleLoader.LoadSceneAsync"));
@@ -344,10 +486,33 @@ namespace WebDLPro.Unity.Tests
             Assert.That(coordinatorSource, Does.Not.Contain("private void Update()"));
             Assert.That(bundleLoaderSource, Does.Contain("UnityWebRequestAssetBundle.GetAssetBundle"));
             Assert.That(bundleLoaderSource, Does.Contain("Hash128.Parse"));
+            Assert.That(bundleLoaderSource, Does.Contain("SupportedCatalogSchemaVersion = 2"));
+            Assert.That(bundleLoaderSource, Does.Contain("document.sizeBytes <= 0"));
             Assert.That(bundleLoaderSource, Does.Contain("ReleaseSceneBundle"));
             // 资源包负责下载与内容校验，场景必须由 Unity 的场景管理器加载；禁止回归到不存在的 AssetBundle.LoadSceneAsync 调用。
             Assert.That(bundleLoaderSource, Does.Contain("SceneManager.LoadSceneAsync(entry.ScenePath, LoadSceneMode.Additive)"));
             Assert.That(bundleLoaderSource, Does.Not.Contain("sceneBundle.LoadSceneAsync"));
+            Assert.That(resourceScopeSource, Does.Contain("StopCoroutine"));
+            Assert.That(resourceScopeSource, Does.Contain("RenderTexture.ReleaseTemporary"));
+            Assert.That(resourceScopeSource, Does.Contain("IDisposable"));
+            Assert.That(resourceScopeSource, Does.Not.Contain("Resources.UnloadUnusedAssets"));
+            Assert.That(resourceScopeSource, Does.Not.Contain("GC.Collect"));
+            Assert.That(resourceScopeSource, Does.Not.Contain("private void Update()"));
+        }
+
+        /// <summary>
+        /// 主播放器和同级场景资源目录必须共享一个发布标识。
+        /// 此处直接覆盖完全一致、空值与相近版本三种边界，确保运行时不会把目录名、场景名或前缀相同误当成可混用版本。
+        /// </summary>
+        [Test]
+        public void 场景资源目录只接受与主播放器完全一致的发布标识()
+        {
+            const string currentReleaseId = "release.task020.1";
+
+            Assert.That(SceneBundleRuntimeLoader.IsExpectedCatalogReleaseId(currentReleaseId, currentReleaseId), Is.True);
+            Assert.That(SceneBundleRuntimeLoader.IsExpectedCatalogReleaseId(currentReleaseId, "release.task020.1-stale"), Is.False);
+            Assert.That(SceneBundleRuntimeLoader.IsExpectedCatalogReleaseId(currentReleaseId, string.Empty), Is.False);
+            Assert.That(SceneBundleRuntimeLoader.IsExpectedCatalogReleaseId(string.Empty, currentReleaseId), Is.False);
         }
 
         [Test]

@@ -47,6 +47,11 @@ namespace WebDLPro.Unity.SceneRuntime
         public string Message { get; }
         public bool Recovered { get; }
         public string RestoredSceneId { get; }
+        /// <summary>
+        /// 目标场景失败后自动恢复出的新物理场景实例标识。该值只在 Recovered 为 true 时存在，
+        /// 调用方必须用它替换恢复前的旧标识，避免新实例对象事件被误判为迟到回调。
+        /// </summary>
+        public string RestoredSceneActivationId { get; }
 
         private SceneSwitchResult(
             bool success,
@@ -56,7 +61,8 @@ namespace WebDLPro.Unity.SceneRuntime
             string stageCode,
             string message,
             bool recovered,
-            string restoredSceneId)
+            string restoredSceneId,
+            string restoredSceneActivationId)
         {
             Success = success;
             SceneId = sceneId ?? string.Empty;
@@ -66,11 +72,12 @@ namespace WebDLPro.Unity.SceneRuntime
             Message = message ?? string.Empty;
             Recovered = recovered;
             RestoredSceneId = restoredSceneId ?? string.Empty;
+            RestoredSceneActivationId = restoredSceneActivationId ?? string.Empty;
         }
 
         public static SceneSwitchResult Completed(string sceneId, string transitionId)
         {
-            return new SceneSwitchResult(true, sceneId, transitionId, string.Empty, "ready", "目标业务场景已就绪。", false, string.Empty);
+            return new SceneSwitchResult(true, sceneId, transitionId, string.Empty, "ready", "目标业务场景已就绪。", false, string.Empty, string.Empty);
         }
 
         public static SceneSwitchResult Failed(
@@ -80,9 +87,19 @@ namespace WebDLPro.Unity.SceneRuntime
             string stageCode,
             string message,
             bool recovered = false,
-            string restoredSceneId = "")
+            string restoredSceneId = "",
+            string restoredSceneActivationId = "")
         {
-            return new SceneSwitchResult(false, sceneId, transitionId, errorCode, stageCode, message, recovered, restoredSceneId);
+            return new SceneSwitchResult(
+                false,
+                sceneId,
+                transitionId,
+                errorCode,
+                stageCode,
+                message,
+                recovered,
+                restoredSceneId,
+                restoredSceneActivationId);
         }
     }
 
@@ -97,6 +114,8 @@ namespace WebDLPro.Unity.SceneRuntime
         {
             public SceneSwitchToken Token;
             public BusinessSceneCatalogEntry Entry;
+            // 超时补偿会要求同场景也重建；普通拓扑切换保持 false，继续复用已就绪物理实例。
+            public bool ForceReload;
             public bool Completed;
         }
 
@@ -128,12 +147,17 @@ namespace WebDLPro.Unity.SceneRuntime
         private IBusinessSceneController _activeController;
         private Scene _activeScene;
         private bool _disposed;
+        // 每次真实提交（含失败后的物理恢复）都递增实例序号；同场景事务走快速完成路径时不改写，
+        // 这样网页可区分 A₁→B→A₂，而不会把普通拓扑切换误判为重新加载的 Unity 场景。
+        private long _sceneActivationSequence;
         // 诊断器只保存当前事务一份受限快照；不保存场景对象、AsyncOperation 或无限历史，
         // 使加载耗时、首帧、峰值内存和失败阶段可观测而不反向延长资源生命周期。
         private readonly SceneRuntimeDiagnostics _runtimeDiagnostics = new SceneRuntimeDiagnostics();
 
         public MultiSceneCoordinatorState State { get; private set; } = MultiSceneCoordinatorState.Idle;
         public string ActiveSceneId => _activeEntry?.SceneId ?? string.Empty;
+        /// <summary>当前已提交物理场景实例的稳定标识；释放后清空，避免旧桥接回调借用已销毁场景。</summary>
+        public string ActiveSceneActivationId { get; private set; } = string.Empty;
         public IBusinessSceneController ActiveController => _activeController;
         public SceneRuntimeDiagnosticsSnapshot RuntimeDiagnostics => _runtimeDiagnostics.Snapshot;
 
@@ -190,9 +214,10 @@ namespace WebDLPro.Unity.SceneRuntime
 
         /// <summary>
         /// 请求切换只接受正式目录中的可用场景。新请求立即取代处理中和待处理请求的提交权，
-        /// 但底层 Unity 异步操作会安全收尾并卸载迟到场景，避免留下隐藏活动场景。
+        /// 但底层 Unity 异步操作会安全收尾并卸载迟到场景，避免留下隐藏活动场景；forceReload 为 true 时
+        /// 同场景也必须重建物理实例，用于清除超时动作可能遗留的未知副作用。
         /// </summary>
-        public bool RequestSwitchScene(string sceneId, string transitionId)
+        public bool RequestSwitchScene(string sceneId, string transitionId, bool forceReload = false)
         {
             if (_disposed)
             {
@@ -225,7 +250,7 @@ namespace WebDLPro.Unity.SceneRuntime
             // 旧请求已先以 superseded 封口，再开始新快照；这样迟到回调无法写回当前诊断。
             _runtimeDiagnostics.BeginTransition(entry.SceneId, transitionId, ActiveSceneId);
             PublishRuntimeDiagnostics();
-            _pendingRequest = new SwitchRequest { Token = token, Entry = entry };
+            _pendingRequest = new SwitchRequest { Token = token, Entry = entry, ForceReload = forceReload };
             if (_worker == null)
             {
                 _worker = StartCoroutine(ProcessQueue());
@@ -258,15 +283,26 @@ namespace WebDLPro.Unity.SceneRuntime
                 SceneManager.UnloadSceneAsync(_activeScene);
             }
             _sceneBundleLoader?.ReleaseSceneBundle(activeSceneId);
+            // 子应用整体释放后不再复用加载器。统一释放所有场景租约、共享依赖包和目录引用，
+            // 但不强制回收仍被 Unity 场景卸载流程引用的对象，避免同步卸载造成卡顿或失效引用。
+            _sceneBundleLoader?.DisposeRuntime();
 
             _activeController = null;
             _activeEntry = null;
             _activeScene = default;
+            ActiveSceneActivationId = string.Empty;
             _runtimeDiagnostics.MarkReleased(activeSceneId);
             PublishRuntimeDiagnostics();
             ActiveControllerChanged?.Invoke(null);
             _loadingOverlay?.Hide();
             SetState(MultiSceneCoordinatorState.Disposed);
+
+            // 最终 disposed 状态已通知完成，随后清除全部订阅者，防止常驻发布者继续持有网页桥接或测试闭包。
+            StateChanged = null;
+            ActiveControllerChanged = null;
+            SceneLoadProgress = null;
+            SceneSwitchCompleted = null;
+            RuntimeDiagnosticsChanged = null;
         }
 
         private IEnumerator ProcessQueue()
@@ -288,7 +324,11 @@ namespace WebDLPro.Unity.SceneRuntime
             {
                 yield break;
             }
-            if (_activeEntry != null && string.Equals(_activeEntry.SceneId, request.Entry.SceneId, StringComparison.Ordinal))
+            // 普通同场景切换可复用当前实例；强制补偿必须进入既有卸载、释放、重载和初始化链路，
+            // 这样旧动作副作用会随场景销毁，并由 CommitActiveScene 生成新的物理激活标识。
+            if (!request.ForceReload &&
+                _activeEntry != null &&
+                string.Equals(_activeEntry.SceneId, request.Entry.SceneId, StringComparison.Ordinal))
             {
                 if (_transactionGate.TryComplete(request.Token))
                 {
@@ -394,7 +434,10 @@ namespace WebDLPro.Unity.SceneRuntime
                 targetAttempt.StageCode,
                 targetAttempt.Message,
                 recovered,
-                recovered ? previousEntry.SceneId : string.Empty));
+                recovered ? previousEntry.SceneId : string.Empty,
+                // 恢复提交会创建新的业务场景控制器和物理实例；失败结果必须携带该新标识，
+                // 否则网页端虽恢复旧稳定场景，却会继续持有卸载前的旧实例标识。
+                recovered ? ActiveSceneActivationId : string.Empty));
         }
 
         private IEnumerator LoadAndInitialize(
@@ -580,6 +623,9 @@ namespace WebDLPro.Unity.SceneRuntime
             _activeEntry = entry;
             _activeScene = scene;
             _activeController = controller;
+            // 激活标识不复用 transitionId：恢复加载也会使用失败事务的 transitionId，而物理实例必须独立计数。
+            _sceneActivationSequence++;
+            ActiveSceneActivationId = $"scene-activation-{_sceneActivationSequence}";
             if (scene.IsValid() && scene.isLoaded)
             {
                 SceneManager.SetActiveScene(scene);

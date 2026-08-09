@@ -274,6 +274,34 @@ describe('场景拓扑原子清单校验器', () => {
     expect(issueCodes).toContain('device-mapping.scene-node-unregistered')
   })
 
+  it('拒绝Unity场景映射中重复登记的节点、路径和流程步骤', () => {
+    const manifest = createValidManifest()
+    const gasScene = manifest.scenes.find((scene) => scene.sceneId === 'gas-power')
+    if (!gasScene) throw new Error('测试清单必须包含燃气场景。')
+
+    const duplicateSceneNodeId = toSceneNodeId('scene-node.gas-turbine')
+    const invalid = {
+      ...manifest,
+      unitySceneMappings: manifest.unitySceneMappings.map((mapping) => mapping.sceneId === gasScene.sceneId
+        ? {
+            ...mapping,
+            // 三类重复都来自显式映射字段；测试不依赖标题、数组下标或对象名称推断归属。
+            sceneNodeIds: [duplicateSceneNodeId, duplicateSceneNodeId],
+            routeIds: ['route.gas-turbine.exhaust', 'route.gas-turbine.exhaust'],
+            processSteps: [
+              { processId: 'gas-power-generation', stepId: 'gas-turbine' },
+              { processId: 'gas-power-generation', stepId: 'gas-turbine' },
+            ],
+          }
+        : mapping),
+    }
+
+    const issueCodes = validateSceneTopologyManifest(invalid).map((issue) => issue.code)
+    expect(issueCodes).toContain('unity-mapping.duplicate-node')
+    expect(issueCodes).toContain('unity-mapping.duplicate-route')
+    expect(issueCodes).toContain('unity-mapping.duplicate-process-step')
+  })
+
   it('拒绝多个设备状态源映射到同一场景三维节点', () => {
     const manifest = createValidManifest()
     const gasScene = manifest.scenes.find((scene) => scene.sceneId === 'gas-power')

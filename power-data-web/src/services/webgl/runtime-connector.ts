@@ -10,7 +10,7 @@ import {
   isWebglRequestAcknowledgementPayload,
   isWebglSceneChangedPayload,
   isWebglSceneLoadProgressPayload,
-  isWebglSceneNodeCommandPayload,
+  isWebglFocusNodePayload,
   isWebglSetNodeVisibilityPayload,
   isWebglSetNodeVisualStatePayload,
   isWebglSetRouteFlowPayload,
@@ -42,6 +42,8 @@ export interface WebglCommandCompletion {
   command: WebglCommandType
   requestId: string
   success: boolean
+  /** switchScene 成功时表示目标实例；失败时仅在 Unity 自动恢复旧场景后表示恢复出的新实例。 */
+  sceneActivationId?: string
 }
 
 /** 连接器向唯一宿主报告的事件；业务组件不得订阅 window.message 或直接调用 postMessage。 */
@@ -347,7 +349,16 @@ export class WebglRuntimeConnector {
       }
 
       this.callbacks.onCommandFailure?.(pending.envelope.type, reason)
-      this.callbacks.onCommandCompleted?.({ command: pending.envelope.type, requestId: pending.envelope.messageId, success: false })
+      this.callbacks.onCommandCompleted?.({
+        command: pending.envelope.type,
+        requestId: pending.envelope.messageId,
+        success: false,
+        // 失败回执只有在 switchScene 已由 Unity 自动恢复旧场景时才允许携带实例标识；
+        // 连接器已在协议层验证该值，宿主无需读取原始 commandResult 载荷。
+        ...(pending.envelope.type === 'switchScene' && envelope.payload.sceneActivationId
+          ? { sceneActivationId: envelope.payload.sceneActivationId }
+          : {}),
+      })
       return
     }
 
@@ -438,7 +449,14 @@ export class WebglRuntimeConnector {
 
     this.completePendingCommand(pending.envelope.messageId)
     this.callbacks.onSceneChanged?.(envelope.payload, envelope.messageId)
-    this.callbacks.onCommandCompleted?.({ command: 'switchScene', requestId: pending.envelope.messageId, success: true })
+    // 物理场景激活标识只从已核验的最终 sceneChanged 透传给等待该 requestId 的编排端口；
+    // 不能从下行 transitionId 推导，以免同场景拓扑事务或失败恢复错认成同一 Unity 实例。
+    this.callbacks.onCommandCompleted?.({
+      command: 'switchScene',
+      requestId: pending.envelope.messageId,
+      success: true,
+      sceneActivationId: envelope.payload.sceneActivationId,
+    })
   }
 
   /** disposed 必须回填 dispose 原始 messageId；收到确认后才让宿主移除 iframe。 */
@@ -586,7 +604,7 @@ function isValidWebglCommandPayload(command: WebglCommandType, payload: unknown)
     case 'enterProcessStep':
       return isWebglEnterProcessStepPayload(payload)
     case 'focusNode':
-      return isWebglSceneNodeCommandPayload(payload)
+      return isWebglFocusNodePayload(payload)
     case 'setNodeVisualState':
       return isWebglSetNodeVisualStatePayload(payload)
     case 'setRouteFlow':
@@ -606,7 +624,7 @@ function getWebglCommandPayloadError(command: WebglCommandType): string {
     case 'enterProcessStep':
       return '流程命令缺少合法流程、步骤、机组或隔离标识。'
     case 'focusNode':
-      return '聚焦命令缺少合法三维节点标识。'
+      return '聚焦命令缺少合法三维节点标识、选择标识或隔离开关。'
     case 'setNodeVisualState':
       return '设备状态命令缺少合法三维节点标识或四态状态。'
     case 'setRouteFlow':

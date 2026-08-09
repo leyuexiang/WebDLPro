@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { SCENE_IDS, toDeviceId, toNodeId, toSceneId, toSceneNodeId, toTopologyId, toUnityRuntimeKey, toUnitySceneKey } from '@/config/scene-topology/identifiers'
+import { SCENE_IDS, toDeviceId, toNodeId, toSceneActivationId, toSceneId, toSceneNodeId, toTopologyId, toUnityRuntimeKey, toUnitySceneKey } from '@/config/scene-topology/identifiers'
 import { TopologyRegistry } from '@/config/scene-topology/topology-registry'
 import type { SceneTopologyManifest } from '@/config/scene-topology/types'
 import { UnityObjectSelectionCoordinator } from '@/modules/visual/orchestration/unity-object-selection-coordinator'
@@ -13,6 +13,7 @@ const topologyId = toTopologyId('topology.gas-power.overview')
 const nodeId = toNodeId('node.gas-turbine')
 const sceneNodeId = toSceneNodeId('scene-node.gas-turbine')
 const deviceId = toDeviceId('device.gas-turbine')
+const sceneActivationId = toSceneActivationId('scene-activation.gas-1')
 
 /** 构造仅含一条明确燃气映射的九场景测试清单，其他八个场景保持显式空态，不伪造业务设备。 */
 function createRegistry(mappingTopologyId: typeof topologyId = topologyId) {
@@ -80,6 +81,7 @@ function createRegistry(mappingTopologyId: typeof topologyId = topologyId) {
 function createFacade(overrides: Partial<VisualizationCoordinatorSnapshot> = {}): VisualizationCoordinatorFacade & { submit: ReturnType<typeof vi.fn> } {
   const snapshot: VisualizationCoordinatorSnapshot = {
     stableContext: { sceneId, topologyId, actionId: null, contextRevision: 7 },
+    sceneActivationId,
     activeTransitionId: null,
     targetSceneId: null,
     targetTopologyId: null,
@@ -122,9 +124,20 @@ function createTopologyRuntime(activeTopologyId: typeof topologyId = topologyId)
   } as unknown as TopologyRuntime & { setSelection: ReturnType<typeof vi.fn> }
 }
 
-/** Unity 选择夹具只携带协议已验证的稳定节点和关联标识，不传对象名称、层级或坐标。 */
-function createUnitySelection(messageId: string, selectedSceneNodeId: string = String(sceneNodeId)) {
-  return { messageId, payload: { nodeId: selectedSceneNodeId } }
+/** Unity 选择夹具只携带协议已验证的三维节点标识和关联标识，不传对象名称、层级或坐标。 */
+function createUnitySelection(
+  messageId: string,
+  selectedSceneNodeId: string = String(sceneNodeId),
+  selectedSceneActivationId: string = String(sceneActivationId),
+) {
+  return {
+    messageId,
+    payload: {
+      sceneId: String(sceneId),
+      sceneNodeId: selectedSceneNodeId,
+      sceneActivationId: selectedSceneActivationId,
+    },
+  }
 }
 
 describe('Unity 三维反向选择协调器', () => {
@@ -162,6 +175,60 @@ describe('Unity 三维反向选择协调器', () => {
     expect(facade.submit).toHaveBeenCalledWith(expect.objectContaining({
       type: 'diagnostic.record', diagnostic: expect.objectContaining({ code: 'unity.selection.mapping.missing', correlationId: 'unity-selection-1' }),
     }))
+  })
+
+  it('同一无映射内层消息只记录一次诊断，重放不能制造诊断洪泛或在后续状态中重试', () => {
+    const facade = createFacade()
+    const runtime = createTopologyRuntime()
+    const coordinator = new UnityObjectSelectionCoordinator(createRegistry(), runtime, facade, { now: () => 0 })
+    const unmappedSelection = createUnitySelection('unity-object-select-unmapped-duplicate', 'scene-node.unknown')
+
+    expect(coordinator.resolve(unmappedSelection)).toBeUndefined()
+    expect(coordinator.resolve(unmappedSelection)).toBeUndefined()
+    expect(runtime.setSelection).not.toHaveBeenCalled()
+    expect(facade.submit).toHaveBeenCalledTimes(1)
+    expect(facade.submit).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'diagnostic.record', diagnostic: expect.objectContaining({ code: 'unity.selection.mapping.missing' }),
+    }))
+  })
+
+  it('场景切换后的迟到对象选择不能借用新稳定上下文解析同名三维节点', () => {
+    const facade = createFacade()
+    const runtime = createTopologyRuntime()
+    const coordinator = new UnityObjectSelectionCoordinator(createRegistry(), runtime, facade, { now: () => 0 })
+
+    const selected = coordinator.resolve({
+      messageId: 'unity-object-select-stale-scene',
+      payload: { sceneId: 'wind-power', sceneNodeId: String(sceneNodeId), sceneActivationId: String(sceneActivationId) },
+    })
+
+    expect(selected).toBeUndefined()
+    expect(runtime.setSelection).not.toHaveBeenCalled()
+    expect(facade.submit).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'diagnostic.record', diagnostic: expect.objectContaining({ code: 'unity.selection.scene.mismatch' }),
+    }))
+  })
+
+  it('同名场景往返后的旧物理实例选择必须被阻断，当前实例的新选择仍可同步二维节点', () => {
+    const secondGasActivationId = toSceneActivationId('scene-activation.gas-2')
+    const facade = createFacade({ sceneActivationId: secondGasActivationId })
+    const runtime = createTopologyRuntime()
+    const coordinator = new UnityObjectSelectionCoordinator(createRegistry(), runtime, facade, { now: () => 0 })
+
+    // 此消息来自燃气第一次激活实例。场景名称和节点均相同，只有实例标识能证明它已过期。
+    expect(coordinator.resolve(createUnitySelection('unity-object-select-aba-old'))).toBeUndefined()
+    expect(runtime.setSelection).not.toHaveBeenCalled()
+    expect(facade.submit).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: 'diagnostic.record', diagnostic: expect.objectContaining({ code: 'unity.selection.activation.mismatch' }),
+    }))
+
+    const selected = coordinator.resolve(createUnitySelection(
+      'unity-object-select-aba-current',
+      String(sceneNodeId),
+      String(secondGasActivationId),
+    ))
+    expect(selected).toMatchObject({ deviceId, nodeIds: [nodeId], correlationId: 'unity-selection-2' })
+    expect(runtime.setSelection).toHaveBeenCalledWith([nodeId], [])
   })
 
   it('同一 Unity 关联标识只同步一次，浏览器重放不会制造重复二维选择或外层事件', () => {

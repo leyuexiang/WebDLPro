@@ -141,6 +141,8 @@ export class TopologyRuntime {
         invalidTimestampDeviceIds: [],
         activeTopologyNodeStatuses: new Map(),
         activeSceneNodeStatuses: new Map(),
+        // 已释放运行时没有活动 Unity 场景；返回空增量可阻止任务-038在释放后安排新的内层状态命令。
+        activeSceneNodeStateUpdates: new Map(),
       }
     }
 

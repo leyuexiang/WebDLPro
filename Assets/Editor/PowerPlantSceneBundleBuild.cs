@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using UnityEditor;
 using UnityEditor.Build;
@@ -71,7 +72,7 @@ public static class PowerPlantSceneBundleBuild
         }
 
         SceneBundleCatalogDocument catalogDocument = CreateCatalogDocument(releaseId, inputs, manifest, bundleOutputDirectory);
-        SceneContentSummaryDocument contentSummary = CreateContentSummaryDocument(releaseId, inputs, sceneIdsByDependencyPath, sharedDependencyPaths);
+        SceneContentSummaryDocument contentSummary = CreateContentSummaryDocument(releaseId, inputs, sharedDependencyPaths, catalogDocument);
         WriteJson(Path.Combine(bundleOutputDirectory, CatalogFileName), catalogDocument);
         WriteJson(Path.Combine(bundleOutputDirectory, ContentSummaryFileName), contentSummary);
         ValidateBuildOutput(catalogDocument, bundleOutputDirectory);
@@ -121,6 +122,7 @@ public static class PowerPlantSceneBundleBuild
         {
             SceneBuildInput input = inputs[index];
             string[] dependencies = AssetDatabase.GetDependencies(input.ScenePath, true);
+            List<string> eligibleDependencyPaths = new List<string>(dependencies.Length);
             for (int dependencyIndex = 0; dependencyIndex < dependencies.Length; dependencyIndex++)
             {
                 string dependencyPath = dependencies[dependencyIndex];
@@ -128,6 +130,7 @@ public static class PowerPlantSceneBundleBuild
                 {
                     continue;
                 }
+                eligibleDependencyPaths.Add(dependencyPath);
                 if (!sceneIdsByDependencyPath.TryGetValue(dependencyPath, out HashSet<string> sceneIds))
                 {
                     sceneIds = new HashSet<string>(StringComparer.Ordinal);
@@ -135,6 +138,9 @@ public static class PowerPlantSceneBundleBuild
                 }
                 sceneIds.Add(input.SceneId);
             }
+            // 依赖扫描是编辑器数据库查询中的主要开销。每个场景只查询一次并缓存排序结果，
+            // 后续共享依赖统计和内容摘要复用同一份数据，避免发布构建重复遍历完整资源图。
+            input.SetDependencyPaths(eligibleDependencyPaths.OrderBy(path => path, StringComparer.Ordinal).ToArray());
         }
         return sceneIdsByDependencyPath;
     }
@@ -193,6 +199,9 @@ public static class PowerPlantSceneBundleBuild
                 fileName = bundleName,
                 hash = manifest.GetAssetBundleHash(bundleName).ToString(),
                 crc = crc,
+                // 记录实际产物字节数，而不是编辑器估算值。该值用于发布评审、容量预算和冷缓存传输统计，
+                // 不参与运行时可信校验；运行时仍以 Unity 构建哈希和循环冗余校验为准。
+                sizeBytes = new FileInfo(bundlePath).Length,
                 dependencies = manifest.GetAllDependencies(bundleName).OrderBy(name => name, StringComparer.Ordinal).ToArray()
             });
         }
@@ -212,7 +221,7 @@ public static class PowerPlantSceneBundleBuild
 
         return new SceneBundleCatalogDocument
         {
-            schemaVersion = 1,
+            schemaVersion = 2,
             releaseId = releaseId,
             bundles = bundles.ToArray(),
             scenes = scenes.ToArray()
@@ -226,31 +235,38 @@ public static class PowerPlantSceneBundleBuild
     private static SceneContentSummaryDocument CreateContentSummaryDocument(
         string releaseId,
         IReadOnlyList<SceneBuildInput> inputs,
-        Dictionary<string, HashSet<string>> sceneIdsByDependencyPath,
-        List<string> sharedDependencyPaths)
+        List<string> sharedDependencyPaths,
+        SceneBundleCatalogDocument catalogDocument)
     {
         HashSet<string> sharedSet = new HashSet<string>(sharedDependencyPaths, StringComparer.Ordinal);
+        Dictionary<string, SceneBundleDocument> bundleByName = catalogDocument.bundles.ToDictionary(
+            bundle => bundle.bundleName,
+            bundle => bundle,
+            StringComparer.Ordinal);
         List<SceneContentSummaryEntry> scenes = new List<SceneContentSummaryEntry>(inputs.Count);
         for (int index = 0; index < inputs.Count; index++)
         {
             SceneBuildInput input = inputs[index];
-            string[] dependencies = AssetDatabase.GetDependencies(input.ScenePath, true)
-                .Where(path => !string.Equals(path, input.ScenePath, StringComparison.Ordinal) && IsBundleEligibleAsset(path))
-                .OrderBy(path => path, StringComparer.Ordinal)
-                .ToArray();
+            List<SceneBundleDocument> sceneBundles = ResolveBundleClosure(input.BundleName, bundleByName);
             scenes.Add(new SceneContentSummaryEntry
             {
                 sceneId = input.SceneId,
                 bundleName = input.BundleName,
                 scenePath = input.ScenePath,
-                exclusiveDependencyPaths = dependencies.Where(path => !sharedSet.Contains(path)).ToArray(),
-                sharedDependencyPaths = dependencies.Where(sharedSet.Contains).ToArray()
+                // 内容版本覆盖场景包及其全部共享依赖。任何一个依赖包哈希变化都会得到新版本，
+                // 避免只使用根场景包哈希而漏掉公共材质、着色器或图集的变更。
+                contentVersion = ComputeSceneContentVersion(sceneBundles),
+                // 传输体积按冷缓存首次加载需要取得的全部包求和；同版本缓存命中时实际网络传输可降为零。
+                transferSizeBytes = sceneBundles.Sum(bundle => bundle.sizeBytes),
+                bundleNames = sceneBundles.Select(bundle => bundle.bundleName).ToArray(),
+                exclusiveDependencyPaths = input.DependencyPaths.Where(path => !sharedSet.Contains(path)).ToArray(),
+                sharedDependencyPaths = input.DependencyPaths.Where(sharedSet.Contains).ToArray()
             });
         }
 
         return new SceneContentSummaryDocument
         {
-            schemaVersion = 1,
+            schemaVersion = 2,
             releaseId = releaseId,
             sharedDependencyPaths = sharedDependencyPaths.ToArray(),
             scenes = scenes.ToArray()
@@ -258,8 +274,70 @@ public static class PowerPlantSceneBundleBuild
     }
 
     /// <summary>
-    /// 构建结束后只检查本任务可证明的发布结构：九个场景均有独立包，目录中的哈希与文件齐全，
-    /// 每个场景包依赖项均能在目录中解析。实际浏览器下载和缓存命中由任务-051的 WebGL 构建回归覆盖。
+    /// 以迭代方式解析一个场景从根包到共享依赖的完整闭包。构建期目录规模虽小，仍使用集合去重，
+    /// 防止菱形依赖重复计入传输体积；缺失依赖会直接阻止发布，不生成不可独立加载的场景摘要。
+    /// </summary>
+    private static List<SceneBundleDocument> ResolveBundleClosure(
+        string rootBundleName,
+        IReadOnlyDictionary<string, SceneBundleDocument> bundleByName)
+    {
+        Stack<string> pendingBundleNames = new Stack<string>();
+        HashSet<string> visitedBundleNames = new HashSet<string>(StringComparer.Ordinal);
+        pendingBundleNames.Push(rootBundleName);
+
+        while (pendingBundleNames.Count > 0)
+        {
+            string bundleName = pendingBundleNames.Pop();
+            if (!visitedBundleNames.Add(bundleName))
+            {
+                continue;
+            }
+            if (!bundleByName.TryGetValue(bundleName, out SceneBundleDocument bundle))
+            {
+                throw new BuildFailedException($"场景资源摘要存在无法解析的依赖包：{bundleName}。");
+            }
+
+            string[] dependencies = bundle.dependencies ?? Array.Empty<string>();
+            for (int index = 0; index < dependencies.Length; index++)
+            {
+                pendingBundleNames.Push(dependencies[index]);
+            }
+        }
+
+        return visitedBundleNames
+            .OrderBy(bundleName => bundleName, StringComparer.Ordinal)
+            .Select(bundleName => bundleByName[bundleName])
+            .ToList();
+    }
+
+    /// <summary>
+    /// 把场景依赖闭包中按名称排序的“包名 + Unity 内容哈希”合成为稳定的场景内容版本。
+    /// 使用安全哈希算法（SHA-256）只为得到低碰撞版本标识，不替代资产包自带的哈希与循环冗余校验。
+    /// </summary>
+    private static string ComputeSceneContentVersion(IReadOnlyList<SceneBundleDocument> sceneBundles)
+    {
+        StringBuilder source = new StringBuilder(sceneBundles.Count * 64);
+        for (int index = 0; index < sceneBundles.Count; index++)
+        {
+            SceneBundleDocument bundle = sceneBundles[index];
+            source.Append(bundle.bundleName).Append(':').Append(bundle.hash).Append('\n');
+        }
+
+        using (SHA256 algorithm = SHA256.Create())
+        {
+            byte[] digest = algorithm.ComputeHash(Encoding.UTF8.GetBytes(source.ToString()));
+            StringBuilder version = new StringBuilder(digest.Length * 2);
+            for (int index = 0; index < digest.Length; index++)
+            {
+                version.Append(digest[index].ToString("x2"));
+            }
+            return version.ToString();
+        }
+    }
+
+    /// <summary>
+    /// 构建结束后检查本任务可证明的发布结构：九个场景均有独立包，目录中的哈希、字节数与文件齐全，
+    /// 每个场景包依赖项均能在目录中解析。浏览器实际加载由任务-020联调包回归覆盖，目标硬件缓存与性能预算由任务-054验收。
     /// </summary>
     private static void ValidateBuildOutput(SceneBundleCatalogDocument catalog, string bundleOutputDirectory)
     {
@@ -279,6 +357,10 @@ public static class PowerPlantSceneBundleBuild
         for (int index = 0; index < catalog.bundles.Length; index++)
         {
             SceneBundleDocument bundle = catalog.bundles[index];
+            if (bundle.sizeBytes <= 0 || string.IsNullOrWhiteSpace(bundle.hash))
+            {
+                throw new BuildFailedException("场景资源目录存在空文件或缺少内容哈希的资源包。");
+            }
             string[] dependencies = bundle.dependencies ?? Array.Empty<string>();
             for (int dependencyIndex = 0; dependencyIndex < dependencies.Length; dependencyIndex++)
             {
@@ -334,6 +416,7 @@ public static class PowerPlantSceneBundleBuild
         public string UnitySceneKey { get; }
         public string ScenePath { get; }
         public string BundleName { get; }
+        public string[] DependencyPaths { get; private set; } = Array.Empty<string>();
 
         public SceneBuildInput(string sceneId, string unitySceneKey, string scenePath, string bundleName)
         {
@@ -341,6 +424,11 @@ public static class PowerPlantSceneBundleBuild
             UnitySceneKey = unitySceneKey;
             ScenePath = scenePath;
             BundleName = bundleName;
+        }
+
+        public void SetDependencyPaths(string[] dependencyPaths)
+        {
+            DependencyPaths = dependencyPaths ?? Array.Empty<string>();
         }
     }
 
@@ -360,6 +448,7 @@ public static class PowerPlantSceneBundleBuild
         public string fileName;
         public string hash;
         public uint crc;
+        public long sizeBytes;
         public string[] dependencies;
     }
 
@@ -387,6 +476,9 @@ public static class PowerPlantSceneBundleBuild
         public string sceneId;
         public string bundleName;
         public string scenePath;
+        public string contentVersion;
+        public long transferSizeBytes;
+        public string[] bundleNames;
         public string[] exclusiveDependencyPaths;
         public string[] sharedDependencyPaths;
     }

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { toActionId, toDeviceId, toNodeId, toRouteId, toSceneId, toSceneNodeId, toTopologyId, toTransitionId } from '@/config/scene-topology/identifiers'
-import { useVisualizationStore } from '@/modules/visual/orchestration/visualization.store'
+import { useVisualizationStore, VISUALIZATION_TRANSITION_SUMMARY_CAPACITY } from '@/modules/visual/orchestration/visualization.store'
 
 describe('可视化稳定上下文状态仓库', () => {
   beforeEach(() => setActivePinia(createPinia()))
@@ -58,5 +58,31 @@ describe('可视化稳定上下文状态仓库', () => {
     expect(store.stableContext).toBeNull()
     expect(store.selectedNodeIds).toEqual([])
     expect(store.runtimeStatus).toBe('error')
+  })
+
+  it('事务摘要固定保留最近 32 条，并标识被新事务取代与恢复失败的受控终态', () => {
+    const store = useVisualizationStore()
+    for (let index = 0; index <= VISUALIZATION_TRANSITION_SUMMARY_CAPACITY; index += 1) {
+      const transitionId = toTransitionId(`transition-summary-${index}`)
+      store.beginTransition(transitionId, toSceneId('gas-power'), toTopologyId('gas-power.overview'), null)
+      store.failTransition(transitionId, {
+        code: 'command.timeout',
+        correlationId: `correlation-summary-${index}`,
+        occurredAt: '2026-08-08T00:00:00.000Z',
+      })
+    }
+
+    // 写入容量加一条后，最早摘要被淘汰；摘要只保留稳定字段和受控错误码，不包含关联载荷内容。
+    expect(store.recentTransitionSummaries).toHaveLength(VISUALIZATION_TRANSITION_SUMMARY_CAPACITY)
+    expect(store.recentTransitionSummaries[0]).toMatchObject({
+      transitionId: toTransitionId('transition-summary-1'),
+      outcome: 'failed',
+      diagnosticCode: 'command.timeout',
+      previousContextRevision: 0,
+    })
+    expect(store.recentTransitionSummaries.at(-1)).toMatchObject({
+      transitionId: toTransitionId(`transition-summary-${VISUALIZATION_TRANSITION_SUMMARY_CAPACITY}`),
+      outcome: 'failed',
+    })
   })
 })

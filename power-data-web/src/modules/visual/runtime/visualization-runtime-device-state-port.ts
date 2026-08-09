@@ -16,8 +16,23 @@ export class VisualizationRuntimeDeviceStatePort implements DeviceStatesUnityPor
     return this.runtime.status.value === 'ready' && this.runtime.capabilities.value.includes('setNodeVisualState')
   }
 
-  /** 载荷由场景拓扑品牌类型约束；宿主仍会在发送前执行内层协议校验和回执关联。 */
-  public setNodeVisualState(sceneNodeId: SceneNodeId, visualState: DeviceVisualStatus): Promise<{ success: boolean }> {
-    return this.runtime.sendCommandAndWait('setNodeVisualState', { sceneNodeId, visualState })
+  /**
+   * 载荷由场景拓扑品牌类型、标准化时间和可选来源修订共同约束；宿主仍会执行内层校验与回执关联。
+   * 内层始终发送 `hasSourceRevision + sourceRevision` 固定二元组，既保留外层可选兼容性，也让 Unity
+   * 明确区分“未提供修订号”和“显式修订号为零”，避免 JSON 默认值破坏同时间覆盖语义。
+   */
+  public setNodeVisualState(
+    sceneNodeId: SceneNodeId,
+    visualState: DeviceVisualStatus,
+    statusUpdatedAt: string,
+    sourceRevision?: number,
+  ): Promise<{ success: boolean }> {
+    return this.runtime.sendCommandAndWait('setNodeVisualState', {
+      sceneNodeId,
+      visualState,
+      statusUpdatedAt,
+      hasSourceRevision: sourceRevision !== undefined,
+      sourceRevision: sourceRevision ?? 0,
+    })
   }
 }

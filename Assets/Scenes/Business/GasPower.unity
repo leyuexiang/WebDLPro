@@ -351,6 +351,10 @@ MonoBehaviour:
   _cameraTransitionDuration: 1.45
   _focusFieldOfView: 52
   _cameraViewDirection: {x: 1, y: 0.65, z: -1}
+  _processOutlineColor: {r: 0, g: 1, b: 0.921, a: 1}
+  _processOutlineWidth: 0.8
+  _alarmOutlineColor: {r: 1, g: 0.018, b: 0, a: 1}
+  _alarmOutlineWidth: 1
   _nodes:
   - _id: plant.overview
     _targets:
@@ -892,6 +896,8 @@ MonoBehaviour:
   _minPitch: -80
   _maxPitch: 80
   _invertLookY: 0
+  _scrollMoveSensitivity: 0.05
+  _maxScrollMovePerFrame: 30
   _processController: {fileID: 0}
 --- !u!1001 &408165204
 PrefabInstance:

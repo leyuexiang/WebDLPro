@@ -21,35 +21,42 @@ function createTestManifest() {
   const manifestVersion = 'local-shell-regression.1'
   const gasResetActionId = 'action.gas.reset'
   const windResetActionId = 'action.wind.reset'
-  const scenes = sceneIds.map((sceneId) => ({
-    sceneId,
-    title: `测试场景-${sceneId}`,
-    unitySceneKey: `scene.${sceneId}`,
-    defaultTopologyId: `topology.${sceneId}.overview`,
-    topologyIds: [`topology.${sceneId}.overview`],
-    // 仅燃气声明一条可重复执行的本地回归动作，用于验证同场景流程触发不会改走场景切换路径。
-    supportedActionIds: sceneId === 'gas-power'
-      ? [gasResetActionId]
-      : sceneId === 'wind-power'
-        ? [windResetActionId]
-        : [],
-    // 当前 Unity 模拟页由既有燃气运行时登记启动，其握手只接受该受控映射版本；这不是正式九场景映射声明。
-    sceneMappingVersion: '2026.08.01-local.2',
-    resourceVersion: `resource.${sceneId}.1`,
-    switchStrategy: 'unload-first',
-  }))
+  const scenes = sceneIds.map((sceneId) => {
+    const topologyIds = [`topology.${sceneId}.overview`]
+    // 燃气明细图仅验证“同场景动作成功后才切换另一张映射拓扑”，不携带或推断正式业务设备资料。
+    if (sceneId === 'gas-power') topologyIds.push('topology.gas-power.detail')
+
+    return {
+      sceneId,
+      title: `测试场景-${sceneId}`,
+      unitySceneKey: `scene.${sceneId}`,
+      defaultTopologyId: topologyIds[0],
+      topologyIds,
+      // 仅燃气声明一条可重复执行的本地回归动作，用于验证同场景流程触发不会改走场景切换路径。
+      supportedActionIds: sceneId === 'gas-power'
+        ? [gasResetActionId]
+        : sceneId === 'wind-power'
+          ? [windResetActionId]
+          : [],
+      // 当前 Unity 模拟页由既有燃气运行时登记启动，其握手只接受该受控映射版本；这不是正式九场景映射声明。
+      sceneMappingVersion: '2026.08.01-local.2',
+      resourceVersion: `resource.${sceneId}.1`,
+      switchStrategy: 'unload-first',
+    }
+  })
 
   return {
     manifestVersion,
     unityBuildId: 'local-mock-build.1',
     unityRuntimeKey: 'local-mock-runtime',
     scenes,
-    topologies: scenes.map((scene) => ({
-      topologyId: scene.defaultTopologyId,
+    topologies: scenes.flatMap((scene) => scene.topologyIds.map((topologyId) => ({
+      topologyId,
       sceneId: scene.sceneId,
-      title: `测试拓扑-${scene.sceneId}`,
+      title: `测试拓扑-${topologyId}`,
       configVersion: manifestVersion,
-      nodes: scene.sceneId === 'gas-power'
+      // 设备测试节点只保留在燃气总览；明细图保持空白，避免把夹具当作正式设备映射。
+      nodes: topologyId === 'topology.gas-power.overview'
         ? [{
             nodeId: 'node.gas-turbine',
             title: '测试燃气轮机',
@@ -63,13 +70,13 @@ function createTestManifest() {
           }]
         : [],
       edges: [],
-    })),
+    }))),
     actions: [
       {
         actionId: gasResetActionId,
         title: '测试燃气场景重置',
         targetSceneId: 'gas-power',
-        targetTopologyId: 'topology.gas-power.overview',
+        targetTopologyId: 'topology.gas-power.detail',
         allowedParameters: [],
         unityAction: { type: 'resetScene' },
         failurePolicy: 'keep-current-context',

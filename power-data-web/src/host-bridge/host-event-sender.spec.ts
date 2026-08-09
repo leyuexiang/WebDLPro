@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
-import { toDeviceId, toNodeId, toSceneId, toSessionId, toTopologyId } from '@/config/scene-topology/identifiers'
+import { toDeviceId, toNodeId, toSceneId, toSceneNodeId, toSessionId, toTopologyId } from '@/config/scene-topology/identifiers'
+import type { HostCommandLifecycleResult } from '@/host-bridge/host-command-lifecycle'
 import { HostEventSender, type HostEventTransport } from '@/host-bridge/host-event-sender'
-import type { HostEventMessage, HostVisualizationContext } from '@/host-bridge/host-protocol'
+import type { HostEventMessage, HostProtocolError, HostVisualizationContext, SceneObjectSelectedPayload } from '@/host-bridge/host-protocol'
+import type { TopologyDeviceDoubleClickIntent } from '@/modules/visual/topology/topology-node-interaction'
 
 /** 夹具桥只记录通过发送器交付的事件，不模拟窗口或路由，保证测试聚焦协议转换职责。 */
 function createTransport(): { transport: HostEventTransport; sent: HostEventMessage[] } {
@@ -49,15 +51,51 @@ describe('外层事件发送器', () => {
     })])
   })
 
+  it('失败结果只发送白名单字段和错误码对应的固定脱敏说明', () => {
+    const { transport, sent } = createTransport()
+    const sender = new HostEventSender(transport, { now: () => 100 })
+    const taintedResult = {
+      replyTo: 'parent-command-sensitive-01',
+      source: 'executed',
+      payload: {
+        success: false,
+        status: 'failed',
+        error: {
+          code: 'scene.switch.failed',
+          message: 'Root/Plant/Turbine，token=secret-value，payload={"raw":true}',
+          stage: 'switching-scene',
+          recoverable: true,
+          rawPayload: { credential: 'secret-value' },
+        },
+        unityHierarchyPath: 'Root/Plant/Turbine',
+      },
+    } as HostCommandLifecycleResult
+
+    expect(sender.sendCommandResult(taintedResult)).toBe(true)
+    expect(sent[0]).toEqual(expect.objectContaining({
+      type: 'command.result',
+      replyTo: 'parent-command-sensitive-01',
+      payload: expect.objectContaining({
+        success: false,
+        error: expect.objectContaining({ message: '目标场景切换未能完成。' }),
+      }),
+    }))
+    const serialized = JSON.stringify(sent[0])
+    expect(serialized).not.toContain('Root/Plant/Turbine')
+    expect(serialized).not.toContain('secret-value')
+    expect(serialized).not.toContain('rawPayload')
+  })
+
   it('仅在事务提交后的 ready 上下文发送视图变更', () => {
     const { transport, sent } = createTransport()
     const sender = new HostEventSender(transport, { now: () => 101 })
 
     expect(sender.sendViewChanged({ ...createReadyContext(), status: 'initializing' })).toBe(false)
-    expect(sender.sendViewChanged(createReadyContext())).toBe(true)
+    expect(sender.sendViewChanged(createReadyContext(), undefined, 'parent-view-01')).toBe(true)
     expect(sent).toHaveLength(1)
     expect(sent[0]).toEqual(expect.objectContaining({
       type: 'view.changed',
+      replyTo: 'parent-view-01',
       payload: expect.objectContaining({ sceneId: 'gas-power', topologyId: 'topology.gas-power', contextRevision: 3 }),
     }))
   })
@@ -66,12 +104,15 @@ describe('外层事件发送器', () => {
     const { transport, sent } = createTransport()
     const sender = new HostEventSender(transport, { now: () => 102 })
 
-    const accepted = sender.sendTopologyNodeDoubleClick({
+    const taintedIntent = {
       sceneId: toSceneId('gas-power'),
       topologyId: toTopologyId('topology.gas-power'),
       nodeId: toNodeId('node.turbine'),
       deviceId: toDeviceId('device.turbine'),
-    }, 3)
+      unityHierarchyPath: 'Root/Plant/Turbine',
+      accessToken: 'secret-value',
+    } as TopologyDeviceDoubleClickIntent
+    const accepted = sender.sendTopologyNodeDoubleClick(taintedIntent, 3)
 
     expect(accepted).toBe(true)
     expect(sent[0]).toEqual(expect.objectContaining({
@@ -83,6 +124,43 @@ describe('外层事件发送器', () => {
         contextRevision: 3,
       }),
     }))
+    expect(JSON.stringify(sent[0])).not.toContain('unityHierarchyPath')
+    expect(JSON.stringify(sent[0])).not.toContain('secret-value')
+  })
+
+  it('三维对象选择只投影稳定映射字段，不透传Unity原始选择附加数据', () => {
+    const { transport, sent } = createTransport()
+    const sender = new HostEventSender(transport, { now: () => 102 })
+    const taintedSelection = {
+      sceneId: toSceneId('gas-power'),
+      sceneNodeId: toSceneNodeId('scene-node.turbine'),
+      deviceId: toDeviceId('device.turbine'),
+      topologyId: toTopologyId('topology.gas-power'),
+      nodeIds: [toNodeId('node.turbine')],
+      contextRevision: 3,
+      correlationId: 'unity-selection-outer-01',
+      unityMessageId: 'unity-inner-message-01',
+      unityHierarchyPath: 'Root/Plant/Turbine',
+      rawUnityPayload: { accessToken: 'secret-value' },
+    } as SceneObjectSelectedPayload
+
+    expect(sender.sendSceneObjectSelected(taintedSelection)).toBe(true)
+    expect(sent[0]).toEqual(expect.objectContaining({
+      type: 'scene.object.selected',
+      payload: {
+        sceneId: 'gas-power',
+        sceneNodeId: 'scene-node.turbine',
+        deviceId: 'device.turbine',
+        topologyId: 'topology.gas-power',
+        nodeIds: ['node.turbine'],
+        contextRevision: 3,
+        correlationId: 'unity-selection-outer-01',
+      },
+    }))
+    const serialized = JSON.stringify(sent[0])
+    expect(serialized).not.toContain('unity-inner-message-01')
+    expect(serialized).not.toContain('Root/Plant/Turbine')
+    expect(serialized).not.toContain('secret-value')
   })
 
   it('状态快照保留查询关联，错误事件不会接收原始 Error 对象', () => {
@@ -95,19 +173,26 @@ describe('外层事件发送器', () => {
       unityStatus: 'ready',
       topologyStatus: 'ready',
     })).toBe(true)
-    expect(sender.sendSystemError({
+    const taintedError = {
       code: 'scene.switch.failed',
-      message: '场景切换未完成。',
+      message: 'Assets/Scenes/Business/GasPower.unity，password=secret-value',
       stage: 'switching-scene',
       recoverable: true,
-    })).toBe(true)
+      rawPayload: { password: 'secret-value' },
+    } as HostProtocolError
+    expect(sender.sendSystemError(taintedError, 'parent-error-01')).toBe(true)
 
     expect(sent).toHaveLength(2)
     expect(sent[0]).toEqual(expect.objectContaining({ type: 'state.snapshot', replyTo: 'parent-state-get-01' }))
-    expect(sent[1]).toEqual(expect.objectContaining({ type: 'system.error' }))
+    expect(sent[1]).toEqual(expect.objectContaining({ type: 'system.error', replyTo: 'parent-error-01' }))
     // 先按可判别联合类型收窄，再验证错误载荷是受控结构，而非浏览器或 Unity 抛出的原始 Error。
     if (sent[1]?.type !== 'system.error') throw new Error('第二条事件必须为系统错误。')
     expect(sent[1].payload.error).not.toBeInstanceOf(Error)
+    expect(sent[1].payload.error.message).toBe('目标场景切换未能完成。')
+    const serialized = JSON.stringify(sent[1])
+    expect(serialized).not.toContain('Assets/Scenes/Business/GasPower.unity')
+    expect(serialized).not.toContain('secret-value')
+    expect(serialized).not.toContain('rawPayload')
   })
 
   it('出站校验失败时不会调用桥接层发送', () => {
@@ -122,7 +207,22 @@ describe('外层事件发送器', () => {
       deviceId: toDeviceId('device.turbine'),
     }, Number.NaN)
 
+    const missingDeviceAccepted = sender.sendTopologyNodeDoubleClick({
+      sceneId: toSceneId('gas-power'),
+      topologyId: toTopologyId('topology.gas-power'),
+      nodeId: toNodeId('node.turbine'),
+      deviceId: undefined,
+    } as unknown as TopologyDeviceDoubleClickIntent, 3)
+    const invalidReplyAccepted = sender.sendSystemError({
+      code: 'scene.switch.failed',
+      message: '该文本不会直接发送。',
+      stage: 'switching-scene',
+      recoverable: true,
+    }, '')
+
     expect(accepted).toBe(false)
+    expect(missingDeviceAccepted).toBe(false)
+    expect(invalidReplyAccepted).toBe(false)
     expect(send).not.toHaveBeenCalled()
   })
 })

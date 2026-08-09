@@ -41,6 +41,32 @@ function readArray(record: UnknownRecord, field: string, issues: SceneTopologyMa
 }
 
 /**
+ * 校验 Unity 映射中的稳定标识既合法又唯一。
+ *
+ * 映射数组允许为空，以表达“当前场景尚未交付该类能力”；但一旦登记同一节点或路径两次，
+ * 后续动作校验会被 Set（集合）去重而掩盖配置录入错误。因此必须在发布门禁中保留重复项错误。
+ */
+function validateUniqueIdentifierArray(
+  record: UnknownRecord,
+  field: string,
+  label: string,
+  issues: SceneTopologyManifestValidationIssue[],
+  missingArrayCode: string,
+  duplicateCode: string,
+  duplicateMessage: string,
+): void {
+  const identifiers = new Set<string>()
+  for (const value of readArray(record, field, issues, missingArrayCode)) {
+    if (!validateIdentifier(value, label, issues)) continue
+    if (identifiers.has(value)) {
+      appendIssue(issues, duplicateCode, duplicateMessage)
+      continue
+    }
+    identifiers.add(value)
+  }
+}
+
+/**
  * 校验完整原子清单。
  * 该函数没有网络、缓存或组件副作用，可在部署前、子应用加载前和单元测试中使用同一规则。
  */
@@ -229,11 +255,38 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
     unityMappingsBySceneId.set(item.sceneId, item)
     const scene = scenesById.get(item.sceneId)
     if (!scene || item.mappingVersion !== scene.sceneMappingVersion) appendIssue(issues, 'unity-mapping.version', 'Unity场景映射版本与场景登记不一致。')
-    readArray(item, 'sceneNodeIds', issues, 'unity-mapping.nodes').forEach((sceneNodeId) => validateIdentifier(sceneNodeId, 'Unity场景节点标识', issues))
-    readArray(item, 'routeIds', issues, 'unity-mapping.routes').forEach((routeId) => validateIdentifier(routeId, 'Unity场景路径标识', issues))
+    // 节点与路径是动作解析的唯一目标集合；重复声明不能被后续 Set 去重后静默吞掉。
+    validateUniqueIdentifierArray(
+      item,
+      'sceneNodeIds',
+      'Unity场景节点标识',
+      issues,
+      'unity-mapping.nodes',
+      'unity-mapping.duplicate-node',
+      'Unity场景映射重复登记了三维节点标识。',
+    )
+    validateUniqueIdentifierArray(
+      item,
+      'routeIds',
+      'Unity场景路径标识',
+      issues,
+      'unity-mapping.routes',
+      'unity-mapping.duplicate-route',
+      'Unity场景映射重复登记了路径标识。',
+    )
+
+    /** 流程唯一性按“流程标识 + 步骤标识”判断；同一流程可合法拥有多个不同步骤。 */
+    const processStepReferences = new Set<string>()
     for (const processStep of readArray(item, 'processSteps', issues, 'unity-mapping.process-steps')) {
       if (!isRecord(processStep) || !validateIdentifier(processStep.processId, '流程标识', issues) || !validateIdentifier(processStep.stepId, '步骤标识', issues)) {
         appendIssue(issues, 'unity-mapping.process-step', 'Unity流程步骤映射无效。')
+        continue
+      }
+      const processStepReference = `${processStep.processId}:${processStep.stepId}`
+      if (processStepReferences.has(processStepReference)) {
+        appendIssue(issues, 'unity-mapping.duplicate-process-step', 'Unity场景映射重复登记了流程步骤。')
+      } else {
+        processStepReferences.add(processStepReference)
       }
     }
   }

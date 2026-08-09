@@ -54,6 +54,9 @@
     const eventCapabilities = ['ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'disposed'];
     const message = document.querySelector('#message');
     let disposed = false;
+    // 模拟 Unity 每次实际完成场景加载时的新物理实例；同场景普通命令不会改变该值。
+    let sceneActivationSequence = 0;
+    let activeSceneActivationId = '';
 
     /** 精确 Origin 是唯一允许的父页面地址；路径、查询和片段都会拒绝启动通信。 */
     function isExactOrigin(value) {
@@ -75,14 +78,29 @@
       return ['normal', 'alarm', 'fault', 'offline'].includes(value);
     }
 
+    /** 状态时间必须与正式内层协议一致：有界且可解析，避免夹具放宽契约而掩盖迟到状态问题。 */
+    function isStatusUpdatedAt(value) {
+      return typeof value === 'string' && value.length > 0 && value.length <= 128 && Number.isFinite(Date.parse(value));
+    }
+
     /** 对每种受控动作执行最小结构校验；真实节点、流程和路径是否存在仍由 Unity 场景控制器负责。 */
     function isValidActionPayload(type, payload) {
       if (type === 'enterProcessStep') {
         return isIdentifier(payload?.processId) && isIdentifier(payload?.stepId) &&
           (payload?.unitId === undefined || isIdentifier(payload.unitId)) && typeof payload?.isolate === 'boolean';
       }
-      if (type === 'focusNode') return isIdentifier(payload?.sceneNodeId) && typeof payload?.isolate === 'boolean';
-      if (type === 'setNodeVisualState') return isIdentifier(payload?.sceneNodeId) && isVisualState(payload?.visualState);
+      // 与正式 Unity 桥接一致：聚焦必须携带 selectionId（选择标识），本地夹具不接受旧载荷静默降级。
+      if (type === 'focusNode') {
+        return isIdentifier(payload?.sceneNodeId) && isIdentifier(payload?.selectionId) && typeof payload?.isolate === 'boolean';
+      }
+      if (type === 'setNodeVisualState') {
+        // 内层固定二元组保留外层修订号可选语义，并明确区分“未提供修订号”和“显式修订号零”。
+        const hasValidRevisionPair = typeof payload?.hasSourceRevision === 'boolean' &&
+          Number.isSafeInteger(payload?.sourceRevision) && payload.sourceRevision >= 0 &&
+          (payload.hasSourceRevision || payload.sourceRevision === 0);
+        return isIdentifier(payload?.sceneNodeId) && isVisualState(payload?.visualState) &&
+          isStatusUpdatedAt(payload?.statusUpdatedAt) && hasValidRevisionPair;
+      }
       if (type === 'setRouteFlow') return isIdentifier(payload?.routeId) && typeof payload?.enabled === 'boolean';
       if (type === 'setNodeVisibility') return isIdentifier(payload?.sceneNodeId) && typeof payload?.enabled === 'boolean';
       return type === 'resetScene';
@@ -133,7 +151,7 @@
         post('commandResult', { requestId: data.messageId, success: true, message: `模拟运行时已确认 ${data.type}。` });
       } else if (data.type === 'switchScene') {
         const payload = data.payload || {};
-        if (!payload.sceneId || !payload.transitionId || payload.sceneMappingVersion !== sceneMappingVersion) {
+        if (!payload.sceneId || !payload.transitionId || payload.sceneMappingVersion !== sceneMappingVersion || typeof payload.forceReload !== 'boolean') {
           // 测试页只显示固定失败阶段，不回显完整命令或查询参数，便于三层夹具判断是否在最终完成事件前失败。
           message.textContent = '场景切换载荷未通过受控映射版本校验。';
           post('commandResult', { requestId: data.messageId, success: false, errorCode: 'scene-switch-payload-invalid', message: '场景切换载荷无效。' });
@@ -156,10 +174,13 @@
             post('commandResult', { requestId: data.messageId, success: false, errorCode: 'scene-switch-simulated-failure', message: '模拟场景切换失败。' });
             return;
           }
+          // 只有场景最终成功提交后才生成实例标识，不能用下行 transitionId 或页面时间戳冒充实例。
+          activeSceneActivationId = `scene-activation.local-${++sceneActivationSequence}`;
           post('sceneChanged', {
             requestId: data.messageId,
             sceneId: payload.sceneId,
             transitionId: payload.transitionId,
+            sceneActivationId: activeSceneActivationId,
             success: true,
             sceneState: `模拟场景 ${payload.sceneId} 已就绪。`
           });
@@ -184,11 +205,17 @@
     }
 
     /**
-     * 模拟 Unity 场景对象选中，只发送本地任务-037清单已经显式登记的三维节点标识。
+     * 模拟 Unity 场景对象选中，只发送本地任务-037清单已经显式登记的三维节点和物理场景实例标识。
      * 它不代表正式燃气映射，更不会回传引擎对象引用、对象名称、层级或坐标。
      */
     document.querySelector('#object-button').addEventListener('click', () => {
-      post('objectSelected', { nodeId: 'scene-node.gas-turbine' });
+      // 协议明确区分二维 nodeId、三维 sceneNodeId 与物理场景实例；夹具只回传已登记的受控标识。
+      if (!activeSceneActivationId) return;
+      post('objectSelected', {
+        sceneId: 'gas-power',
+        sceneNodeId: 'scene-node.gas-turbine',
+        sceneActivationId: activeSceneActivationId,
+      });
     });
   </script>
 </body>

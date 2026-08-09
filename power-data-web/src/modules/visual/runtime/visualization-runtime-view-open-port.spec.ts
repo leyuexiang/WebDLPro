@@ -1,12 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
-import { toActionId, toProcessId, toSceneId, toStepId, toTransitionId } from '@/config/scene-topology/identifiers'
+import { toActionId, toProcessId, toSceneActivationId, toSceneId, toSceneNodeId, toStepId, toTransitionId } from '@/config/scene-topology/identifiers'
 import { VisualizationRuntimeViewOpenPort } from '@/modules/visual/runtime/visualization-runtime-view-open-port'
 import type { VisualizationRuntimeHostController } from '@/modules/visual/runtime/visualization-runtime-host'
 
 /** 运行时宿主夹具只公开事务适配器需要的等待命令端口，避免测试耦合 iframe 或跨窗口消息。 */
 function createRuntime(success = true): VisualizationRuntimeHostController {
   return {
-    sendCommandAndWait: vi.fn().mockResolvedValue({ success }),
+    // switchScene 成功必须携带 Unity 实际生成的物理场景实例标识；动作命令会忽略该字段。
+    sendCommandAndWait: vi.fn().mockResolvedValue({ success, ...(success ? { sceneActivationId: 'scene-activation.runtime-test' } : {}) }),
   } as unknown as VisualizationRuntimeHostController
 }
 
@@ -15,11 +16,48 @@ describe('view.open Unity 运行时端口', () => {
     const runtime = createRuntime()
     const port = new VisualizationRuntimeViewOpenPort(runtime)
 
-    await expect(port.switchScene(toSceneId('wind-power'), 'mapping.wind.1', toTransitionId('transition.wind.1'))).resolves.toEqual({ success: true })
+    await expect(port.switchScene(toSceneId('wind-power'), 'mapping.wind.1', toTransitionId('transition.wind.1'), true)).resolves.toEqual({
+      success: true,
+      sceneActivationId: toSceneActivationId('scene-activation.runtime-test'),
+    })
     expect(runtime.sendCommandAndWait).toHaveBeenCalledWith('switchScene', {
       sceneId: toSceneId('wind-power'),
       sceneMappingVersion: 'mapping.wind.1',
       transitionId: toTransitionId('transition.wind.1'),
+      forceReload: true,
+    })
+  })
+
+  it('普通场景切换显式发送非强制重载，避免协议缺省值在不同运行时产生歧义', async () => {
+    const runtime = createRuntime()
+    const port = new VisualizationRuntimeViewOpenPort(runtime)
+
+    await port.switchScene(toSceneId('gas-power'), 'mapping.gas.1', toTransitionId('transition.gas.1'))
+
+    expect(runtime.sendCommandAndWait).toHaveBeenCalledWith('switchScene', {
+      sceneId: toSceneId('gas-power'),
+      sceneMappingVersion: 'mapping.gas.1',
+      transitionId: toTransitionId('transition.gas.1'),
+      forceReload: false,
+    })
+  })
+
+  it('切换失败但运行时已自动恢复时保留恢复后的物理场景标识', async () => {
+    const runtime = createRuntime(false)
+    vi.mocked(runtime.sendCommandAndWait).mockResolvedValueOnce({
+      success: false,
+      sceneActivationId: 'scene-activation.gas-restored',
+    })
+    const port = new VisualizationRuntimeViewOpenPort(runtime)
+
+    await expect(port.switchScene(
+      toSceneId('wind-power'),
+      'mapping.wind.1',
+      toTransitionId('transition.wind.failed'),
+    )).resolves.toEqual({
+      success: false,
+      errorCode: 'scene.switch.failed',
+      sceneActivationId: toSceneActivationId('scene-activation.gas-restored'),
     })
   })
 
@@ -39,6 +77,23 @@ describe('view.open Unity 运行时端口', () => {
       stepId: toStepId('overview'),
       unitId: 'all',
       isolate: true,
+    })
+  })
+
+  it('聚焦动作使用当前视图事务作为显式选择标识', async () => {
+    const runtime = createRuntime()
+    const port = new VisualizationRuntimeViewOpenPort(runtime)
+    const transitionId = toTransitionId('transition.gas.focus.01')
+
+    await expect(port.executeAction({
+      type: 'focusNode',
+      sceneNodeId: toSceneNodeId('scene-node.gas-turbine'),
+      isolate: false,
+    }, toActionId('action.gas.focus'), transitionId)).resolves.toEqual({ success: true })
+    expect(runtime.sendCommandAndWait).toHaveBeenCalledWith('focusNode', {
+      sceneNodeId: toSceneNodeId('scene-node.gas-turbine'),
+      selectionId: transitionId,
+      isolate: false,
     })
   })
 })

@@ -1,4 +1,4 @@
-import { toTransitionId, type TransitionId } from '@/config/scene-topology/identifiers'
+import { toTransitionId, type SceneActivationId, type TransitionId } from '@/config/scene-topology/identifiers'
 import type { UnityActionDefinition } from '@/config/scene-topology/types'
 import type { TopologyRegistry } from '@/config/scene-topology/topology-registry'
 import type { HostCommandExecutionResult } from '@/host-bridge/host-command-lifecycle'
@@ -13,7 +13,16 @@ import type { TopologyRuntime } from '@/modules/visual/topology/topology-runtime
  * 真正的内层连接器在组合根实现该端口；本处理器只按结果推进或回滚领域事务。
  */
 export interface ViewOpenUnityPort {
-  switchScene(sceneId: ViewOpenPayload['sceneId'], sceneMappingVersion: string, transitionId: TransitionId): Promise<ViewOpenUnityPortResult>
+  /**
+   * `forceReload` 为 true 时，即使目标与当前场景相同也必须重建物理 Unity 场景。
+   * 该开关仅供超时补偿清除可能已经产生的动作副作用，普通视图切换保持 false 以复用当前实例。
+   */
+  switchScene(
+    sceneId: ViewOpenPayload['sceneId'],
+    sceneMappingVersion: string,
+    transitionId: TransitionId,
+    forceReload?: boolean,
+  ): Promise<ViewOpenUnityPortResult>
   executeAction(action: UnityActionDefinition, actionId: NonNullable<ViewOpenPayload['actionId']>, transitionId: TransitionId): Promise<ViewOpenUnityPortResult>
 }
 
@@ -21,10 +30,36 @@ export interface ViewOpenUnityPort {
 export interface ViewOpenUnityPortResult {
   success: boolean
   errorCode?: 'scene.switch.failed' | 'action.execute.failed'
+  /** 仅 switchScene 成功时返回 Unity 实际提交的物理场景实例标识。 */
+  sceneActivationId?: SceneActivationId
 }
 
 /** 可注入的切换事务标识工厂；测试使用固定值，生产默认使用有前缀的安全随机标识。 */
 export type ViewOpenTransitionIdFactory = () => TransitionId
+
+/**
+ * 外层生命周期允许同时等待的命令上限为 64 条；原子初始化最多额外占用一条记录。
+ * 这里使用相同的固定上限，避免测试或异常调用绕过外层桥后使“关联标识 → 事务”映射无界增长。
+ */
+const MAXIMUM_ACTIVE_VIEW_OPEN_TRANSACTIONS = 65
+
+/**
+ * 只保存实施补偿恢复所需的受控字段，不保存外层完整载荷、Unity 对象、Canvas（画布）或 Promise。
+ * `previousContext` 是超时后唯一允许恢复的基线；有动作的旧上下文不能猜测为可重放，必须转入明确错误态。
+ */
+interface ActiveViewOpenTransaction {
+  readonly correlationId: string
+  readonly transitionId: TransitionId
+  readonly payload: ViewOpenPayload
+  readonly previousContext: VisualizationStableContext | null
+  recoveryStarted: boolean
+}
+
+/** 物理回退与超时补偿都只使用协议已经允许的有限失败码。 */
+type RecoverableViewOpenErrorCode = Extract<
+  HostProtocolErrorCode,
+  'scene.switch.failed' | 'action.execute.failed' | 'topology.activate.failed' | 'command.timeout'
+>
 
 /**
  * `view.open`（原子打开视图）事务处理器。
@@ -34,6 +69,8 @@ export type ViewOpenTransitionIdFactory = () => TransitionId
  * 永远不会观察到“新场景 + 旧拓扑”或“新拓扑 + 旧场景”的可操作组合。
  */
 export class ViewOpenTransactionHandler {
+  private readonly activeTransactionsByCorrelationId = new Map<string, ActiveViewOpenTransaction>()
+
   public constructor(
     private readonly registry: TopologyRegistry,
     private readonly topologyRuntime: TopologyRuntime,
@@ -54,6 +91,22 @@ export class ViewOpenTransactionHandler {
     return this.open(command.payload, command.correlationId)
   }
 
+  /**
+   * 外层十秒超时时撤销原事务的提交权，并立即开始补偿恢复事务。
+   * 不能只让外层回包超时：那样迟到的 Unity 成功仍会激活目标拓扑。补偿事务使用新标识，
+   * 使 Unity 的事务门同步废弃正在加载的旧目标；若新用户请求随后到达，又会继续取代该补偿事务。
+   */
+  public cancelTimedOutCommand(correlationId: string): void {
+    const activeTransaction = this.activeTransactionsByCorrelationId.get(correlationId)
+    if (!activeTransaction || activeTransaction.recoveryStarted) return
+
+    activeTransaction.recoveryStarted = true
+    void this.beginTimedOutRecovery(activeTransaction).catch(() => {
+      // 端口契约应将异常收敛为受控结果；即使未来实现违约，也只将当前事务转入明确错误态。
+      this.failTimedOutRecovery(activeTransaction)
+    })
+  }
+
   private async open(payload: ViewOpenPayload, correlationId: string): Promise<HostCommandExecutionResult> {
     const actionValidationFailure = this.validateManifestReferences(payload)
     if (actionValidationFailure) return actionValidationFailure
@@ -63,6 +116,10 @@ export class ViewOpenTransactionHandler {
     const preparedTopology = this.topologyRuntime.prepare(payload.sceneId, payload.topologyId, transitionId)
     if (!preparedTopology) {
       return this.failure('topology.prepare.failed', 'preparing-topology', '目标拓扑未能完成预解析，未执行场景切换。', transitionId, payload)
+    }
+    if (this.activeTransactionsByCorrelationId.size >= MAXIMUM_ACTIVE_VIEW_OPEN_TRANSACTIONS) {
+      // 容量检查必须早于 transition.begin（开始事务）；否则一个本应拒绝的调用会意外取代有效事务。
+      return this.failure('protocol.capacity.exceeded', 'validation', '原子视图事务已达到受控容量上限。', transitionId, payload)
     }
 
     const beginResult = this.coordinator.submit({
@@ -77,7 +134,19 @@ export class ViewOpenTransactionHandler {
     if (beginResult.status === 'rejected') return this.failure(beginResult.error.code as HostProtocolErrorCode, 'validation', beginResult.error.message, transitionId, payload)
 
     const previousContext = this.coordinator.getSnapshot().stableContext
+    const activeTransaction: ActiveViewOpenTransaction = {
+      correlationId,
+      transitionId,
+      payload,
+      previousContext: previousContext ? { ...previousContext } : null,
+      recoveryStarted: false,
+    }
+    this.activeTransactionsByCorrelationId.set(correlationId, activeTransaction)
+
+    try {
     const requiresSceneSwitch = previousContext?.sceneId !== payload.sceneId
+    // 同场景拓扑切换复用现有 Unity 物理实例；只有 Unity 真正完成切换或恢复后才替换该标识。
+    let sceneActivationId = this.coordinator.getSnapshot().sceneActivationId ?? null
     let targetSceneActivated = false
     if (requiresSceneSwitch) {
       // 场景登记与 Unity 场景映射版本同属清单；切换消息必须携带这一版本以拒绝旧资源回执。
@@ -88,10 +157,27 @@ export class ViewOpenTransactionHandler {
       const switchResult = await this.unity.switchScene(payload.sceneId, targetScene.sceneMappingVersion, transitionId)
       if (!this.isCurrentTransition(transitionId)) return this.superseded(transitionId)
       if (!switchResult.success) {
-        return this.failCurrentTransition('scene.switch.failed', 'switching-scene', 'Unity 未能完成目标业务场景切换。', correlationId, transitionId, payload)
+        // Unity 的跨场景协调器可能在目标加载失败后自动重建上一稳定场景。此时业务上下文不变，
+        // 但物理实例已经变化，必须以 recovered 收尾并替换激活标识；缺失标识时仍按普通失败处理。
+        return this.failCurrentTransition(
+          'scene.switch.failed',
+          'switching-scene',
+          'Unity 未能完成目标业务场景切换。',
+          correlationId,
+          transitionId,
+          payload,
+          switchResult.sceneActivationId ? 'recovered' : 'failed',
+          switchResult.sceneActivationId,
+        )
       }
       // 仅收到目标场景最终成功回执后才视为物理运行时已改变；此前失败无需执行回退命令。
       targetSceneActivated = true
+      if (!switchResult.sceneActivationId) {
+        // Unity 已切入目标却未给出实例标识时，不能让后续对象选择与任意同名旧场景混合；
+        // 进入统一物理恢复流程，绝不以当前事务标识或节点名称代替真实激活标识。
+        return this.recoverPhysicalRuntimeOrFail('scene.switch.failed', 'switching-scene', 'Unity 未返回可验证的物理场景激活标识。', correlationId, transitionId, payload, previousContext, targetSceneActivated)
+      }
+      sceneActivationId = switchResult.sceneActivationId
     }
 
     const unityReadyResult = this.coordinator.submit({ type: 'unity.status.reported', transitionId, status: 'ready' })
@@ -105,16 +191,17 @@ export class ViewOpenTransactionHandler {
       const actionResult = await this.unity.executeAction(action.unityAction, action.actionId, transitionId)
       if (!this.isCurrentTransition(transitionId)) return this.superseded(transitionId)
       if (!actionResult.success) {
-        if (!requiresSceneSwitch && action.failurePolicy === 'keep-current-context') {
+        if (action.failurePolicy === 'commit-view-with-warning') {
           /*
-           * 同场景动作由清单显式声明“保持当前上下文”时，不激活目标拓扑且不重建 Unity。
-           * 该策略是任务-034的默认失败语义；跨场景动作仍必须走物理回退，不能把已切换场景伪装成旧状态。
+           * 只有清单显式标为“带警告提交”时，已结束但失败的非关键展示动作才可继续激活映射拓扑。
+           * 该规则同样适用于跨场景：Unity 已确认进入目标场景，此时提交目标视图比伪装为旧场景更一致；
+           * 关键动作仍使用 keep-current-context（保持当前上下文），跨场景失败会继续走物理回退。
            */
-          return this.failCurrentTransition('action.execute.failed', 'executing-action', '同场景动作未完成，已保持上一稳定视图。', correlationId, transitionId, payload)
-        }
-        if (!requiresSceneSwitch && action.failurePolicy === 'commit-view-with-warning') {
-          // 只有原子清单明确许可时，动作失败才可继续激活映射拓扑；诊断保留稳定码供外层有限状态查询关联。
+          // 诊断仅保留稳定错误码与请求关联，避免将 Unity 原始异常、对象或参数暴露给外层。
           this.coordinator.submit({ type: 'diagnostic.record', diagnostic: this.createDiagnostic('action.execute.failed', correlationId) })
+        } else if (!requiresSceneSwitch) {
+          // 同场景关键动作尚未造成场景物理变化，直接恢复上一稳定上下文即可，绝不升级为全局错误态。
+          return this.failCurrentTransition('action.execute.failed', 'executing-action', '同场景动作未完成，已保持上一稳定视图。', correlationId, transitionId, payload)
         } else {
           return this.recoverPhysicalRuntimeOrFail('action.execute.failed', 'executing-action', '目标场景动作未完成，未激活目标拓扑。', correlationId, transitionId, payload, previousContext, targetSceneActivated)
         }
@@ -138,6 +225,7 @@ export class ViewOpenTransactionHandler {
       sceneId: payload.sceneId,
       topologyId: payload.topologyId,
       actionId: payload.actionId ?? null,
+      sceneActivationId,
     })
     if (commitResult.status === 'ignored') return this.superseded(transitionId)
     if (commitResult.status === 'rejected') {
@@ -149,6 +237,12 @@ export class ViewOpenTransactionHandler {
       status: 'completed',
       transitionId,
       contextRevision: commitResult.contextRevision,
+    }
+    } finally {
+      // 只有本次登记仍是当前值时才删除，避免测试替身或未来重试复用关联标识时误删后续事务。
+      if (this.activeTransactionsByCorrelationId.get(correlationId) === activeTransaction) {
+        this.activeTransactionsByCorrelationId.delete(correlationId)
+      }
     }
   }
 
@@ -177,15 +271,97 @@ export class ViewOpenTransactionHandler {
 
   /** 当前事务失败时统一写入受控诊断；协调器负责恢复上一份稳定上下文。 */
   private failCurrentTransition(
-    code: Extract<HostProtocolErrorCode, 'scene.switch.failed' | 'action.execute.failed' | 'topology.activate.failed'>,
+    code: RecoverableViewOpenErrorCode,
     stage: HostProtocolError['stage'],
     message: string,
     correlationId: string,
     transitionId: TransitionId,
     payload: ViewOpenPayload,
+    outcome: 'failed' | 'recovered' = 'failed',
+    restoredSceneActivationId: SceneActivationId | undefined = undefined,
   ): HostCommandExecutionResult {
-    this.coordinator.submit({ type: 'transition.fail', transitionId, diagnostic: this.createDiagnostic(code, correlationId) })
+    this.coordinator.submit({
+      type: 'transition.fail',
+      transitionId,
+      diagnostic: this.createDiagnostic(code, correlationId),
+      outcome,
+      ...(restoredSceneActivationId ? { restoredSceneActivationId } : {}),
+    })
     return this.failure(code, stage, message, transitionId, payload)
+  }
+
+  /**
+   * 对超时事务启动补偿恢复。恢复始终另建事务并强制按场景切换处理：这会把旧 Unity 请求
+   * 交给引擎侧事务门清理，而不是在网页端假定“目标尚未加载”。恢复成功只恢复原稳定上下文，
+   * 不提交新版本；恢复被后续用户请求取代时，迟到结果会因 recoveryTransitionId 失效而被丢弃。
+   */
+  private async beginTimedOutRecovery(activeTransaction: ActiveViewOpenTransaction): Promise<void> {
+    if (!this.isCurrentTransition(activeTransaction.transitionId)) return
+
+    const previousContext = activeTransaction.previousContext
+    if (!previousContext || previousContext.actionId !== null) {
+      // 没有基线或基线携带动作时无法证明可重放，不能借标题、名称或当前 Unity 画面猜测恢复目标。
+      this.failTimedOutRecovery(activeTransaction)
+      return
+    }
+
+    const previousScene = this.registry.getScene(previousContext.sceneId)
+    const recoveryTransitionId = this.createTransitionId()
+    const previousTopology = this.topologyRuntime.prepare(
+      previousContext.sceneId,
+      previousContext.topologyId,
+      recoveryTransitionId,
+    )
+    if (!previousScene || !previousTopology) {
+      this.failTimedOutRecovery(activeTransaction)
+      return
+    }
+
+    const beginRecovery = this.coordinator.submit({
+      type: 'transition.begin',
+      transitionId: recoveryTransitionId,
+      sceneId: previousContext.sceneId,
+      topologyId: previousContext.topologyId,
+      actionId: null,
+      // 逻辑稳定场景本就等于恢复目标，但物理 Unity 可能已经切到超时目标；必须强制发起补偿切换。
+      forceSceneSwitch: true,
+    })
+    if (beginRecovery.status !== 'accepted') {
+      this.failTimedOutRecovery(activeTransaction)
+      return
+    }
+
+    const recoveryResult = await this.unity.switchScene(
+      previousContext.sceneId,
+      previousScene.sceneMappingVersion,
+      recoveryTransitionId,
+      // 超时命令可能已在同一场景产生部分副作用；只有物理重载才能建立可证明的干净恢复基线。
+      true,
+    )
+    if (!this.isCurrentTransition(recoveryTransitionId)) return
+    if (!recoveryResult.success || !recoveryResult.sceneActivationId || !this.topologyRuntime.activate(previousTopology, recoveryTransitionId)) {
+      this.failTimedOutRecovery(activeTransaction, recoveryTransitionId)
+      return
+    }
+
+    // 恢复不是新的业务打开：画布和 Unity 已回到旧稳定上下文后，以 fail 收尾保持原 contextRevision 不递增。
+    this.coordinator.submit({
+      type: 'transition.fail',
+      transitionId: recoveryTransitionId,
+      diagnostic: this.createDiagnostic('command.timeout', activeTransaction.correlationId),
+      outcome: 'recovered',
+      restoredSceneActivationId: recoveryResult.sceneActivationId,
+    })
+  }
+
+  /** 不能安全证明补偿结果时清空稳定上下文，禁止保留可能已与物理 Unity 脱节的旧二维视图。 */
+  private failTimedOutRecovery(activeTransaction: ActiveViewOpenTransaction, transitionId = activeTransaction.transitionId): void {
+    if (!this.isCurrentTransition(transitionId)) return
+    this.coordinator.submit({
+      type: 'transition.recovery.fail',
+      transitionId,
+      diagnostic: this.createDiagnostic('command.timeout', activeTransaction.correlationId),
+    })
   }
 
   /**
@@ -193,7 +369,7 @@ export class ViewOpenTransactionHandler {
    * 旧事务在任何 await（等待）点被新事务取代时立即停止恢复，避免旧回退命令反向覆盖最新目标。
    */
   private async recoverPhysicalRuntimeOrFail(
-    code: Extract<HostProtocolErrorCode, 'scene.switch.failed' | 'action.execute.failed' | 'topology.activate.failed'>,
+    code: RecoverableViewOpenErrorCode,
     stage: HostProtocolError['stage'],
     message: string,
     correlationId: string,
@@ -219,17 +395,26 @@ export class ViewOpenTransactionHandler {
 
     const recoveryResult = await this.unity.switchScene(previousContext.sceneId, previousScene.sceneMappingVersion, transitionId)
     if (!this.isCurrentTransition(transitionId)) return this.superseded(transitionId)
-    if (!recoveryResult.success || !this.topologyRuntime.activate(previousTopology, transitionId)) {
+    if (!recoveryResult.success || !recoveryResult.sceneActivationId || !this.topologyRuntime.activate(previousTopology, transitionId)) {
       return this.failRecoveryToError(code, stage, message, correlationId, transitionId, payload)
     }
 
     // 物理三维与单画布均回到上一个稳定上下文后，才允许仓库恢复 ready（就绪）状态。
-    return this.failCurrentTransition(code, stage, message, correlationId, transitionId, payload)
+    return this.failCurrentTransition(
+      code,
+      stage,
+      message,
+      correlationId,
+      transitionId,
+      payload,
+      'recovered',
+      recoveryResult.sceneActivationId,
+    )
   }
 
   /** 回退无法被清单和最终回执证明时，清空稳定上下文并让壳层展示可恢复的明确错误视图。 */
   private failRecoveryToError(
-    code: Extract<HostProtocolErrorCode, 'scene.switch.failed' | 'action.execute.failed' | 'topology.activate.failed'>,
+    code: RecoverableViewOpenErrorCode,
     stage: HostProtocolError['stage'],
     message: string,
     correlationId: string,

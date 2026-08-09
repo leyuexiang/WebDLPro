@@ -11,7 +11,8 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  objectSelected: [nodeId: string, messageId: string]
+  /** 旧工艺面板转发的对象选择也必须保持三维节点字段语义，不能将其降格为二维节点。 */
+  objectSelected: [sceneNodeId: string, messageId: string]
 }>()
 
 const runtimeHost = inject(visualizationRuntimeHostKey, null)
@@ -53,7 +54,8 @@ async function synchronizeRuntime(): Promise<void> {
   if (!unregisterViewport) unregisterViewport = runtimeHost.registerViewport(sceneViewport.value)
   if (!unsubscribeObjectSelection) {
     unsubscribeObjectSelection = runtimeHost.subscribeObjectSelected(({ payload, messageId }) => {
-      emit('objectSelected', payload.nodeId, messageId)
+      // Unity 上行载荷只能提供 sceneNodeId（三维节点标识）；二维节点由统一协调器按清单解析。
+      emit('objectSelected', payload.sceneNodeId, messageId)
     })
   }
 
