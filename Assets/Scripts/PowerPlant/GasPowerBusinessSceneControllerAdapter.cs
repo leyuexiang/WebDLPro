@@ -18,13 +18,30 @@ public sealed class GasPowerBusinessSceneControllerAdapter : IBusinessSceneContr
 
     public string SceneId => GasPowerSceneId;
 
-    public BusinessSceneCapability Capabilities =>
-        BusinessSceneCapability.Initialize |
-        BusinessSceneCapability.EnterProcessStep |
-        BusinessSceneCapability.FocusNode |
-        BusinessSceneCapability.SetNodeVisibility |
-        BusinessSceneCapability.ResetScene |
-        BusinessSceneCapability.Release;
+    public BusinessSceneCapability Capabilities
+    {
+        get
+        {
+            BusinessSceneCapability capabilities =
+                BusinessSceneCapability.Initialize |
+                BusinessSceneCapability.EnterProcessStep |
+                BusinessSceneCapability.FocusNode |
+                BusinessSceneCapability.ClearSelection |
+                BusinessSceneCapability.SetNodeVisibility |
+                BusinessSceneCapability.ResetScene |
+                BusinessSceneCapability.Release;
+
+            // 四态能力不由协议元数据或接口方法的存在决定，而由当前真实燃气模型是否完成全部显式登记决定。
+            // 注册失败时保持能力缺失，让桥接返回结构化“不支持”，不能让部分模型成功变色后再静默忽略其余目标。
+            if (_controller != null && _controller.SupportsNodeVisualState)
+            {
+                capabilities |= BusinessSceneCapability.UpdateNodeVisualState |
+                                BusinessSceneCapability.ClearNodeVisualState;
+            }
+
+            return capabilities;
+        }
+    }
 
     public GasPowerBusinessSceneControllerAdapter(PowerPlantProcessController controller)
     {
@@ -79,6 +96,10 @@ public sealed class GasPowerBusinessSceneControllerAdapter : IBusinessSceneContr
             : BusinessSceneCommandResult.Failed("invalid-process-step", message);
     }
 
+    /// <summary>
+    /// 将拓扑节点选择转交燃气控制器更新三维描边。
+    /// 接口命名沿用既有协议，但实现不移动镜头；isolate 仅控制模型显隐上下文。
+    /// </summary>
     public BusinessSceneCommandResult FocusNode(string sceneNodeId, bool isolate)
     {
         if (!TryUseController(out BusinessSceneCommandResult unavailable))
@@ -92,10 +113,57 @@ public sealed class GasPowerBusinessSceneControllerAdapter : IBusinessSceneContr
             : BusinessSceneCommandResult.Failed("invalid-node", message);
     }
 
-    /// <summary>正式四态视觉映射尚未提供，明确拒绝，避免把现有告警或显隐行为误当成四态语义。</summary>
+    /// <summary>
+    /// 只清除当前由拓扑节点聚焦产生的三维交互描边。
+    /// 不改变流程步骤、模型显隐、当前镜头位置或告警描边，保证空白点击不会把场景重置到总览。
+    /// </summary>
+    public BusinessSceneCommandResult ClearSelection()
+    {
+        if (!TryUseController(out BusinessSceneCommandResult unavailable))
+        {
+            return unavailable;
+        }
+
+        bool success = _controller.TryClearSelection(out string message);
+        return success
+            ? BusinessSceneCommandResult.Completed(message)
+            : BusinessSceneCommandResult.Failed("clear-selection-failed", message);
+    }
+
+    /// <summary>
+    /// 将固定四态委托给燃气控制器的显式真实模型登记器。
+    /// 适配器不接收颜色、材质或对象引用；能力未声明时仍维持统一的结构化拒绝边界。
+    /// </summary>
     public BusinessSceneCommandResult UpdateNodeVisualState(string sceneNodeId, BusinessSceneNodeVisualState visualState)
     {
-        return BusinessSceneCommandResult.Unsupported(BusinessSceneCapability.UpdateNodeVisualState);
+        if (!TryUseController(out BusinessSceneCommandResult unavailable))
+        {
+            return unavailable;
+        }
+        if (!Capabilities.HasFlag(BusinessSceneCapability.UpdateNodeVisualState))
+        {
+            return BusinessSceneCommandResult.Unsupported(BusinessSceneCapability.UpdateNodeVisualState);
+        }
+
+        return _controller.UpdateNodeVisualState(sceneNodeId, visualState);
+    }
+
+    /// <summary>
+    /// 撤销动态状态覆盖并恢复模型基础颜色。
+    /// 清除能力与设置能力始终同时声明，保证完整快照中设备消失时不会遗留旧颜色。
+    /// </summary>
+    public BusinessSceneCommandResult ClearNodeVisualState(string sceneNodeId)
+    {
+        if (!TryUseController(out BusinessSceneCommandResult unavailable))
+        {
+            return unavailable;
+        }
+        if (!Capabilities.HasFlag(BusinessSceneCapability.ClearNodeVisualState))
+        {
+            return BusinessSceneCommandResult.Unsupported(BusinessSceneCapability.ClearNodeVisualState);
+        }
+
+        return _controller.ClearNodeVisualState(sceneNodeId);
     }
 
     /// <summary>用户已删除燃气动态路径流能力；统一接口保留契约，但燃气适配器显式声明不支持。</summary>

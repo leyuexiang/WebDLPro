@@ -1,7 +1,7 @@
 import type { NodeId, RouteId, SceneId, SceneNodeId, TopologyId, TransitionId } from '@/config/scene-topology/identifiers'
 import type { DeviceVisualStatus, TopologyDefinition } from '@/config/scene-topology/types'
 import type { TopologyRegistry } from '@/config/scene-topology/topology-registry'
-import { TopologyDeviceStateCache, type TopologyDeviceStateApplyResult, type TopologyDeviceStateBatch } from '@/modules/visual/topology/topology-device-state-cache'
+import { TopologyDeviceStateCache, type TopologyNodeStateApplyResult, type TopologyNodeStateBatch } from '@/modules/visual/topology/topology-device-state-cache'
 
 /** 单个拓扑的有限视图状态；不保存 Canvas、图片、事件回调或原始设备消息。 */
 export interface TopologyViewState {
@@ -114,7 +114,15 @@ export class TopologyRuntime {
        * 立即尝试回放上一个已知拓扑；即使该补偿也失败，activeTopology 仍不改写为目标值，
        * 上层事务会据此执行三维回退或进入明确错误态，绝不提交混合上下文。
        */
-      this.restorePreviousCanvas(previousTopology)
+      if (previousTopology) {
+        this.restorePreviousCanvas(previousTopology)
+      } else {
+        /*
+         * 首图激活没有可回放的旧拓扑。此前状态缓存已经短暂指向候选场景，若不显式清空，
+         * 后续三维重投影可能把未成功激活的目标场景状态发送给 Unity；清空后只能由下一次成功 activate 重新建立上下文。
+         */
+        this.deviceStateCache.setActiveContext(undefined, undefined)
+      }
       return false
     }
   }
@@ -132,29 +140,43 @@ export class TopologyRuntime {
    * 当前活动二维快照会在同一调用内写入唯一画布；当前三维节点快照仅作为受控返回值提供给任务-038，
    * 本任务不绕过能力协商直接向 Unity 发送 `setNodeVisualState`（设置节点视觉状态）命令。
    */
-  public applyDeviceStates(batch: TopologyDeviceStateBatch): TopologyDeviceStateApplyResult {
+  public applyDeviceStates(batch: TopologyNodeStateBatch): TopologyNodeStateApplyResult {
     if (this.disposed) {
       return {
-        acceptedDeviceIds: [],
-        outdatedDeviceIds: [],
-        unmappedDeviceIds: [],
-        invalidTimestampDeviceIds: [],
+        committed: false,
+        capacityExceeded: false,
+        snapshotSequence: 0,
+        acceptedNodeIds: [],
+        restoredNodeIds: [],
+        outdatedNodeIds: [],
+        unmappedNodeIds: [],
+        invalidTimestampNodeIds: [],
         activeTopologyNodeStatuses: new Map(),
         activeSceneNodeStatuses: new Map(),
-        // 已释放运行时没有活动 Unity 场景；返回空增量可阻止任务-038在释放后安排新的内层状态命令。
+        // 已释放运行时没有活动 Unity 场景；返回空投影可阻止任务-038在释放后安排新的内层状态命令。
         activeSceneNodeStateUpdates: new Map(),
+        clearedActiveSceneNodeIds: [],
       }
     }
 
     this.deviceStateCache.setActiveContext(this.activeTopology?.sceneId, this.activeTopology?.topologyId)
-    const result = this.deviceStateCache.apply(batch)
-    if (this.activeTopology) this.canvas.setNodeStatuses(result.activeTopologyNodeStatuses)
-    return result
+    return this.deviceStateCache.apply(batch, (candidate) => {
+      /*
+       * 二维画布必须先成功接纳候选完整快照，缓存才会交换权威状态引用。
+       * 若画布抛错，异常交给现有协调器转换为受控失败；缓存仍保留上一份快照，避免半提交。
+       */
+      if (this.activeTopology) this.canvas.setNodeStatuses(candidate.activeTopologyNodeStatuses)
+    })
   }
 
   /** 返回当前活动场景已显式映射的三维节点状态；调用方只能拿到防御性快照，不能访问缓存本体。 */
   public getActiveSceneNodeStatuses(): ReadonlyMap<SceneNodeId, DeviceVisualStatus> {
     return this.deviceStateCache.getActiveSceneNodeStatuses()
+  }
+
+  /** 场景重新激活时只公开当前权威快照投影，任务-038不得访问缓存历史或自行猜测三维状态。 */
+  public getActiveSceneNodeStateSnapshot() {
+    return this.deviceStateCache.getActiveSceneNodeStateSnapshot()
   }
 
   /** 当前画布报告视图后写入有限缓存；配置版本变更由 prepare 自动淘汰对应旧视图。 */

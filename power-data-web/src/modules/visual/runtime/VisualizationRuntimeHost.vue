@@ -202,7 +202,8 @@ function startPendingRuntime(): void {
       sceneLoadProgressListeners.forEach((listener) => listener({ payload, messageId }))
     },
     onCommandFailure: (command, reason) => {
-      // 非致命命令失败不销毁已就绪场景，只保留可见诊断，避免一次聚焦失败导致画面闪退。
+      // 非致命命令失败不销毁已就绪场景；页面只显示固定中文降级，详细原因写入控制台供联调排查。
+      console.warn('[网页图形运行时命令失败]', { command, reason })
       runtimeReason.value = `${command} 命令失败：${reason}`
     },
     // 连接器只在原 requestId 的最终成功、失败或超时后通知；宿主据此一次性结算 Promise。
@@ -241,6 +242,16 @@ async function attachIframeWindow(): Promise<void> {
   connector.attachChildWindow(iframeElement.value.contentWindow)
 }
 
+/**
+ * iframe 首次插入时的 contentWindow（内容窗口）可能仍对应 about:blank（初始空白页）。
+ * Unity 页面完成实际导航后重新读取一次窗口代理，使连接器的严格 event.source（事件来源窗口）校验
+ * 对准真实运行时；连接器不会因此延长握手时限，也不会放宽来源或实例标识校验。
+ */
+function handleIframeLoad(): void {
+  if (!connector || !iframeElement.value?.contentWindow) return
+  connector.attachChildWindow(iframeElement.value.contentWindow)
+}
+
 /** 将连接器内部阶段映射到布局状态机，并在终态统一回收 iframe 与观察器。 */
 function handleConnectorStatus(status: WebglConnectorStatus, reason?: string): void {
   if (status === 'handshaking') {
@@ -262,6 +273,8 @@ function handleConnectorStatus(status: WebglConnectorStatus, reason?: string): v
   }
 
   if (status === 'failed') {
+    // 运行时失败页面只显示固定中文说明，连接器提供的受控原因保留在控制台。
+    console.error('[网页图形运行时连接失败]', { status, reason })
     runtimeReason.value = reason ?? '网页图形运行时连接失败。'
     runtimeStatus.value = 'failed'
     cleanupActiveRuntime(false)
@@ -313,6 +326,7 @@ function cleanupActiveRuntime(startNext: boolean): void {
 
 /** 在连接器尚未建立时直接标记失败，避免错误地访问不存在的远端窗口。 */
 function failBeforeConnector(reason: string): void {
+  console.error('[网页图形运行时初始化失败]', { reason })
   runtimeReason.value = reason
   runtimeStatus.value = 'failed'
   iframeSource.value = null
@@ -426,6 +440,7 @@ onBeforeUnmount(() => {
       :src="iframeSource"
       title="网页图形运行时"
       allow="fullscreen"
+      @load="handleIframeLoad"
     />
   </Teleport>
 </template>

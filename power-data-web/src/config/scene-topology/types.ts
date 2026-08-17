@@ -1,6 +1,5 @@
 import type {
   ActionId,
-  DeviceId,
   NodeId,
   ProcessId,
   RouteId,
@@ -18,8 +17,8 @@ export type DeviceVisualStatus = 'normal' | 'alarm' | 'fault' | 'offline'
 /** 场景切换默认先卸载旧资源，只有经过内存验证的场景才可提高峰值内存预加载。 */
 export type SceneSwitchStrategy = 'unload-first' | 'preload-then-unload'
 
-/** 设备双击仅能上报正式设备标识；概念节点必须明确声明为不产生外部事件。 */
-export type DoubleClickBehavior = 'emit-device' | 'none'
+/** 业务节点双击只上报我方稳定节点编号；说明类节点必须明确声明为不产生外部事件。 */
+export type DoubleClickBehavior = 'emit-node' | 'none'
 
 /** 已受控的 Unity 动作；外部父页面永远只能传动作标识，不能传 Unity 方法名称。 */
 export type UnityActionDefinition =
@@ -62,11 +61,10 @@ export interface TopologyPresentationLayerDefinition {
   color: string
 }
 
-/** 二维节点显式保存二维、外部设备及三维节点三种不同标识，禁止根据同名默认关联。 */
+/** 二维节点只保存逻辑节点编号和可选三维节点编号；平台真实设备编号不得进入我方清单。 */
 export interface TopologyNodeDefinition {
   nodeId: NodeId
   title: string
-  deviceId?: DeviceId
   sceneNodeId?: SceneNodeId
   iconKey: string
   x: number
@@ -96,8 +94,39 @@ export interface TopologyEdgeDefinition {
 }
 
 /**
- * 一套拓扑严格归属于一个场景，同一设备出现在多图时由设备映射清单显式登记。
- * `layers`（展示层级）是纯二维展示数据，保留它不会放宽设备或三维映射的显式登记规则。
+ * 过滤拓扑中单个节点的画布坐标覆盖。
+ *
+ * 子视图复用总拓扑的节点、连线及三维关联事实，只允许为已显式选中的节点提供另一套二维排布，
+ * 从而避免把同一设备、标题或 sceneNodeId（场景三维节点标识）复制到多份配置后发生漂移。
+ */
+export interface TopologyNodeLayoutOverride {
+  nodeId: NodeId
+  x: number
+  y: number
+}
+
+/**
+ * 从一张同场景总拓扑派生流程视图的显式过滤规则。
+ *
+ * `visibleNodeIds` 与 `visibleEdgeIds` 都是来源总图的稳定标识；运行时仅绘制它们，
+ * 不得根据标题、图元、坐标或三维模型名称猜测应隐藏的对象。
+ */
+export interface TopologyFilterDefinition {
+  sourceTopologyId: TopologyId
+  visibleNodeIds: readonly NodeId[]
+  visibleEdgeIds: readonly RouteId[]
+  /**
+   * 资料明确要求展示、但在来源总图筛选后没有任何可见连线的节点。
+   * 该字段只豁免“孤立节点”校验，不创建连线；发布校验会要求声明集合与实际孤立集合完全一致，
+   * 防止遗漏合法连线或用宽泛豁免掩盖错误配置。
+   */
+  allowedOrphanNodeIds?: readonly NodeId[]
+  nodeLayoutOverrides: readonly TopologyNodeLayoutOverride[]
+}
+
+/**
+ * 一套拓扑严格归属于一个场景；过滤视图复用来源总图的同一逻辑节点编号。
+ * `layers`（展示层级）是纯二维展示数据，保留它不会放宽节点或三维映射的显式登记规则。
  */
 export interface TopologyDefinition {
   topologyId: TopologyId
@@ -107,6 +136,11 @@ export interface TopologyDefinition {
   layers?: readonly TopologyPresentationLayerDefinition[]
   nodes: readonly TopologyNodeDefinition[]
   edges: readonly TopologyEdgeDefinition[]
+  /**
+   * 存在时表示当前拓扑是来源总图的只读流程视图。
+   * 过滤视图的 nodes 与 edges 必须为空，所有实际图元由 sourceTopologyId 投影而来。
+   */
+  filter?: TopologyFilterDefinition
 }
 
 /** 外部动作到场景、拓扑和 Unity 动作的唯一受控映射。 */
@@ -121,17 +155,8 @@ export interface ActionDefinition {
   configVersion: string
 }
 
-/** 外部设备、二维节点和三维节点的显式关联；同一设备可出现于当前场景的多套拓扑。 */
-export interface DeviceMappingDefinition {
-  deviceId: DeviceId
-  sceneId: SceneId
-  topologyNodeRefs: readonly { topologyId: TopologyId; nodeId: NodeId }[]
-  sceneNodeId?: SceneNodeId
-  configVersion: string
-}
-
 /**
- * 场景、拓扑、动作、设备映射和 Unity 场景映射的原子发布单元。
+ * 场景、拓扑、动作和 Unity 场景映射的原子发布单元。
  * 任何字段缺失、跨引用失效或版本不一致都会阻止加载，调用方不得拼接旧缓存降级运行。
  */
 export interface SceneTopologyManifest {
@@ -141,7 +166,6 @@ export interface SceneTopologyManifest {
   scenes: readonly SceneDefinition[]
   topologies: readonly TopologyDefinition[]
   actions: readonly ActionDefinition[]
-  deviceMappings: readonly DeviceMappingDefinition[]
   unitySceneMappings: readonly UnitySceneMappingDefinition[]
 }
 

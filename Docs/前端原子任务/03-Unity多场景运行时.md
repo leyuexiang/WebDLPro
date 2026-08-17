@@ -64,7 +64,7 @@
 
 **前置：** 任务-016、018。
 
-**需求：** 将 `enterProcessStep`、`focusNode`、`setNodeVisualState`、`setRouteFlow` 和 `resetScene` 转发给当前场景控制器；统一使用稳定映射标识。
+**需求：** 将 `enterProcessStep`、`focusNode`、`clearSelection`、`setNodeVisualState`、`setRouteFlow` 和 `resetScene` 转发给当前场景控制器；统一使用稳定映射标识。`clearSelection` 只取消拓扑选择对应的三维交互描边，不得重置场景、流程、显隐或镜头。
 
 **交付：** Unity 场景命令适配层和命令结果。
 

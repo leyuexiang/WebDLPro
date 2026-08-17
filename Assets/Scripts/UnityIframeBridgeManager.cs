@@ -22,27 +22,26 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
     private const string LocalSceneMappingVersion = "unpublished";
 
     /// <summary>
-    /// 当前物理场景中单个三维节点最近成功应用的因果水位。
-    /// 使用值类型避免最多五百项状态索引为每次更新分配托管对象；修订号只在相同时间下参与比较。
+    /// 当前物理场景中单个三维节点最近成功应用的壳内快照序号。
+    /// 使用值类型避免最多五百项状态索引为每次更新分配托管对象；平台时间与来源修订不参与比较。
     /// </summary>
     private readonly struct NodeVisualStateWatermark
     {
-        public long UpdatedAtUtcTicks { get; }
-        public bool HasSourceRevision { get; }
-        public long SourceRevision { get; }
+        public long SnapshotSequence { get; }
 
-        public NodeVisualStateWatermark(long updatedAtUtcTicks, bool hasSourceRevision, long sourceRevision)
+        public NodeVisualStateWatermark(long snapshotSequence)
         {
-            UpdatedAtUtcTicks = updatedAtUtcTicks;
-            HasSourceRevision = hasSourceRevision;
-            SourceRevision = sourceRevision;
+            SnapshotSequence = snapshotSequence;
         }
     }
 
     /// <summary>供测试立方体点击组件调用的当前通信管理器实例。</summary>
     public static UnityIframeBridgeManager Instance { get; private set; }
 
-    /// <summary>测试指令与尺寸消息会显示在这里，便于无需 UI 资源即可验证通信。</summary>
+    /// <summary>
+    /// 最近一次有限状态摘要，仅供编辑器测试面板和自动化断言读取。
+    /// WebGL 不再在画面上绘制该文本；状态变化通过 Debug 日志进入浏览器开发者工具控制台。
+    /// </summary>
     public string StatusText { get; private set; } = "等待父页面初始化…";
 
     /// <summary>当前已激活业务控制器的只读引用；跨场景时仅由协调器事件更新，禁止按对象名称重新查询。</summary>
@@ -85,7 +84,7 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
     // 聚焦选择以队列保存淘汰顺序、以哈希集合提供常数时间查重；容量固定，避免长期运行时历史无界增长。
     private readonly Queue<string> _recentFocusSelectionIds = new Queue<string>();
     private readonly HashSet<string> _recentFocusSelectionIdSet = new HashSet<string>(StringComparer.Ordinal);
-    // 水位只属于当前活动控制器。复合值与前端“时间优先、修订裁决同时间”的规则一致，避免二维与三维分叉。
+    // 水位只属于当前活动控制器。只有壳会话内快照序号可阻止异步迟到状态覆盖，平台字段仅供诊断。
     private readonly Dictionary<string, NodeVisualStateWatermark> _nodeVisualStateWatermarks =
         new Dictionary<string, NodeVisualStateWatermark>(StringComparer.Ordinal);
 
@@ -147,6 +146,90 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         public long timestamp;
     }
 
+    /// <summary>
+    /// 初始化确认和释放确认的最小上行负载。
+    /// JsonUtility（Unity 内置 JSON 序列化工具）会把通用对象的未赋值字段写入 JSON；
+    /// 因此确认消息不能复用含 sceneActivationId（物理场景激活标识）的通用 BridgePayload，
+    /// 否则空字符串会越过协议边界并被前端正确拒绝。
+    /// </summary>
+    [Serializable]
+    private sealed class RequestAcknowledgementBridgePayload
+    {
+        public string requestId;
+        public bool success;
+        public string message;
+        public string sceneState;
+    }
+
+    /// <summary>确认专用信封只包含协议允许的最小载荷，防止未使用字段污染 ack 或 disposed 消息。</summary>
+    [Serializable]
+    private sealed class RequestAcknowledgementBridgeMessage
+    {
+        public string channel;
+        public int version;
+        public string instanceId;
+        public string messageId;
+        public string type;
+        public RequestAcknowledgementBridgePayload payload;
+        public long timestamp;
+    }
+
+    /// <summary>
+    /// 常规命令结果不声明 sceneActivationId。
+    /// 该字段只属于“场景失败但旧场景已自动恢复”的特殊结果，普通命令、初始化和未恢复的失败都不能发送空占位。
+    /// </summary>
+    [Serializable]
+    private sealed class CommandResultBridgePayload
+    {
+        public string requestId;
+        public bool success;
+        public string message;
+        public string errorCode;
+        public string sceneId;
+        public string transitionId;
+        public string sceneState;
+    }
+
+    /// <summary>常规命令结果使用独立信封，确保可选恢复标识未被 JsonUtility 自动写入。</summary>
+    [Serializable]
+    private sealed class CommandResultBridgeMessage
+    {
+        public string channel;
+        public int version;
+        public string instanceId;
+        public string messageId;
+        public string type;
+        public CommandResultBridgePayload payload;
+        public long timestamp;
+    }
+
+    /// <summary>失败恢复结果只在已有非空恢复实例标识时采用该专用负载。</summary>
+    [Serializable]
+    private sealed class RecoveredCommandResultBridgePayload
+    {
+        public string requestId;
+        public bool success;
+        public string message;
+        public string errorCode;
+        public string sceneId;
+        public string transitionId;
+        public string sceneState;
+        public string sceneActivationId;
+    }
+
+    /// <summary>恢复场景结果专用信封保证 sceneActivationId 只出现在协议允许的异常恢复分支。</summary>
+    [Serializable]
+    private sealed class RecoveredCommandResultBridgeMessage
+    {
+        public string channel;
+        public int version;
+        public string instanceId;
+        public string messageId;
+        public string type;
+        public RecoveredCommandResultBridgePayload payload;
+        public long timestamp;
+    }
+
     /// <summary>测试与燃气发电业务命令共享的固定负载字段。</summary>
     [Serializable]
     private sealed class BridgePayload
@@ -172,11 +255,11 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         public string nodeName;
         public string routeId;
         public string visualState;
-        // 状态来源时间由前端从已校验的外层协议规范化后透传；桥接只验证该内层因果字段，
-        // 不保存父页面原始设备消息，避免常驻 Unity 对象累积无界状态历史。
+        // 本地快照序号从一开始单调递增，是三维迟到隔离的唯一依据；零表示旧协议或字段缺失，必须拒绝。
+        public long snapshotSequence;
+        // 状态来源时间由前端从已校验外层协议规范化后透传，仅用于诊断，不参与覆盖排序。
         public string statusUpdatedAt;
-        // 外层来源修订号本身可选；浏览器适配器将其规范化为固定二元组，使 JsonUtility 能区分“缺失”和显式零。
-        public bool hasSourceRevision;
+        // 平台来源修订号必填但只作诊断；服务重启后可以变小，不能用它拒绝后到合法快照。
         public long sourceRevision;
         public string errorCode;
         public string sceneState;
@@ -235,6 +318,36 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
     }
 
     /// <summary>
+    /// WebGL 首个场景完成加载后的桥接兜底入口。
+    ///
+    /// 正常路径仍由 BootstrapRuntime（启动运行时根对象）上已序列化的组件在 Start 中初始化浏览器桥。
+    /// 但 WebGL 的播放器启动、场景资源裁剪和浏览器线程调度会使该生命周期回调缺失时难以从外层恢复；
+    /// 因此在首个场景加载完成后再执行一次仅 WebGL 有效的幂等补偿。它优先复用场景中已存在的组件，
+    /// 仅在组件意外缺失时创建最小常驻根对象，保证不会生成第二个消息监听器或第二个 Unity 实例。
+    /// </summary>
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+    private static void EnsureWebGlBridgeAfterInitialSceneLoad()
+    {
+#if UNITY_WEBGL && !UNITY_EDITOR
+        UnityIframeBridgeManager manager = Instance;
+        if (manager == null)
+        {
+            manager = FindFirstObjectByType<UnityIframeBridgeManager>();
+        }
+
+        if (manager == null)
+        {
+            // 只有首屏场景序列化组件意外缺失时才创建；AddComponent 会先完成 Awake，
+            // 从而读取 instanceId 和 sceneMappingVersion，随后再调用同一幂等初始化方法。
+            GameObject fallbackRoot = new GameObject("WebGlIframeBridgeFallback");
+            manager = fallbackRoot.AddComponent<UnityIframeBridgeManager>();
+        }
+
+        manager.EnsureBrowserBridgeInitialized();
+#endif
+    }
+
+    /// <summary>
     /// 常驻桥接器在生命周期内只允许初始化浏览器监听一次。场景切换只重绑控制器，
     /// 绝不再次注册 window.message 监听器或创建第二个 Unity WebGL 实例。
     /// </summary>
@@ -248,6 +361,9 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         _browserBridgeInitialized = true;
         BrowserBridgeInitializationCount++;
 #if UNITY_WEBGL && !UNITY_EDITOR
+        // 仅记录一次固定阶段，不记录来源、地址、载荷或场景对象，便于在浏览器控制台确认
+        // C# 生命周期已实际进入桥接调用，同时不扩大生产日志的敏感信息范围。
+        Debug.Log("[UnityIframeBridge] 正在初始化 WebGL 浏览器桥接。");
         // 传入实际 GameObject 名称，.jslib 会用它精确调用 ReceiveFromParent。
         Power3dUnityBridge_Initialize(gameObject.name, _instanceId);
 #else
@@ -325,8 +441,14 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
             case "focusNode":
                 HandleFocusNode(message);
                 break;
+            case "clearSelection":
+                HandleClearSelection(message);
+                break;
             case "setNodeVisualState":
                 HandleSetNodeVisualState(message);
+                break;
+            case "clearNodeVisualState":
+                HandleClearNodeVisualState(message);
                 break;
             case "setRouteFlow":
                 HandleSetRouteFlow(message);
@@ -347,6 +469,7 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
     public void ReportObjectClick(string deviceCode, string deviceName)
     {
         StatusText = $"已点击对象：{deviceName}";
+        LogStatusToBrowserConsole();
         SendToParent("object-click", new BridgePayload { deviceCode = deviceCode, deviceName = deviceName });
     }
 
@@ -373,6 +496,7 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
             return;
         }
         StatusText = $"已选择对象：{nodeName}";
+        LogStatusToBrowserConsole();
         SendObjectSelectedToParent(
             _sceneController.SceneId,
             sceneNodeId,
@@ -407,15 +531,10 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
     private void HandleInitialize(BridgeMessage message)
     {
         StatusText = "已完成父页面初始化。";
+        LogStatusToBrowserConsole();
         TryBindSceneController();
-        SendToParent("ack", new BridgePayload
-        {
-            // init 的 ack 必须明确成功，否则父页面会将默认 false 判为握手失败。
-            success = true,
-            requestId = message.messageId,
-            message = "Unity 已完成初始化",
-            sceneState = GetSceneStateDescription()
-        });
+        // init 的 ack（初始化确认）必须使用最小模型，不能让通用负载带出空的可选恢复标识。
+        SendRequestAcknowledgement("ack", message.messageId, true, "Unity 已完成初始化", GetSceneStateDescription());
     }
 
     /// <summary>
@@ -426,6 +545,7 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
     {
         BridgePayload payload = message.payload;
         StatusText = $"已同步场景容器尺寸：{payload?.width ?? 0f} × {payload?.height ?? 0f}";
+        LogStatusToBrowserConsole();
         SendCommandResult(message, true, string.Empty, StatusText);
     }
 
@@ -476,6 +596,20 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
 
         // 先登记原始 requestId：协调器对未知场景会同步回调失败，必须让该回调也能精确关联请求。
         _sceneRequestIdsByTransition.Add(switchPayload.transitionId, message.messageId);
+        StatusText = $"已接收场景切换请求：{switchPayload.sceneId}。";
+        LogStatusToBrowserConsole();
+        /*
+         * 接收确认必须早于 RequestSwitchScene（请求场景切换）。协调器可能在同一调用栈内立即上报
+         * sceneLoadProgress（场景加载进度）或失败结果；前端只有收到 ack 后才会把该请求标记为
+         * awaitingSceneResult（等待场景终态），因此顺序错误会让首个进度被严格拒绝并失去超时刷新依据。
+         * 确认使用最小模型，避免通用 BridgePayload 将空 sceneActivationId 写入 JSON。
+         */
+        SendRequestAcknowledgement(
+            "ack",
+            message.messageId,
+            true,
+            "Unity 已接收场景切换请求，正在异步加载。",
+            GetSceneStateDescription());
         bool accepted = _sceneCoordinator.RequestSwitchScene(
             switchPayload.sceneId,
             switchPayload.transitionId,
@@ -486,17 +620,6 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
             _sceneRequestIdsByTransition.Remove(switchPayload.transitionId);
             return;
         }
-
-        StatusText = $"已接收场景切换请求：{switchPayload.sceneId}。";
-        SendToParent("ack", new BridgePayload
-        {
-            requestId = message.messageId,
-            success = true,
-            message = "Unity 已接收场景切换请求，正在异步加载。",
-            sceneId = switchPayload.sceneId,
-            transitionId = switchPayload.transitionId,
-            sceneState = GetSceneStateDescription()
-        });
     }
 
     /// <summary>
@@ -521,6 +644,7 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
             legacyController?.ReleaseScene();
         }
         StatusText = "Unity 实例正在释放。";
+        LogStatusToBrowserConsole();
         SendDisposed(message, true, StatusText);
 
 #if UNITY_WEBGL && !UNITY_EDITOR
@@ -536,13 +660,7 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
     /// </summary>
     private void SendDisposed(BridgeMessage command, bool success, string resultMessage)
     {
-        SendToParent("disposed", new BridgePayload
-        {
-            requestId = command.messageId,
-            success = success,
-            message = resultMessage,
-            sceneState = GetSceneStateDescription()
-        });
+        SendRequestAcknowledgement("disposed", command.messageId, success, resultMessage, GetSceneStateDescription());
     }
 
     private void HandleEnterProcessStep(BridgeMessage message)
@@ -575,6 +693,10 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         SendSceneCommandResult(message, controller.ResetScene());
     }
 
+    /// <summary>
+    /// 处理拓扑节点选择的三维描边命令。
+    /// 节点标识只用于更新当前交互描边，实际控制器不得移动镜头；isolate 仍只控制显隐上下文。
+    /// </summary>
     private void HandleFocusNode(BridgeMessage message)
     {
         BridgePayload payload = message.payload;
@@ -590,7 +712,7 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         }
 
         // 同一 selectionId 可能因 commandResult 丢失而由浏览器原样重发；返回成功但不再次调用控制器，
-        // 防止相机补间、描边材质和选择事件产生重复副作用。
+        // 防止重复更新描边或选择事件产生重复副作用。
         if (_recentFocusSelectionIdSet.Contains(payload.selectionId))
         {
             SendCommandResult(message, true, string.Empty, "重复聚焦选择已幂等忽略。");
@@ -600,6 +722,21 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         // 在调用控制器前登记：即使业务节点返回失败，同一选择也只能执行一次，保持与前端协调器语义一致。
         RememberFocusSelectionId(payload.selectionId);
         SendSceneCommandResult(message, controller.FocusNode(payload.sceneNodeId, payload.isolate));
+    }
+
+    /// <summary>
+    /// 处理拓扑空白点击的三维清除命令。
+    /// 该命令不读取或修改节点标识，也不调用 resetScene；实际控制器只关闭交互描边，
+    /// 因而不会改变当前场景、流程步骤、模型显隐和镜头状态。
+    /// </summary>
+    private void HandleClearSelection(BridgeMessage message)
+    {
+        if (!TryGetSceneController(message, BusinessSceneCapability.ClearSelection, out IBusinessSceneController controller))
+        {
+            return;
+        }
+
+        SendSceneCommandResult(message, controller.ClearSelection());
     }
 
     /// <summary>
@@ -633,13 +770,14 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         BridgePayload payload = message.payload;
         if (!SceneActionProtocolValidator.IsValidSceneNodeId(payload?.sceneNodeId) ||
             !SceneActionProtocolValidator.TryParseVisualState(payload?.visualState, out BusinessSceneNodeVisualState visualState) ||
-            !DateTimeOffset.TryParse(payload?.statusUpdatedAt, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTimeOffset statusUpdatedAt) ||
+            !DateTimeOffset.TryParse(payload?.statusUpdatedAt, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out _) ||
+            payload.snapshotSequence <= 0 ||
+            payload.snapshotSequence > MaxJavaScriptSafeInteger ||
             payload.sourceRevision < 0 ||
-            payload.sourceRevision > MaxJavaScriptSafeInteger ||
-            (!payload.hasSourceRevision && payload.sourceRevision != 0))
+            payload.sourceRevision > MaxJavaScriptSafeInteger)
         {
-            // 时间与修订二元组共同构成因果依据；组合无效时不能把可能迟到或精度已损坏的数据应用到当前场景。
-            SendCommandResult(message, false, "node-visual-state-payload-invalid", "设备状态命令缺少合法三维节点标识、固定四态状态或因果顺序。");
+            // 快照序号是唯一因果依据；其余字段仍校验格式，防止损坏的诊断数据穿透到场景控制器。
+            SendCommandResult(message, false, "node-visual-state-payload-invalid", "设备状态命令缺少合法三维节点标识、固定四态状态或本地快照序号。");
             return;
         }
         if (!TryGetSceneController(message, BusinessSceneCapability.UpdateNodeVisualState, out IBusinessSceneController controller))
@@ -647,15 +785,11 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
             return;
         }
 
-        NodeVisualStateWatermark incomingWatermark = new NodeVisualStateWatermark(
-            statusUpdatedAt.UtcDateTime.Ticks,
-            payload.hasSourceRevision,
-            payload.sourceRevision);
+        NodeVisualStateWatermark incomingWatermark = new NodeVisualStateWatermark(payload.snapshotSequence);
         bool hasAppliedWatermark = _nodeVisualStateWatermarks.TryGetValue(payload.sceneNodeId, out NodeVisualStateWatermark latestAppliedWatermark);
         if (hasAppliedWatermark && IsOutdatedOrDuplicate(incomingWatermark, latestAppliedWatermark))
         {
-            // 更早时间、相同时间缺少可比较修订号、同修订重试或低修订迟到都返回成功但不重复调用控制器。
-            // 浏览器因此能清理待确认项，同时不会让旧状态覆盖二维缓存已经接受的新状态。
+            // 相同序号重试或更小序号迟到均返回成功但不重复调用控制器，便于浏览器清理待确认项。
             SendCommandResult(message, true, string.Empty, "重复或迟到的设备状态已幂等忽略。");
             return;
         }
@@ -669,31 +803,59 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         BusinessSceneCommandResult result = controller.UpdateNodeVisualState(payload.sceneNodeId, visualState);
         if (result.Success)
         {
-            // 仅记录成功应用的复合水位；控制器失败时保留原命令重试机会，不能把未执行命令误标为已处理。
+            // 仅记录成功应用的本地序号；控制器失败时保留原命令重试机会，不能把未执行命令误标为已处理。
             _nodeVisualStateWatermarks[payload.sceneNodeId] = incomingWatermark;
         }
         SendSceneCommandResult(message, result);
     }
 
     /// <summary>
-    /// 与前端状态缓存使用完全相同的顺序：先比较时间；时间相同且任一方无修订时视为重复；
-    /// 双方都有修订时仅更高修订可继续执行。该比较为常数时间且不会创建临时集合。
+    /// 完整快照中设备消失时撤销其动态四态覆盖。清除和设置共用同一节点水位，
+    /// 因此更旧的设置命令即使在清除后迟到，也只能幂等完成而不能重新染色。
+    /// </summary>
+    private void HandleClearNodeVisualState(BridgeMessage message)
+    {
+        BridgePayload payload = message.payload;
+        if (!SceneActionProtocolValidator.IsValidSceneNodeId(payload?.sceneNodeId) ||
+            payload.snapshotSequence <= 0 ||
+            payload.snapshotSequence > MaxJavaScriptSafeInteger)
+        {
+            SendCommandResult(message, false, "node-visual-state-clear-payload-invalid", "设备状态清除命令缺少合法三维节点标识或本地快照序号。");
+            return;
+        }
+        if (!TryGetSceneController(message, BusinessSceneCapability.ClearNodeVisualState, out IBusinessSceneController controller))
+        {
+            return;
+        }
+
+        NodeVisualStateWatermark incomingWatermark = new NodeVisualStateWatermark(payload.snapshotSequence);
+        bool hasAppliedWatermark = _nodeVisualStateWatermarks.TryGetValue(payload.sceneNodeId, out NodeVisualStateWatermark latestAppliedWatermark);
+        if (hasAppliedWatermark && IsOutdatedOrDuplicate(incomingWatermark, latestAppliedWatermark))
+        {
+            SendCommandResult(message, true, string.Empty, "重复或迟到的设备状态清除已幂等忽略。");
+            return;
+        }
+        if (!hasAppliedWatermark && _nodeVisualStateWatermarks.Count >= MaxTrackedNodeVisualStates)
+        {
+            SendCommandResult(message, false, "node-visual-state-capacity", "当前场景的设备状态因果水位已达到安全上限。");
+            return;
+        }
+
+        BusinessSceneCommandResult result = controller.ClearNodeVisualState(payload.sceneNodeId);
+        if (result.Success)
+        {
+            _nodeVisualStateWatermarks[payload.sceneNodeId] = incomingWatermark;
+        }
+        SendSceneCommandResult(message, result);
+    }
+
+    /// <summary>
+    /// 与前端权威快照使用相同顺序：相同序号是幂等重试，更小序号是迟到任务，只有更大序号可执行。
+    /// 比较为常数时间且不会创建临时集合。
     /// </summary>
     private static bool IsOutdatedOrDuplicate(NodeVisualStateWatermark incoming, NodeVisualStateWatermark latest)
     {
-        if (incoming.UpdatedAtUtcTicks < latest.UpdatedAtUtcTicks)
-        {
-            return true;
-        }
-        if (incoming.UpdatedAtUtcTicks > latest.UpdatedAtUtcTicks)
-        {
-            return false;
-        }
-        if (!incoming.HasSourceRevision || !latest.HasSourceRevision)
-        {
-            return true;
-        }
-        return incoming.SourceRevision <= latest.SourceRevision;
+        return incoming.SnapshotSequence <= latest.SnapshotSequence;
     }
 
     /// <summary>
@@ -763,12 +925,14 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         if (controller == null)
         {
             StatusText = "当前没有已初始化的业务场景控制器。";
+            LogStatusToBrowserConsole(true);
             SendCommandResult(message, false, "controller-unavailable", StatusText);
             return false;
         }
         if ((controller.Capabilities & requiredCapability) != requiredCapability)
         {
             StatusText = $"当前业务场景未声明能力：{requiredCapability}。";
+            LogStatusToBrowserConsole(true);
             SendCommandResult(message, false, "capability-unsupported", StatusText);
             controller = null;
             return false;
@@ -780,6 +944,7 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
     private void SendSceneCommandResult(BridgeMessage message, BusinessSceneCommandResult result)
     {
         StatusText = result.Message;
+        LogStatusToBrowserConsole(!result.Success);
         SendCommandResult(message, result.Success, result.ErrorCode, result.Message);
     }
 
@@ -808,24 +973,143 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         string transitionId = null,
         string sceneActivationId = null)
     {
-        SendToParent("commandResult", new BridgePayload
+        // 只有自动恢复已经产生新的非空物理场景实例时，才允许回传 sceneActivationId。
+        // 其他路径使用不含该字段的模型，避免 JsonUtility 把 null 序列化为空字符串而违反前端协议。
+        if (!string.IsNullOrWhiteSpace(sceneActivationId))
         {
-            requestId = requestId,
-            // commandResult 与原始 messageId 一一对应；success 供父页面结束待确认记录。
-            success = success,
-            message = resultMessage,
-            errorCode = errorCode,
-            sceneId = sceneId,
-            transitionId = transitionId,
-            sceneActivationId = sceneActivationId,
-            sceneState = GetSceneStateDescription()
-        });
+            SendRecoveredCommandResult(
+                requestId,
+                success,
+                errorCode,
+                resultMessage,
+                sceneId,
+                transitionId,
+                sceneActivationId,
+                GetSceneStateDescription());
+            return;
+        }
+
+        SendCommandResultWithoutRecovery(
+            requestId,
+            success,
+            errorCode,
+            resultMessage,
+            sceneId,
+            transitionId,
+            GetSceneStateDescription());
+    }
+
+    /// <summary>
+    /// 发送初始化确认或释放确认。
+    /// 这两个消息只需要原请求标识、结果、受控说明和当前场景摘要；使用专用模型可保证 JSON
+    /// 不含空 sceneActivationId（物理场景激活标识）或其他未使用通用字段。
+    /// </summary>
+    private void SendRequestAcknowledgement(
+        string type,
+        string requestId,
+        bool success,
+        string resultMessage,
+        string sceneState)
+    {
+        long timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        RequestAcknowledgementBridgeMessage message = new RequestAcknowledgementBridgeMessage
+        {
+            channel = WebGlProtocolContract.Channel,
+            version = WebGlProtocolContract.ProtocolVersion,
+            instanceId = _instanceId,
+            messageId = $"{timestamp}-{Guid.NewGuid():N}",
+            type = type,
+            payload = new RequestAcknowledgementBridgePayload
+            {
+                requestId = requestId,
+                success = success,
+                message = resultMessage,
+                sceneState = sceneState
+            },
+            timestamp = timestamp
+        };
+        SendSerializedMessage(JsonUtility.ToJson(message));
+    }
+
+    /// <summary>
+    /// 发送不包含恢复实例的常规命令结果。
+    /// 即使场景、事务或错误码为空，也不声明 sceneActivationId，确保前端只在确有恢复实例时处理该字段。
+    /// </summary>
+    private void SendCommandResultWithoutRecovery(
+        string requestId,
+        bool success,
+        string errorCode,
+        string resultMessage,
+        string sceneId,
+        string transitionId,
+        string sceneState)
+    {
+        long timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        CommandResultBridgeMessage message = new CommandResultBridgeMessage
+        {
+            channel = WebGlProtocolContract.Channel,
+            version = WebGlProtocolContract.ProtocolVersion,
+            instanceId = _instanceId,
+            messageId = $"{timestamp}-{Guid.NewGuid():N}",
+            type = "commandResult",
+            payload = new CommandResultBridgePayload
+            {
+                requestId = requestId,
+                success = success,
+                message = resultMessage,
+                errorCode = errorCode,
+                sceneId = sceneId,
+                transitionId = transitionId,
+                sceneState = sceneState
+            },
+            timestamp = timestamp
+        };
+        SendSerializedMessage(JsonUtility.ToJson(message));
+    }
+
+    /// <summary>
+    /// 发送场景失败后已经恢复旧场景的专用命令结果。
+    /// 调用方只在协调器提供非空恢复实例标识时进入本方法，因此该字段出现即代表真实可用的新物理场景实例。
+    /// </summary>
+    private void SendRecoveredCommandResult(
+        string requestId,
+        bool success,
+        string errorCode,
+        string resultMessage,
+        string sceneId,
+        string transitionId,
+        string sceneActivationId,
+        string sceneState)
+    {
+        long timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        RecoveredCommandResultBridgeMessage message = new RecoveredCommandResultBridgeMessage
+        {
+            channel = WebGlProtocolContract.Channel,
+            version = WebGlProtocolContract.ProtocolVersion,
+            instanceId = _instanceId,
+            messageId = $"{timestamp}-{Guid.NewGuid():N}",
+            type = "commandResult",
+            payload = new RecoveredCommandResultBridgePayload
+            {
+                requestId = requestId,
+                success = success,
+                message = resultMessage,
+                errorCode = errorCode,
+                sceneId = sceneId,
+                transitionId = transitionId,
+                sceneState = sceneState,
+                sceneActivationId = sceneActivationId
+            },
+            timestamp = timestamp
+        };
+        SendSerializedMessage(JsonUtility.ToJson(message));
     }
 
     private void HandleTestCommand(BridgePayload payload)
     {
         string text = payload?.text ?? string.Empty;
         StatusText = $"收到平台消息：{text}";
+        LogStatusToBrowserConsole();
 
         // 改变测试立方体颜色，以便在 WebGL 页面中直观看到消息被 Unity 成功处理。
         if (_testObjectRenderer != null)
@@ -1014,6 +1298,7 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         if (result.Success)
         {
             StatusText = result.Message;
+            LogStatusToBrowserConsole();
             SceneChangedPayload changedPayload = new SceneChangedPayload
             {
                 requestId = requestId,
@@ -1041,6 +1326,7 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         }
 
         StatusText = result.Message;
+        LogStatusToBrowserConsole(true);
         SendCommandResult(
             requestId,
             false,
@@ -1050,6 +1336,26 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
             result.TransitionId,
             // 只有协调器确认恢复提交成功时才透传激活标识；普通失败不得伪造可用物理场景。
             result.Recovered ? result.RestoredSceneActivationId : null);
+    }
+
+    /// <summary>
+    /// 将原先显示在 Unity 画面上的状态摘要写入引擎日志。
+    /// WebGL 会把 Debug 日志转发到浏览器开发者工具控制台；警告仅用于失败状态，便于线上筛选。
+    /// </summary>
+    private void LogStatusToBrowserConsole(bool warning = false)
+    {
+        if (string.IsNullOrWhiteSpace(StatusText))
+        {
+            return;
+        }
+
+        if (warning)
+        {
+            Debug.LogWarning($"[UnityIframeBridge] {StatusText}", this);
+            return;
+        }
+
+        Debug.Log($"[UnityIframeBridge] {StatusText}", this);
     }
 
     private string GetSceneStateDescription()
@@ -1106,13 +1412,5 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         int endIndex = url.IndexOf('&', startIndex);
         string value = endIndex < 0 ? url.Substring(startIndex) : url.Substring(startIndex, endIndex - startIndex);
         return string.IsNullOrWhiteSpace(value) ? fallbackValue : Uri.UnescapeDataString(value);
-    }
-
-    private void OnGUI()
-    {
-        // 正式包不呈现测试面板，开发阶段保留状态提示以方便 iframe 联调。
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-        GUI.Box(new Rect(12, 12, 500, 64), $"Unity iframe 通信测试\n{StatusText}");
-#endif
     }
 }

@@ -16,19 +16,20 @@
           <div id="unity-progress-bar-full"></div>
         </div>
       </div>
-      <div id="unity-warning"></div>
     </div>
     <script>
       const canvas = document.querySelector('#unity-canvas');
       const loadingBar = document.querySelector('#unity-loading-bar');
       const progressBarFull = document.querySelector('#unity-progress-bar-full');
-      const warningBanner = document.querySelector('#unity-warning');
 
-      /** 将运行时错误限定为画布内提示，既不撑开 iframe，也不影响父页面布局。 */
+      /**
+       * Unity 播放器警告与错误不再覆盖三维画面，统一写入浏览器开发者工具控制台。
+       * 错误仍使用 error 级别，警告使用 warn 级别，便于正式环境筛选和留存。
+       */
       function unityShowBanner(message, type) {
-        warningBanner.textContent = message;
-        warningBanner.style.display = 'block';
-        warningBanner.style.background = type === 'error' ? '#b91c1c' : '#a16207';
+        const text = `[UnityWebGL] ${String(message)}`;
+        if (type === 'error') console.error(text);
+        else console.warn(text);
       }
 
       const buildUrl = 'Build';
@@ -49,12 +50,109 @@
       config.devicePixelRatio = Math.min(window.devicePixelRatio || 1, 2);
       loadingBar.style.display = 'block';
 
+      /*
+       * 启动探针只记录固定阶段和有限错误文本，不记录地址、查询参数或业务载荷。
+       * 父页面和测试工具可据此区分“加载器未完成、Unity 实例承诺未完成、实例已完成、
+       * 实例创建失败”四个阶段；探针不参与握手，也不会用假对象替代真实 unityInstance。
+       */
+      window.__power3dStartupStage = 'loader-pending';
+      const recordStartupStage = (stage, error) => {
+        window.__power3dStartupStage = stage;
+        if (error) window.__power3dStartupError = String(error).slice(0, 240);
+        else delete window.__power3dStartupError;
+      };
+
+      /**
+       * WebGL 播放器正常会在 BootstrapRuntime（启动运行时根对象）上的 C# 桥接组件启动时注册消息监听。
+       * 部分浏览器环境已完成播放器加载却没有及时进入首场景脚本生命周期，此时外层无法收到 ready（就绪）而永远
+       * 无法下发首个 switchScene（场景切换），业务模型也不会从场景资源包加载。该兜底只在 C# 桥接缺失时执行，
+       * 严格复用正式协议的来源、实例、版本、能力和命令白名单，不接受任意来源或任意对象名的页面消息。
+       */
+      function installBridgeFallback(unityInstance, bridgeMetadata) {
+        if (window.Power3dUnityBridge && !window.Power3dUnityBridge.releaseRequested) return;
+        if (!unityInstance || typeof unityInstance.SendMessage !== 'function') return;
+
+        const parentOrigin = bridgeMetadata.parentOrigin;
+        let parsedParentOrigin;
+        try {
+          parsedParentOrigin = new URL(parentOrigin);
+        } catch {
+          return;
+        }
+        const isExactHttpOrigin =
+          (parsedParentOrigin.protocol === 'http:' || parsedParentOrigin.protocol === 'https:') &&
+          parsedParentOrigin.origin === parentOrigin;
+        if (!isExactHttpOrigin) return;
+
+        const commandCapabilities = [
+          'init', 'resize', 'switchScene', 'enterProcessStep', 'resetScene', 'focusNode',
+          // clearSelection（清除选择）只撤销拓扑聚焦产生的三维交互描边；
+          // 模板兜底桥必须与正式 .jslib 使用同一白名单，否则兜底启动时会拒绝合法空白点击命令。
+          'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose',
+        ];
+        const eventCapabilities = [
+          'ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'disposed',
+        ];
+        const gameObjectName = 'BootstrapRuntime';
+        const receiveFromParent = (event) => {
+          const bridge = window.Power3dUnityBridge;
+          const data = event.data;
+          if (
+            !bridge ||
+            bridge.releaseRequested ||
+            event.origin !== bridge.parentOrigin ||
+            event.source !== window.parent ||
+            !data ||
+            data.channel !== 'power3d-unity' ||
+            data.version !== 1 ||
+            data.instanceId !== bridge.instanceId ||
+            typeof data.messageId !== 'string' ||
+            typeof data.timestamp !== 'number' ||
+            !commandCapabilities.includes(data.type)
+          ) return;
+
+          // BootstrapRuntime 与 Unity 构建入口共同固定为首场景根对象；无需按层级或显示名称搜索对象。
+          unityInstance.SendMessage(gameObjectName, 'ReceiveFromParent', JSON.stringify(data));
+        };
+
+        window.Power3dUnityBridge = {
+          gameObjectName,
+          instanceId: bridgeMetadata.instanceId,
+          parentOrigin,
+          receiveFromParent,
+          releaseRequested: false,
+        };
+        window.addEventListener('message', receiveFromParent);
+        window.parent.postMessage({
+          channel: 'power3d-unity',
+          version: 1,
+          instanceId: bridgeMetadata.instanceId,
+          messageId: `${Date.now()}-ready`,
+          type: 'ready',
+          payload: {
+            runtimeKey: bridgeMetadata.runtimeKey,
+            buildId: bridgeMetadata.buildId,
+            sceneMappingVersion: bridgeMetadata.sceneMappingVersion,
+            protocolVersion: 1,
+            resourceDigest: bridgeMetadata.resourceDigest,
+            commandCapabilities,
+            eventCapabilities,
+          },
+          timestamp: Date.now(),
+        }, parentOrigin);
+        console.info('[Power3dUnityBridge] 已通过网页模板兜底注册监听并发送 ready。');
+      }
+
       const script = document.createElement('script');
       script.src = loaderUrl;
+      script.onerror = (error) => recordStartupStage('loader-failed', error);
       script.onload = () => {
+        recordStartupStage('loader-loaded');
+        recordStartupStage('instance-creating');
         createUnityInstance(canvas, config, (progress) => {
           progressBarFull.style.width = `${Math.round(progress * 100)}%`;
         }).then((unityInstance) => {
+          recordStartupStage('instance-ready');
           /*
            * 父页面下发的握手字段在 Unity 初始化后固化到地址栏，.jslib 再据此校验精确来源、实例与版本。
            * 这些字段全部来自受控运行时登记表，模板不接受任意业务页面自行拼接的来源或构建标识。
@@ -71,11 +169,16 @@
               resourceDigest: bridgeQuery.get('resourceDigest') || 'local-webgl-topology-link',
             };
             history.replaceState(null, '', `${window.location.pathname}?${new URLSearchParams(bridgeMetadata)}`);
+            // 先保存实例再安装兜底桥接：监听器接收命令时必须能立即转发给已完成创建的 Unity 实例。
+            window.unityInstance = unityInstance;
+            installBridgeFallback(unityInstance, bridgeMetadata);
+          } else {
+            // 独立调试页没有受控父来源，不安装跨窗口监听器；仍保留实例供本地播放器检查。
+            window.unityInstance = unityInstance;
           }
-
-          window.unityInstance = unityInstance;
           loadingBar.style.display = 'none';
         }).catch((error) => {
+          recordStartupStage('instance-failed', error);
           unityShowBanner(String(error), 'error');
         });
       };

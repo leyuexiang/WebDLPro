@@ -1,5 +1,5 @@
 import { SCENE_IDS, isSceneId, validateStableIdentifier } from '@/config/scene-topology/identifiers'
-import type { ActionId, DeviceId, NodeId, SceneId, SceneNodeId, SessionId, TopologyId, TransitionId } from '@/config/scene-topology/identifiers'
+import type { ActionId, NodeId, SceneId, SceneNodeId, SessionId, TopologyId, TransitionId } from '@/config/scene-topology/identifiers'
 import type { DeviceVisualStatus } from '@/config/scene-topology/types'
 
 /** 外层父页面与可视化子应用的固定通道；禁止与 Unity 内层通道混用。 */
@@ -18,6 +18,12 @@ export const HOST_PROTOCOL_LIMITS = Object.freeze({
   workflowParameters: 32,
   selectionNodeIds: 64,
 })
+
+/**
+ * 状态时间必须显式携带 `Z` 或 `±HH:mm` 时区，禁止浏览器按本地时区解释无时区字符串。
+ * 正则只负责结构门禁，随后仍交给 `Date.parse` 校验真实日期与偏移量是否合法。
+ */
+const ISO_TIMESTAMP_WITH_TIMEZONE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(Z|[+-]\d{2}:\d{2})$/
 
 /** 父页面下行命令白名单；任何 Unity 方法名或资源地址都不在此集合内。 */
 export const HOST_COMMAND_TYPES = [
@@ -94,16 +100,16 @@ export interface WorkflowTriggerPayload {
   expectedContextRevision?: number
 }
 
-/** 父页面设备状态更新中的单条四态记录。 */
+/** 父页面节点状态更新中的单条四态记录；真实设备编号只存在于平台内部。 */
 export interface DeviceStateUpdateItem {
-  deviceId: DeviceId
+  nodeId: NodeId
   deviceStatus: DeviceVisualStatus
   statusUpdatedAt: string
 }
 
-/** 批量状态更新受 500 条上限约束，防止外部消息一次占用无界内存。 */
+/** 批量状态更新受 500 条上限约束；来源修订号必填，但只保留作日志和诊断。 */
 export interface DeviceStatesUpdatePayload {
-  sourceRevision?: number
+  sourceRevision: number
   items: readonly DeviceStateUpdateItem[]
 }
 
@@ -154,6 +160,7 @@ export type HostProtocolErrorCode =
   | 'topology.activate.failed'
   | 'command.timeout'
   | 'command.superseded'
+  | 'runtime.startup.timeout'
   | 'runtime.disposed'
 
 /** 结构化错误只包含稳定领域标识和受控说明，不允许 Unity 层级、凭据或原始消息。 */
@@ -201,27 +208,18 @@ export interface ViewChangedPayload {
   transitionId?: TransitionId
 }
 
-/** 设备双击事件强制携带设备标识；没有设备标识的概念节点不得发送该事件。 */
+/** 节点双击事件只公开当前结构清单中的稳定节点编号。 */
 export interface TopologyNodeDoubleClickPayload {
   sceneId: SceneId
   topologyId: TopologyId
   nodeId: NodeId
-  deviceId: DeviceId
-  sceneNodeId?: SceneNodeId
-  deviceType?: string
-  contextRevision: number
-  correlationId: string
 }
 
 /** Unity 反向选择只使用映射得到的稳定标识，不透出 Unity 对象层级路径。 */
 export interface SceneObjectSelectedPayload {
   sceneId: SceneId
   sceneNodeId: SceneNodeId
-  deviceId?: DeviceId
-  topologyId?: TopologyId
-  nodeIds: readonly NodeId[]
-  contextRevision: number
-  correlationId: string
+  nodeId: NodeId
 }
 
 /** 当前状态快照不保存设备全量状态或原始消息，仅包含有限的运行阶段。 */
@@ -256,12 +254,56 @@ export type HostProtocolValidationResult<TMessage> =
   | { status: 'valid'; message: TMessage; issues: readonly [] }
   | { status: 'invalid'; issues: readonly HostProtocolValidationIssue[] }
 
+/**
+ * 外层命令完成基础信封校验后的有限候选对象。
+ * 它只允许桥接层读取会话和消息标识来完成安全门禁；具体命令类型与载荷仍须继续校验，
+ * 从而严格保持“来源/会话 → messageId 去重 → 类型 → 载荷”的协议顺序。
+ */
+export interface HostCommandEnvelopeCandidate {
+  instanceId: string
+  sessionId: string
+  messageId: string
+  /** 原始普通对象仅在当前同步接收栈内继续校验，不进入缓存、日志或业务层。 */
+  readonly value: Readonly<UnknownRecord>
+}
+
 type UnknownRecord = Record<string, unknown>
 
 /** 校验父页面命令的完整信封、类型白名单和对应载荷。 */
 export function validateHostCommandMessage(input: unknown): HostProtocolValidationResult<HostCommandMessage> {
-  const envelope = validateEnvelope(input, HOST_COMMAND_TYPES, 'command')
+  const candidate = validateHostCommandEnvelope(input)
+  if (candidate.status === 'invalid') return candidate
+  return validateHostCommandPayload(candidate.message)
+}
+
+/**
+ * 仅校验去重前允许访问的基础命令信封。
+ * 此阶段故意不检查 type 和 payload：桥接层必须先对当前会话的合法 messageId 去重，
+ * 避免同一恶意重放反复触发较昂贵的类型和最多500项状态载荷遍历。
+ */
+export function validateHostCommandEnvelope(input: unknown): HostProtocolValidationResult<HostCommandEnvelopeCandidate> {
+  const envelope = validateBaseEnvelope(input, 'command')
   if (!envelope) return invalidResult(input)
+
+  return {
+    status: 'valid',
+    message: {
+      instanceId: envelope.instanceId as string,
+      sessionId: envelope.sessionId as string,
+      messageId: envelope.messageId as string,
+      value: envelope,
+    },
+    issues: [],
+  }
+}
+
+/**
+ * 对已经通过基础信封和当前会话去重的命令执行类型、载荷校验。
+ * 该函数不再次序列化整条消息，避免大型合法状态快照在同一接收路径中重复计算字节长度。
+ */
+export function validateHostCommandPayload(candidate: HostCommandEnvelopeCandidate): HostProtocolValidationResult<HostCommandMessage> {
+  const envelope = candidate.value
+  if (!HOST_COMMAND_TYPES.includes(envelope.type as HostCommandType)) return invalidEnvelopeResult()
 
   const payloadValid =
     (envelope.type === 'system.init' && isSystemInitPayload(envelope.payload)) ||
@@ -309,12 +351,18 @@ export function isHostEventMessage(input: unknown): input is HostEventMessage {
 
 /** 验证通用信封，并先做序列化大小检查以防止后续字段遍历处理超大对象。 */
 function validateEnvelope<TType extends string>(input: unknown, allowedTypes: readonly TType[], direction: 'command' | 'event'): UnknownRecord | undefined {
+  const envelope = validateBaseEnvelope(input, direction)
+  return envelope && allowedTypes.includes(envelope.type as TType) ? envelope : undefined
+}
+
+/** 基础信封校验不读取命令类型或载荷内容，供命令入口按规范顺序先完成会话级去重。 */
+function validateBaseEnvelope(input: unknown, direction: 'command' | 'event'): UnknownRecord | undefined {
   if (!isMessageWithinSizeLimit(input) || !isRecord(input)) return undefined
   if (input.channel !== HOST_PROTOCOL_CHANNEL || input.version !== HOST_PROTOCOL_VERSION) return undefined
   if (!isOpaqueIdentifier(input.instanceId) || !isOpaqueIdentifier(input.sessionId) || !isOpaqueIdentifier(input.messageId)) return undefined
   if (input.replyTo !== undefined && !isOpaqueIdentifier(input.replyTo)) return undefined
   if (direction === 'command' && input.replyTo !== undefined) return undefined
-  if (!allowedTypes.includes(input.type as TType) || !isTimestamp(input.timestamp) || !Object.hasOwn(input, 'payload')) return undefined
+  if (!isTimestamp(input.timestamp) || !Object.hasOwn(input, 'type') || !Object.hasOwn(input, 'payload')) return undefined
   return input
 }
 
@@ -384,16 +432,20 @@ function isWorkflowTriggerPayload(value: unknown): value is WorkflowTriggerPaylo
   )
 }
 
-/** 批量设备状态拒绝空数组、超过 500 条记录、重复格式错误和无效 ISO 时间。 */
+/**
+ * 完整设备快照拒绝空数组、超过 500 条记录、缺失来源修订号和无效状态项。
+ * 此处只验证来源修订号是非负安全整数，绝不依据数值大小判断批次新旧。
+ */
 function isDeviceStatesUpdatePayload(value: unknown): value is DeviceStatesUpdatePayload {
   if (!isRecord(value) || !Array.isArray(value.items) || value.items.length === 0 || value.items.length > HOST_PROTOCOL_LIMITS.deviceStateItems) return false
-  if (value.sourceRevision !== undefined && !isNonNegativeInteger(value.sourceRevision)) return false
+  if (!hasOnlyOwnKeys(value, ['sourceRevision', 'items'])) return false
+  if (!isNonNegativeInteger(value.sourceRevision)) return false
   return value.items.every(isDeviceStateUpdateItem)
 }
 
-/** 设备状态项仅允许协议定义的四态与有效时间字符串。 */
+/** 节点状态项严格只允许 nodeId、协议四态和带时区时间，旧 deviceId 字段会被整体拒绝。 */
 function isDeviceStateUpdateItem(value: unknown): value is DeviceStateUpdateItem {
-  return isRecord(value) && isStableIdentifier(value.deviceId) && isDeviceVisualStatus(value.deviceStatus) && isIsoTimestamp(value.statusUpdatedAt)
+  return isRecord(value) && hasOnlyOwnKeys(value, ['nodeId', 'deviceStatus', 'statusUpdatedAt']) && isStableIdentifier(value.nodeId) && isDeviceVisualStatus(value.deviceStatus) && isIsoTimestampWithTimezone(value.statusUpdatedAt)
 }
 
 /** 设备状态严格收敛为协议定义四态，不能把数据源的未知枚举直接传入画布或 Unity。 */
@@ -441,14 +493,14 @@ function isViewChangedPayload(value: unknown): value is ViewChangedPayload {
   return isRecord(value) && isSceneId(value.sceneId) && isStableIdentifier(value.topologyId) && (value.actionId === null || isStableIdentifier(value.actionId)) && isNonNegativeInteger(value.contextRevision) && (value.transitionId === undefined || isStableIdentifier(value.transitionId))
 }
 
-/** 双击事件必须携带 deviceId；可选三维节点和设备类型仍受长度与格式限制。 */
+/** 双击事件只允许三个结构标识，任何旧设备编号或附加映射字段都会被拒绝。 */
 function isTopologyNodeDoubleClickPayload(value: unknown): value is TopologyNodeDoubleClickPayload {
-  return isRecord(value) && isSceneId(value.sceneId) && isStableIdentifier(value.topologyId) && isStableIdentifier(value.nodeId) && isStableIdentifier(value.deviceId) && (value.sceneNodeId === undefined || isStableIdentifier(value.sceneNodeId)) && (value.deviceType === undefined || isBoundedString(value.deviceType)) && isNonNegativeInteger(value.contextRevision) && isOpaqueIdentifier(value.correlationId)
+  return isRecord(value) && hasOnlyOwnKeys(value, ['sceneId', 'topologyId', 'nodeId']) && isSceneId(value.sceneId) && isStableIdentifier(value.topologyId) && isStableIdentifier(value.nodeId)
 }
 
-/** 三维选择最多回传 64 个二维节点，避免异常映射输出无界选择集合。 */
+/** 三维反向选择只返回静态唯一映射得到的单个逻辑节点，不暴露设备编号或内部上下文。 */
 function isSceneObjectSelectedPayload(value: unknown): value is SceneObjectSelectedPayload {
-  return isRecord(value) && isSceneId(value.sceneId) && isStableIdentifier(value.sceneNodeId) && (value.deviceId === undefined || isStableIdentifier(value.deviceId)) && (value.topologyId === undefined || isStableIdentifier(value.topologyId)) && Array.isArray(value.nodeIds) && value.nodeIds.length <= HOST_PROTOCOL_LIMITS.selectionNodeIds && value.nodeIds.every(isStableIdentifier) && isNonNegativeInteger(value.contextRevision) && isOpaqueIdentifier(value.correlationId)
+  return isRecord(value) && hasOnlyOwnKeys(value, ['sceneId', 'sceneNodeId', 'nodeId']) && isSceneId(value.sceneId) && isStableIdentifier(value.sceneNodeId) && isStableIdentifier(value.nodeId)
 }
 
 /** 状态快照仅回传受控上下文与有限运行状态，不能包含场景对象或设备原始状态。 */
@@ -476,7 +528,7 @@ function isHostProtocolErrorCode(value: unknown): value is HostProtocolErrorCode
   return typeof value === 'string' && [
     // 未声明能力是协议规范定义的首版拒绝原因；必须与 HostProtocolErrorCode（外层协议错误码）保持一一对应，
     // 否则命令分派器返回的受控错误会在出站校验阶段被误判为无效载荷。
-    'protocol.origin.rejected', 'protocol.source.rejected', 'protocol.envelope.invalid', 'protocol.payload.invalid', 'protocol.capability.undeclared', 'protocol.message.duplicate', 'protocol.capacity.exceeded', 'manifest.version.mismatch', 'scene.unknown', 'topology.unknown', 'topology.scene.mismatch', 'action.unknown', 'action.context.mismatch', 'context.revision.conflict', 'scene.switch.failed', 'action.execute.failed', 'topology.prepare.failed', 'topology.activate.failed', 'command.timeout', 'command.superseded', 'runtime.disposed',
+    'protocol.origin.rejected', 'protocol.source.rejected', 'protocol.envelope.invalid', 'protocol.payload.invalid', 'protocol.capability.undeclared', 'protocol.message.duplicate', 'protocol.capacity.exceeded', 'manifest.version.mismatch', 'scene.unknown', 'topology.unknown', 'topology.scene.mismatch', 'action.unknown', 'action.context.mismatch', 'context.revision.conflict', 'scene.switch.failed', 'action.execute.failed', 'topology.prepare.failed', 'topology.activate.failed', 'command.timeout', 'command.superseded', 'runtime.startup.timeout', 'runtime.disposed',
   ].includes(value as HostProtocolErrorCode)
 }
 
@@ -485,9 +537,41 @@ function isCapabilityArray<TCapability extends string>(value: unknown, allowedCa
   return Array.isArray(value) && value.length <= allowedCapabilities.length && value.every((item) => typeof item === 'string' && allowedCapabilities.includes(item as TCapability)) && new Set(value).size === value.length
 }
 
-/** ISO 时间必须可被解析且不超长，防止状态更新缓存使用无效时间作为排序依据。 */
-function isIsoTimestamp(value: unknown): value is string {
-  return isBoundedString(value) && Number.isFinite(Date.parse(value))
+/** 对关键协议对象执行精确字段白名单，避免旧字段被结构化克隆后悄悄带入新协议。 */
+function hasOnlyOwnKeys(value: UnknownRecord, allowedKeys: readonly string[]): boolean {
+  const allowed = new Set(allowedKeys)
+  return Object.keys(value).every((key) => allowed.has(key))
+}
+
+/**
+ * 时间只用于状态事实和诊断，不参与快照新旧判断；仍强制显式时区，保证各浏览器解释一致。
+ */
+function isIsoTimestampWithTimezone(value: unknown): value is string {
+  if (!isBoundedString(value)) return false
+  const match = ISO_TIMESTAMP_WITH_TIMEZONE_PATTERN.exec(value)
+  if (!match) return false
+
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  const hour = Number(match[4])
+  const minute = Number(match[5])
+  const second = Number(match[6])
+  const timezone = match[7] ?? ''
+
+  // Date.parse 会把 2 月 30 日和 24:00 自动滚入下一天，因此先独立校验真实日历范围。
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
+  const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+  if (month < 1 || month > 12 || day < 1 || day > (daysInMonth[month - 1] ?? 0)) return false
+  if (hour > 23 || minute > 59 || second > 59) return false
+
+  if (timezone !== 'Z') {
+    const timezoneHour = Number(timezone.slice(1, 3))
+    const timezoneMinute = Number(timezone.slice(4, 6))
+    if (timezoneHour > 23 || timezoneMinute > 59) return false
+  }
+
+  return Number.isFinite(Date.parse(value))
 }
 
 /** 基础信封失败时按容量与结构分别返回稳定错误，不保留或展示原始消息。 */

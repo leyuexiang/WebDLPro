@@ -1,6 +1,6 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import type { ActionId, DeviceId, NodeId, RouteId, SceneActivationId, SceneId, SceneNodeId, TopologyId, TransitionId } from '@/config/scene-topology/identifiers'
+import type { ActionId, NodeId, RouteId, SceneActivationId, SceneId, SceneNodeId, TopologyId, TransitionId } from '@/config/scene-topology/identifiers'
 
 /** 选择来源用于阻断二维单击、Unity 反向选择和外层事件之间的聚焦回环。 */
 export type VisualizationSelectionSource = 'topology' | 'unity' | 'external' | 'system'
@@ -82,7 +82,6 @@ export const useVisualizationStore = defineStore('visualization', () => {
   const sceneLoadProgress = ref<VisualizationSceneLoadProgress | null>(null)
   const selectedNodeIds = ref<readonly NodeId[]>([])
   const selectedRouteIds = ref<readonly RouteId[]>([])
-  const selectedDeviceId = ref<DeviceId | null>(null)
   const selectedSceneNodeId = ref<SceneNodeId | null>(null)
   const selectionSource = ref<VisualizationSelectionSource>('system')
   const latestDiagnostic = ref<VisualizationDiagnostic | null>(null)
@@ -227,7 +226,6 @@ export const useVisualizationStore = defineStore('visualization', () => {
     // 错误态没有可信活动拓扑，继续保留二维选择会让后续恢复流程误用过期节点与路径标识。
     selectedNodeIds.value = []
     selectedRouteIds.value = []
-    selectedDeviceId.value = null
     selectedSceneNodeId.value = null
     selectionSource.value = 'system'
     activeTransitionStartedAt.value = null
@@ -239,12 +237,10 @@ export const useVisualizationStore = defineStore('visualization', () => {
     nodeIds: readonly NodeId[],
     routeIds: readonly RouteId[],
     source: VisualizationSelectionSource,
-    deviceId: DeviceId | null = null,
     sceneNodeId: SceneNodeId | null = null,
   ): void {
     selectedNodeIds.value = [...nodeIds]
     selectedRouteIds.value = [...routeIds]
-    selectedDeviceId.value = deviceId
     selectedSceneNodeId.value = sceneNodeId
     selectionSource.value = source
   }
@@ -299,7 +295,6 @@ export const useVisualizationStore = defineStore('visualization', () => {
     sceneLoadProgress.value = null
     selectedNodeIds.value = []
     selectedRouteIds.value = []
-    selectedDeviceId.value = null
     selectedSceneNodeId.value = null
     selectionSource.value = 'system'
     latestDiagnostic.value = null
@@ -320,7 +315,6 @@ export const useVisualizationStore = defineStore('visualization', () => {
     sceneLoadProgress,
     selectedNodeIds,
     selectedRouteIds,
-    selectedDeviceId,
     selectedSceneNodeId,
     selectionSource,
     latestDiagnostic,

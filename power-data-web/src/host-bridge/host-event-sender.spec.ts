@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
-import { toDeviceId, toNodeId, toSceneId, toSceneNodeId, toSessionId, toTopologyId } from '@/config/scene-topology/identifiers'
+import { toNodeId, toSceneId, toSceneNodeId, toSessionId, toTopologyId } from '@/config/scene-topology/identifiers'
 import type { HostCommandLifecycleResult } from '@/host-bridge/host-command-lifecycle'
 import { HostEventSender, type HostEventTransport } from '@/host-bridge/host-event-sender'
 import type { HostEventMessage, HostProtocolError, HostVisualizationContext, SceneObjectSelectedPayload } from '@/host-bridge/host-protocol'
-import type { TopologyDeviceDoubleClickIntent } from '@/modules/visual/topology/topology-node-interaction'
+import type { TopologyNodeDoubleClickIntent } from '@/modules/visual/topology/topology-node-interaction'
 
 /** 夹具桥只记录通过发送器交付的事件，不模拟窗口或路由，保证测试聚焦协议转换职责。 */
 function createTransport(): { transport: HostEventTransport; sent: HostEventMessage[] } {
@@ -100,7 +100,7 @@ describe('外层事件发送器', () => {
     }))
   })
 
-  it('正式清单设备双击强制携带设备标识，并以事件标识作为关联标识', () => {
+  it('双击只发送场景、拓扑和节点三项稳定标识', () => {
     const { transport, sent } = createTransport()
     const sender = new HostEventSender(transport, { now: () => 102 })
 
@@ -108,21 +108,16 @@ describe('外层事件发送器', () => {
       sceneId: toSceneId('gas-power'),
       topologyId: toTopologyId('topology.gas-power'),
       nodeId: toNodeId('node.turbine'),
-      deviceId: toDeviceId('device.turbine'),
       unityHierarchyPath: 'Root/Plant/Turbine',
       accessToken: 'secret-value',
-    } as TopologyDeviceDoubleClickIntent
-    const accepted = sender.sendTopologyNodeDoubleClick(taintedIntent, 3)
+    } as TopologyNodeDoubleClickIntent
+    const accepted = sender.sendTopologyNodeDoubleClick(taintedIntent)
 
     expect(accepted).toBe(true)
     expect(sent[0]).toEqual(expect.objectContaining({
       type: 'topology.node.dblclick',
       messageId: 'shell-topology-node-dblclick-1',
-      payload: expect.objectContaining({
-        deviceId: 'device.turbine',
-        correlationId: 'shell-topology-node-dblclick-1',
-        contextRevision: 3,
-      }),
+      payload: { sceneId: 'gas-power', topologyId: 'topology.gas-power', nodeId: 'node.turbine' },
     }))
     expect(JSON.stringify(sent[0])).not.toContain('unityHierarchyPath')
     expect(JSON.stringify(sent[0])).not.toContain('secret-value')
@@ -134,11 +129,7 @@ describe('外层事件发送器', () => {
     const taintedSelection = {
       sceneId: toSceneId('gas-power'),
       sceneNodeId: toSceneNodeId('scene-node.turbine'),
-      deviceId: toDeviceId('device.turbine'),
-      topologyId: toTopologyId('topology.gas-power'),
-      nodeIds: [toNodeId('node.turbine')],
-      contextRevision: 3,
-      correlationId: 'unity-selection-outer-01',
+      nodeId: toNodeId('node.turbine'),
       unityMessageId: 'unity-inner-message-01',
       unityHierarchyPath: 'Root/Plant/Turbine',
       rawUnityPayload: { accessToken: 'secret-value' },
@@ -147,15 +138,7 @@ describe('外层事件发送器', () => {
     expect(sender.sendSceneObjectSelected(taintedSelection)).toBe(true)
     expect(sent[0]).toEqual(expect.objectContaining({
       type: 'scene.object.selected',
-      payload: {
-        sceneId: 'gas-power',
-        sceneNodeId: 'scene-node.turbine',
-        deviceId: 'device.turbine',
-        topologyId: 'topology.gas-power',
-        nodeIds: ['node.turbine'],
-        contextRevision: 3,
-        correlationId: 'unity-selection-outer-01',
-      },
+      payload: { sceneId: 'gas-power', sceneNodeId: 'scene-node.turbine', nodeId: 'node.turbine' },
     }))
     const serialized = JSON.stringify(sent[0])
     expect(serialized).not.toContain('unity-inner-message-01')
@@ -195,6 +178,30 @@ describe('外层事件发送器', () => {
     expect(serialized).not.toContain('rawPayload')
   })
 
+  it('启动期限超时时只上报固定错误码和脱敏说明', () => {
+    const { transport, sent } = createTransport()
+    const sender = new HostEventSender(transport, { now: () => 104 })
+
+    expect(sender.sendSystemError({
+      code: 'runtime.startup.timeout',
+      message: 'manifestUrl=https://internal.example.test/path，UnityError=secret-value',
+      stage: 'handshake',
+      recoverable: true,
+    })).toBe(true)
+
+    expect(sent).toEqual([expect.objectContaining({
+      type: 'system.error',
+      payload: expect.objectContaining({
+        error: expect.objectContaining({
+          code: 'runtime.startup.timeout',
+          message: '页面未能在启动期限内完成运行时准备。',
+        }),
+      }),
+    })])
+    expect(JSON.stringify(sent[0])).not.toContain('internal.example.test')
+    expect(JSON.stringify(sent[0])).not.toContain('secret-value')
+  })
+
   it('出站校验失败时不会调用桥接层发送', () => {
     const { transport } = createTransport()
     const send = vi.spyOn(transport, 'send')
@@ -203,16 +210,14 @@ describe('外层事件发送器', () => {
     const accepted = sender.sendTopologyNodeDoubleClick({
       sceneId: toSceneId('gas-power'),
       topologyId: toTopologyId('topology.gas-power'),
-      nodeId: toNodeId('node.turbine'),
-      deviceId: toDeviceId('device.turbine'),
-    }, Number.NaN)
+      nodeId: undefined,
+    } as unknown as TopologyNodeDoubleClickIntent)
 
-    const missingDeviceAccepted = sender.sendTopologyNodeDoubleClick({
+    const missingNodeAccepted = sender.sendTopologyNodeDoubleClick({
       sceneId: toSceneId('gas-power'),
       topologyId: toTopologyId('topology.gas-power'),
       nodeId: toNodeId('node.turbine'),
-      deviceId: undefined,
-    } as unknown as TopologyDeviceDoubleClickIntent, 3)
+    })
     const invalidReplyAccepted = sender.sendSystemError({
       code: 'scene.switch.failed',
       message: '该文本不会直接发送。',
@@ -221,8 +226,8 @@ describe('外层事件发送器', () => {
     }, '')
 
     expect(accepted).toBe(false)
-    expect(missingDeviceAccepted).toBe(false)
+    expect(missingNodeAccepted).toBe(true)
     expect(invalidReplyAccepted).toBe(false)
-    expect(send).not.toHaveBeenCalled()
+    expect(send).toHaveBeenCalledTimes(1)
   })
 })

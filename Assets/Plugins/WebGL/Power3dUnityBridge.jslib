@@ -7,6 +7,19 @@ mergeInto(LibraryManager.library, {
   Power3dUnityBridge_Initialize: function (gameObjectNamePointer, instanceIdPointer) {
     var gameObjectName = UTF8ToString(gameObjectNamePointer);
     var instanceId = UTF8ToString(instanceIdPointer);
+    /*
+     * 正常路径由 C# 的 UnityIframeBridgeManager 在 Start 中调用本函数。
+     * 个别 WebGL 播放器在首场景脚本生命周期未及时进入时，网页模板会在 unityInstance（网页图形实例）
+     * 创建完成后以 BootstrapRuntime（启动运行时根对象）建立同构兜底桥接。这里必须优先复用该已登记桥接，
+     * 否则两个 window.message（窗口消息）监听器会把同一命令投递两次，造成重复场景切换或重复回执。
+     */
+    if (window.Power3dUnityBridge && !window.Power3dUnityBridge.releaseRequested) {
+      console.info('[Power3dUnityBridge] 已存在活动桥接，跳过重复初始化。');
+      return;
+    }
+    // 仅记录固定阶段名称，不输出来源、查询参数或业务消息；浏览器回归可据此区分
+    // “C# 未进入桥接调用”和“已进入但后续握手失败”两类故障。
+    console.info('[Power3dUnityBridge] 已接收 Unity 桥接初始化调用。');
     var query = new URLSearchParams(window.location.search);
     var parentOrigin = query.get('parentOrigin');
     var runtimeKey = query.get('runtimeKey');
@@ -33,8 +46,8 @@ mergeInto(LibraryManager.library, {
     }
 
     var commandCapabilities = [
-      'init', 'resize', 'switchScene', 'enterProcessStep', 'resetScene', 'focusNode',
-      'setNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'
+      'init', 'resize', 'switchScene', 'enterProcessStep', 'resetScene', 'focusNode', 'clearSelection',
+      'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'
     ];
     var eventCapabilities = ['ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'disposed'];
     var isSupportedCommand = function (type) {
@@ -96,6 +109,9 @@ mergeInto(LibraryManager.library, {
       },
       timestamp: Date.now()
     }, parentOrigin);
+    // ready 已在监听器注册后发出。该受控阶段日志不包含实例、来源或载荷，
+    // 仅用于验证 WebGL 构建中的浏览器桥已真实可用。
+    console.info('[Power3dUnityBridge] 已注册监听并发送 ready。');
   },
 
   /**

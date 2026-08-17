@@ -4,6 +4,7 @@ using UnityEngine.InputSystem;
 /// <summary>
 /// WebGL 运行时的自由相机控制。
 /// WASD：前后左右，Q/E：下降/上升，Shift：加速，按住鼠标右键：旋转视角，鼠标滚轮：沿画面中心方向推拉镜头。
+/// 流程、总览和拓扑节点选择均不会改写相机，当前视角始终由本控制器维护。
 /// </summary>
 [DisallowMultipleComponent]
 [RequireComponent(typeof(Camera))]
@@ -26,19 +27,11 @@ public sealed class PowerPlantFreeCameraController : MonoBehaviour
     [Tooltip("限制滚轮在单帧内造成的最大位移，防止高精度触控板或浏览器累积事件使镜头瞬间穿过场景。")]
     [SerializeField, Min(0.1f)] private float _maxScrollMovePerFrame = 30f;
 
-    [Header("流程镜头")]
-    [SerializeField] private PowerPlantProcessController _processController;
-
     private float _yaw;
     private float _pitch;
 
     private void Awake()
     {
-        if (_processController == null)
-        {
-            _processController = FindFirstObjectByType<PowerPlantProcessController>();
-        }
-
         Vector3 eulerAngles = transform.rotation.eulerAngles;
         _yaw = eulerAngles.y;
         _pitch = NormalizePitch(eulerAngles.x);
@@ -67,11 +60,6 @@ public sealed class PowerPlantFreeCameraController : MonoBehaviour
 
         Vector3 localMove = ReadMoveInput(keyboard);
         bool hasMoveInput = localMove.sqrMagnitude > 0.0001f;
-        if (hasLookInput || hasMoveInput || hasScrollInput)
-        {
-            _processController?.CancelCameraTransition();
-        }
-
         if (hasLookInput)
         {
             _yaw += lookDelta.x * _lookSensitivity;

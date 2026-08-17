@@ -1,6 +1,9 @@
 import { SCENE_IDS, isSceneId, validateStableIdentifier } from '@/config/scene-topology/identifiers'
 import type { SceneTopologyManifest, SceneTopologyManifestValidationIssue } from '@/config/scene-topology/types'
 
+/** 与 Unity 节点快照水位表一致；结构清单超过该值会使清除补偿无法保证完整交付。 */
+export const MAX_DEVICE_STATE_SCENE_NODE_TARGETS_PER_SCENE = 500
+
 /** 非可信外部清单只能先当作普通记录处理，完成字段校验后才允许断言为领域类型。 */
 type UnknownRecord = Record<string, unknown>
 
@@ -9,9 +12,118 @@ function appendIssue(issues: SceneTopologyManifestValidationIssue[], code: strin
   issues.push({ code, message })
 }
 
-/** 运行时对象守卫不接受数组、空值和函数，防止将原型对象或可执行对象带入配置缓存。 */
+/**
+ * 运行时对象守卫只接受普通对象或无原型对象，不接受数组、空值、函数、类实例或继承属性对象。
+ * 远程响应经 JSON（JavaScript 对象表示法）解析后应天然满足该条件；在直接调用校验器时仍要拒绝
+ * 原型链上的意外字段，避免配置缓存读取到调用方注入的方法或继承状态。
+ */
 function isRecord(value: unknown): value is UnknownRecord {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
+}
+
+/** 清单扫描容量远高于当前九场景规模，用于阻断恶意宽对象和深层对象消耗主线程。 */
+const MAX_MANIFEST_CONTAINER_COUNT = 50_000
+const MAX_MANIFEST_ENTRY_COUNT = 250_000
+const MAX_MANIFEST_FIELD_NAME_LENGTH = 128
+
+type LegacyManifestFieldKind = 'device-identifier' | 'device-mapping' | 'binding-metadata' | 'runtime-manifest'
+const DEVICE_IDENTIFIER_SUFFIXES = new Set(['id', 'ids'])
+const DEVICE_MAPPING_SUFFIXES = new Set(['mapping', 'mappings'])
+const BINDING_METADATA_SUFFIXES = new Set(['count', 'revision'])
+const RUNTIME_MANIFEST_SUFFIXES = new Set(['manifest'])
+
+const LEGACY_MANIFEST_ISSUES: Readonly<Record<LegacyManifestFieldKind, SceneTopologyManifestValidationIssue>> = Object.freeze({
+  'device-identifier': Object.freeze({ code: 'manifest.legacy-device-identifier', message: '结构清单不得包含平台设备编号字段。' }),
+  'device-mapping': Object.freeze({ code: 'manifest.legacy-device-mapping', message: '结构清单不得包含平台设备映射字段。' }),
+  'binding-metadata': Object.freeze({ code: 'manifest.legacy-binding-metadata', message: '结构清单不得包含平台绑定元数据。' }),
+  'runtime-manifest': Object.freeze({ code: 'manifest.legacy-runtime-manifest', message: '结构清单不得包含第二份运行时清单字段。' }),
+})
+
+/**
+ * 把驼峰、连续大写和常见分隔符统一拆为小写词元；只分析键名，不扫描标题或协议标签值。
+ * 词元识别可区分合法的 deviceStatus 与非法的 deviceId，也不会把 deviceIdentity 误判为 device + id。
+ */
+function classifyLegacyManifestField(field: string): LegacyManifestFieldKind | undefined {
+  const words = field
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .split(/[^A-Za-z0-9]+/)
+    .filter(Boolean)
+    .map((word) => word.toLowerCase())
+  const compact = field.replace(/[^A-Za-z0-9]+/g, '').toLowerCase()
+  const containsAdjacentWords = (first: string, seconds: ReadonlySet<string>): boolean =>
+    words.some((word, index) => word === first && seconds.has(words[index + 1] ?? ''))
+
+  if (containsAdjacentWords('device', DEVICE_IDENTIFIER_SUFFIXES) || compact === 'deviceid' || compact === 'deviceids' || compact.endsWith('deviceid') || compact.endsWith('deviceids')) {
+    return 'device-identifier'
+  }
+  if (containsAdjacentWords('device', DEVICE_MAPPING_SUFFIXES) || compact.endsWith('devicemapping') || compact.endsWith('devicemappings')) {
+    return 'device-mapping'
+  }
+  if (containsAdjacentWords('binding', BINDING_METADATA_SUFFIXES) || compact.endsWith('bindingcount') || compact.endsWith('bindingrevision')) {
+    return 'binding-metadata'
+  }
+  if (containsAdjacentWords('runtime', RUNTIME_MANIFEST_SUFFIXES) || compact.endsWith('runtimemanifest')) {
+    return 'runtime-manifest'
+  }
+  return undefined
+}
+
+/**
+ * 使用显式栈扫描不可信清单，避免递归深度导致栈溢出。每个容器只访问一次，每类旧字段最多返回一个固定问题；
+ * 命中旧字段后不再遍历其子树，因为整份清单已经必须拒绝，继续读取只会扩大外部输入的处理成本。
+ */
+function findLegacyManifestIssues(input: UnknownRecord): readonly SceneTopologyManifestValidationIssue[] {
+  const stack: unknown[] = [input]
+  const visited = new WeakSet<object>()
+  const foundKinds = new Set<LegacyManifestFieldKind>()
+  let containerCount = 0
+  let entryCount = 0
+
+  while (stack.length > 0) {
+    const value = stack.pop()
+    if ((!isRecord(value) && !Array.isArray(value)) || visited.has(value)) continue
+    visited.add(value)
+    containerCount += 1
+    if (containerCount > MAX_MANIFEST_CONTAINER_COUNT) {
+      return [{ code: 'manifest.capacity', message: '结构清单嵌套对象数量超过上限。' }]
+    }
+
+    if (Array.isArray(value)) {
+      entryCount += value.length
+      if (entryCount > MAX_MANIFEST_ENTRY_COUNT || stack.length + value.length > MAX_MANIFEST_CONTAINER_COUNT) {
+        return [{ code: 'manifest.capacity', message: '结构清单字段和数组项数量超过上限。' }]
+      }
+      for (const item of value) {
+        if (item && typeof item === 'object') stack.push(item)
+      }
+      continue
+    }
+
+    const fields = Object.keys(value)
+    entryCount += fields.length
+    if (entryCount > MAX_MANIFEST_ENTRY_COUNT) {
+      return [{ code: 'manifest.capacity', message: '结构清单字段和数组项数量超过上限。' }]
+    }
+    for (const field of fields) {
+      if (field.length > MAX_MANIFEST_FIELD_NAME_LENGTH) {
+        return [{ code: 'manifest.capacity', message: '结构清单字段名称超过长度上限。' }]
+      }
+      const legacyKind = classifyLegacyManifestField(field)
+      if (legacyKind) {
+        foundKinds.add(legacyKind)
+        continue
+      }
+      const nestedValue = value[field]
+      if (nestedValue && typeof nestedValue === 'object') stack.push(nestedValue)
+    }
+  }
+
+  return (Object.keys(LEGACY_MANIFEST_ISSUES) as LegacyManifestFieldKind[])
+    .filter((kind) => foundKinds.has(kind))
+    .map((kind) => LEGACY_MANIFEST_ISSUES[kind])
 }
 
 /** 通用字符串字段检查；只校验存在性，不把不可信的完整字段值放入错误消息。 */
@@ -77,6 +189,9 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
     return issues
   }
 
+  const legacyManifestIssues = findLegacyManifestIssues(input)
+  if (legacyManifestIssues.length > 0) return legacyManifestIssues
+
   const manifest = input
   hasNonEmptyString(manifest, 'manifestVersion', issues, 'manifest.version')
   hasNonEmptyString(manifest, 'unityBuildId', issues, 'manifest.unity-build')
@@ -85,7 +200,6 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
   const sceneItems = readArray(manifest, 'scenes', issues, 'manifest.scenes')
   const topologyItems = readArray(manifest, 'topologies', issues, 'manifest.topologies')
   const actionItems = readArray(manifest, 'actions', issues, 'manifest.actions')
-  const deviceMappingItems = readArray(manifest, 'deviceMappings', issues, 'manifest.device-mappings')
   const unityMappingItems = readArray(manifest, 'unitySceneMappings', issues, 'manifest.unity-scene-mappings')
   const manifestVersion = typeof manifest.manifestVersion === 'string' ? manifest.manifestVersion : ''
 
@@ -95,6 +209,7 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
       appendIssue(issues, 'scene.shape', '场景定义必须是对象。')
       continue
     }
+
 
     const sceneId = item.sceneId
     if (!isSceneId(sceneId)) {
@@ -126,6 +241,12 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
 
   const topologiesById = new Map<string, UnknownRecord>()
   const topologyNodesByRef = new Map<string, UnknownRecord>()
+  /** 只统计来源拓扑中的节点定义；过滤视图引用同一节点不构成第二次定义。 */
+  const sourceNodeIds = new Set<string>()
+  /** 同一场景三维节点最多反向对应一个逻辑节点，保证 Unity 反选结果确定。 */
+  const nodeIdBySceneNodeReference = new Map<string, string>()
+  /** 三维状态目标按场景限制为500个，避免一次完整快照产生无界 Unity 投影。 */
+  const sceneNodeReferencesBySceneId = new Map<string, Set<string>>()
   /** 节点归属场景在解析拓扑时固定记录，后续校验三维节点时不从标题、文件名或当前 UI 回推场景。 */
   const sceneIdByTopologyNodeReference = new Map<string, string>()
   for (const item of topologyItems) {
@@ -133,6 +254,7 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
       appendIssue(issues, 'topology.shape', '拓扑定义必须是对象。')
       continue
     }
+
 
     const topologyId = item.topologyId
     const sceneId = item.sceneId
@@ -158,6 +280,7 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
           continue
         }
 
+
         const layerId = layerItem.layerId as string
         if (layerIds.has(layerId)) appendIssue(issues, 'topology.duplicate-layer', '同一拓扑内展示层级标识重复。')
         layerIds.add(layerId)
@@ -173,15 +296,22 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
 
     const nodeIds = new Set<string>()
     const nodeItems = readArray(item, 'nodes', issues, 'topology.nodes')
+    // 业务源拓扑的全部节点都必须允许上报 nodeId；每张图只记录一次问题，避免大清单产生重复报告。
+    let sourceTopologyContainsNonReportableNode = false
     for (const nodeItem of nodeItems) {
       if (!isRecord(nodeItem) || !validateIdentifier(nodeItem.nodeId, '拓扑节点标识', issues)) {
         appendIssue(issues, 'topology.node-shape', '拓扑节点缺少有效稳定标识。')
         continue
       }
 
+
       const nodeId = nodeItem.nodeId as string
       if (nodeIds.has(nodeId)) appendIssue(issues, 'topology.duplicate-node', '同一拓扑内节点标识重复。')
       nodeIds.add(nodeId)
+      if (item.filter === undefined) {
+        if (sourceNodeIds.has(nodeId)) appendIssue(issues, 'topology.duplicate-source-node', '同一联动资源内来源节点标识必须全局唯一。')
+        sourceNodeIds.add(nodeId)
+      }
       const topologyNodeReference = `${topologyId}:${nodeId}`
       topologyNodesByRef.set(topologyNodeReference, nodeItem)
       sceneIdByTopologyNodeReference.set(topologyNodeReference, sceneId as string)
@@ -195,10 +325,27 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
         appendIssue(issues, 'topology.node-layer-reference', '拓扑节点引用了不存在的展示层级。')
       }
       if (!['normal', 'alarm', 'fault', 'offline'].includes(String(nodeItem.deviceStatus))) appendIssue(issues, 'topology.node-status', '拓扑节点设备状态无效。')
-      if (nodeItem.deviceId !== undefined) validateIdentifier(nodeItem.deviceId, '设备标识', issues)
-      if (nodeItem.sceneNodeId !== undefined) validateIdentifier(nodeItem.sceneNodeId, '三维节点标识', issues)
-      if (nodeItem.doubleClickBehavior !== 'emit-device' && nodeItem.doubleClickBehavior !== 'none') appendIssue(issues, 'topology.double-click', '节点双击行为无效。')
-      if (nodeItem.doubleClickBehavior === 'emit-device' && nodeItem.deviceId === undefined) appendIssue(issues, 'topology.double-click-device', '可上报双击的节点必须有设备标识。')
+      if (nodeItem.sceneNodeId !== undefined && validateIdentifier(nodeItem.sceneNodeId, '三维节点标识', issues) && item.filter === undefined) {
+        const sceneNodeReference = `${sceneId}:${nodeItem.sceneNodeId}`
+        const previousNodeId = nodeIdBySceneNodeReference.get(sceneNodeReference)
+        if (previousNodeId !== undefined && previousNodeId !== nodeId) {
+          appendIssue(issues, 'topology.scene-node-duplicate', '同一场景三维节点不能映射多个逻辑节点。')
+        } else {
+          nodeIdBySceneNodeReference.set(sceneNodeReference, nodeId)
+          const sceneTargets = sceneNodeReferencesBySceneId.get(sceneId as string) ?? new Set<string>()
+          sceneTargets.add(sceneNodeReference)
+          sceneNodeReferencesBySceneId.set(sceneId as string, sceneTargets)
+        }
+      }
+      if (nodeItem.doubleClickBehavior !== 'emit-node' && nodeItem.doubleClickBehavior !== 'none') appendIssue(issues, 'topology.double-click', '节点双击行为无效。')
+      if (nodeItem.doubleClickBehavior !== 'emit-node') sourceTopologyContainsNonReportableNode = true
+    }
+    /*
+     * 只有保存真实节点的来源总图参加门禁。流程过滤视图必须保持 nodes 为空并从来源图投影，
+     * 因而会自然复用来源节点的上报能力和三维映射，不需要维护第二份节点声明。
+     */
+    if (item.filter === undefined && nodeItems.length > 0 && sourceTopologyContainsNonReportableNode) {
+      appendIssue(issues, 'topology.source-node-reporting-permission', '业务源拓扑的所有节点都必须允许上报节点编号。')
     }
 
     const routeIds = new Set<string>()
@@ -207,6 +354,7 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
         appendIssue(issues, 'topology.edge-shape', '拓扑连线缺少有效稳定标识。')
         continue
       }
+
 
       const edgeId = edgeItem.edgeId as string
       if (routeIds.has(edgeId)) appendIssue(issues, 'topology.duplicate-edge', '同一拓扑内连线标识重复。')
@@ -221,6 +369,147 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
       if (edgeItem.evidenceStatus !== undefined && !['verified', 'pending-confirmation', 'conceptual'].includes(String(edgeItem.evidenceStatus))) {
         appendIssue(issues, 'topology.edge-evidence-status', '拓扑连线证据状态无效。')
       }
+    }
+  }
+
+  /*
+   * 过滤拓扑必须在所有总图完成基础解析后再校验：这样来源图的节点和连线可用 Map（映射表）
+   * 常数时间查询，既避免嵌套扫描整份清单，也不会把流程视图误当成另一份独立拓扑事实。
+   */
+  for (const topology of topologiesById.values()) {
+    if (topology.filter === undefined) continue
+    if (!isRecord(topology.filter)) {
+      appendIssue(issues, 'topology.filter-shape', '流程拓扑过滤规则必须是对象。')
+      continue
+    }
+
+    const topologyId = String(topology.topologyId)
+    const sourceTopologyId = topology.filter.sourceTopologyId
+    if (!validateIdentifier(sourceTopologyId, '流程拓扑来源标识', issues)) {
+      appendIssue(issues, 'topology.filter-source', '流程拓扑必须显式引用来源总拓扑。')
+      continue
+    }
+
+    const sourceTopology = topologiesById.get(sourceTopologyId)
+    if (!sourceTopology) {
+      appendIssue(issues, 'topology.filter-source', '流程拓扑引用的来源总拓扑不存在。')
+      continue
+    }
+    if (sourceTopology.sceneId !== topology.sceneId) {
+      appendIssue(issues, 'topology.filter-scene', '流程拓扑只能引用同一场景的来源总拓扑。')
+    }
+    if (sourceTopology.filter !== undefined) {
+      appendIssue(issues, 'topology.filter-nested', '流程拓扑不能继续引用另一张流程拓扑，必须直接引用总拓扑。')
+    }
+    if (readArray(topology, 'nodes', issues, 'topology.nodes').length > 0 || readArray(topology, 'edges', issues, 'topology.edges').length > 0) {
+      appendIssue(issues, 'topology.filter-local-content', '流程拓扑不得复制节点或连线，必须完全由来源总拓扑过滤派生。')
+    }
+    if (topology.layers !== undefined) {
+      appendIssue(issues, 'topology.filter-local-layers', '流程拓扑不得复制展示层级，必须复用来源总拓扑的层级。')
+    }
+
+    const sourceNodesById = new Map<string, UnknownRecord>()
+    for (const sourceNode of readArray(sourceTopology, 'nodes', issues, 'topology.nodes')) {
+      if (isRecord(sourceNode) && typeof sourceNode.nodeId === 'string') sourceNodesById.set(sourceNode.nodeId, sourceNode)
+    }
+    const sourceEdgesById = new Map<string, UnknownRecord>()
+    for (const sourceEdge of readArray(sourceTopology, 'edges', issues, 'topology.edges')) {
+      if (isRecord(sourceEdge) && typeof sourceEdge.edgeId === 'string') sourceEdgesById.set(sourceEdge.edgeId, sourceEdge)
+    }
+
+    const visibleNodeIds = new Set<string>()
+    for (const nodeId of readArray(topology.filter, 'visibleNodeIds', issues, 'topology.filter-nodes')) {
+      if (!validateIdentifier(nodeId, '流程拓扑可见节点标识', issues)) continue
+      if (visibleNodeIds.has(nodeId)) {
+        appendIssue(issues, 'topology.filter-duplicate-node', '流程拓扑重复声明了可见节点。')
+        continue
+      }
+      visibleNodeIds.add(nodeId)
+      if (!sourceNodesById.has(nodeId)) appendIssue(issues, 'topology.filter-node', '流程拓扑引用了来源总拓扑中不存在的节点。')
+    }
+    if (visibleNodeIds.size < 2) appendIssue(issues, 'topology.filter-minimum-nodes', '流程拓扑至少应保留两个相连节点。')
+
+    const visibleEdgeIds = new Set<string>()
+    const visibleNodeDegrees = new Map<string, number>()
+    for (const edgeId of readArray(topology.filter, 'visibleEdgeIds', issues, 'topology.filter-edges')) {
+      if (!validateIdentifier(edgeId, '流程拓扑可见连线标识', issues)) continue
+      if (visibleEdgeIds.has(edgeId)) {
+        appendIssue(issues, 'topology.filter-duplicate-edge', '流程拓扑重复声明了可见连线。')
+        continue
+      }
+      visibleEdgeIds.add(edgeId)
+      const edge = sourceEdgesById.get(edgeId)
+      if (!edge) {
+        appendIssue(issues, 'topology.filter-edge', '流程拓扑引用了来源总拓扑中不存在的连线。')
+        continue
+      }
+      const fromNodeId = String(edge.fromNodeId)
+      const toNodeId = String(edge.toNodeId)
+      if (!visibleNodeIds.has(fromNodeId) || !visibleNodeIds.has(toNodeId)) {
+        appendIssue(issues, 'topology.filter-edge-node', '流程拓扑的可见连线两端必须同时保留为可见节点。')
+        continue
+      }
+      visibleNodeDegrees.set(fromNodeId, (visibleNodeDegrees.get(fromNodeId) ?? 0) + 1)
+      visibleNodeDegrees.set(toNodeId, (visibleNodeDegrees.get(toNodeId) ?? 0) + 1)
+    }
+    if (visibleEdgeIds.size === 0) appendIssue(issues, 'topology.filter-minimum-edges', '流程拓扑至少应保留一条来源总图连线。')
+
+    /*
+     * 少数业务资料会明确要求显示当前子图内没有合法连线的节点。这里采用“精确集合”豁免：
+     * 声明项必须可见且实际孤立，实际孤立项也必须逐项声明。这样既忠实展示资料，又不会为了通过
+     * 校验伪造来源总图中不存在的连线，或让遗漏连线的普通节点静默通过。
+     */
+    const allowedOrphanNodeIds = new Set<string>()
+    if (topology.filter.allowedOrphanNodeIds !== undefined) {
+      for (const nodeId of readArray(topology.filter, 'allowedOrphanNodeIds', issues, 'topology.filter-allowed-orphans')) {
+        if (!validateIdentifier(nodeId, '流程拓扑允许孤立节点标识', issues)) continue
+        if (allowedOrphanNodeIds.has(nodeId)) {
+          appendIssue(issues, 'topology.filter-duplicate-allowed-orphan', '流程拓扑重复声明了允许孤立节点。')
+          continue
+        }
+        allowedOrphanNodeIds.add(nodeId)
+        if (!visibleNodeIds.has(nodeId)) {
+          appendIssue(issues, 'topology.filter-allowed-orphan-hidden', '流程拓扑只能为可见节点声明孤立豁免。')
+        }
+      }
+    }
+    for (const nodeId of visibleNodeIds) {
+      const isOrphan = (visibleNodeDegrees.get(nodeId) ?? 0) === 0
+      const isExplicitlyAllowed = allowedOrphanNodeIds.has(nodeId)
+      if (isOrphan && !isExplicitlyAllowed) {
+        appendIssue(issues, 'topology.filter-orphan-node', '流程拓扑的孤立节点必须由业务资料逐项显式声明。')
+      }
+      if (!isOrphan && isExplicitlyAllowed) {
+        appendIssue(issues, 'topology.filter-allowed-orphan-connected', '流程拓扑不得把已有可见连线的节点声明为孤立节点。')
+      }
+    }
+
+    const overriddenNodeIds = new Set<string>()
+    for (const override of readArray(topology.filter, 'nodeLayoutOverrides', issues, 'topology.filter-layouts')) {
+      if (!isRecord(override) || !validateIdentifier(override.nodeId, '流程拓扑排布节点标识', issues)) {
+        appendIssue(issues, 'topology.filter-layout-shape', '流程拓扑排布项必须包含有效节点标识。')
+        continue
+      }
+      const nodeId = override.nodeId as string
+      if (overriddenNodeIds.has(nodeId)) appendIssue(issues, 'topology.filter-duplicate-layout', '流程拓扑重复声明了节点排布。')
+      overriddenNodeIds.add(nodeId)
+      if (!visibleNodeIds.has(nodeId)) appendIssue(issues, 'topology.filter-layout-node', '流程拓扑只能为可见节点声明排布。')
+      if (typeof override.x !== 'number' || !Number.isFinite(override.x) || override.x < 0 || override.x > 100 ||
+          typeof override.y !== 'number' || !Number.isFinite(override.y) || override.y < 0 || override.y > 100) {
+        appendIssue(issues, 'topology.filter-layout-position', '流程拓扑节点排布坐标必须是 0 到 100 的有限数字。')
+      }
+    }
+    for (const nodeId of visibleNodeIds) {
+      if (!overriddenNodeIds.has(nodeId)) appendIssue(issues, 'topology.filter-layout-missing', '流程拓扑必须为每个可见节点提供显式排布。')
+    }
+
+    // 为运行时设备投影和三维状态派生补齐过滤视图节点引用，仍复用来源节点对象，绝不复制一份状态事实。
+    for (const nodeId of visibleNodeIds) {
+      const sourceNode = sourceNodesById.get(nodeId)
+      if (!sourceNode) continue
+      const topologyNodeReference = `${topologyId}:${nodeId}`
+      topologyNodesByRef.set(topologyNodeReference, sourceNode)
+      sceneIdByTopologyNodeReference.set(topologyNodeReference, String(topology.sceneId))
     }
   }
 
@@ -319,6 +608,18 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
     }
   }
 
+  /*
+   * 正向校验只能证明“场景声明的对象存在”；这里补齐反向校验，确保清单中每一张拓扑都真正被所属场景
+   * 收录。没有入口的拓扑会使平台能够注入并维护一份永远不可见的设备关系，必须在发布前阻断。
+   */
+  for (const [topologyId, topology] of topologiesById) {
+    const scene = scenesById.get(String(topology.sceneId))
+    const declaredTopologyIds = scene ? readArray(scene, 'topologyIds', issues, 'scene.topology-ids').map(String) : []
+    if (!scene || !declaredTopologyIds.includes(topologyId)) {
+      appendIssue(issues, 'topology.scene-unlisted', '拓扑未被所属场景的拓扑列表显式收录。')
+    }
+  }
+
   for (const action of actionsById.values()) {
     const targetTopology = topologiesById.get(String(action.targetTopologyId))
     const targetSceneId = String(action.targetSceneId)
@@ -326,54 +627,25 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
     validateUnityAction(action.unityAction, targetSceneId, unityMappingsBySceneId, issues)
   }
 
-  const devicesById = new Map<string, UnknownRecord>()
-  /** 同一场景三维节点只能由一个设备状态源驱动，避免批量更新按到达顺序互相覆盖。 */
-  const deviceBySceneNodeReference = new Map<string, string>()
-  /**
-   * 设备映射实际覆盖的二维节点引用。
-   * 不能只因 deviceId（设备标识）出现在映射表就允许节点双击上报；每个设备节点必须被映射表逐项引用，
-   * 否则多拓扑中同名设备、遗漏明细图或错误引用会绕过发布校验并形成不完整的外部事件载荷。
+  /*
+   * 动作也必须从目标场景的受控入口可达。仅校验目标场景和拓扑正确不足以阻止“孤立动作”绕过菜单、
+   * 权限与事务编排；反向收录检查让动作与场景声明形成双向闭环。
    */
-  const mappedTopologyNodeReferences = new Set<string>()
-  for (const item of deviceMappingItems) {
-    if (!isRecord(item) || !validateIdentifier(item.deviceId, '设备映射标识', issues) || !isSceneId(item.sceneId)) {
-      appendIssue(issues, 'device-mapping.shape', '设备映射必须包含设备标识和固定场景。')
-      continue
+  for (const [actionId, action] of actionsById) {
+    const scene = scenesById.get(String(action.targetSceneId))
+    const declaredActionIds = scene ? readArray(scene, 'supportedActionIds', issues, 'scene.action-ids').map(String) : []
+    if (!scene || !declaredActionIds.includes(actionId)) {
+      appendIssue(issues, 'action.scene-unlisted', '动作未被目标场景的动作列表显式收录。')
     }
-    const deviceId = item.deviceId as string
-    if (devicesById.has(deviceId)) appendIssue(issues, 'device-mapping.duplicate', '设备映射标识重复。')
-    devicesById.set(deviceId, item)
-    if (item.configVersion !== manifestVersion) appendIssue(issues, 'device-mapping.version', '设备映射版本与清单版本不一致。')
-    if (item.sceneNodeId !== undefined && validateIdentifier(item.sceneNodeId, '设备三维节点标识', issues)) {
-      const sceneNodeReference = `${item.sceneId}:${item.sceneNodeId}`
-      const registeredSceneNodeIds = registeredSceneNodeIdsBySceneId.get(String(item.sceneId))
-      if (!registeredSceneNodeIds?.has(String(item.sceneNodeId))) {
-        appendIssue(issues, 'device-mapping.scene-node-unregistered', '设备映射引用了当前Unity场景未登记的三维节点。')
-      }
-      const previousDeviceId = deviceBySceneNodeReference.get(sceneNodeReference)
-      if (previousDeviceId !== undefined && previousDeviceId !== deviceId) {
-        appendIssue(issues, 'device-mapping.scene-node-duplicate', '同一场景三维节点不能映射多个设备状态源。')
-      } else {
-        deviceBySceneNodeReference.set(sceneNodeReference, deviceId)
-      }
-    }
-    for (const nodeReference of readArray(item, 'topologyNodeRefs', issues, 'device-mapping.nodes')) {
-      if (!isRecord(nodeReference) || !validateIdentifier(nodeReference.topologyId, '设备映射拓扑标识', issues) || !validateIdentifier(nodeReference.nodeId, '设备映射节点标识', issues)) {
-        appendIssue(issues, 'device-mapping.node-shape', '设备映射节点引用无效。')
-        continue
-      }
-      const node = topologyNodesByRef.get(`${nodeReference.topologyId}:${nodeReference.nodeId}`)
-      const topologyNodeReference = `${nodeReference.topologyId}:${nodeReference.nodeId}`
-      if (!node || node.deviceId !== deviceId) {
-        appendIssue(issues, 'device-mapping.node-reference', '设备映射未显式对应二维设备节点。')
-      } else {
-        // 只记录已经验证设备归属的引用，错误设备映射不能借引用键让节点通过后续闭环校验。
-        mappedTopologyNodeReferences.add(topologyNodeReference)
-      }
-      if (topologiesById.get(String(nodeReference.topologyId))?.sceneId !== item.sceneId) {
-        appendIssue(issues, 'device-mapping.scene', '设备映射引用了其他场景的二维节点。')
-      }
-      if (node?.sceneNodeId !== undefined && item.sceneNodeId !== node.sceneNodeId) appendIssue(issues, 'device-mapping.scene-node', '二维三维映射缺少或不一致的三维节点标识。')
+  }
+
+  for (const sceneTargets of sceneNodeReferencesBySceneId.values()) {
+    if (sceneTargets.size > MAX_DEVICE_STATE_SCENE_NODE_TARGETS_PER_SCENE) {
+      appendIssue(
+        issues,
+        'topology.scene-node-capacity',
+        `单个场景最多允许${MAX_DEVICE_STATE_SCENE_NODE_TARGETS_PER_SCENE}个不同节点状态三维目标。`,
+      )
     }
   }
 
@@ -384,12 +656,6 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
       if (!registeredSceneNodeIds?.has(String(node.sceneNodeId))) {
         appendIssue(issues, 'topology.scene-node-unregistered', `拓扑节点${topologyReference}引用了所属Unity场景未登记的三维节点。`)
       }
-    }
-    if (node.deviceId !== undefined && !devicesById.has(String(node.deviceId))) {
-      appendIssue(issues, 'device-mapping.missing', `设备节点${topologyReference}缺少设备映射。`)
-    }
-    if (node.deviceId !== undefined && !mappedTopologyNodeReferences.has(topologyReference)) {
-      appendIssue(issues, 'device-mapping.node-unmapped', `设备节点${topologyReference}未被设备映射显式引用。`)
     }
   }
 

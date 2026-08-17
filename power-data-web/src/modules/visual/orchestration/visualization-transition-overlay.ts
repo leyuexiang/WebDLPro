@@ -1,4 +1,4 @@
-import type { VisualizationRuntimeStatus, VisualizationSceneLoadProgress } from '@/modules/visual/orchestration/visualization.store'
+import type { VisualizationRuntimeStatus } from '@/modules/visual/orchestration/visualization.store'
 import type { VisualizationCoordinatorSnapshot } from '@/modules/visual/orchestration/visualization-coordinator'
 
 /**
@@ -7,15 +7,12 @@ import type { VisualizationCoordinatorSnapshot } from '@/modules/visual/orchestr
  */
 type VisualizationTransitionOverlaySource = Pick<
   VisualizationCoordinatorSnapshot,
-  'activeTransitionId' | 'targetSceneId' | 'targetTopologyId' | 'runtimeStatus' | 'sceneLoadProgress'
+  'activeTransitionId' | 'targetSceneId' | 'targetTopologyId' | 'runtimeStatus'
 >
 
-/** 壳层渲染所需的脱敏遮罩模型；隐藏时消息为空，避免无效实时播报。 */
+/** 壳层渲染所需的脱敏遮罩模型；不携带进度或业务目标，避免把伪实时反馈展示给用户。 */
 export interface VisualizationTransitionOverlayState {
   readonly visible: boolean
-  readonly message: string
-  /** 仅在 Unity 已回传有效阶段进度时显示，null 表示仍等待第一条受控反馈。 */
-  readonly progressPercent: number | null
 }
 
 /** 只有准备和切换阶段可触发事务遮罩；其他运行阶段永远不能复用这类交互阻断。 */
@@ -35,36 +32,9 @@ export function getVisualizationTransitionOverlayState(
     && source.targetTopologyId !== null
 
   if (!hasActiveTarget || !isTransitioningStatus(source.runtimeStatus)) {
-    return { visible: false, message: '', progressPercent: null }
+    return { visible: false }
   }
 
-  // 旧只读快照适配器可能尚未包含该字段；缺失时与显式 null 一样，继续显示无百分比的安全遮罩。
-  const sceneProgress = source.runtimeStatus === 'switching' ? source.sceneLoadProgress ?? null : null
-  return {
-    visible: true,
-    message: source.runtimeStatus === 'preparing'
-      ? '正在准备拓扑视图，请稍候。'
-      : getSceneSwitchMessage(sceneProgress),
-    progressPercent: sceneProgress ? Math.round(sceneProgress.progress * 100) : null,
-  }
-}
-
-/**
- * 阶段名称只说明当前切换工作，不携带目标场景、拓扑、事务或 Unity 资源信息。
- * 这样用户能获得真实加载反馈，同时未提交目标仍不会成为可操作或可枚举的业务视图。
- */
-function getSceneSwitchMessage(progress: VisualizationSceneLoadProgress | null): string {
-  if (!progress) return '正在切换三维场景与拓扑，请稍候。'
-
-  const percent = Math.round(progress.progress * 100)
-  switch (progress.stageCode) {
-    case 'unloading-scene':
-      return `正在卸载当前三维场景（${percent}%），请稍候。`
-    case 'loading-scene':
-      return `正在加载目标三维场景（${percent}%），请稍候。`
-    case 'initializing-scene':
-      return `正在初始化目标三维场景（${percent}%），请稍候。`
-    case 'restoring-scene':
-      return `正在恢复上一稳定三维场景（${percent}%），请稍候。`
-  }
+  // 进度事件仍由协调器保存并写入控制台，但页面只呈现无数值的遮挡层，避免伪造加载百分比。
+  return { visible: true }
 }

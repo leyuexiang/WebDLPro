@@ -21,7 +21,7 @@ describe('网页图形受控连接器', () => {
     entryUrl: `${childOrigin}/index.html`,
     childOrigin,
     allowedParentOrigin: 'https://platform.example.com',
-    capabilities: ['init', 'dispose', 'focusNode', 'resize', 'switchScene', 'setNodeVisualState', 'setRouteFlow'],
+    capabilities: ['init', 'dispose', 'focusNode', 'clearSelection', 'resize', 'switchScene', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow'],
     eventCapabilities: ['ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'disposed'],
     resourceBudget: { initialMemoryMb: 128, maxConcurrentInstances: 1, cacheMode: 'versioned' },
   } as const satisfies WebglRuntimeRegistration
@@ -113,6 +113,92 @@ describe('网页图形受控连接器', () => {
     connector.forceDispose()
   })
 
+  /**
+   * 首次插入的 iframe 会先指向 about:blank，随后才导航到真实 Unity 页面。
+   * 回归此场景可确保宿主重绑后的严格窗口校验只接受实际 Unity 窗口，旧空白页不能伪造 ready，
+   * 且重绑不会重新开始握手计时或创建第二个监听器。
+   */
+  it('导航后重绑 Unity 窗口，只接受新窗口的 ready 且不延长原握手期限', () => {
+    const initialWindow = { postMessage: vi.fn() }
+    const navigatedUnityWindow = { postMessage: vi.fn() }
+    const statuses: string[] = []
+    const connector = new WebglRuntimeConnector(runtime, 'instance-1', {
+      onStatusChange: (status) => statuses.push(status),
+    })
+    connector.startListening()
+    connector.attachChildWindow(initialWindow as unknown as WindowProxy)
+
+    // 模拟 iframe 的实际导航发生在创建五秒后；允许更新窗口代理，但超时仍从首次绑定起计算。
+    vi.advanceTimersByTime(5_000)
+    connector.attachChildWindow(navigatedUnityWindow as unknown as WindowProxy)
+    emit(readyEnvelope(), childOrigin, initialWindow as unknown as MessageEventSource)
+    expect(initialWindow.postMessage).not.toHaveBeenCalled()
+
+    emit(readyEnvelope(), childOrigin, navigatedUnityWindow as unknown as MessageEventSource)
+    const initMessage = navigatedUnityWindow.postMessage.mock.calls[0]?.[0] as WebglMessageEnvelope
+    expect(initMessage).toEqual(expect.objectContaining({ type: 'init' }))
+    emit({
+      channel: WEBGL_PROTOCOL_CHANNEL,
+      version: WEBGL_PROTOCOL_VERSION,
+      instanceId: 'instance-1',
+      messageId: 'ack-init-after-navigation',
+      type: 'ack',
+      payload: { requestId: initMessage.messageId, success: true },
+      timestamp: 2,
+    }, childOrigin, navigatedUnityWindow as unknown as MessageEventSource)
+
+    expect(statuses).toEqual(['handshaking', 'ready'])
+    vi.advanceTimersByTime(10_000)
+    expect(statuses).toEqual(['handshaking', 'ready'])
+    connector.forceDispose()
+  })
+
+  /** 重绑窗口只能更新校验目标，不能让反复导航延长故障状态的最长等待时间。 */
+  it('导航重绑不重置握手超时', () => {
+    const initialWindow = { postMessage: vi.fn() }
+    const navigatedUnityWindow = { postMessage: vi.fn() }
+    const statuses: string[] = []
+    const connector = new WebglRuntimeConnector(runtime, 'instance-1', {
+      onStatusChange: (status) => statuses.push(status),
+    })
+    connector.startListening()
+    connector.attachChildWindow(initialWindow as unknown as WindowProxy)
+
+    vi.advanceTimersByTime(10_000)
+    connector.attachChildWindow(navigatedUnityWindow as unknown as WindowProxy)
+    vi.advanceTimersByTime(5_000)
+
+    expect(statuses).toEqual(['handshaking', 'failed'])
+  })
+
+  /**
+   * 回执的 `sceneActivationId`（物理场景激活标识）只允许在场景失败且自动恢复时出现。
+   * Unity 通用负载若把未赋值字段写成空字符串，前端必须拒绝该错误回执，
+   * 不能为了兼容旧序列化行为放宽稳定标识约束或错误结束当前 init（初始化）请求。
+   */
+  it('拒绝包含空物理场景激活标识的初始化确认', () => {
+    const connector = new WebglRuntimeConnector(runtime, 'instance-1')
+    connector.startListening()
+    connector.attachChildWindow(childWindow as unknown as WindowProxy)
+    emit(readyEnvelope())
+
+    const initMessage = childWindow.postMessage.mock.calls[0]?.[0] as WebglMessageEnvelope
+    emit({
+      channel: WEBGL_PROTOCOL_CHANNEL,
+      version: WEBGL_PROTOCOL_VERSION,
+      instanceId: 'instance-1',
+      messageId: 'ack-init-empty-activation',
+      type: 'ack',
+      payload: { requestId: initMessage.messageId, success: true, sceneActivationId: '' },
+      timestamp: 2,
+    })
+
+    expect(connector.getRejections()).toEqual([
+      expect.objectContaining({ reason: 'ack 事件确认载荷无效。' }),
+    ])
+    connector.forceDispose()
+  })
+
   it('仅在 ready 与 init 确认后开放协商命令能力', () => {
     const { connector, statuses } = createReadyConnector()
 
@@ -124,11 +210,17 @@ describe('网页图形受控连接器', () => {
       childOrigin,
     )
 
+    expect(connector.sendCommand('clearSelection', {})).toContain('instance-1-3')
+    expect(childWindow.postMessage).toHaveBeenLastCalledWith(
+      expect.objectContaining({ type: 'clearSelection', payload: {} }),
+      childOrigin,
+    )
+
     connector.forceDispose()
   })
 
   /** 无效动作载荷不得创建待确认项；固定四态和路径开关通过后才允许送入受控 iframe。 */
-  it('在发送前拒绝无效场景动作并允许合法四态和路径命令', () => {
+  it('在发送前拒绝无效场景动作并允许合法四态、状态清除和路径命令', () => {
     const onCommandFailure = vi.fn()
     const { connector } = createReadyConnector(onCommandFailure)
 
@@ -138,13 +230,19 @@ describe('网页图形受控连接器', () => {
     expect(connector.sendCommand('setNodeVisualState', {
       sceneNodeId: 'node.demo.1',
       visualState: 'alarm',
+      snapshotSequence: 1,
       statusUpdatedAt: '2026-08-08T10:00:00.000Z',
-      hasSourceRevision: true,
       sourceRevision: 1,
     })).toContain('instance-1-3')
-    expect(onCommandFailure).toHaveBeenCalledTimes(2)
+    expect(connector.sendCommand('clearNodeVisualState', {
+      sceneNodeId: 'node.demo.1',
+      snapshotSequence: 2,
+    })).toContain('instance-1-4')
+    expect(connector.sendCommand('clearNodeVisualState', { sceneNodeId: 'node.demo.1', snapshotSequence: 0 })).toBeUndefined()
+    expect(onCommandFailure).toHaveBeenCalledTimes(3)
     expect(onCommandFailure).toHaveBeenNthCalledWith(1, 'focusNode', expect.stringContaining('三维节点'))
     expect(onCommandFailure).toHaveBeenNthCalledWith(2, 'setNodeVisualState', expect.stringContaining('四态'))
+    expect(onCommandFailure).toHaveBeenNthCalledWith(3, 'clearNodeVisualState', expect.stringContaining('快照序号'))
 
     connector.forceDispose()
   })
@@ -211,6 +309,36 @@ describe('网页图形受控连接器', () => {
       payload: { requestId: commandId, success: true },
       timestamp: 3,
     })
+    expect(connector.getRejections()).toHaveLength(1)
+    connector.forceDispose()
+  })
+
+  it('三维状态清除确认丢失时以相同请求标识重试一次，随后受控失败并清理记录', () => {
+    const onCommandFailure = vi.fn()
+    const onCommandCompleted = vi.fn()
+    const connector = new WebglRuntimeConnector(runtime, 'instance-1', { onCommandFailure, onCommandCompleted })
+    connector.startListening()
+    connector.attachChildWindow(childWindow as unknown as WindowProxy)
+    emit(readyEnvelope())
+    const initMessage = childWindow.postMessage.mock.calls[0]?.[0] as WebglMessageEnvelope
+    emit({ channel: WEBGL_PROTOCOL_CHANNEL, version: WEBGL_PROTOCOL_VERSION, instanceId: 'instance-1', messageId: 'ack-init-clear-retry', type: 'ack', payload: { requestId: initMessage.messageId, success: true }, timestamp: 2 })
+
+    const requestId = connector.sendCommand('clearNodeVisualState', {
+      sceneNodeId: 'node.demo.1',
+      snapshotSequence: 9,
+    })
+    vi.advanceTimersByTime(10_000)
+
+    const firstClear = childWindow.postMessage.mock.calls.at(-2)?.[0] as WebglMessageEnvelope
+    const retriedClear = childWindow.postMessage.mock.calls.at(-1)?.[0] as WebglMessageEnvelope
+    expect(firstClear).toMatchObject({ type: 'clearNodeVisualState', messageId: requestId })
+    expect(retriedClear).toMatchObject({ type: 'clearNodeVisualState', messageId: requestId })
+
+    vi.advanceTimersByTime(10_000)
+    expect(onCommandFailure).toHaveBeenCalledWith('clearNodeVisualState', expect.stringContaining('超时'))
+    expect(onCommandCompleted).toHaveBeenCalledWith({ command: 'clearNodeVisualState', requestId, success: false })
+
+    emit({ channel: WEBGL_PROTOCOL_CHANNEL, version: WEBGL_PROTOCOL_VERSION, instanceId: 'instance-1', messageId: 'late-clear-result', type: 'commandResult', payload: { requestId, success: true }, timestamp: 3 })
     expect(connector.getRejections()).toHaveLength(1)
     connector.forceDispose()
   })

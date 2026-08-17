@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { readFileSync, rmSync } from 'node:fs'
+import { readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 const commandPath = 'scripts/validate-scene-topology-manifest.mjs'
@@ -10,9 +10,12 @@ const releaseBuildCommandPath = 'scripts/build-release.mjs'
  * 这样可验证脚本会加载与运行时相同的校验器、输出有限 JSON（JavaScript对象表示法）报告，
  * 并将无效清单转换为可供持续集成识别的非零退出码。
  */
-function runContractCommand(manifestPath: string, reportPath?: string): { status: number | null; stdout: string; stderr: string } {
+function runContractCommand(
+  manifestPath: string,
+  options: Readonly<{ reportPath?: string }> = {},
+): { status: number | null; stdout: string; stderr: string } {
   const argumentsList = [commandPath, '--manifest', manifestPath]
-  if (reportPath) argumentsList.push('--report', reportPath)
+  if (options.reportPath) argumentsList.push('--report', options.reportPath)
 
   try {
     const stdout = execFileSync(process.execPath, argumentsList, {
@@ -51,13 +54,14 @@ function runReleaseBuildCommand(manifestPath: string): { status: number | null; 
 }
 
 describe('场景拓扑发布契约命令', () => {
-  it('完整九场景夹具生成有效且不泄露绝对路径的报告', () => {
+  it('完整九场景基础夹具生成有效且不泄露绝对路径的报告', () => {
     const result = runContractCommand('tests/fixtures/scene-topology-contract-valid.json')
 
     expect(result.status).toBe(0)
     expect(result.stderr).toBe('')
     expect(JSON.parse(result.stdout)).toEqual({
       status: 'valid',
+      mode: 'structure',
       manifestPath: 'tests/fixtures/scene-topology-contract-valid.json',
       issueCount: 0,
       issues: [],
@@ -71,7 +75,7 @@ describe('场景拓扑发布契约命令', () => {
     rmSync(reportFilePath, { force: true })
 
     try {
-      const result = runContractCommand('tests/fixtures/scene-topology-contract-valid.json', reportPath)
+      const result = runContractCommand('tests/fixtures/scene-topology-contract-valid.json', { reportPath })
 
       expect(result.status).toBe(0)
       expect(JSON.parse(readFileSync(reportFilePath, 'utf8'))).toEqual(JSON.parse(result.stdout))
@@ -96,5 +100,81 @@ describe('场景拓扑发布契约命令', () => {
     expect(result.status).toBe(1)
     expect(JSON.parse(result.stdout)).toMatchObject({ status: 'invalid' })
     expect(result.stdout).not.toContain('building client environment')
+  })
+
+  it('深层旧绑定字段变体会在生产构建前被同一清单门禁拒绝', () => {
+    const invalidPath = 'tests/fixtures/.scene-topology-legacy-binding.generated.json'
+    const invalidFilePath = `${process.cwd()}/${invalidPath}`
+    const payload = JSON.parse(readFileSync(`${process.cwd()}/tests/fixtures/scene-topology-contract-valid.json`, 'utf8')) as {
+      unitySceneMappings: Array<Record<string, unknown>>
+    }
+    // 故意把旧字段放到三维映射深层并改变大小写，证明门禁不是只检查根级精确拼写。
+    payload.unitySceneMappings[0] = { ...payload.unitySceneMappings[0], selectedDeviceId: 'legacy-device' }
+    writeFileSync(invalidFilePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8')
+
+    try {
+      const contractResult = runContractCommand(invalidPath)
+      expect(contractResult.status).toBe(1)
+      expect(JSON.parse(contractResult.stdout)).toMatchObject({
+        status: 'invalid',
+        issues: [{ code: 'manifest.legacy-device-identifier' }],
+      })
+
+      const buildResult = runReleaseBuildCommand(invalidPath)
+      expect(buildResult.status).toBe(1)
+      expect(buildResult.stdout).not.toContain('building client environment')
+    } finally {
+      rmSync(invalidFilePath, { force: true })
+    }
+  })
+
+  it('拒绝已废弃的基础/运行时双清单参数', () => {
+    const result = (() => {
+      try {
+        execFileSync(process.execPath, [commandPath, '--mode', 'runtime', '--manifest', 'tests/fixtures/scene-topology-contract-valid.json'], { cwd: process.cwd(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+        return { status: 0 }
+      } catch (error) {
+        return { status: (error as { status?: number }).status ?? null }
+      }
+    })()
+    expect(result.status).toBe(2)
+  })
+
+  it('持续集成工作流只向发布入口传递当前单结构清单参数', () => {
+    const workflow = readFileSync(`${process.cwd()}/../.github/workflows/power-data-web-contract.yml`, 'utf8')
+    const releaseCommand = workflow.split('\n').find((line) => line.includes('npm run build:release')) ?? ''
+
+    expect(releaseCommand).toContain('--manifest "$MANIFEST_PATH" --report "$CONTRACT_REPORT_PATH"')
+    expect(releaseCommand).not.toContain('--mode')
+    expect(workflow).not.toContain('平台运行时清单需')
+  })
+
+  it('任一业务源节点不允许设备绑定时命令门禁失败', () => {
+    const invalidPath = 'tests/fixtures/.scene-topology-source-binding-invalid.generated.json'
+    const invalidFilePath = `${process.cwd()}/${invalidPath}`
+    const payload = JSON.parse(readFileSync(`${process.cwd()}/tests/fixtures/scene-topology-contract-valid.json`, 'utf8')) as {
+      topologies: Array<Record<string, unknown>>
+    }
+    payload.topologies[0] = {
+      ...payload.topologies[0],
+      nodes: [{
+        nodeId: 'test-node', title: '测试源节点', iconKey: 'server', x: 50, y: 50,
+        deviceStatus: 'offline', doubleClickBehavior: 'none',
+      }],
+    }
+    writeFileSync(invalidFilePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8')
+
+    try {
+      const result = runContractCommand(invalidPath)
+      expect(result.status).toBe(1)
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        status: 'invalid',
+        issues: expect.arrayContaining([
+          expect.objectContaining({ code: 'topology.source-node-reporting-permission' }),
+        ]),
+      })
+    } finally {
+      rmSync(invalidFilePath, { force: true })
+    }
   })
 })

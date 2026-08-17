@@ -89,7 +89,6 @@ function createManifest(): SceneTopologyManifest {
         configVersion: manifestVersion,
       },
     ],
-    deviceMappings: [],
     unitySceneMappings: scenes.map((scene) => ({
       sceneId: scene.sceneId,
       mappingVersion: scene.sceneMappingVersion,
@@ -128,7 +127,11 @@ function createUnityPort(): ViewOpenUnityPort {
   }
 }
 
-function createHandler(unity = createUnityPort(), manifest: SceneTopologyManifest = createManifest()): {
+function createHandler(
+  unity = createUnityPort(),
+  manifest: SceneTopologyManifest = createManifest(),
+  onPhysicalRuntimeRecovered: (sceneActivationId?: ReturnType<typeof toSceneActivationId>) => void = () => undefined,
+): {
   handler: ViewOpenTransactionHandler
   registry: TopologyRegistry
   facade: ReturnType<typeof createVisualizationCoordinatorFacade>
@@ -155,6 +158,7 @@ function createHandler(unity = createUnityPort(), manifest: SceneTopologyManifes
     unity,
     facade,
     () => transitionIds.shift() ?? toTransitionId('transition.view-open.fallback'),
+    onPhysicalRuntimeRecovered,
   )
   return { handler, registry: registryResult.registry, facade, canvas, unity, store, topologyRuntime }
 }
@@ -215,8 +219,6 @@ describe('view.open 原子切换事务', () => {
      */
     expect(getVisualizationTransitionOverlayState(facade.getSnapshot())).toEqual({
       visible: true,
-      message: '正在切换三维场景与拓扑，请稍候。',
-      progressPercent: null,
     })
     // switchScene 的 Promise 代表连接器已等待同一 requestId 的最终 sceneChanged，尚未结算前不得提前下发动作。
     expect(unity.executeAction).not.toHaveBeenCalled()
@@ -227,7 +229,7 @@ describe('view.open 原子切换事务', () => {
     resolveSwitch?.(createSceneSwitchSuccess('scene-activation.waiting'))
     await expect(pending).resolves.toMatchObject({ success: true, status: 'completed', contextRevision: 1 })
 
-    expect(getVisualizationTransitionOverlayState(facade.getSnapshot())).toEqual({ visible: false, message: '', progressPercent: null })
+    expect(getVisualizationTransitionOverlayState(facade.getSnapshot())).toEqual({ visible: false })
     expect(canvas.setTopology).toHaveBeenCalledTimes(1)
     expect(store.contextRevision).toBe(1)
   })
@@ -277,7 +279,8 @@ describe('view.open 原子切换事务', () => {
 
   it('Unity 切换失败时恢复上一个稳定上下文，且不激活新拓扑', async () => {
     const unity = createUnityPort()
-    const { handler, canvas, store } = createHandler(unity)
+    const onPhysicalRuntimeRecovered = vi.fn()
+    const { handler, canvas, store } = createHandler(unity, createManifest(), onPhysicalRuntimeRecovered)
     await handler.submit(createViewOpen())
     const initialSceneActivationId = store.sceneActivationId
     vi.mocked(unity.switchScene).mockResolvedValueOnce({
@@ -294,6 +297,30 @@ describe('view.open 原子切换事务', () => {
     expect(store.runtimeStatus).toBe('ready')
     expect(store.sceneActivationId).not.toEqual(initialSceneActivationId)
     expect(store.sceneActivationId).toEqual(toSceneActivationId('scene-activation.gas-restored'))
+    // Unity 在失败内部重新创建了燃气实例；恢复回调只重放权威快照，不改变二维稳定上下文或外层失败结果。
+    expect(onPhysicalRuntimeRecovered).toHaveBeenCalledWith(toSceneActivationId('scene-activation.gas-restored'))
+  })
+
+  it('恢复快照回调抛错时仍保持已恢复的二维稳定上下文和外层失败语义', async () => {
+    const unity = createUnityPort()
+    const onPhysicalRuntimeRecovered = vi.fn(() => {
+      throw new Error('模拟内部三维重投影端口异常')
+    })
+    const { handler, canvas, store } = createHandler(unity, createManifest(), onPhysicalRuntimeRecovered)
+    await handler.submit(createViewOpen())
+    vi.mocked(unity.switchScene).mockResolvedValueOnce({
+      success: false,
+      errorCode: 'scene.switch.failed',
+      sceneActivationId: toSceneActivationId('scene-activation.gas-restored-callback-error'),
+    })
+
+    const result = await handler.submit(createViewOpen(toSceneId('wind-power'), windOverviewTopologyId))
+
+    expect(result).toMatchObject({ success: false, status: 'failed', error: { code: 'scene.switch.failed', recoverable: true } })
+    expect(onPhysicalRuntimeRecovered).toHaveBeenCalledTimes(1)
+    expect(canvas.setTopology).toHaveBeenCalledTimes(1)
+    expect(store.stableContext).toEqual({ sceneId: toSceneId('gas-power'), topologyId: gasOverviewTopologyId, actionId: null, contextRevision: 1 })
+    expect(store.sceneActivationId).toEqual(toSceneActivationId('scene-activation.gas-restored-callback-error'))
   })
 
   it('新事务完成后，旧场景切换回调只能返回已取代，不能覆盖最后稳定上下文', async () => {
@@ -342,7 +369,8 @@ describe('view.open 原子切换事务', () => {
   it('外层超时后未发送新命令时，迟到的目标场景成功只能触发补偿恢复，不能提交旧目标', async () => {
     const unity = createUnityPort()
     let resolveLateTargetSwitch: ((result: { success: boolean }) => void) | undefined
-    const { handler, canvas, store } = createHandler(unity)
+    const onPhysicalRuntimeRecovered = vi.fn()
+    const { handler, canvas, store } = createHandler(unity, createManifest(), onPhysicalRuntimeRecovered)
 
     await handler.submit(createViewOpen())
     vi.mocked(unity.switchScene).mockImplementationOnce(() => new Promise((resolve) => { resolveLateTargetSwitch = resolve }))
@@ -367,6 +395,7 @@ describe('view.open 原子切换事务', () => {
       expect.objectContaining({ transitionId: toTransitionId('transition.view-open.2'), outcome: 'superseded' }),
       expect.objectContaining({ transitionId: toTransitionId('transition.view-open.3'), outcome: 'recovered', diagnosticCode: 'command.timeout' }),
     ])
+    expect(onPhysicalRuntimeRecovered).toHaveBeenCalledWith(toSceneActivationId('scene-activation.transition.view-open.3'))
 
     resolveLateTargetSwitch?.(createSceneSwitchSuccess('scene-activation.late-target'))
     await expect(timedOutTransition).resolves.toMatchObject({ success: false, status: 'superseded', transitionId: toTransitionId('transition.view-open.2') })
@@ -379,7 +408,8 @@ describe('view.open 原子切换事务', () => {
     const unity = createUnityPort()
     let resolveLateAction: ((result: { success: boolean }) => void) | undefined
     vi.mocked(unity.executeAction).mockImplementationOnce(() => new Promise((resolve) => { resolveLateAction = resolve }))
-    const { handler, canvas, store } = createHandler(unity)
+    const onPhysicalRuntimeRecovered = vi.fn()
+    const { handler, canvas, store } = createHandler(unity, createManifest(), onPhysicalRuntimeRecovered)
 
     await handler.submit(createViewOpen())
     const timedOutTransition = handler.submit(createViewOpen(toSceneId('wind-power'), windDetailTopologyId, windResetActionId))
@@ -401,6 +431,7 @@ describe('view.open 原子切换事务', () => {
     expect(unity.executeAction).toHaveBeenCalledTimes(1)
     expect(canvas.setTopology).toHaveBeenCalledTimes(2)
     expect(store.stableContext).toEqual({ sceneId: toSceneId('gas-power'), topologyId: gasOverviewTopologyId, actionId: null, contextRevision: 1 })
+    expect(onPhysicalRuntimeRecovered).toHaveBeenCalledWith(toSceneActivationId('scene-activation.transition.view-open.3'))
 
     resolveLateAction?.({ success: true })
     await expect(timedOutTransition).resolves.toMatchObject({ success: false, status: 'superseded', transitionId: toTransitionId('transition.view-open.2') })
@@ -440,7 +471,8 @@ describe('view.open 原子切换事务', () => {
       .mockResolvedValueOnce(createSceneSwitchSuccess('scene-activation.target'))
       .mockResolvedValueOnce(createSceneSwitchSuccess('scene-activation.recovery'))
     vi.mocked(unity.executeAction).mockResolvedValueOnce({ success: false, errorCode: 'action.execute.failed' })
-    const { handler, canvas, store } = createHandler(unity)
+    const onPhysicalRuntimeRecovered = vi.fn()
+    const { handler, canvas, store } = createHandler(unity, createManifest(), onPhysicalRuntimeRecovered)
 
     await handler.submit(createViewOpen())
     const result = await handler.submit(createViewOpen(toSceneId('wind-power'), windDetailTopologyId, windResetActionId))
@@ -450,6 +482,7 @@ describe('view.open 原子切换事务', () => {
     expect(canvas.setTopology).toHaveBeenCalledTimes(2)
     expect(store.stableContext).toEqual({ sceneId: toSceneId('gas-power'), topologyId: gasOverviewTopologyId, actionId: null, contextRevision: 1 })
     expect(store.runtimeStatus).toBe('ready')
+    expect(onPhysicalRuntimeRecovered).toHaveBeenCalledWith(toSceneActivationId('scene-activation.recovery'))
   })
 
   it('动作阶段被新事务取代后，迟到动作结果不能覆盖最后一个场景与拓扑', async () => {

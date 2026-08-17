@@ -10,6 +10,36 @@ interface NodeLayout {
   y: number
   width: number
   height: number
+  /** 标题虽绘制在图元边框外，仍属于节点的完整视觉边界，供命中、连线和标签避让统一使用。 */
+  titleBounds: RectangleBounds
+  /** 命中范围独立于视觉尺寸，保证图标缩小后鼠标和触屏仍有至少 40 像素的可操作区域。 */
+  hitBounds: RectangleBounds
+  /** 路由边界包含图元、标题与选中框安全区，连线不得穿过该矩形。 */
+  routeBounds: RectangleBounds
+}
+
+/** 画布坐标中的轴对齐矩形，统一承载标题、命中和路由碰撞边界。 */
+interface RectangleBounds {
+  left: number
+  top: number
+  right: number
+  bottom: number
+}
+
+/**
+ * 同一画布尺寸只计算一次的响应式度量。
+ * 图元、文字、选中框和碰撞算法共享这些值，避免视觉缩小后命中区或连线仍沿用旧尺寸。
+ */
+interface ResponsiveTopologyMetrics {
+  scale: number
+  nodeTitleFontSize: number
+  nodeTitleMaxWidth: number
+  nodeTitleGap: number
+  nodeTitleHeight: number
+  layerTitleFontSize: number
+  edgeLabelFontSize: number
+  selectionExpansion: number
+  minimumHitSize: number
 }
 
 /** 已请求图元的加载状态缓存，防止每次重绘重复创建 Image 或重复请求同一 SVG。 */
@@ -30,18 +60,24 @@ export interface CanvasTopologyViewState {
   offsetY: number
 }
 
-/** 正交线路中的单个拐点；点序列支持多端口和多通道，避免固定四点折线被迫重叠。 */
+/** 任意角度线路中的单个端点或拐点；点序列同时支持直线、少量拐点和最终通道回退。 */
 interface EdgeRoutePoint {
   x: number
   y: number
 }
 
 /**
- * 预计算后的正交连线路径。
- * 最后两个点始终表示箭头朝向，全部点则同时供协议标签挑选最长可读线段。
+ * 预计算后的任意角度连线路径。
+ * 最后两个点始终表示箭头朝向，全部点同时供协议标签挑选最长可读线段。
  */
 interface EdgeRoute {
   points: readonly EdgeRoutePoint[]
+}
+
+/** 路由与所属边一并保存，使交叉检测可以只放行真正共享的端点。 */
+interface AcceptedEdgeRoute {
+  request: EdgeRoutingRequest
+  route: EdgeRoute
 }
 
 /** 节点边缘的端口方位；同侧多条边会分配到不同端口，防止在节点出口处堆叠。 */
@@ -94,18 +130,11 @@ const edgeColorByEvidence = {
   unclassified: '#94a3b8',
 } as const
 
-const deviceStatusColor = {
-  normal: '#22c55e',
-  alarm: '#facc15',
-  fault: '#ef4444',
-  offline: '#94a3b8',
-} as const
-
 /**
  * 路由规则变更时递增该版本号，使开发热更新中的既有画布实例自动丢弃旧路径缓存。
  * 正式运行时版本恒定，仍只在尺寸或拓扑变化后重算，不增加实时重绘成本。
  */
-const EDGE_ROUTE_LAYOUT_VERSION = 3
+const EDGE_ROUTE_LAYOUT_VERSION = 4
 
 /**
  * 轻量 Canvas 二维拓扑适配器。
@@ -122,6 +151,8 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
   private readonly layoutByNodeId = new Map<string, NodeLayout>()
   /** 连线路径只在拓扑定义或画布尺寸变化时重建，选中态重绘直接复用，避免重复分组排序。 */
   private readonly routeByEdgeId = new Map<string, EdgeRoute>()
+  /** 协议标签按边绘制时登记已占区域，后续标签会主动避让，避免直线路由增加后标签彼此覆盖。 */
+  private readonly drawnEdgeLabelBounds: RectangleBounds[] = []
   private readonly iconImageByUrl = new Map<string, IconImageCacheEntry>()
   private frameHandle: number | undefined
   private width = 1
@@ -297,19 +328,34 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
     this.scheduleDraw()
   }
 
-  /** 使用绘制期缓存的节点矩形完成命中测试，点击操作不触发布局或配置扫描。 */
+  /**
+   * 使用绘制期缓存的完整命中矩形完成命中测试，点击操作不触发布局或配置扫描。
+   * 多个命中区在紧凑画布中相交时选择中心点最近的节点，避免结果依赖清单插入顺序。
+   */
   public pickNodeAt(x: number, y: number): ProcessNodeId | undefined {
     // Canvas 绘制以中心点缩放，命中坐标必须逆变换后才能复用逻辑布局缓存。
     const contentX = this.width / 2 + (x - this.width / 2 - this.viewOffsetX) / this.viewScale
     const contentY = this.height / 2 + (y - this.height / 2 - this.viewOffsetY) / this.viewScale
 
-    for (const layout of this.layoutByNodeId.values()) {
-      const isInside = contentX >= layout.x && contentX <= layout.x + layout.width && contentY >= layout.y && contentY <= layout.y + layout.height
+    let nearestLayout: NodeLayout | undefined
+    let nearestDistanceSquared = Number.POSITIVE_INFINITY
 
-      if (isInside) return layout.node.nodeId
+    for (const layout of this.layoutByNodeId.values()) {
+      const bounds = layout.hitBounds
+      const isInside = contentX >= bounds.left && contentX <= bounds.right && contentY >= bounds.top && contentY <= bounds.bottom
+      if (!isInside) continue
+
+      const centerX = layout.x + layout.width / 2
+      const centerY = layout.y + layout.height / 2
+      const distanceSquared = (contentX - centerX) ** 2 + (contentY - centerY) ** 2
+
+      if (distanceSquared < nearestDistanceSquared) {
+        nearestLayout = layout
+        nearestDistanceSquared = distanceSquared
+      }
     }
 
-    return undefined
+    return nearestLayout?.node.nodeId
   }
 
   /** 取消待绘制任务、解除图元回调并释放引用，确保离开工艺页后不再访问旧 Canvas。 */
@@ -331,6 +377,7 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
     this.nodeStatusOverrideById.clear()
     this.layoutByNodeId.clear()
     this.routeByEdgeId.clear()
+    this.drawnEdgeLabelBounds.length = 0
     this.routesDirty = true
     this.routeLayoutVersion = -1
     this.iconImageByUrl.clear()
@@ -379,6 +426,7 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
     this.drawLayerBands(context)
     this.createNodeLayouts()
     this.rebuildEdgeRoutesIfNeeded()
+    this.drawnEdgeLabelBounds.length = 0
 
     for (const edge of this.topology.edges) {
       this.drawEdge(context, edge)
@@ -450,7 +498,8 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
       context.stroke()
       context.setLineDash([])
       context.fillStyle = layer.color
-      context.font = '700 11px Microsoft YaHei, sans-serif'
+      const metrics = this.getResponsiveMetrics()
+      context.font = `700 ${metrics.layerTitleFontSize}px Microsoft YaHei, sans-serif`
       context.textAlign = 'left'
       context.textBaseline = 'top'
       context.fillText(layer.title, 16, Math.min(top + 10, Math.max(4, currentY - 30)))
@@ -458,7 +507,10 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
     }
   }
 
-  /** 根据最密集层的节点数量计算卡片尺寸，保证多层拓扑在中窄屏下尽量避免横向覆盖。 */
+  /**
+   * 根据画布宽高、最密集层和最小层间距共同计算图元尺寸。
+   * 常规画布为 28 至 40 像素；极低嵌入画布可进一步缩小，避免旧固定下限挤占五层纵向空间。
+   */
   private createNodeLayouts(): void {
     if (!this.topology) return
     const countByLayer = new Map<string, number>()
@@ -469,21 +521,26 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
     }
 
     const densestLayerCount = Math.max(1, ...countByLayer.values())
-    // 密集层额外预留 2.4 个节点宽度作为间隔，优先保证同层设备卡片之间始终有可见留白。
-    // 下限同步收窄，避免窄视口中七个现场设备再次挤压成连续块。
-    // 约 1000 像素以下的可视工作区都采用紧凑排版；五层拓扑在中等宽度下同样可能出现长中文截断。
-    const isCompactViewport = this.width < 1000
-    /*
-     * 窄屏时优先保证现场设备层的完整中文标签可读：七个节点在最小容器宽度内仍使用 64 像素卡片，
-     * 并收窄额外间隔而非继续压缩文本区。常规宽度沿用原有密度策略，避免大屏卡片无意义膨胀。
-     */
-    const layoutGapWeight = isCompactViewport ? 1.05 : 2.4
-    const minimumNodeWidth = isCompactViewport ? 64 : 40
-    const nodeWidth = Math.min(118, Math.max(minimumNodeWidth, Math.floor(this.width / (densestLayerCount + layoutGapWeight))))
-    // 紧凑视口允许四行八号字，故提高最小高度；层级坐标会在下方约束至可视区域，避免首末层裁切。
-    const nodeHeight = isCompactViewport
-      ? Math.min(42, Math.max(34, Math.floor(this.height / 8.5)))
-      : Math.min(42, Math.max(28, Math.floor(this.height / 10.5)))
+    const metrics = this.getResponsiveMetrics()
+    const isCompactViewport = this.width < 1000 || this.height < 320
+    // 密集画布仅压缩额外间隔，不再以中文标题宽度撑大图元；完整名称仍由受控提示层展示。
+    const layoutGapWeight = isCompactViewport ? 1.15 : 2.2
+    const availableSlotWidth = Math.floor(this.width / (densestLayerCount + layoutGapWeight))
+    const legacyNodeWidth = Math.min(44, Math.max(36, Math.floor(availableSlotWidth * 0.48)))
+    const orderedLayerCenters = [...new Set((this.topology.layers ?? []).map((layer) => layer.y))]
+      .sort((left, right) => left - right)
+      .map((percentage) => (percentage / 100) * this.height)
+    const minimumLayerDistance = orderedLayerCenters.length > 1
+      ? Math.min(...orderedLayerCenters.slice(1).map((center, index) => center - (orderedLayerCenters[index] ?? center)))
+      : this.height
+    // 标题、间隔和选中安全区必须留在相邻层之间；该高度约束只会进一步缩小，不会放大密集节点。
+    // 额外保留 1 像素处理百分比中心映射后的亚像素舍入，最小画布也不得让相邻安全区刚好相触。
+    // 最小 600×600 外层视口实测只给拓扑画布约 108 像素；此时图元允许缩至 8 像素，
+    // 用户可用既有缩放查看细节。160 至 239 像素画布使用 18 像素下限，240 像素以上保持 28 像素。
+    const minimumNodeSize = this.height < 160 ? 8 : this.height < 240 ? 18 : 28
+    const maximumNodeHeightByLayers = Math.max(minimumNodeSize, minimumLayerDistance - metrics.nodeTitleHeight - metrics.nodeTitleGap - metrics.selectionExpansion * 2 - 3)
+    const nodeWidth = Math.min(40, Math.max(minimumNodeSize, Math.floor(Math.min(legacyNodeWidth * metrics.scale, maximumNodeHeightByLayers))))
+    const nodeHeight = nodeWidth
     const layerLabelGutter = this.getLayerLabelGutter()
     const rightPadding = Math.max(14, Math.round(this.width * 0.02))
     // 节点横坐标只在层级标题右侧的内容区内映射，避免最低坐标设备侵入左侧导视文字。
@@ -495,9 +552,69 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
       const requestedY = Math.round((node.y / 100) * this.height - nodeHeight / 2)
       // 顶层与现场层都采用中心坐标；限制卡片边界后可防止 y=8 和 y=94 的标签被 Canvas（画布）裁掉。
       const x = Math.min(this.width - rightPadding - nodeWidth, Math.max(layerLabelGutter, requestedX))
-      const y = Math.min(this.height - nodeHeight, Math.max(0, requestedY))
-      this.layoutByNodeId.set(node.nodeId, { node, x, y, width: nodeWidth, height: nodeHeight })
+      // 底部额外保留一行小字，文字虽在图元边框外，仍不能被画布裁切。
+      const titleSpace = metrics.nodeTitleGap + metrics.nodeTitleHeight
+      const y = Math.min(this.height - nodeHeight - titleSpace - 1, Math.max(0, requestedY))
+      const centerX = x + nodeWidth / 2
+      const titleTop = y + nodeHeight + metrics.nodeTitleGap
+      const titleBounds = this.createBoundsFromCenter(centerX, titleTop + metrics.nodeTitleHeight / 2, metrics.nodeTitleMaxWidth, metrics.nodeTitleHeight)
+      const visualBounds = this.unionBounds({ left: x, top: y, right: x + nodeWidth, bottom: y + nodeHeight }, titleBounds)
+      const hitBounds = this.expandBoundsToMinimumSize(visualBounds, centerX, y + nodeHeight / 2, metrics.minimumHitSize)
+      const routeBounds = this.expandBounds(visualBounds, metrics.selectionExpansion + 1)
+      this.layoutByNodeId.set(node.nodeId, { node, x, y, width: nodeWidth, height: nodeHeight, titleBounds, hitBounds, routeBounds })
     }
+  }
+
+  /**
+   * 宽度与高度各自归一化后取较小值，保证带鱼屏和低矮嵌入容器都按受限维度缩放。
+   * 188 像素及以上画布使用 0.8 至 0.9；108 至 188 像素按 0.55 至 0.8 连续插值，
+   * 让真实最小外层视口中的五层结构仍不重叠，用户可通过既有缩放恢复细节。
+   */
+  private getResponsiveMetrics(): ResponsiveTopologyMetrics {
+    const widthProgress = Math.min(1, Math.max(0, (this.width - 600) / (1280 - 600)))
+    const heightProgress = Math.min(1, Math.max(0, (this.height - 240) / (720 - 240)))
+    const regularScale = 0.8 + Math.min(widthProgress, heightProgress) * 0.1
+    const extremeHeightProgress = Math.min(1, Math.max(0, (this.height - 108) / (188 - 108)))
+    const scale = this.height < 188 ? 0.55 + extremeHeightProgress * 0.25 : regularScale
+    const isExtremelyLow = this.height < 160
+
+    return {
+      scale,
+      nodeTitleFontSize: 8 * scale,
+      nodeTitleMaxWidth: (this.width < 1000 || this.height < 320 ? 60 : 68) * scale,
+      nodeTitleGap: isExtremelyLow ? 1 : 2,
+      nodeTitleHeight: 9 * scale,
+      layerTitleFontSize: 11 * scale,
+      edgeLabelFontSize: 9 * scale,
+      selectionExpansion: isExtremelyLow ? 1 : 2,
+      minimumHitSize: 40,
+    }
+  }
+
+  /** 由中心点和尺寸创建矩形，集中处理命中与视觉边界的坐标换算。 */
+  private createBoundsFromCenter(centerX: number, centerY: number, width: number, height: number): RectangleBounds {
+    return { left: centerX - width / 2, top: centerY - height / 2, right: centerX + width / 2, bottom: centerY + height / 2 }
+  }
+
+  /** 合并两个矩形为最小包围盒，确保图元与下方标题被视为一个完整节点。 */
+  private unionBounds(left: RectangleBounds, right: RectangleBounds): RectangleBounds {
+    return {
+      left: Math.min(left.left, right.left),
+      top: Math.min(left.top, right.top),
+      right: Math.max(left.right, right.right),
+      bottom: Math.max(left.bottom, right.bottom),
+    }
+  }
+
+  /** 从四边等距扩展矩形，供选中框和连线安全区共用。 */
+  private expandBounds(bounds: RectangleBounds, amount: number): RectangleBounds {
+    return { left: bounds.left - amount, top: bounds.top - amount, right: bounds.right + amount, bottom: bounds.bottom + amount }
+  }
+
+  /** 保留原矩形内容并补足最小点击尺寸，图标缩小不会牺牲触屏与鼠标可用性。 */
+  private expandBoundsToMinimumSize(bounds: RectangleBounds, centerX: number, centerY: number, minimumSize: number): RectangleBounds {
+    const minimumBounds = this.createBoundsFromCenter(centerX, centerY, minimumSize, minimumSize)
+    return this.unionBounds(bounds, minimumBounds)
   }
 
   /**
@@ -509,17 +626,18 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
   }
 
   /**
-   * 在全部节点完成布局后，统一预计算连线端口和通道。
-   * 旧实现逐边从节点中心出发，扇入、扇出关系会复用同一段主干；这里通过“先端口、后通道”
-   * 的两阶段分配，使每条关系都有可辨识的入口、出口和水平/垂直通道。
+   * 在全部节点完成布局后统一预计算连线。
+   * 先准备稳定端口与最终回退通道，再按“直线、一个拐点、两个拐点”选择最短无碰撞路径；
+   * 只有简洁候选全部失败时才使用通道，避免逐边从节点中心出发形成重叠主干。
    */
   private rebuildEdgeRoutesIfNeeded(): void {
     if ((!this.routesDirty && this.routeLayoutVersion === EDGE_ROUTE_LAYOUT_VERSION) || !this.topology) return
 
-    const requests = this.createEdgeRoutingRequests()
+    const requests = this.createEdgeRoutingRequests().sort((left, right) => left.edge.edgeId.localeCompare(right.edge.edgeId))
     this.assignEndpointPorts(requests)
-    this.assignDirectRoutes(requests)
-    this.assignRouteLanes(requests.filter((request) => !request.directRoute))
+    // 先为全部边准备稳定通道坐标；只有更简洁候选全部失败时才实际采用该兜底路径。
+    this.assignRouteLanes(requests)
+    this.assignPreferredRoutes(requests)
     this.routeByEdgeId.clear()
 
     for (const request of requests) {
@@ -650,86 +768,225 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
   }
 
   /**
-   * 在通道分配前识别并固定可直连关系。
-   * 直连边不占用绕行通道，优先还原“同层横向设备”“同列上下设备”的自然阅读路径；
-   * 若直线会穿过第三方节点或与已确认直线重合，则安全降级为通道路由。
+   * 按“直线、一个拐点、两个拐点”的顺序为每条边挑选首个无冲突路径。
+   * 已接受路径立即参与后续碰撞检测，因此同一拓扑每次都得到稳定且不共线复用的结果。
    */
-  private assignDirectRoutes(requests: readonly EdgeRoutingRequest[]): void {
-    const acceptedRoutes: EdgeRoute[] = []
+  private assignPreferredRoutes(requests: readonly EdgeRoutingRequest[]): void {
+    const acceptedRoutes: AcceptedEdgeRoute[] = []
 
     for (const request of requests) {
-      const directRoute = this.createDirectRoute(request)
+      const candidates = [
+        this.createArbitraryDirectRoute(request),
+        ...this.createOneBendRouteCandidates(request),
+        ...this.createTwoBendRouteCandidates(request),
+      ].filter((route): route is EdgeRoute => Boolean(route))
 
-      if (!directRoute || this.overlapsAcceptedDirectRoute(directRoute, acceptedRoutes)) continue
+      const preferredRoute = candidates.find((candidate) => this.isRouteAvailable(request, candidate, acceptedRoutes))
+      const route = preferredRoute ?? this.createRouteFromRequest(request)
+      if (!route) continue
 
-      request.directRoute = directRoute
-      acceptedRoutes.push(directRoute)
+      // directRoute 字段现表示“已经选定的缓存路径”；名称为兼容既有结构保留，路径本身可能是最终通道兜底。
+      request.directRoute = route
+      acceptedRoutes.push({ request, route })
     }
   }
 
-  /** 依据关系主方向构造直连候选；只有端口已完成分配后，才能可靠判断其是否处于同一水平线。 */
-  private createDirectRoute(request: EdgeRoutingRequest): EdgeRoute | undefined {
-    const startPort = request.startPort
-    const endPort = request.endPort
+  /** 任意角度直线从两个图元的真实边框出发，不再限制为同层同高或跨层同列。 */
+  private createArbitraryDirectRoute(request: EdgeRoutingRequest): EdgeRoute | undefined {
+    const fromCenter = this.getLayoutCenter(request.fromLayout)
+    const toCenter = this.getLayoutCenter(request.toLayout)
+    if (this.pointsEqual(fromCenter, toCenter)) return undefined
 
-    if (!startPort || !endPort) return undefined
-
-    if (request.orientation === 'horizontal') {
-      return this.canUseDirectHorizontalRoute(request, startPort, endPort) ? { points: [startPort, endPort] } : undefined
+    return {
+      points: [
+        this.getRectangleBoundaryPoint(request.fromLayout, toCenter),
+        this.getRectangleBoundaryPoint(request.toLayout, fromCenter),
+      ],
     }
+  }
 
-    return this.createDirectVerticalRoute(request)
+  /** 一个拐点只有两种正交组合；短路径优先，稳定次序由坐标字符串兜底。 */
+  private createOneBendRouteCandidates(request: EdgeRoutingRequest): EdgeRoute[] {
+    const start = request.startPort
+    const end = request.endPort
+    if (!start || !end) return []
+
+    return this.sortRouteCandidates([
+      { points: this.removeDuplicateRoutePoints([start, { x: end.x, y: start.y }, end]) },
+      { points: this.removeDuplicateRoutePoints([start, { x: start.x, y: end.y }, end]) },
+    ])
   }
 
   /**
-   * 防止两条同向直线复用同一段路径；交叉直线也会降级为通道，以保持上下游箭头清楚可辨。
-   * 当前拓扑边数很小，仅在拓扑或尺寸变化时执行，O(E²) 的一次性检查不会影响实时重绘性能。
+   * 两拐点候选从中线、节点安全边界和画布安全边缘生成，不做像素级搜索。
+   * 候选数量为 O(N)，而全套计算只在尺寸或拓扑变化时执行，避免把路径搜索带入实时重绘。
    */
-  private overlapsAcceptedDirectRoute(candidate: EdgeRoute, acceptedRoutes: readonly EdgeRoute[]): boolean {
-    const candidateStart = candidate.points[0]
-    const candidateEnd = candidate.points[1]
+  private createTwoBendRouteCandidates(request: EdgeRoutingRequest): EdgeRoute[] {
+    const start = request.startPort
+    const end = request.endPort
+    if (!start || !end) return []
+    const clearance = 4
+    const verticalLanes = new Set<number>([(start.x + end.x) / 2, this.getLayerLabelGutter() + clearance, this.width - clearance])
+    const horizontalLanes = new Set<number>([(start.y + end.y) / 2, clearance, this.height - clearance])
 
-    if (!candidateStart || !candidateEnd) return true
+    for (const layout of this.layoutByNodeId.values()) {
+      verticalLanes.add(layout.routeBounds.left - clearance)
+      verticalLanes.add(layout.routeBounds.right + clearance)
+      horizontalLanes.add(layout.routeBounds.top - clearance)
+      horizontalLanes.add(layout.routeBounds.bottom + clearance)
+    }
 
-    const candidateHorizontal = Math.abs(candidateStart.y - candidateEnd.y) < 0.5
+    const candidates: EdgeRoute[] = []
+    for (const x of verticalLanes) {
+      if (x < this.getLayerLabelGutter() || x > this.width) continue
+      candidates.push({ points: this.removeDuplicateRoutePoints([start, { x, y: start.y }, { x, y: end.y }, end]) })
+    }
+    for (const y of horizontalLanes) {
+      if (y < 0 || y > this.height) continue
+      candidates.push({ points: this.removeDuplicateRoutePoints([start, { x: start.x, y }, { x: end.x, y }, end]) })
+    }
 
-    for (const acceptedRoute of acceptedRoutes) {
-      const acceptedStart = acceptedRoute.points[0]
-      const acceptedEnd = acceptedRoute.points[1]
+    return this.sortRouteCandidates(candidates)
+  }
 
-      if (!acceptedStart || !acceptedEnd) continue
+  /** 路径先按总长度排序，再按坐标串稳定排序，同一配置不会因集合迭代顺序改变走向。 */
+  private sortRouteCandidates(routes: readonly EdgeRoute[]): EdgeRoute[] {
+    return [...routes]
+      .filter((route) => route.points.length >= 2)
+      .sort((left, right) => this.getRouteLength(left) - this.getRouteLength(right)
+        || JSON.stringify(left.points).localeCompare(JSON.stringify(right.points)))
+  }
 
-      const acceptedHorizontal = Math.abs(acceptedStart.y - acceptedEnd.y) < 0.5
+  /** 候选路径不得穿过第三方完整节点边界，也不得复用或非端点交叉已接受路径。 */
+  private isRouteAvailable(request: EdgeRoutingRequest, route: EdgeRoute, acceptedRoutes: readonly AcceptedEdgeRoute[]): boolean {
+    for (let index = 1; index < route.points.length; index += 1) {
+      const start = route.points[index - 1]
+      const end = route.points[index]
+      if (!start || !end || this.pointsEqual(start, end)) continue
 
-      if (candidateHorizontal === acceptedHorizontal) {
-        const sharesAxis = candidateHorizontal
-          ? Math.abs(candidateStart.y - acceptedStart.y) < 0.5
-          : Math.abs(candidateStart.x - acceptedStart.x) < 0.5
-
-        if (!sharesAxis) continue
-
-        const candidateRange = candidateHorizontal
-          ? [Math.min(candidateStart.x, candidateEnd.x), Math.max(candidateStart.x, candidateEnd.x)]
-          : [Math.min(candidateStart.y, candidateEnd.y), Math.max(candidateStart.y, candidateEnd.y)]
-        const acceptedRange = acceptedHorizontal
-          ? [Math.min(acceptedStart.x, acceptedEnd.x), Math.max(acceptedStart.x, acceptedEnd.x)]
-          : [Math.min(acceptedStart.y, acceptedEnd.y), Math.max(acceptedStart.y, acceptedEnd.y)]
-
-        if (candidateRange[0] < acceptedRange[1] && candidateRange[1] > acceptedRange[0]) return true
-        continue
+      for (const layout of this.layoutByNodeId.values()) {
+        if (layout.node.nodeId === request.fromLayout.node.nodeId || layout.node.nodeId === request.toLayout.node.nodeId) continue
+        if (this.segmentIntersectsRectangle(start, end, layout.routeBounds)) return false
       }
+    }
 
-      const horizontalStart = candidateHorizontal ? candidateStart : acceptedStart
-      const horizontalEnd = candidateHorizontal ? candidateEnd : acceptedEnd
-      const verticalStart = candidateHorizontal ? acceptedStart : candidateStart
-      const verticalEnd = candidateHorizontal ? acceptedEnd : candidateEnd
-      const intersectsX = verticalStart.x > Math.min(horizontalStart.x, horizontalEnd.x) && verticalStart.x < Math.max(horizontalStart.x, horizontalEnd.x)
-      const intersectsY = horizontalStart.y > Math.min(verticalStart.y, verticalEnd.y) && horizontalStart.y < Math.max(verticalStart.y, verticalEnd.y)
+    return acceptedRoutes.every((accepted) => !this.routesConflict(request, route, accepted))
+  }
 
-      if (intersectsX && intersectsY) return true
+  /** 检查两条多段路径的共线重叠或非端点交叉；共享业务节点时仅放行双方端点的单点接触。 */
+  private routesConflict(request: EdgeRoutingRequest, route: EdgeRoute, accepted: AcceptedEdgeRoute): boolean {
+    const sharesNode = request.fromLayout.node.nodeId === accepted.request.fromLayout.node.nodeId
+      || request.fromLayout.node.nodeId === accepted.request.toLayout.node.nodeId
+      || request.toLayout.node.nodeId === accepted.request.fromLayout.node.nodeId
+      || request.toLayout.node.nodeId === accepted.request.toLayout.node.nodeId
+
+    for (let leftIndex = 1; leftIndex < route.points.length; leftIndex += 1) {
+      const leftStart = route.points[leftIndex - 1]
+      const leftEnd = route.points[leftIndex]
+      if (!leftStart || !leftEnd) continue
+
+      for (let rightIndex = 1; rightIndex < accepted.route.points.length; rightIndex += 1) {
+        const rightStart = accepted.route.points[rightIndex - 1]
+        const rightEnd = accepted.route.points[rightIndex]
+        if (!rightStart || !rightEnd) continue
+        if (this.segmentsConflict(leftStart, leftEnd, rightStart, rightEnd, sharesNode)) return true
+      }
     }
 
     return false
+  }
+
+  /** 线段与矩形使用参数裁剪检测，可覆盖水平、垂直和斜线，且不会按像素逐点扫描。 */
+  private segmentIntersectsRectangle(start: EdgeRoutePoint, end: EdgeRoutePoint, bounds: RectangleBounds): boolean {
+    const deltaX = end.x - start.x
+    const deltaY = end.y - start.y
+    let minimum = 0
+    let maximum = 1
+    const constraints = [
+      [-deltaX, start.x - bounds.left],
+      [deltaX, bounds.right - start.x],
+      [-deltaY, start.y - bounds.top],
+      [deltaY, bounds.bottom - start.y],
+    ] as const
+
+    for (const [direction, distance] of constraints) {
+      if (Math.abs(direction) < 1e-6) {
+        if (distance < 0) return false
+        continue
+      }
+      const ratio = distance / direction
+      if (direction < 0) minimum = Math.max(minimum, ratio)
+      else maximum = Math.min(maximum, ratio)
+      if (minimum > maximum) return false
+    }
+
+    return true
+  }
+
+  /**
+   * 叉积判定支持任意角度。共线线段只要存在有效重叠即冲突；单点接触仅在共享节点且双方都是端点时放行。
+   */
+  private segmentsConflict(
+    firstStart: EdgeRoutePoint,
+    firstEnd: EdgeRoutePoint,
+    secondStart: EdgeRoutePoint,
+    secondEnd: EdgeRoutePoint,
+    allowSharedEndpoint: boolean,
+  ): boolean {
+    const cross = (origin: EdgeRoutePoint, left: EdgeRoutePoint, right: EdgeRoutePoint) =>
+      (left.x - origin.x) * (right.y - origin.y) - (left.y - origin.y) * (right.x - origin.x)
+    const firstDirection = { x: firstEnd.x - firstStart.x, y: firstEnd.y - firstStart.y }
+    const secondDirection = { x: secondEnd.x - secondStart.x, y: secondEnd.y - secondStart.y }
+    const denominator = firstDirection.x * secondDirection.y - firstDirection.y * secondDirection.x
+    const offset = { x: secondStart.x - firstStart.x, y: secondStart.y - firstStart.y }
+
+    if (Math.abs(denominator) < 1e-6) {
+      if (Math.abs(cross(firstStart, firstEnd, secondStart)) >= 1e-6) return false
+      const useX = Math.abs(firstDirection.x) >= Math.abs(firstDirection.y)
+      const firstRange = useX ? [firstStart.x, firstEnd.x] : [firstStart.y, firstEnd.y]
+      const secondRange = useX ? [secondStart.x, secondEnd.x] : [secondStart.y, secondEnd.y]
+      const overlapStart = Math.max(Math.min(...firstRange), Math.min(...secondRange))
+      const overlapEnd = Math.min(Math.max(...firstRange), Math.max(...secondRange))
+      if (overlapEnd < overlapStart - 1e-6) return false
+      if (overlapEnd - overlapStart > 1e-6) return true
+      return !allowSharedEndpoint
+    }
+
+    const firstRatio = (offset.x * secondDirection.y - offset.y * secondDirection.x) / denominator
+    const secondRatio = (offset.x * firstDirection.y - offset.y * firstDirection.x) / denominator
+    if (firstRatio < -1e-6 || firstRatio > 1 + 1e-6 || secondRatio < -1e-6 || secondRatio > 1 + 1e-6) return false
+    const bothAtEndpoints = (firstRatio < 1e-6 || firstRatio > 1 - 1e-6) && (secondRatio < 1e-6 || secondRatio > 1 - 1e-6)
+    return !(allowSharedEndpoint && bothAtEndpoints)
+  }
+
+  /** 从图元中心朝目标点投射，返回射线与方形图元边框的交点。 */
+  private getRectangleBoundaryPoint(layout: NodeLayout, target: EdgeRoutePoint): EdgeRoutePoint {
+    const center = this.getLayoutCenter(layout)
+    const deltaX = target.x - center.x
+    const deltaY = target.y - center.y
+    const divisor = Math.max(Math.abs(deltaX) / Math.max(1, layout.width / 2), Math.abs(deltaY) / Math.max(1, layout.height / 2), 1e-6)
+    return { x: center.x + deltaX / divisor, y: center.y + deltaY / divisor }
+  }
+
+  /** 读取图元中心，集中避免各路由分支重复坐标公式。 */
+  private getLayoutCenter(layout: NodeLayout): EdgeRoutePoint {
+    return { x: layout.x + layout.width / 2, y: layout.y + layout.height / 2 }
+  }
+
+  /** 浮点坐标使用小容差比较，防止几何计算误差产生零长度伪线段。 */
+  private pointsEqual(left: EdgeRoutePoint, right: EdgeRoutePoint): boolean {
+    return Math.abs(left.x - right.x) < 1e-6 && Math.abs(left.y - right.y) < 1e-6
+  }
+
+  /** 累加真实线段长度用于在同拐点数量内选择最短绕行候选。 */
+  private getRouteLength(route: EdgeRoute): number {
+    let total = 0
+    for (let index = 1; index < route.points.length; index += 1) {
+      const previous = route.points[index - 1]
+      const current = route.points[index]
+      if (previous && current) total += Math.hypot(current.x - previous.x, current.y - previous.y)
+    }
+    return total
   }
 
   /**
@@ -824,74 +1081,6 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
     return { points: this.removeDuplicateRoutePoints(points) }
   }
 
-  /**
-   * 对同列上下节点优先建立一条直接竖线，例如控制器至同列现场执行设备。
-   * 直连使用卡片中线而非扇出端口，既符合工艺阅读方向，也不会受其他分支端口的偏移影响。
-   */
-  private createDirectVerticalRoute(request: EdgeRoutingRequest): EdgeRoute | undefined {
-    const fromCenterX = request.fromLayout.x + request.fromLayout.width / 2
-    const toCenterX = request.toLayout.x + request.toLayout.width / 2
-
-    // 仅在严格同列时直连；跨列关系仍必须使用独立通道，避免重新制造交叉与重叠。
-    if (Math.abs(fromCenterX - toCenterX) > 0.5) return undefined
-
-    const isDownward = request.toLayout.y >= request.fromLayout.y
-    const startPoint = {
-      x: fromCenterX,
-      y: isDownward ? request.fromLayout.y + request.fromLayout.height : request.fromLayout.y,
-    }
-    const endPoint = {
-      x: toCenterX,
-      y: isDownward ? request.toLayout.y : request.toLayout.y + request.toLayout.height,
-    }
-
-    return this.canUseDirectVerticalRoute(request, startPoint, endPoint) ? { points: [startPoint, endPoint] } : undefined
-  }
-
-  /**
-   * 判断同层边能否直连：端口必须处于同一高度，且两端之间不能穿过第三方节点。
-   * 不满足任一条件时继续使用独立通道，以避免直线穿卡或重新引入公共主干重叠。
-   */
-  private canUseDirectHorizontalRoute(request: EdgeRoutingRequest, startPort: EdgeRoutePoint, endPort: EdgeRoutePoint): boolean {
-    if (Math.abs(startPort.y - endPort.y) > 0.5) return false
-
-    const safeGap = 2
-    const left = Math.min(startPort.x, endPort.x)
-    const right = Math.max(startPort.x, endPort.x)
-
-    for (const layout of this.layoutByNodeId.values()) {
-      if (layout.node.nodeId === request.fromLayout.node.nodeId || layout.node.nodeId === request.toLayout.node.nodeId) continue
-
-      const intersectsHorizontalRange = left < layout.x + layout.width + safeGap && right > layout.x - safeGap
-      const intersectsVerticalRange = startPort.y > layout.y - safeGap && startPort.y < layout.y + layout.height + safeGap
-
-      if (intersectsHorizontalRange && intersectsVerticalRange) return false
-    }
-
-    return true
-  }
-
-  /**
-   * 同列直线只允许穿过两端节点之间的空白区域；若中途存在其他卡片，继续使用通道折线避让。
-   * 这样现场层的垂直控制关系会保持直接、清晰，同时不让跨越多层的关系误穿中间设备。
-   */
-  private canUseDirectVerticalRoute(request: EdgeRoutingRequest, startPoint: EdgeRoutePoint, endPoint: EdgeRoutePoint): boolean {
-    const safeGap = 2
-    const top = Math.min(startPoint.y, endPoint.y)
-    const bottom = Math.max(startPoint.y, endPoint.y)
-
-    for (const layout of this.layoutByNodeId.values()) {
-      if (layout.node.nodeId === request.fromLayout.node.nodeId || layout.node.nodeId === request.toLayout.node.nodeId) continue
-
-      const intersectsHorizontalRange = startPoint.x > layout.x - safeGap && startPoint.x < layout.x + layout.width + safeGap
-      const intersectsVerticalRange = top < layout.y + layout.height + safeGap && bottom > layout.y - safeGap
-
-      if (intersectsHorizontalRange && intersectsVerticalRange) return false
-    }
-
-    return true
-  }
-
   /** 删除零长度拐点，确保箭头方向和标签扫描始终基于真实线段。 */
   private removeDuplicateRoutePoints(points: readonly EdgeRoutePoint[]): EdgeRoutePoint[] {
     return points.filter((point, index) => {
@@ -959,10 +1148,11 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
    * 线段空间不足时宁可不显示标签，也不让文字压住设备名称或层级导视内容。
    */
   private drawEdgeLabel(context: CanvasRenderingContext2D, label: string, route: EdgeRoute, color: string): void {
-    context.font = '600 9px Microsoft YaHei, sans-serif'
-    const labelWidth = Math.min(74, Math.ceil(context.measureText(label).width + 10))
-    // 紧凑层间仅保留约 18 像素空隙，标签高度压缩为 14 像素后仍可完整显示“4-20mA”。
-    const labelHeight = 14
+    const metrics = this.getResponsiveMetrics()
+    context.font = `600 ${metrics.edgeLabelFontSize}px Microsoft YaHei, sans-serif`
+    const labelWidth = Math.min(68 * metrics.scale, Math.ceil(context.measureText(label).width + 8 * metrics.scale))
+    // 高度随画布连续缩放，最低仍可完整容纳 7.2 像素协议文字。
+    const labelHeight = 14 * metrics.scale
     const placement = this.findAvailableEdgeLabelPlacement(route, labelWidth, labelHeight)
 
     if (!placement) return
@@ -976,12 +1166,13 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
     context.fillStyle = '#d9f8ff'
     context.textAlign = 'center'
     context.textBaseline = 'middle'
-    context.fillText(label, placement.x, placement.y, labelWidth - 8)
+    context.fillText(label, placement.x, placement.y, labelWidth - 8 * metrics.scale)
+    this.drawnEdgeLabelBounds.push(this.createBoundsFromCenter(placement.x, placement.y, placement.width, placement.height))
   }
 
   /**
-   * 扫描正交点序列中的每一段，横线标签固定浮在连线上方，竖线标签置于线侧。
-   * 路由升级为多点通道后仍能从最长可读段挑选标签，且不会让发光线穿过协议文字。
+   * 扫描任意角度点序列中的每一段，标签沿线段法线向两侧偏移并保持文字水平。
+   * 候选按线段长度排序，既支持斜直线，也兼容水平、垂直和多拐点兜底路径。
    */
   private findAvailableEdgeLabelPlacement(route: EdgeRoute, labelWidth: number, labelHeight: number): EdgeLabelPlacement | undefined {
     const candidates: Array<EdgeLabelPlacement & { segmentLength: number }> = []
@@ -996,34 +1187,16 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
       const deltaX = current.x - previous.x
       const deltaY = current.y - previous.y
 
-      if (Math.abs(deltaX) >= labelWidth + 8 && Math.abs(deltaY) < 0.5) {
-        // 标签底部与横线保留 4 像素距离，确保连线不会穿过文字或标签底色。
-        candidates.push({
-          x: (previous.x + current.x) / 2,
-          y: previous.y - labelHeight / 2 - lineClearance,
-          width: labelWidth,
-          height: labelHeight,
-          segmentLength: Math.abs(deltaX),
-        })
-      }
+      const segmentLength = Math.hypot(deltaX, deltaY)
+      if (segmentLength < Math.max(labelWidth, labelHeight) + 6) continue
+      const middleX = (previous.x + current.x) / 2
+      const middleY = (previous.y + current.y) / 2
+      const normalX = -deltaY / segmentLength
+      const normalY = deltaX / segmentLength
+      const offset = Math.abs(normalX) * (labelWidth / 2 + lineClearance) + Math.abs(normalY) * (labelHeight / 2 + lineClearance)
 
-      if (Math.abs(deltaY) >= labelHeight + 2 && Math.abs(deltaX) < 0.5) {
-        // 竖线无法使用“上方”布局，标签改为左右两侧候选，避免竖线从文字中间穿过。
-        candidates.push({
-          x: previous.x + labelWidth / 2 + lineClearance,
-          y: (previous.y + current.y) / 2,
-          width: labelWidth,
-          height: labelHeight,
-          segmentLength: Math.abs(deltaY),
-        })
-        candidates.push({
-          x: previous.x - labelWidth / 2 - lineClearance,
-          y: (previous.y + current.y) / 2,
-          width: labelWidth,
-          height: labelHeight,
-          segmentLength: Math.abs(deltaY),
-        })
-      }
+      candidates.push({ x: middleX + normalX * offset, y: middleY + normalY * offset, width: labelWidth, height: labelHeight, segmentLength })
+      candidates.push({ x: middleX - normalX * offset, y: middleY - normalY * offset, width: labelWidth, height: labelHeight, segmentLength })
     }
 
     candidates.sort((left, right) => right.segmentLength - left.segmentLength)
@@ -1042,10 +1215,13 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
     if (left < this.getLayerLabelGutter() || right > this.width - safeGap || top < safeGap || bottom > this.height - safeGap) return false
 
     for (const layout of this.layoutByNodeId.values()) {
-      const overlaps = left < layout.x + layout.width && right > layout.x && top < layout.y + layout.height && bottom > layout.y
+      const bounds = layout.routeBounds
+      const overlaps = left < bounds.right && right > bounds.left && top < bounds.bottom && bottom > bounds.top
 
       if (overlaps) return false
     }
+
+    if (this.drawnEdgeLabelBounds.some((bounds) => left < bounds.right && right > bounds.left && top < bounds.bottom && bottom > bounds.top)) return false
 
     return true
   }
@@ -1058,31 +1234,27 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
     const isSelected = this.selectedNodeIds.has(layout.node.nodeId)
     const layerColor = this.getLayerColor(layout.node.layerId)
     const deviceStatus = this.nodeStatusOverrideById.get(layout.node.nodeId) ?? layout.node.deviceStatus
-    const statusColor = deviceStatusColor[deviceStatus]
 
     context.save()
+    const metrics = this.getResponsiveMetrics()
     if (isSelected) {
       context.strokeStyle = '#67e8f9'
       context.lineWidth = 2
       context.shadowColor = '#22d3ee'
-      context.shadowBlur = 14
-      this.roundRect(context, layout.x - 3, layout.y - 3, layout.width + 6, layout.height + 6, 8)
+      context.shadowBlur = 10
+      const expansion = metrics.selectionExpansion
+      this.roundRect(context, layout.x - expansion, layout.y - expansion, layout.width + expansion * 2, layout.height + expansion * 2, 7)
       context.stroke()
     }
 
-    context.fillStyle = 'rgba(4, 29, 44, 0.92)'
+    // 普通节点不再绘制大于图元的卡片底板；层级描边覆盖在图元盒内侧，不额外扩大视觉边界。
+    context.fillStyle = 'transparent'
     context.strokeStyle = `${layerColor}cc`
     context.lineWidth = 1
-    this.roundRect(context, layout.x, layout.y, layout.width, layout.height, 6)
-    context.fill()
-    context.stroke()
 
-    const isCompactViewport = this.width < 1000
-    // 窄屏图元同步缩小，为中文文本预留稳定宽度；状态圆点仍固定在右上角，不影响文本可读性。
-    const iconSize = isCompactViewport
-      ? Math.min(layout.height - 14, Math.max(14, Math.floor(layout.width * 0.24)))
-      : Math.min(layout.height - 10, Math.max(18, Math.floor(layout.width * 0.3)))
-    const iconX = layout.x + (isCompactViewport ? 4 : 5)
+    // SVG 图元直接铺满 28 至 40 像素的响应式节点盒；内侧描边不会形成比图标大一圈的普通卡片。
+    const iconSize = Math.max(1, Math.min(layout.height, layout.width))
+    const iconX = layout.x + (layout.width - iconSize) / 2
     const iconY = layout.y + (layout.height - iconSize) / 2
     const image = this.getIconImage(layout.node, deviceStatus)
 
@@ -1097,39 +1269,27 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
       context.setLineDash([])
     }
 
-    context.fillStyle = statusColor
-    context.strokeStyle = '#03111d'
-    context.lineWidth = 1.5
-    context.beginPath()
-    context.arc(layout.x + layout.width - 7, layout.y + 7, 4, 0, Math.PI * 2)
-    context.fill()
+    // 重新建立边框路径后覆盖在图元边缘内侧；图片加载与占位路径不会污染该描边。
+    this.roundRect(context, layout.x + 0.5, layout.y + 0.5, layout.width - 1, layout.height - 1, 5)
     context.stroke()
-    this.drawNodeTitle(context, layout, iconX + iconSize + (isCompactViewport ? 3 : 4))
+
+    // 四态已经由受控 SVG 图元和完整提示共同表达，不再叠加右上角状态圆点，避免遮挡放大的设备图标。
+    this.drawNodeTitle(context, layout, metrics)
     context.restore()
   }
 
   /**
-   * 中文节点名按实测像素宽度换行：常规视口保留两行，窄屏改为四行紧凑排版。
-   * 这比根据字数裁切稳定，且不改变节点、设备或场景映射；只有超过四行承载能力时才显示省略号。
+   * 常驻节点名在图元边框外下方显示一行更小的辅助文字，完整标题由画布外的受控提示层展示。
+   * 这里仍按实测像素宽度截断，避免中文、字母和数字宽度差异造成相邻节点文字碰撞。
    */
-  private drawNodeTitle(context: CanvasRenderingContext2D, layout: NodeLayout, startX: number): void {
-    const availableWidth = layout.x + layout.width - startX - 6
-
-    if (availableWidth < 12) return
-    const isCompactViewport = this.width < 1000
-    const fontSize = isCompactViewport ? 8 : 10
-    const maxLines = isCompactViewport ? 4 : 2
+  private drawNodeTitle(context: CanvasRenderingContext2D, layout: NodeLayout, metrics: ResponsiveTopologyMetrics): void {
+    const availableWidth = metrics.nodeTitleMaxWidth
     context.fillStyle = '#e2f7ff'
-    context.font = `600 ${fontSize}px Microsoft YaHei, sans-serif`
-    context.textAlign = 'left'
-    context.textBaseline = 'middle'
-    const lines = this.wrapText(context, layout.node.title, availableWidth, maxLines)
-    const lineHeight = isCompactViewport ? fontSize + 1 : fontSize + 2
-    const firstLineY = layout.y + layout.height / 2 - ((lines.length - 1) * lineHeight) / 2
-
-    for (let index = 0; index < lines.length; index += 1) {
-      context.fillText(lines[index] ?? '', startX, firstLineY + index * lineHeight, availableWidth)
-    }
+    context.font = `600 ${metrics.nodeTitleFontSize}px Microsoft YaHei, sans-serif`
+    context.textAlign = 'center'
+    context.textBaseline = 'top'
+    const [label = ''] = this.wrapText(context, layout.node.title, availableWidth, 1)
+    context.fillText(label, layout.x + layout.width / 2, layout.titleBounds.top, availableWidth)
   }
 
   /** 基于 Canvas 实测宽度拆分文本，末行超出时追加省略号而非让标签穿透相邻节点。 */

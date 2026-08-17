@@ -159,12 +159,22 @@ namespace WebDLPro.Unity.Tests
             // 共享材质引用不变可证明状态更新没有调用 Renderer.material 或替换共享材质数组。
             Assert.That(renderer.sharedMaterial, Is.SameAs(originalSharedMaterial));
             MaterialPropertyBlock inspectionBlock = new MaterialPropertyBlock();
-            renderer.GetPropertyBlock(inspectionBlock);
+            renderer.GetPropertyBlock(inspectionBlock, 0);
             Color appliedColor = inspectionBlock.GetColor(Shader.PropertyToID(colorPropertyName));
             Assert.That(appliedColor.r, Is.EqualTo(offlineColor.r).Within(0.001f));
             Assert.That(appliedColor.g, Is.EqualTo(offlineColor.g).Within(0.001f));
             Assert.That(appliedColor.b, Is.EqualTo(offlineColor.b).Within(0.001f));
             Assert.That(appliedColor.a, Is.EqualTo(offlineColor.a).Within(0.001f));
+
+            BusinessSceneCommandResult clearResult = registry.ClearNodeVisualState("scene-node.test");
+            Assert.That(clearResult.Success, Is.True, clearResult.Message);
+            renderer.GetPropertyBlock(inspectionBlock, 0);
+            Color restoredColor = inspectionBlock.GetColor(Shader.PropertyToID(colorPropertyName));
+            Color expectedBaselineColor = originalSharedMaterial.GetColor(Shader.PropertyToID(colorPropertyName));
+            Assert.That(restoredColor.r, Is.EqualTo(expectedBaselineColor.r).Within(0.001f));
+            Assert.That(restoredColor.g, Is.EqualTo(expectedBaselineColor.g).Within(0.001f));
+            Assert.That(restoredColor.b, Is.EqualTo(expectedBaselineColor.b).Within(0.001f));
+            Assert.That(restoredColor.a, Is.EqualTo(expectedBaselineColor.a).Within(0.001f));
 
             BusinessSceneCommandResult missingNodeResult = registry.UpdateNodeVisualState("scene-node.missing", BusinessSceneNodeVisualState.Alarm);
             Assert.That(missingNodeResult.Success, Is.False);
@@ -470,6 +480,11 @@ namespace WebDLPro.Unity.Tests
             Assert.That(buildScriptSource, Does.Contain("scenes = new[] { BootstrapScenePath }"));
             Assert.That(buildScriptSource, Does.Contain("assetBundleManifestPath = assetBundleManifestPath"));
             Assert.That(buildScriptSource, Does.Contain("PowerPlantSceneBundleBuild.BuildSceneBundles"));
+            // 合作方联调包和正式包都允许通过局域网 HTTP 下载场景资源；同时要求构建脚本保存并恢复编辑器原设置，
+            // 以防止只修改了项目配置却没有把策略编译进 WebGL 播放器，或构建结束后污染后续编辑器会话。
+            Assert.That(buildScriptSource, Does.Contain("PlayerSettings.insecureHttpOption"));
+            Assert.That(buildScriptSource, Does.Contain("InsecureHttpOption.AlwaysAllowed"));
+            Assert.That(buildScriptSource, Does.Contain("originalInsecureHttpOption"));
             Assert.That(bundleBuildScriptSource, Does.Contain("BuildAssetBundles"));
             Assert.That(bundleBuildScriptSource, Does.Contain("scene-catalog.json"));
             Assert.That(bundleBuildScriptSource, Does.Contain("scene-content-summary.json"));
@@ -568,7 +583,9 @@ namespace WebDLPro.Unity.Tests
 
             public BusinessSceneCommandResult EnterProcessStep(string processId, string stepId, string unitId, bool isolate) => BusinessSceneCommandResult.Unsupported(BusinessSceneCapability.EnterProcessStep);
             public BusinessSceneCommandResult FocusNode(string sceneNodeId, bool isolate) => BusinessSceneCommandResult.Unsupported(BusinessSceneCapability.FocusNode);
+            public BusinessSceneCommandResult ClearSelection() => BusinessSceneCommandResult.Unsupported(BusinessSceneCapability.ClearSelection);
             public BusinessSceneCommandResult UpdateNodeVisualState(string sceneNodeId, BusinessSceneNodeVisualState visualState) => BusinessSceneCommandResult.Unsupported(BusinessSceneCapability.UpdateNodeVisualState);
+            public BusinessSceneCommandResult ClearNodeVisualState(string sceneNodeId) => BusinessSceneCommandResult.Unsupported(BusinessSceneCapability.ClearNodeVisualState);
             public BusinessSceneCommandResult SetRouteFlow(string routeId, bool enabled, float speedMultiplier) => BusinessSceneCommandResult.Unsupported(BusinessSceneCapability.SetRouteFlow);
             public BusinessSceneCommandResult SetNodeVisibility(string sceneNodeId, bool visible) => BusinessSceneCommandResult.Unsupported(BusinessSceneCapability.SetNodeVisibility);
             public BusinessSceneCommandResult ResetScene() => BusinessSceneCommandResult.Unsupported(BusinessSceneCapability.ResetScene);

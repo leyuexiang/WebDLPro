@@ -18,7 +18,10 @@ namespace WebDLPro.Unity.SceneRuntime
         SetRouteFlow = 1 << 4,
         ResetScene = 1 << 5,
         Release = 1 << 6,
-        SetNodeVisibility = 1 << 7
+        SetNodeVisibility = 1 << 7,
+        ClearSelection = 1 << 8,
+        // 清除设备动态状态与 Normal 四态语义不同：前者恢复模型登记时的基础材质颜色，后者是平台明确下发的正常态。
+        ClearNodeVisualState = 1 << 9
     }
 
     /// <summary>设备视觉状态固定为四态，禁止场景控制器自行扩展不可互通的字符串枚举。</summary>
@@ -92,7 +95,9 @@ namespace WebDLPro.Unity.SceneRuntime
         IEnumerator InitializeAsync(BusinessSceneInitializationContext context, Action<BusinessSceneCommandResult> completed);
         BusinessSceneCommandResult EnterProcessStep(string processId, string stepId, string unitId, bool isolate);
         BusinessSceneCommandResult FocusNode(string sceneNodeId, bool isolate);
+        BusinessSceneCommandResult ClearSelection();
         BusinessSceneCommandResult UpdateNodeVisualState(string sceneNodeId, BusinessSceneNodeVisualState visualState);
+        BusinessSceneCommandResult ClearNodeVisualState(string sceneNodeId);
         BusinessSceneCommandResult SetRouteFlow(string routeId, bool enabled, float speedMultiplier);
         BusinessSceneCommandResult SetNodeVisibility(string sceneNodeId, bool visible);
         BusinessSceneCommandResult ResetScene();

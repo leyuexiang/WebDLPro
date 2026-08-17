@@ -1,23 +1,10 @@
 ---
 id: kd_fcd1bd94-dd14-47a3-a76c-2b99f1286ccf
-type: memory
-path: unity-project-understanding/power-platform-frontend-architecture.md
-title: power-platform-frontend-architecture
-inheritInjectMode: true
-summaryEnabled: true
-commandEnabled: false
-readOnly: false
-inheritAiConfig: true
-createdAt: 1785571975696
-updatedAt: 1785765857318
+injectMode: inherit
+summary: 已确认的电力全流程平台前端与 Unity WebGL 集成架构决策。
+aiEditMode: inherit
 ---
 
-# power-platform-frontend-architecture
-
-## Summary
-已确认的电力全流程平台前端与 Unity WebGL 集成架构决策。
-
-<!-- locus:body:start -->
 - 已确认前端总体架构：独立业务前端壳承载普通页面；可视化使用配置驱动的三栏工艺工作台；Unity WebGL 作为 iframe 运行时接入。
 - `VisualizationRuntimeHost` 位于可视化布局层，是唯一持有 iframe、监听器与 WebGL 资源的宿主。页面仅申请 `runtimeKey` 使用权；同一运行时复用，跨运行时或离开可视化模块则经 `dispose`/`disposed` 释放。
 - 工艺场景分为 `webgl`、`static-preview`、`empty`；只有通过资源预算、桥接协议、版本握手和节点映射校验的域可启用 WebGL。
@@ -28,4 +15,3 @@ updatedAt: 1785765857318
 - 二维拓扑一期采用 ECharts 作为查看与实时状态适配器；上线前按目标设备档位固化节点、边、刷新率、首帧与内存基准。拓扑编辑如被确认，新增独立编辑器适配器，输出保持为 `TopologyDefinition`。
 - 实时连接以每浏览器标签页一条 WebSocket 为界；订阅携带页面实例、配置版本和会话标识，重连后必须重取快照或按序补数。
 - Unity 部署优先与前端同源；跨域时仅允许受控固定子域，并同时配置父页 `frame-src`、子页 `frame-ancestors` 与精确消息来源校验。
-<!-- locus:body:end -->

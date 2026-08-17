@@ -31,6 +31,11 @@ export type HostInitializationResult =
 /** 回调让握手层保持无业务副作用，场景与拓扑事务将由后续唯一协调器执行。 */
 export interface HostHandshakeCallbacks {
   onInitialize: (command: Extract<HostCommandMessage, { type: 'system.init' }>) => Promise<HostInitializationResult>
+  /**
+   * 初始化失败必须同时通知组合根发送关联的 `system.error`（系统错误）。
+   * 握手层不直接负责错误事件序列号或脱敏投影，避免生成第二条绕过统一出站门禁的发送路径。
+   */
+  onInitializationFailure?: (replyTo: string, error: HostProtocolError) => void
   onStatusChange?: (status: HostHandshakeStatus) => void
 }
 
@@ -92,7 +97,7 @@ export class HostHandshake {
     if (this.status === 'initializing') return false
 
     if (command.payload.expectedManifestVersion && command.payload.expectedManifestVersion !== this.metadata.manifestVersion) {
-      this.sendInitializationAcknowledgement(command.messageId, {
+      this.reportInitializationFailure(command.messageId, {
         success: false,
         error: createHandshakeError('manifest.version.mismatch', '父页面期望的清单版本与当前已发布版本不一致。', true),
       })
@@ -103,12 +108,16 @@ export class HostHandshake {
     this.transitionTo('initializing')
     try {
       const result = await this.callbacks.onInitialize(command)
-      this.sendInitializationAcknowledgement(command.messageId, result)
+      // 组件可能在初始化事务等待 Unity 或拓扑期间被卸载；释放后迟到结果只能清理自身，不能复活握手或发 ack。
+      if (this.isDisposed()) return false
+      if (result.success) this.sendInitializationAcknowledgement(command.messageId, result)
+      else this.reportInitializationFailure(command.messageId, result)
       this.transitionTo(result.success ? 'initialized' : 'awaiting-init')
       if (!result.success) this.restartInitializationTimer()
       return result.success
     } catch {
-      this.sendInitializationAcknowledgement(command.messageId, {
+      if (this.isDisposed()) return false
+      this.reportInitializationFailure(command.messageId, {
         success: false,
         error: createHandshakeError('topology.prepare.failed', '初始化准备失败，当前视图未提交。', true),
       })
@@ -130,6 +139,19 @@ export class HostHandshake {
     this.bridge.send(this.createEvent('system.ack', result.success
       ? { success: true, context: result.context, error: null }
       : { success: false, error: result.error }, replyTo))
+  }
+
+  /**
+   * 初始化失败的确认与系统错误必须共用原 `system.init` 消息标识。
+   * 先发 `system.ack` 让父页面确认初始化未提交，再委托组合根发送经过统一脱敏的 `system.error`；
+   * 这样错误不会携带原始异常或任意运行时对象，也不会落入普通 `command.result`（命令结果）路径。
+   */
+  private reportInitializationFailure(
+    replyTo: string,
+    result: Extract<HostInitializationResult, { success: false }>,
+  ): void {
+    this.sendInitializationAcknowledgement(replyTo, result)
+    this.callbacks.onInitializationFailure?.(replyTo, result.error)
   }
 
   /** 统一生成当前实例、会话和递增消息标识，调用者无法覆盖安全上下文。 */
@@ -170,6 +192,11 @@ export class HostHandshake {
     if (this.status === nextStatus) return
     this.status = nextStatus
     this.callbacks.onStatusChange?.(nextStatus)
+  }
+
+  /** 异步边界后重新读取完整状态联合，避免编译器沿用 await 前已经失效的控制流收窄结果。 */
+  private isDisposed(): boolean {
+    return this.status === 'disposed'
   }
 }
 

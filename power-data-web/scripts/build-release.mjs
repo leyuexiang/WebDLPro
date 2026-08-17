@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process'
 /**
  * 正式发布构建入口必须先执行场景拓扑契约校验。
  * 校验不通过时立即透传非零退出码，不运行 Vite（前端构建工具）构建，确保孤立引用、版本错配、
- * 缺失设备标识或三维节点映射不能被打包为可发布产物。
+ * 唯一结构清单夹带旧设备职责、节点编号重复或三维节点映射失效都不能被打包为可发布产物。
  */
 function execute(command, argumentsList) {
   const result = spawnSync(command, argumentsList, {

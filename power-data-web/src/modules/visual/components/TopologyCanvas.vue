@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ProcessNodeId, RouteId } from '@/config/process/identifiers'
 import type { TopologyDefinition, TopologyDeviceStatus } from '@/config/process/types'
 import { CanvasTopologyAdapter, type CanvasTopologyViewState } from '@/services/topology/canvas-topology-adapter'
@@ -18,6 +18,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   selectNode: [nodeId: ProcessNodeId]
+  /** 空白单击只表达清空二维选择；上层负责按当前稳定拓扑提交，不直接操作状态仓库。 */
+  clearSelection: []
   /** 双击只上报命中的二维节点；设备与三维映射必须由正式拓扑运行时显式解析。 */
   doubleClickNode: [nodeId: ProcessNodeId]
 }>()
@@ -26,14 +28,44 @@ const containerElement = ref<HTMLElement | null>(null)
 const canvasElement = ref<HTMLCanvasElement | null>(null)
 const zoomLevel = ref(1)
 const isPanning = ref(false)
+const isCanvasFocused = ref(false)
+const hoveredNodeId = ref<ProcessNodeId | null>(null)
+const keyboardNodeId = ref<ProcessNodeId | null>(null)
+const tooltipX = ref(16)
+const tooltipY = ref(16)
+const tooltipUsesKeyboardPosition = ref(false)
 let adapter: CanvasTopologyAdapter | undefined
 let updateCoordinator: TopologyCanvasUpdateCoordinator | undefined
 let resizeObserver: ResizeObserver | undefined
 let lastPointerX = 0
 let lastPointerY = 0
+let pointerDownX = 0
+let pointerDownY = 0
 let hasMovedSincePointerDown = false
 /** 无运行时状态时复用空快照，避免每次同步创建临时 Map（映射）。 */
 const emptyNodeStatuses: ReadonlyMap<ProcessNodeId, TopologyDeviceStatus> = new Map()
+/** 节点索引仅在拓扑引用变化时重建，悬浮和键盘移动不会反复扫描24个燃气节点。 */
+const nodeById = computed(() => new Map(props.topology.nodes.map((node) => [node.nodeId, node] as const)))
+const activeTooltipNode = computed(() => {
+  const nodeId = hoveredNodeId.value ?? (isCanvasFocused.value ? keyboardNodeId.value : null)
+  return nodeId ? nodeById.value.get(nodeId) : undefined
+})
+const activeTooltipStatus = computed(() => {
+  const node = activeTooltipNode.value
+
+  if (!node) return ''
+  const status = props.nodeStatuses?.get(node.nodeId) ?? node.deviceStatus
+  return ({ normal: '正常', alarm: '告警', fault: '故障', offline: '离线' } as const)[status]
+})
+const tooltipStyle = computed(() => tooltipUsesKeyboardPosition.value
+  ? undefined
+  : { left: `${tooltipX.value}px`, top: `${tooltipY.value}px` })
+
+/** 将提示锚点限制在画布安全区，避免靠近左右或顶部边缘的节点把完整标题裁出容器。 */
+function updateTooltipAnchor(clientX: number, clientY: number, bounds: DOMRect): void {
+  tooltipX.value = Math.min(Math.max(clientX - bounds.left, 12), Math.max(12, bounds.width - 24))
+  tooltipY.value = Math.min(Math.max(clientY - bounds.top, 68), Math.max(68, bounds.height - 12))
+}
 
 /**
  * 拓扑定义变化才调用 setTopology；该调用会重建节点索引和路径缓存，
@@ -41,6 +73,9 @@ const emptyNodeStatuses: ReadonlyMap<ProcessNodeId, TopologyDeviceStatus> = new 
  */
 function syncTopologyDefinition(): void {
   updateCoordinator?.updateTopology(props.topology)
+  // 新拓扑不能保留旧节点提示或键盘焦点；若当前选择仍存在，则用它作为新的键盘起点。
+  hoveredNodeId.value = null
+  keyboardNodeId.value = props.selectedNodeIds.find((nodeId) => nodeById.value.has(nodeId)) ?? props.topology.nodes[0]?.nodeId ?? null
 }
 
 /**
@@ -78,7 +113,19 @@ function handleCanvasClick(event: MouseEvent): void {
   const bounds = canvas.getBoundingClientRect()
   const nodeId = adapter.pickNodeAt(event.clientX - bounds.left, event.clientY - bounds.top)
 
-  if (nodeId) emit('selectNode', nodeId)
+  if (nodeId) {
+    hoveredNodeId.value = nodeId
+    keyboardNodeId.value = nodeId
+    tooltipUsesKeyboardPosition.value = false
+    updateTooltipAnchor(event.clientX, event.clientY, bounds)
+    emit('selectNode', nodeId)
+    return
+  }
+
+  // 只有真实空白单击进入这里；拖拽结束点击已在函数开头拦截，不会因平移画布误清空选择。
+  hoveredNodeId.value = null
+  keyboardNodeId.value = null
+  emit('clearSelection')
 }
 
 /**
@@ -162,6 +209,7 @@ function dispose(): void {
 
 /** 鼠标位于画布内时将滚轮解释为缩放，阻止外层页面因查看细节发生误滚动。 */
 function handleCanvasWheel(event: WheelEvent): void {
+  hoveredNodeId.value = null
   changeZoom(event.deltaY > 0 ? -0.15 : 0.15)
 }
 
@@ -174,20 +222,71 @@ function handlePointerDown(event: PointerEvent): void {
   hasMovedSincePointerDown = false
   lastPointerX = event.clientX
   lastPointerY = event.clientY
+  pointerDownX = event.clientX
+  pointerDownY = event.clientY
+  hoveredNodeId.value = null
   canvas.setPointerCapture(event.pointerId)
 }
 
-/** 以相邻指针位置差平移视图，不修改配置坐标、节点选择或三维联动状态。 */
+/**
+ * 非拖拽时复用适配器现有命中缓存更新唯一提示层；拖拽达到4像素阈值后才平移，
+ * 避免触屏轻微抖动吞掉原本应立即选择并联动三维的点击。
+ */
 function handlePointerMove(event: PointerEvent): void {
-  if (!adapter || !isPanning.value) return
+  const canvas = canvasElement.value
+
+  if (!adapter || !canvas) return
+  const bounds = canvas.getBoundingClientRect()
+  if (!isPanning.value) {
+    hoveredNodeId.value = adapter.pickNodeAt(event.clientX - bounds.left, event.clientY - bounds.top) ?? null
+    tooltipUsesKeyboardPosition.value = false
+    updateTooltipAnchor(event.clientX, event.clientY, bounds)
+    return
+  }
   const deltaX = event.clientX - lastPointerX
   const deltaY = event.clientY - lastPointerY
+  const dragDistance = Math.hypot(event.clientX - pointerDownX, event.clientY - pointerDownY)
 
-  if (deltaX !== 0 || deltaY !== 0) {
+  if (dragDistance >= 4 && (deltaX !== 0 || deltaY !== 0)) {
     hasMovedSincePointerDown = true
     adapter.panBy(deltaX, deltaY)
     lastPointerX = event.clientX
     lastPointerY = event.clientY
+  }
+}
+
+/** 离开画布时清除鼠标提示；键盘焦点提示由独立状态保留。 */
+function handlePointerLeave(): void {
+  if (!isPanning.value) hoveredNodeId.value = null
+}
+
+/** 键盘焦点从当前选择或首节点开始，不自动触发业务选择与三维命令。 */
+function handleCanvasFocus(): void {
+  isCanvasFocused.value = true
+  keyboardNodeId.value = props.selectedNodeIds.find((nodeId) => nodeById.value.has(nodeId)) ?? keyboardNodeId.value ?? props.topology.nodes[0]?.nodeId ?? null
+  tooltipUsesKeyboardPosition.value = true
+}
+
+function handleCanvasBlur(): void {
+  isCanvasFocused.value = false
+}
+
+/** 方向键循环浏览节点，回车或空格才提交选择，保证键盘行为与鼠标单击的业务副作用一致。 */
+function handleCanvasKeydown(event: KeyboardEvent): void {
+  const nodes = props.topology.nodes
+
+  if (nodes.length === 0) return
+  const currentIndex = Math.max(0, nodes.findIndex((node) => node.nodeId === keyboardNodeId.value))
+  if (event.key.startsWith('Arrow')) {
+    event.preventDefault()
+    const direction = event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1
+    keyboardNodeId.value = nodes[(currentIndex + direction + nodes.length) % nodes.length]?.nodeId ?? null
+    tooltipUsesKeyboardPosition.value = true
+    return
+  }
+  if ((event.key === 'Enter' || event.key === ' ') && keyboardNodeId.value) {
+    event.preventDefault()
+    emit('selectNode', keyboardNodeId.value)
   }
 }
 
@@ -246,15 +345,32 @@ defineExpose<TopologyCanvasController>({
       ref="canvasElement"
       :class="{ 'topology-canvas__surface--panning': isPanning }"
       aria-label="工艺二维拓扑，可在画布内缩放并按住鼠标左键拖拽"
+      :aria-describedby="activeTooltipNode ? 'topology-node-tooltip' : undefined"
       role="img"
+      tabindex="0"
+      @blur="handleCanvasBlur"
       @click="handleCanvasClick"
       @dblclick="handleCanvasDoubleClick"
+      @focus="handleCanvasFocus"
+      @keydown="handleCanvasKeydown"
       @pointercancel="handlePointerEnd"
       @pointerdown.prevent="handlePointerDown"
+      @pointerleave="handlePointerLeave"
       @pointermove="handlePointerMove"
       @pointerup="handlePointerEnd"
       @wheel.prevent="handleCanvasWheel"
     />
+    <div
+      v-if="activeTooltipNode"
+      id="topology-node-tooltip"
+      :class="['topology-canvas__tooltip', { 'topology-canvas__tooltip--keyboard': tooltipUsesKeyboardPosition }]"
+      :style="tooltipStyle"
+      role="tooltip"
+      aria-live="polite"
+    >
+      <strong>{{ activeTooltipNode.title }}</strong>
+      <span>状态：{{ activeTooltipStatus }}</span>
+    </div>
     <div class="topology-canvas__toolbar" aria-label="拓扑缩放控制">
       <button type="button" title="缩小拓扑" :disabled="zoomLevel <= 0.55" @click="changeZoom(-0.15)">−</button>
       <output aria-label="当前拓扑缩放比例">{{ Math.round(zoomLevel * 100) }}%</output>
@@ -287,6 +403,43 @@ defineExpose<TopologyCanvasController>({
   cursor: grabbing;
 }
 
+.topology-canvas canvas:focus-visible {
+  outline: 2px solid #67e8f9;
+  outline-offset: -3px;
+}
+
+/* 全部节点共用一个提示层，避免为24个燃气节点创建文档对象、监听器和响应式实例。 */
+.topology-canvas__tooltip {
+  position: absolute;
+  z-index: 3;
+  display: grid;
+  max-inline-size: min(260px, calc(100% - 24px));
+  gap: 3px;
+  padding: 7px 9px;
+  border: 1px solid rgba(103, 232, 249, 0.72);
+  border-radius: 6px;
+  color: #e2f7ff;
+  font: 500 11px/1.35 Microsoft YaHei, sans-serif;
+  background: rgba(3, 17, 29, 0.96);
+  box-shadow: 0 5px 18px rgba(0, 0, 0, 0.42);
+  pointer-events: none;
+  transform: translate(10px, calc(-100% - 10px));
+}
+
+.topology-canvas__tooltip strong {
+  font-size: 12px;
+}
+
+.topology-canvas__tooltip span {
+  color: #9dd8e5;
+}
+
+.topology-canvas__tooltip--keyboard {
+  inset-block-start: 10px;
+  inset-inline-start: 50%;
+  transform: translateX(-50%);
+}
+
 /* 全屏遮罩由父面板提供边框和标题；画布仅占用标题、提示之外的全部剩余空间。 */
 .topology-canvas--fullscreen {
   block-size: 100%;
@@ -296,6 +449,7 @@ defineExpose<TopologyCanvasController>({
 /* 缩放工具栏悬浮于画布内，不参与文档流，也不改变固定容器尺寸。 */
 .topology-canvas__toolbar {
   position: absolute;
+  z-index: 4;
   inset-block-end: 10px;
   inset-inline-end: 10px;
   display: flex;

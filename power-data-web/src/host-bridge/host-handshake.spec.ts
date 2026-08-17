@@ -92,4 +92,24 @@ describe('外层初始化握手', () => {
     expect(onInitialize).toHaveBeenCalledTimes(1)
     expect(handshake.getStatus()).toBe('disposed')
   })
+
+  it('初始化等待期间释放后，迟到成功不能发送确认或恢复握手状态', async () => {
+    let resolveInitialization: ((result: { success: true; context: HostVisualizationContext }) => void) | undefined
+    const onInitialize = vi.fn(() => new Promise<{ success: true; context: HostVisualizationContext }>((resolve) => {
+      resolveInitialization = resolve
+    }))
+    const { handshake, sent } = createHandshake(onInitialize)
+    handshake.start()
+
+    const initialization = handshake.handle({
+      channel: 'power-scene-topology-shell', version: 1, instanceId: 'visual-shell-01', sessionId: toSessionId('session-test-01'), messageId: 'parent-init-disposed', type: 'system.init', timestamp: 1,
+      payload: { sceneId: 'gas-power' as never, topologyId: 'gas-power.overview' as never },
+    })
+    handshake.dispose()
+    resolveInitialization?.({ success: true, context: stableContext })
+
+    await expect(initialization).resolves.toBe(false)
+    expect(sent.filter((entry) => (entry[0] as { type?: string }).type === 'system.ack')).toHaveLength(0)
+    expect(handshake.getStatus()).toBe('disposed')
+  })
 })

@@ -2,10 +2,12 @@ import { describe, expect, it, vi } from 'vitest'
 import { toSceneNodeId, toSelectionId } from '@/config/scene-topology/identifiers'
 import { TopologySelectionFocusCoordinator, type TopologyFocusPort } from '@/modules/visual/topology/topology-selection-focus-coordinator'
 
-function createFocusPort(supportsFocusNode = true, success = true): TopologyFocusPort {
+function createFocusPort(supportsFocusNode = true, success = true, supportsClearSelection = true): TopologyFocusPort {
   return {
     supportsFocusNode: vi.fn(() => supportsFocusNode),
     focusNode: vi.fn().mockResolvedValue({ success }),
+    supportsClearSelection: vi.fn(() => supportsClearSelection),
+    clearSelection: vi.fn().mockResolvedValue({ success }),
   }
 }
 
@@ -52,5 +54,25 @@ describe('TopologySelectionFocusCoordinator', () => {
       sceneNodeId: toSceneNodeId('scene-node.gas-turbine'),
     })).resolves.toBe(false)
     expect(port.focusNode).not.toHaveBeenCalled()
+  })
+
+  it('空白点击只发送三维清除选择命令，不依赖场景重置', async () => {
+    const port = createFocusPort()
+    const coordinator = new TopologySelectionFocusCoordinator(port)
+
+    await expect(coordinator.requestClearSelection()).resolves.toBe(true)
+    expect(port.clearSelection).toHaveBeenCalledTimes(1)
+  })
+
+  it('未协商清除能力或清除失败时不产生错误的三维成功状态', async () => {
+    const unsupportedPort = createFocusPort(true, true, false)
+    const unsupportedCoordinator = new TopologySelectionFocusCoordinator(unsupportedPort)
+    await expect(unsupportedCoordinator.requestClearSelection()).resolves.toBe(false)
+    expect(unsupportedPort.clearSelection).not.toHaveBeenCalled()
+
+    const failedPort = createFocusPort(true, false, true)
+    const failedCoordinator = new TopologySelectionFocusCoordinator(failedPort)
+    await expect(failedCoordinator.requestClearSelection()).resolves.toBe(false)
+    expect(failedPort.clearSelection).toHaveBeenCalledTimes(1)
   })
 })

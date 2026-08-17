@@ -26,6 +26,8 @@ public static class PowerPlantWebGlBuild
         public string unityReleaseId;
         public string channel;
         public int protocolVersion;
+        // 完整命令能力用于发布前静态门禁，不能依赖启动浏览器后才发现旧构建缺少命令。
+        public string[] commandCapabilities;
         public int sceneChangedSchemaVersion;
         public string[] sceneChangedRequiredFields;
         public string[] switchSceneRequiredFields;
@@ -33,6 +35,8 @@ public static class PowerPlantWebGlBuild
         public string[] switchSceneRecoveryRequiredFields;
         public int setNodeVisualStateSchemaVersion;
         public string[] setNodeVisualStateRequiredFields;
+        public int clearNodeVisualStateSchemaVersion;
+        public string[] clearNodeVisualStateRequiredFields;
     }
 
     public const string DevelopmentOutputPath = "Builds/WebGL-Development";
@@ -43,6 +47,21 @@ public static class PowerPlantWebGlBuild
     // 正式嵌入壳必须使用该模板，避免默认模板将画布回退为 960×600 并在前端 16:9 容器内产生滚动条。
     private const string EmbeddedViewportWebGlTemplate = "PROJECT:EmbeddedViewport";
     private const string EmbeddedViewportTemplateDirectory = "Assets/WebGLTemplates/EmbeddedViewport";
+    // 燃气场景的资源包按需加载，浏览器不应把主播放器数据长期写入本地离线缓存。
+    // 关闭该项可避免反复调试不同发布包时，旧包缓存与当前 WebAssembly（网页程序集）共同占用内存和磁盘空间；
+    // 它只控制 Unity WebGL 的资源持久化缓存，不改变运行时的内存上限或场景资源包的按需下载机制。
+    private const bool EnableWebGlDataCachingForBuild = false;
+    // 合作方联调包和正式包都部署在局域网独立服务中，服务地址通常是明文 HTTP；
+    // Unity 的 WebGL 播放器如果保持 NotAllowed，会在通过局域网地址下载 SceneBundles 时直接报“Insecure connection not allowed”。
+    // 这里只在构建产物中允许 HTTP，构建结束后会恢复编辑器原设置；HTTPS 部署仍然可以正常访问，不会被该选项限制。
+    private const InsecureHttpOption InsecureHttpOptionForBuild = InsecureHttpOption.AlwaysAllowed;
+    // 主播放器只承载 Bootstrap（启动壳），燃气模型等重资源由场景资源包在 switchScene（场景切换）后按需下载。
+    // 因此首启只申请 256MB 连续网页程序集内存，避免受限浏览器因预留过大而在实例创建前失败。
+    // 内存不足时仍沿用项目设置中的几何自动增长；最大值和单次几何增长封顶在此固定，
+    // 防止一次扩容或长期累计增长无上限地挤占浏览器与宿主应用可用内存。
+    private const int InitialWebGlMemorySizeInMegabytes = 256;
+    private const int MaximumWebGlMemorySizeInMegabytes = 768;
+    private const int WebGlGeometricMemoryGrowthCapInMegabytes = 64;
 
     /// <summary>
     /// 兼容既有“高亮流程”命令行入口：该入口语义固定为开发构建，
@@ -98,14 +117,54 @@ public static class PowerPlantWebGlBuild
 
         // Application.version（应用版本）由 PlayerSettings.bundleVersion（播放器设置版本）生成。
         // 因此构建期间必须把当前发布标识嵌入主播放器，运行时才能拒绝与自身不属于同一发布事务的 SceneBundles（场景资源包）目录。
+        // 数据缓存设置也在构建期间显式固定，确保每个发布包的缓存行为可预测；
         // finally 无条件恢复编辑器原设置，既避免污染用户项目版本，也保证构建失败不会遗留隐藏的项目配置修改。
         string originalBundleVersion = PlayerSettings.bundleVersion;
         bool bundleVersionChanged = !string.Equals(originalBundleVersion, releaseId, StringComparison.Ordinal);
+        bool originalWebGlDataCaching = PlayerSettings.WebGL.dataCaching;
+        bool webGlDataCachingChanged = originalWebGlDataCaching != EnableWebGlDataCachingForBuild;
+        int originalWebGlInitialMemorySize = PlayerSettings.WebGL.initialMemorySize;
+        bool webGlInitialMemorySizeChanged = originalWebGlInitialMemorySize != InitialWebGlMemorySizeInMegabytes;
+        int originalWebGlMaximumMemorySize = PlayerSettings.WebGL.maximumMemorySize;
+        bool webGlMaximumMemorySizeChanged = originalWebGlMaximumMemorySize != MaximumWebGlMemorySizeInMegabytes;
+        int originalWebGlGeometricMemoryGrowthCap = PlayerSettings.WebGL.memoryGeometricGrowthCap;
+        bool webGlGeometricMemoryGrowthCapChanged =
+            originalWebGlGeometricMemoryGrowthCap != WebGlGeometricMemoryGrowthCapInMegabytes;
+        InsecureHttpOption originalInsecureHttpOption = PlayerSettings.insecureHttpOption;
+        bool insecureHttpOptionChanged = originalInsecureHttpOption != InsecureHttpOptionForBuild;
         try
         {
             if (bundleVersionChanged)
             {
                 PlayerSettings.bundleVersion = releaseId;
+            }
+            if (webGlDataCachingChanged)
+            {
+                // 在 BuildPipeline.BuildPlayer（构建管线）调用前写入关闭状态，使输出的网页包不会启用旧资源持久化缓存。
+                // 此处不删除浏览器中已经存在的缓存；用户可通过浏览器清理站点数据回收此前发布包占用的空间。
+                PlayerSettings.WebGL.dataCaching = EnableWebGlDataCachingForBuild;
+            }
+            if (webGlInitialMemorySizeChanged)
+            {
+                // 即使编辑器本地配置被临时改动，构建产物仍固定使用经过内置浏览器实测调整后的启动内存基线。
+                // 几何增长模式继续由项目配置维持，避免在构建代码中引入与编辑器枚举版本绑定的重复定义。
+                PlayerSettings.WebGL.initialMemorySize = InitialWebGlMemorySizeInMegabytes;
+            }
+            if (webGlMaximumMemorySizeChanged)
+            {
+                // 上限只约束自动增长的最高值，不会使播放器在启动时立即申请 768MB。
+                PlayerSettings.WebGL.maximumMemorySize = MaximumWebGlMemorySizeInMegabytes;
+            }
+            if (webGlGeometricMemoryGrowthCapChanged)
+            {
+                // 几何增长单次最多增加 64MB，限制突发扩容对嵌入浏览器和外层页面的内存冲击。
+                PlayerSettings.WebGL.memoryGeometricGrowthCap = WebGlGeometricMemoryGrowthCapInMegabytes;
+            }
+            if (insecureHttpOptionChanged)
+            {
+                // 该设置会被 Unity 编译进 WebGL 运行时，必须在 BuildPipeline.BuildPlayer 之前写入；
+                // 仅修改发布服务的响应头或浏览器地址无法解除 Unity 自身对 UnityWebRequest 明文 HTTP 的拒绝。
+                PlayerSettings.insecureHttpOption = InsecureHttpOptionForBuild;
             }
 
             string absoluteOutputPath = Path.GetFullPath(outputPath);
@@ -149,6 +208,31 @@ public static class PowerPlantWebGlBuild
             {
                 PlayerSettings.bundleVersion = originalBundleVersion;
             }
+            if (webGlDataCachingChanged)
+            {
+                // 构建专属设置在成功、失败和异常退出路径均恢复，避免影响用户下一次在编辑器中的手工测试配置。
+                PlayerSettings.WebGL.dataCaching = originalWebGlDataCaching;
+            }
+            if (webGlInitialMemorySizeChanged)
+            {
+                // 与离线缓存相同，构建后恢复编辑器会话的临时值；版本库中的项目基线仍固定为 256MB。
+                PlayerSettings.WebGL.initialMemorySize = originalWebGlInitialMemorySize;
+            }
+            if (webGlMaximumMemorySizeChanged)
+            {
+                // 还原调用前的编辑器会话配置，避免构建脚本在异常退出后改变用户未提交的本地设置。
+                PlayerSettings.WebGL.maximumMemorySize = originalWebGlMaximumMemorySize;
+            }
+            if (webGlGeometricMemoryGrowthCapChanged)
+            {
+                // 还原单次增长封顶；持久化项目基线由 ProjectSettings.asset（项目设置文件）统一保存。
+                PlayerSettings.WebGL.memoryGeometricGrowthCap = originalWebGlGeometricMemoryGrowthCap;
+            }
+            if (insecureHttpOptionChanged)
+            {
+                // 构建专属的 HTTP 访问策略只属于输出产物；无论成功、失败还是异常退出路径，都恢复编辑器会话原值。
+                PlayerSettings.insecureHttpOption = originalInsecureHttpOption;
+            }
         }
     }
 
@@ -164,13 +248,16 @@ public static class PowerPlantWebGlBuild
             unityReleaseId = releaseId,
             channel = WebGlProtocolContract.Channel,
             protocolVersion = WebGlProtocolContract.ProtocolVersion,
+            commandCapabilities = WebGlProtocolContract.CreateCommandCapabilities(),
             sceneChangedSchemaVersion = WebGlProtocolContract.SceneChangedSchemaVersion,
             sceneChangedRequiredFields = WebGlProtocolContract.CreateSceneChangedRequiredFields(),
             switchSceneRequiredFields = WebGlProtocolContract.CreateSwitchSceneRequiredFields(),
             switchSceneRecoverySchemaVersion = WebGlProtocolContract.SwitchSceneRecoverySchemaVersion,
             switchSceneRecoveryRequiredFields = WebGlProtocolContract.CreateSwitchSceneRecoveryRequiredFields(),
             setNodeVisualStateSchemaVersion = WebGlProtocolContract.SetNodeVisualStateSchemaVersion,
-            setNodeVisualStateRequiredFields = WebGlProtocolContract.CreateSetNodeVisualStateRequiredFields()
+            setNodeVisualStateRequiredFields = WebGlProtocolContract.CreateSetNodeVisualStateRequiredFields(),
+            clearNodeVisualStateSchemaVersion = WebGlProtocolContract.ClearNodeVisualStateSchemaVersion,
+            clearNodeVisualStateRequiredFields = WebGlProtocolContract.CreateClearNodeVisualStateRequiredFields()
         };
         string metadataPath = Path.Combine(absoluteOutputPath, WebGlProtocolContract.MetadataFileName);
         File.WriteAllText(metadataPath, JsonUtility.ToJson(metadata, true), new UTF8Encoding(false));

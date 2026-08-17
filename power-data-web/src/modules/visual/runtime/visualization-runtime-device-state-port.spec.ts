@@ -8,39 +8,45 @@ import type { VisualizationRuntimeHostController } from '@/modules/visual/runtim
 function createRuntime(): VisualizationRuntimeHostController {
   return {
     status: ref('ready'),
-    capabilities: ref(['setNodeVisualState']),
+    capabilities: ref(['setNodeVisualState', 'clearNodeVisualState']),
     sendCommandAndWait: vi.fn().mockResolvedValue({ success: true }),
   } as unknown as VisualizationRuntimeHostController
 }
 
 describe('设备状态 Unity 运行时端口', () => {
-  it('显式来源修订号转换为有修订二元组，保留修订号零与缺失的语义差异', async () => {
+  it('固定发送本地快照序号，并将平台时间与来源修订仅作为诊断字段透传', async () => {
     const runtime = createRuntime()
     const port = new VisualizationRuntimeDeviceStatePort(runtime)
 
-    await port.setNodeVisualState(toSceneNodeId('scene-node.test'), 'fault', '2026-08-09T08:00:00.000Z', 0)
+    await port.setNodeVisualState(
+      toSceneNodeId('scene-node.test'),
+      'fault',
+      7,
+      '2026-08-09T08:00:00.000Z',
+      0,
+    )
 
     expect(runtime.sendCommandAndWait).toHaveBeenCalledWith('setNodeVisualState', {
       sceneNodeId: toSceneNodeId('scene-node.test'),
       visualState: 'fault',
+      snapshotSequence: 7,
       statusUpdatedAt: '2026-08-09T08:00:00.000Z',
-      hasSourceRevision: true,
       sourceRevision: 0,
     })
   })
 
-  it('外层未提供来源修订号时固定发送无修订二元组，避免 Unity 将缺失字段误判为显式零', async () => {
+  it('只有设置与清除能力同时就绪才支持完整快照，并按本地序号发送基础状态恢复', async () => {
     const runtime = createRuntime()
     const port = new VisualizationRuntimeDeviceStatePort(runtime)
 
-    await port.setNodeVisualState(toSceneNodeId('scene-node.test'), 'alarm', '2026-08-09T08:00:01.000Z')
-
-    expect(runtime.sendCommandAndWait).toHaveBeenCalledWith('setNodeVisualState', {
+    expect(port.supportsNodeVisualState()).toBe(true)
+    await port.clearNodeVisualState(toSceneNodeId('scene-node.test'), 8)
+    expect(runtime.sendCommandAndWait).toHaveBeenCalledWith('clearNodeVisualState', {
       sceneNodeId: toSceneNodeId('scene-node.test'),
-      visualState: 'alarm',
-      statusUpdatedAt: '2026-08-09T08:00:01.000Z',
-      hasSourceRevision: false,
-      sourceRevision: 0,
+      snapshotSequence: 8,
     })
+
+    ;(runtime.capabilities as { value: readonly string[] }).value = ['setNodeVisualState']
+    expect(port.supportsNodeVisualState()).toBe(false)
   })
 })

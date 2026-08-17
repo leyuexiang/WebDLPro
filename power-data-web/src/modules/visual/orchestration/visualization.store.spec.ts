@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { toActionId, toDeviceId, toNodeId, toRouteId, toSceneId, toSceneNodeId, toTopologyId, toTransitionId } from '@/config/scene-topology/identifiers'
+import { toActionId, toNodeId, toRouteId, toSceneId, toSceneNodeId, toTopologyId, toTransitionId } from '@/config/scene-topology/identifiers'
 import { useVisualizationStore, VISUALIZATION_TRANSITION_SUMMARY_CAPACITY } from '@/modules/visual/orchestration/visualization.store'
 
 describe('可视化稳定上下文状态仓库', () => {
@@ -32,11 +32,11 @@ describe('可视化稳定上下文状态仓库', () => {
 
   it('选择状态与运行状态独立保存，释放后不保留旧上下文或选择', () => {
     const store = useVisualizationStore()
-    store.setSelection([toNodeId('node-gas-turbine-01')], [toRouteId('route-gas-01')], 'topology', toDeviceId('device-gas-01'), toSceneNodeId('scene-node-gas-01'))
+    store.setSelection([toNodeId('node-gas-turbine-01')], [toRouteId('route-gas-01')], 'topology', toSceneNodeId('scene-node-gas-01'))
     store.release()
 
     expect(store.selectedNodeIds).toEqual([])
-    expect(store.selectedDeviceId).toBeNull()
+    expect(store.selectedSceneNodeId).toBeNull()
     expect(store.runtimeStatus).toBe('released')
     expect(store.unityStatus).toBe('disposed')
   })

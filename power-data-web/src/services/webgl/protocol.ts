@@ -15,7 +15,9 @@ export const WEBGL_COMMAND_TYPES = [
   'enterProcessStep',
   'resetScene',
   'focusNode',
+  'clearSelection',
   'setNodeVisualState',
+  'clearNodeVisualState',
   'setRouteFlow',
   'setNodeVisibility',
   'dispose',
@@ -100,16 +102,24 @@ export interface WebglFocusNodePayload {
 export type WebglNodeVisualState = 'normal' | 'alarm' | 'fault' | 'offline'
 
 /**
- * 设备状态增量只指定映射节点、固定四态和规范化因果二元组，具体材质由 Unity 场景控制器内部决定。
- * `hasSourceRevision + sourceRevision` 始终同时发送：前者区分外层未提供修订号与显式修订号零，后者只在
- * 相同状态时间下裁决新旧；这样不会把父页面其他业务字段或任意渲染参数暴露给 Unity。
+ * 节点状态命令只指定已静态映射的三维节点、固定四态、壳内快照序号和两个诊断字段，具体材质由 Unity 场景控制器决定。
+ * `snapshotSequence` 是唯一迟到门禁；平台状态时间和来源修订不得参与 Unity 覆盖顺序。
  */
 export interface WebglSetNodeVisualStatePayload {
   sceneNodeId: string
   visualState: WebglNodeVisualState
+  snapshotSequence: number
   statusUpdatedAt: string
-  hasSourceRevision: boolean
   sourceRevision: number
+}
+
+/**
+ * 完整快照中节点消失时使用独立清除命令恢复模型基础视觉。
+ * 该命令不能复用 `normal`：正常是平台明确下发的实时四态之一，而清除表示撤销动态覆盖。
+ */
+export interface WebglClearNodeVisualStatePayload {
+  sceneNodeId: string
+  snapshotSequence: number
 }
 
 /** 路径动作仅允许受控路径标识与开关值；速度、着色器与资源参数不得由网页下发。 */
@@ -154,7 +164,7 @@ export interface WebglSceneChangedPayload {
  * 对象选中事件只传回场景、稳定三维节点和物理场景激活标识，不传名称、状态、层级或任意对象引用。
  * `sceneActivationId`（物理场景激活标识）用于阻断“场景 A → B → 场景 A”中的首个 A 迟到事件；
  * 它与普通 `transitionId`（视图切换事务标识）不同，同场景拓扑切换不会改变它。二维 `nodeId`
- * （拓扑节点标识）仍只能由前端通过已发布设备映射反查，禁止 Unity 隐式写入或互换。
+ * （拓扑节点标识）仍只能由前端通过已发布的 `nodeId ↔ sceneNodeId` 静态映射反查，禁止 Unity 隐式写入或互换。
  */
 export interface WebglObjectSelectedPayload {
   sceneId: string
@@ -296,8 +306,8 @@ export function isWebglFocusNodePayload(value: unknown): value is WebglFocusNode
 }
 
 /**
- * 验证四态视觉更新。修订号二元组必须完整且无歧义：未提供修订时固定为 false/0，提供时为 true/非负安全整数。
- * 这让 Unity 的 JsonUtility 即使把缺失数值初始化为零，也不能把“缺失”和“显式修订零”混为同一语义。
+ * 验证四态视觉更新。快照序号必须为正安全整数，零只会由 Unity JSON 缺省产生，因此可可靠拒绝旧载荷；
+ * 状态时间和来源修订继续严格校验，但只允许进入诊断，不能替代本地序号做因果判断。
  */
 export function isWebglSetNodeVisualStatePayload(value: unknown): value is WebglSetNodeVisualStatePayload {
   if (!value || typeof value !== 'object') return false
@@ -305,10 +315,22 @@ export function isWebglSetNodeVisualStatePayload(value: unknown): value is Webgl
   const candidate = value as Record<string, unknown>
   return isBoundedIdentifier(candidate.sceneNodeId) &&
     isWebglNodeVisualState(candidate.visualState) &&
+    isPositiveSafeInteger(candidate.snapshotSequence) &&
     isWebglStatusUpdatedAt(candidate.statusUpdatedAt) &&
-    typeof candidate.hasSourceRevision === 'boolean' &&
-    isNonNegativeSafeInteger(candidate.sourceRevision) &&
-    (candidate.hasSourceRevision || candidate.sourceRevision === 0)
+    isNonNegativeSafeInteger(candidate.sourceRevision)
+}
+
+/** 清除命令与设置命令共享本地序号门禁，确保迟到设置不能重新写回已经消失的设备状态。 */
+export function isWebglClearNodeVisualStatePayload(value: unknown): value is WebglClearNodeVisualStatePayload {
+  if (!value || typeof value !== 'object') return false
+
+  const candidate = value as Record<string, unknown>
+  const keys = Object.keys(candidate)
+  return keys.length === 2 &&
+    keys.includes('sceneNodeId') &&
+    keys.includes('snapshotSequence') &&
+    isBoundedIdentifier(candidate.sceneNodeId) &&
+    isPositiveSafeInteger(candidate.snapshotSequence)
 }
 
 /** 验证路径流动命令；只允许稳定路径标识与布尔开关。 */
@@ -418,6 +440,11 @@ function isWebglNodeVisualState(value: unknown): value is WebglNodeVisualState {
 /** 来源修订号与外层协议共用 JavaScript 安全整数边界，避免跨语言传输后发生精度截断。 */
 function isNonNegativeSafeInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+}
+
+/** 壳内快照序号从一开始单调递增；拒绝零可防止 Unity JSON 缺省字段绕过新协议。 */
+function isPositiveSafeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
 }
 
 /** 场景加载生命周期只允许协调器实际产生的固定阶段，未知阶段不能影响宿主进度展示。 */

@@ -48,18 +48,37 @@ namespace WebDLPro.Unity.SceneRuntime
     {
         public string SceneNodeId { get; }
         public Renderer[] Renderers { get; }
-        public string ColorPropertyName { get; }
+        /// <summary>
+        /// 场景属性面板登记的颜色属性候选列表。
+        /// 不同导入材质可能分别使用 `_BaseColor`、`_BASE_COLOR` 等合法属性名；
+        /// 注册阶段按该列表顺序为每个材质槽选择一个实际存在的属性，运行时不再猜测着色器结构。
+        /// </summary>
+        public string[] ColorPropertyNames { get; }
         public BusinessSceneVisualStatePalette Palette { get; }
+
+        /// <summary>兼容只配置一个属性名的旧调用方；新场景应使用 ColorPropertyNames。</summary>
+        public string ColorPropertyName => ColorPropertyNames != null && ColorPropertyNames.Length > 0
+            ? ColorPropertyNames[0]
+            : string.Empty;
 
         public BusinessSceneVisualStateBinding(
             string sceneNodeId,
             Renderer[] renderers,
             string colorPropertyName,
             BusinessSceneVisualStatePalette palette)
+            : this(sceneNodeId, renderers, new[] { colorPropertyName }, palette)
+        {
+        }
+
+        public BusinessSceneVisualStateBinding(
+            string sceneNodeId,
+            Renderer[] renderers,
+            string[] colorPropertyNames,
+            BusinessSceneVisualStatePalette palette)
         {
             SceneNodeId = sceneNodeId;
             Renderers = renderers;
-            ColorPropertyName = colorPropertyName;
+            ColorPropertyNames = colorPropertyNames;
             Palette = palette;
         }
     }
@@ -74,14 +93,22 @@ namespace WebDLPro.Unity.SceneRuntime
         private sealed class RegisteredBinding
         {
             public Renderer[] Renderers { get; }
-            public int ColorPropertyId { get; }
+            /// <summary>按渲染器、材质槽保存一次性选定的颜色属性标识。</summary>
+            public int[][] ColorPropertyIds { get; }
             public BusinessSceneVisualStatePalette Palette { get; }
+            /** 每个渲染器、每个材质槽的基础颜色；只在登记阶段创建，清除动态覆盖时原样恢复。 */
+            public Color[][] BaselineColors { get; }
 
-            public RegisteredBinding(Renderer[] renderers, int colorPropertyId, BusinessSceneVisualStatePalette palette)
+            public RegisteredBinding(
+                Renderer[] renderers,
+                int[][] colorPropertyIds,
+                BusinessSceneVisualStatePalette palette,
+                Color[][] baselineColors)
             {
                 Renderers = renderers;
-                ColorPropertyId = colorPropertyId;
+                ColorPropertyIds = colorPropertyIds;
                 Palette = palette;
+                BaselineColors = baselineColors;
             }
         }
 
@@ -111,7 +138,8 @@ namespace WebDLPro.Unity.SceneRuntime
             if (!SceneActionProtocolValidator.IsValidSceneNodeId(binding.SceneNodeId) ||
                 binding.Renderers == null ||
                 binding.Renderers.Length == 0 ||
-                string.IsNullOrWhiteSpace(binding.ColorPropertyName))
+                binding.ColorPropertyNames == null ||
+                binding.ColorPropertyNames.Length == 0)
             {
                 return BusinessSceneCommandResult.Failed("node-visual-binding-invalid", "四态视觉映射缺少合法三维节点、渲染器或着色属性。");
             }
@@ -120,8 +148,9 @@ namespace WebDLPro.Unity.SceneRuntime
                 return BusinessSceneCommandResult.Failed("node-visual-binding-duplicate", $"三维节点 {binding.SceneNodeId} 重复登记四态视觉映射。");
             }
 
-            int colorPropertyId = Shader.PropertyToID(binding.ColorPropertyName);
             HashSet<Renderer> currentRenderers = new HashSet<Renderer>();
+            int[][] colorPropertyIds = new int[binding.Renderers.Length][];
+            Color[][] baselineColors = new Color[binding.Renderers.Length][];
             for (int rendererIndex = 0; rendererIndex < binding.Renderers.Length; rendererIndex++)
             {
                 Renderer renderer = binding.Renderers[rendererIndex];
@@ -142,20 +171,43 @@ namespace WebDLPro.Unity.SceneRuntime
                 {
                     return BusinessSceneCommandResult.Failed("node-visual-material-missing", $"三维节点 {binding.SceneNodeId} 的渲染器没有共享材质。");
                 }
+                baselineColors[rendererIndex] = new Color[sharedMaterials.Length];
+                colorPropertyIds[rendererIndex] = new int[sharedMaterials.Length];
                 for (int materialIndex = 0; materialIndex < sharedMaterials.Length; materialIndex++)
                 {
                     Material sharedMaterial = sharedMaterials[materialIndex];
-                    if (sharedMaterial == null || !sharedMaterial.HasProperty(colorPropertyId))
+                    if (sharedMaterial == null)
                     {
                         return BusinessSceneCommandResult.Failed(
                             "node-visual-property-missing",
-                            $"三维节点 {binding.SceneNodeId} 的共享材质不支持已登记着色属性。");
+                            $"三维节点 {binding.SceneNodeId} 的共享材质为空。");
                     }
+
+                    int colorPropertyId = ResolveColorPropertyId(sharedMaterial, binding.ColorPropertyNames);
+                    if (colorPropertyId == 0)
+                    {
+                        return BusinessSceneCommandResult.Failed(
+                            "node-visual-property-missing",
+                            $"三维节点 {binding.SceneNodeId} 的材质 {sharedMaterial.name} 不支持属性面板登记的任何颜色属性：{string.Join(", ", binding.ColorPropertyNames)}。");
+                    }
+
+                    colorPropertyIds[rendererIndex][materialIndex] = colorPropertyId;
+                    // 基础颜色优先读取登记时已存在的材质槽属性块；没有颜色覆盖时才回退共享材质。
+                    // 这样场景作者预先配置的实例颜色不会被错误恢复成资源文件默认色。
+                    _reusablePropertyBlock.Clear();
+                    renderer.GetPropertyBlock(_reusablePropertyBlock, materialIndex);
+                    baselineColors[rendererIndex][materialIndex] = _reusablePropertyBlock.HasColor(colorPropertyId)
+                        ? _reusablePropertyBlock.GetColor(colorPropertyId)
+                        : sharedMaterial.GetColor(colorPropertyId);
                 }
             }
 
             // 上方完整验证结束后再一次性提交索引，确保失败不会留下残缺登记。
-            RegisteredBinding registeredBinding = new RegisteredBinding(binding.Renderers, colorPropertyId, binding.Palette);
+            RegisteredBinding registeredBinding = new RegisteredBinding(
+                binding.Renderers,
+                colorPropertyIds,
+                binding.Palette,
+                baselineColors);
             _bindings.Add(binding.SceneNodeId, registeredBinding);
             for (int rendererIndex = 0; rendererIndex < binding.Renderers.Length; rendererIndex++)
             {
@@ -194,13 +246,55 @@ namespace WebDLPro.Unity.SceneRuntime
             for (int rendererIndex = 0; rendererIndex < binding.Renderers.Length; rendererIndex++)
             {
                 Renderer renderer = binding.Renderers[rendererIndex];
-                _reusablePropertyBlock.Clear();
-                renderer.GetPropertyBlock(_reusablePropertyBlock);
-                _reusablePropertyBlock.SetColor(binding.ColorPropertyId, targetColor);
-                renderer.SetPropertyBlock(_reusablePropertyBlock);
+                int materialSlotCount = binding.BaselineColors[rendererIndex].Length;
+                for (int materialIndex = 0; materialIndex < materialSlotCount; materialIndex++)
+                {
+                    _reusablePropertyBlock.Clear();
+                    renderer.GetPropertyBlock(_reusablePropertyBlock, materialIndex);
+                    _reusablePropertyBlock.SetColor(binding.ColorPropertyIds[rendererIndex][materialIndex], targetColor);
+                    renderer.SetPropertyBlock(_reusablePropertyBlock, materialIndex);
+                }
             }
 
             return BusinessSceneCommandResult.Completed($"三维节点 {sceneNodeId} 已更新为 {visualState} 状态。");
+        }
+
+        /// <summary>
+        /// 撤销指定节点的动态四态覆盖，并恢复登记阶段逐材质槽保存的模型基础颜色。
+        /// MaterialPropertyBlock（材质属性块）支持按材质槽写入；该路径复用同一属性块，不创建材质副本，
+        /// 同时保留其他系统写入的非颜色属性以及同一渲染器上不同材质槽原本不同的颜色。
+        /// </summary>
+        public BusinessSceneCommandResult ClearNodeVisualState(string sceneNodeId)
+        {
+            if (_released)
+            {
+                return BusinessSceneCommandResult.Failed("scene-controller-released", "四态视觉注册表已经释放。");
+            }
+            if (!SceneActionProtocolValidator.IsValidSceneNodeId(sceneNodeId) ||
+                !_bindings.TryGetValue(sceneNodeId, out RegisteredBinding binding))
+            {
+                return BusinessSceneCommandResult.Failed("invalid-node", $"未知三维节点：{sceneNodeId}");
+            }
+
+            for (int rendererIndex = 0; rendererIndex < binding.Renderers.Length; rendererIndex++)
+            {
+                Renderer renderer = binding.Renderers[rendererIndex];
+                if (renderer == null)
+                {
+                    return BusinessSceneCommandResult.Failed("node-visual-renderer-unavailable", $"三维节点 {sceneNodeId} 的渲染器已经不可用。");
+                }
+
+                Color[] rendererBaselineColors = binding.BaselineColors[rendererIndex];
+                for (int materialIndex = 0; materialIndex < rendererBaselineColors.Length; materialIndex++)
+                {
+                    _reusablePropertyBlock.Clear();
+                    renderer.GetPropertyBlock(_reusablePropertyBlock, materialIndex);
+                    _reusablePropertyBlock.SetColor(binding.ColorPropertyIds[rendererIndex][materialIndex], rendererBaselineColors[materialIndex]);
+                    renderer.SetPropertyBlock(_reusablePropertyBlock, materialIndex);
+                }
+            }
+
+            return BusinessSceneCommandResult.Completed($"三维节点 {sceneNodeId} 已恢复模型基础视觉。");
         }
 
         /// <summary>
@@ -218,6 +312,30 @@ namespace WebDLPro.Unity.SceneRuntime
             _bindings.Clear();
             _rendererOwners.Clear();
             _reusablePropertyBlock.Clear();
+        }
+
+        /// <summary>
+        /// 按属性面板给出的候选顺序解析材质槽实际支持的颜色属性。
+        /// 解析只发生在场景初始化登记阶段，状态更新阶段直接使用缓存的属性标识，避免反复查询材质。
+        /// </summary>
+        private static int ResolveColorPropertyId(Material material, string[] colorPropertyNames)
+        {
+            for (int propertyIndex = 0; propertyIndex < colorPropertyNames.Length; propertyIndex++)
+            {
+                string propertyName = colorPropertyNames[propertyIndex];
+                if (string.IsNullOrWhiteSpace(propertyName))
+                {
+                    continue;
+                }
+
+                int propertyId = Shader.PropertyToID(propertyName);
+                if (propertyId != 0 && material.HasProperty(propertyId))
+                {
+                    return propertyId;
+                }
+            }
+
+            return 0;
         }
     }
 }

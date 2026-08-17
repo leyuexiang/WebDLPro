@@ -8,6 +8,7 @@
     "build": "npm run typecheck && vite build",
     "build:release": "node ./scripts/build-release.mjs",
     "validate:manifest": "node ./scripts/validate-scene-topology-manifest.mjs",
+    "validate:release-artifact": "node ./scripts/validate-release-artifact.mjs",
     "test:visual": "node ./scripts/compare-visual-baseline.mjs",
     "typecheck": "vue-tsc --build",
     "test:unit": "vitest run",

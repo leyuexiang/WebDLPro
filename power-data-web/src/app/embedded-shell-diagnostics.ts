@@ -5,6 +5,7 @@ export type EmbeddedShellDiagnosticKind =
   | 'configuration-error'
   | 'unity-error'
   | 'topology-error'
+  | 'startup-timeout'
   | 'released'
 
 /** 每个状态都有稳定代码和安全默认说明，组件只渲染此模型而不直接渲染异常对象。 */
@@ -18,10 +19,13 @@ export interface EmbeddedShellDiagnostic {
 /** 可展示的额外稳定失败码；仅允许清单读取器已声明的有限集合进入界面。 */
 export type EmbeddedShellAdditionalDiagnosticCode =
   | 'manifest.http-status'
+  | 'manifest.package-not-found'
+  | 'manifest.file-missing'
   | 'manifest.payload'
   | 'manifest.timeout'
   | 'manifest.aborted'
   | 'manifest.network'
+  | 'manifest.cache-policy'
   | 'manifest.invalid'
 
 /** 统一构造诊断，调用方只能替换已脱敏的原因、关联标识和有限额外失败码。 */
@@ -35,6 +39,7 @@ export function createEmbeddedShellDiagnostic(
     'configuration-error': 'deployment.invalid',
     'unity-error': 'unity.runtime-failed',
     'topology-error': 'topology.invalid',
+    'startup-timeout': 'runtime.startup-timeout',
     released: 'runtime.disposed',
   }
 
@@ -44,6 +49,14 @@ export function createEmbeddedShellDiagnostic(
     reason: options.reason,
     ...(options.correlationId ? { correlationId: options.correlationId } : {}),
   }
+}
+
+/**
+ * 使用已经通过部署配置校验的宽高生成尺寸提示，确保界面文案与运行时比较条件共用同一阈值。
+ * “不小于”与实际的小于号判断严格对应：宽高恰好达到阈值时即可正常运行。
+ */
+export function createContainerTooSmallReason(minimumWidth: number, minimumHeight: number): string {
+  return `当前窗口可用区域不足，请将窗口调整至不小于 ${minimumWidth} × ${minimumHeight} 像素后重试。`
 }
 
 /**

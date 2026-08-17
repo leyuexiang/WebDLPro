@@ -1,10 +1,12 @@
 import { readDeploymentConfiguration, type DeploymentConfiguration } from '@/config/deployment/deployment-config'
 import { toSessionId, validateStableIdentifier } from '@/config/scene-topology/identifiers'
 import type { SessionId } from '@/config/scene-topology/identifiers'
+import { HostMessageReceiptRegistry } from '@/host-bridge/host-command-lifecycle'
 import {
   HOST_PROTOCOL_VERSION,
   isHostEventMessage,
-  validateHostCommandMessage,
+  validateHostCommandEnvelope,
+  validateHostCommandPayload,
   type HostCommandMessage,
   type HostEventMessage,
   type HostProtocolErrorCode,
@@ -82,7 +84,9 @@ export function createHostBridgeStartup(
  */
 export class HostBridge {
   private readonly rejections: HostBridgeRejection[] = []
+  private readonly commandReceipts = new HostMessageReceiptRegistry()
   private unsubscribeRouter: (() => void) | undefined
+  private disposed = false
 
   public constructor(
     private readonly context: HostBridgeSecurityContext,
@@ -93,15 +97,18 @@ export class HostBridge {
 
   /** 订阅外层固定通道；重复启动不会重复注册同一个路由订阅。 */
   public start(): void {
-    if (this.unsubscribeRouter) return
+    if (this.disposed || this.unsubscribeRouter) return
     this.unsubscribeRouter = this.router.subscribe('power-scene-topology-shell', (event) => this.receive(event))
   }
 
   /** 完整释放路由订阅和有限诊断，子应用销毁后不再保留父窗口引用。 */
   public dispose(): void {
+    if (this.disposed) return
+    this.disposed = true
     this.unsubscribeRouter?.()
     this.unsubscribeRouter = undefined
     this.rejections.length = 0
+    this.commandReceipts.dispose()
   }
 
   /** 返回当前会话的只读安全上下文，调用方不可替换 parentOrigin 或 sessionId。 */
@@ -119,6 +126,7 @@ export class HostBridge {
    * 所有 postMessage（跨窗口消息）均使用部署确认过的精确 targetOrigin，永不使用通配符。
    */
   public send(event: HostEventMessage): boolean {
+    if (this.disposed) return false
     if (!isHostEventMessage(event) || event.instanceId !== this.context.instanceId || event.sessionId !== this.context.sessionId) {
       this.reject('protocol.envelope.invalid', event.messageId)
       return false
@@ -133,6 +141,7 @@ export class HostBridge {
    * 任一失败都在进入业务回调前返回，且拒绝日志不保存 payload（载荷）。
    */
   private receive(event: MessageEvent<unknown>): void {
+    if (this.disposed) return
     if (event.origin !== this.context.parentOrigin) {
       this.reject('protocol.origin.rejected', readMessageId(event.data))
       return
@@ -142,13 +151,27 @@ export class HostBridge {
       return
     }
 
-    const result = validateHostCommandMessage(event.data)
-    if (result.status === 'invalid') {
-      this.reject(result.issues[0]?.code ?? 'protocol.envelope.invalid', readMessageId(event.data))
+    // 基础信封和当前会话先通过后才能登记 messageId；错误来源或旧会话绝不能占用当前会话去重窗口。
+    const envelope = validateHostCommandEnvelope(event.data)
+    if (envelope.status === 'invalid') {
+      this.reject(envelope.issues[0]?.code ?? 'protocol.envelope.invalid', readMessageId(event.data))
       return
     }
-    if (result.message.instanceId !== this.context.instanceId || result.message.sessionId !== this.context.sessionId) {
-      this.reject('protocol.envelope.invalid', result.message.messageId)
+    if (envelope.message.instanceId !== this.context.instanceId || envelope.message.sessionId !== this.context.sessionId) {
+      this.reject('protocol.envelope.invalid', envelope.message.messageId)
+      return
+    }
+
+    // 按协议在类型和载荷校验前执行常数时间去重；首个重复仅留一条有限诊断，其余重放完全静默。
+    const receipt = this.commandReceipts.register(envelope.message.messageId)
+    if (receipt !== 'accepted') {
+      if (receipt === 'duplicate-first') this.reject('protocol.message.duplicate', envelope.message.messageId)
+      return
+    }
+
+    const result = validateHostCommandPayload(envelope.message)
+    if (result.status === 'invalid') {
+      this.reject(result.issues[0]?.code ?? 'protocol.envelope.invalid', envelope.message.messageId)
       return
     }
 

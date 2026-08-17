@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { toActionId, toDeviceId, toSceneId, toSessionId, toTopologyId } from '@/config/scene-topology/identifiers'
+import { toActionId, toNodeId, toSceneId, toSessionId, toTopologyId } from '@/config/scene-topology/identifiers'
 import { HostCommandDispatcher, type HostCommandCoordinatorPort } from '@/host-bridge/host-command-dispatcher'
 import type { HostCommandMessage } from '@/host-bridge/host-protocol'
 import type { VisualizationCoordinatorSnapshot } from '@/modules/visual/orchestration/visualization-coordinator'
@@ -23,7 +23,6 @@ function createSnapshot(overrides: Partial<VisualizationCoordinatorSnapshot> = {
     topologyStatus: 'ready',
     selectedNodeIds: [],
     selectedRouteIds: [],
-    selectedDeviceId: null,
     selectedSceneNodeId: null,
     selectionSource: 'system',
     latestDiagnostic: null,
@@ -112,7 +111,7 @@ describe('外层命令分派器', () => {
     await dispatcher.execute(createCommand('workflow.trigger', { actionId: toActionId('gas-power.turbine'), parameters: { unitId: 'unit-01' } }))
     await dispatcher.execute(createCommand('device.states.update', {
       sourceRevision: 8,
-      items: [{ deviceId: toDeviceId('device-gas-turbine-01'), deviceStatus: 'normal', statusUpdatedAt: '2026-08-04T14:20:30.000Z' }],
+      items: [{ nodeId: toNodeId('node.gas.turbine.01'), deviceStatus: 'normal', statusUpdatedAt: '2026-08-04T14:20:30.000Z' }],
     }))
 
     expect(coordinator.submit).toHaveBeenNthCalledWith(1, expect.objectContaining({ type: 'workflow.trigger' }))

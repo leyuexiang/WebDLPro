@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { SCENE_IDS, toDeviceId, toNodeId, toSceneActivationId, toSceneId, toSceneNodeId, toTopologyId, toUnityRuntimeKey, toUnitySceneKey } from '@/config/scene-topology/identifiers'
+import { SCENE_IDS, toNodeId, toSceneActivationId, toSceneId, toSceneNodeId, toTopologyId, toUnityRuntimeKey, toUnitySceneKey } from '@/config/scene-topology/identifiers'
 import { TopologyRegistry } from '@/config/scene-topology/topology-registry'
 import type { SceneTopologyManifest } from '@/config/scene-topology/types'
 import { UnityObjectSelectionCoordinator } from '@/modules/visual/orchestration/unity-object-selection-coordinator'
@@ -12,7 +12,6 @@ const sceneId = toSceneId('gas-power')
 const topologyId = toTopologyId('topology.gas-power.overview')
 const nodeId = toNodeId('node.gas-turbine')
 const sceneNodeId = toSceneNodeId('scene-node.gas-turbine')
-const deviceId = toDeviceId('device.gas-turbine')
 const sceneActivationId = toSceneActivationId('scene-activation.gas-1')
 
 /** 构造仅含一条明确燃气映射的九场景测试清单，其他八个场景保持显式空态，不伪造业务设备。 */
@@ -41,9 +40,9 @@ function createRegistry(mappingTopologyId: typeof topologyId = topologyId) {
         sceneId: candidateSceneId,
         title: `测试拓扑-${candidateSceneId}`,
         configVersion: manifestVersion,
-        // 明细图映射用例必须让默认图保持无设备节点，否则发布校验会正确拒绝“节点未被映射”这一不完整清单。
+        // 明细图映射用例让默认图保持无节点，验证注册表不会根据标题猜测当前拓扑。
         nodes: candidateSceneId === sceneId && !hasAdditionalGasTopology
-          ? [{ nodeId, title: '测试燃气轮机', deviceId, sceneNodeId, iconKey: 'generic-device', x: 50, y: 50, deviceStatus: 'normal' as const, doubleClickBehavior: 'emit-device' as const }]
+          ? [{ nodeId, title: '测试燃气轮机', sceneNodeId, iconKey: 'generic-device', x: 50, y: 50, deviceStatus: 'normal' as const, doubleClickBehavior: 'emit-node' as const }]
           : [],
         edges: [],
       })),
@@ -52,18 +51,11 @@ function createRegistry(mappingTopologyId: typeof topologyId = topologyId) {
         sceneId,
         title: '测试燃气明细拓扑',
         configVersion: manifestVersion,
-        nodes: [{ nodeId, title: '测试燃气轮机', deviceId, sceneNodeId, iconKey: 'generic-device', x: 50, y: 50, deviceStatus: 'normal' as const, doubleClickBehavior: 'emit-device' as const }],
+        nodes: [{ nodeId, title: '测试燃气轮机', sceneNodeId, iconKey: 'generic-device', x: 50, y: 50, deviceStatus: 'normal' as const, doubleClickBehavior: 'emit-node' as const }],
         edges: [],
       }] : []),
     ],
     actions: [],
-    deviceMappings: [{
-      deviceId,
-      sceneId,
-      topologyNodeRefs: [{ topologyId: mappingTopologyId, nodeId }],
-      sceneNodeId,
-      configVersion: manifestVersion,
-    }],
     unitySceneMappings: SCENE_IDS.map((candidateSceneId) => ({
       sceneId: candidateSceneId,
       mappingVersion: manifestVersion,
@@ -91,7 +83,6 @@ function createFacade(overrides: Partial<VisualizationCoordinatorSnapshot> = {})
     topologyStatus: 'ready',
     selectedNodeIds: [],
     selectedRouteIds: [],
-    selectedDeviceId: null,
     selectedSceneNodeId: null,
     selectionSource: 'system',
     latestDiagnostic: null,
@@ -104,7 +95,7 @@ function createFacade(overrides: Partial<VisualizationCoordinatorSnapshot> = {})
 }
 
 /** 当前活动拓扑替身只开放任务-037需要的读取和选择增量接口，避免测试依赖 Canvas（画布）实现。 */
-function createTopologyRuntime(activeTopologyId: typeof topologyId = topologyId): TopologyRuntime & { setSelection: ReturnType<typeof vi.fn> } {
+function createTopologyRuntime(activeTopologyId: typeof topologyId = topologyId, includeNode = true): TopologyRuntime & { setSelection: ReturnType<typeof vi.fn> } {
   return {
     getActiveTopology: vi.fn().mockReturnValue({
       sceneId,
@@ -114,8 +105,8 @@ function createTopologyRuntime(activeTopologyId: typeof topologyId = topologyId)
         sceneId,
         title: '测试拓扑',
         configVersion: manifestVersion,
-        nodes: activeTopologyId === topologyId
-          ? [{ nodeId, title: '测试燃气轮机', deviceId, sceneNodeId, iconKey: 'generic-device', x: 50, y: 50, deviceStatus: 'normal', doubleClickBehavior: 'emit-device' }]
+        nodes: activeTopologyId === topologyId && includeNode
+          ? [{ nodeId, title: '测试燃气轮机', sceneNodeId, iconKey: 'generic-device', x: 50, y: 50, deviceStatus: 'normal', doubleClickBehavior: 'emit-node' }]
           : [],
         edges: [],
       },
@@ -151,14 +142,13 @@ describe('Unity 三维反向选择协调器', () => {
     expect(selected).toEqual({
       sceneId,
       sceneNodeId,
-      deviceId,
+      nodeId,
       topologyId,
-      nodeIds: [nodeId],
       contextRevision: 7,
       correlationId: 'unity-selection-1',
     })
     expect(facade.submit).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'selection.replace', source: 'unity', nodeIds: [nodeId], sceneNodeId, deviceId,
+      type: 'selection.replace', source: 'unity', nodeIds: [nodeId], sceneNodeId,
     }))
     expect(runtime.setSelection).toHaveBeenCalledWith([nodeId], [])
   })
@@ -227,7 +217,7 @@ describe('Unity 三维反向选择协调器', () => {
       String(sceneNodeId),
       String(secondGasActivationId),
     ))
-    expect(selected).toMatchObject({ deviceId, nodeIds: [nodeId], correlationId: 'unity-selection-2' })
+    expect(selected).toMatchObject({ nodeId })
     expect(runtime.setSelection).toHaveBeenCalledWith([nodeId], [])
   })
 
@@ -245,7 +235,7 @@ describe('Unity 三维反向选择协调器', () => {
 
   it('设备映射未引用当前拓扑时保留诊断，不回退选择默认拓扑或标题相同节点', () => {
     const facade = createFacade()
-    const runtime = createTopologyRuntime()
+    const runtime = createTopologyRuntime(topologyId, false)
     const coordinator = new UnityObjectSelectionCoordinator(createRegistry(toTopologyId('topology.gas-power.detail')), runtime, facade, { now: () => 0 })
 
     const selected = coordinator.resolve(createUnitySelection('unity-object-select-other-topology'))

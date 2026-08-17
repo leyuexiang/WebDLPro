@@ -11,15 +11,42 @@ namespace WebDLPro.Unity.SceneRuntime
     {
         public const string Channel = "power3d-unity";
         public const int ProtocolVersion = 1;
-        // 第二版元数据新增失败恢复标识与四态复合因果水位声明；旧构建必须由发布门禁拒绝。
-        public const int MetadataSchemaVersion = 2;
+        // 第四版元数据新增独立动态状态清除能力；旧构建无法恢复完整快照中消失设备的模型基线，必须阻止发布。
+        public const int MetadataSchemaVersion = 4;
         // 第二版场景完成结构新增物理 sceneActivationId；全局信封版本保持不变，避免无关命令被迫升级。
         public const int SceneChangedSchemaVersion = 2;
         // 第一版失败恢复声明要求 commandResult 在自动恢复成功时携带新的物理场景激活标识。
         public const int SwitchSceneRecoverySchemaVersion = 1;
         // 第二版四态命令在来源时间之外增加显式修订二元组，保证同时间高修订不会被误判为重试。
-        public const int SetNodeVisualStateSchemaVersion = 2;
+        // 第三版节点状态结构增加壳内快照序号，并移除会误作因果门禁的可选来源修订标志。
+        public const int SetNodeVisualStateSchemaVersion = 3;
+        // 第一版清除命令只携带稳定三维节点和壳内快照序号，由场景控制器恢复登记时的基础视觉。
+        public const int ClearNodeVisualStateSchemaVersion = 1;
         public const string MetadataFileName = "webgl-protocol-capabilities.json";
+
+        /// <summary>
+        /// 返回构建实际支持的完整下行命令能力。该数组与网页模板及 .jslib 白名单保持一致；
+        /// 构建脚本只读取该小型元数据即可拒绝缺少清除交互描边能力的旧播放器。
+        /// 每次返回新数组，避免编辑器构建代码改写运行时共享集合。
+        /// </summary>
+        public static string[] CreateCommandCapabilities()
+        {
+            return new[]
+            {
+                "init",
+                "resize",
+                "switchScene",
+                "enterProcessStep",
+                "resetScene",
+                "focusNode",
+                "clearSelection",
+                "setNodeVisualState",
+                "clearNodeVisualState",
+                "setRouteFlow",
+                "setNodeVisibility",
+                "dispose"
+            };
+        }
 
         /// <summary>返回新数组，防止编辑器构建代码意外改写运行时共享的必填字段集合。</summary>
         public static string[] CreateSceneChangedRequiredFields()
@@ -39,10 +66,16 @@ namespace WebDLPro.Unity.SceneRuntime
             return new[] { "requestId", "success", "sceneActivationId" };
         }
 
-        /// <summary>四态命令的修订二元组始终必填，避免 Unity JSON 默认值把“缺失”和“显式零”混淆。</summary>
+        /// <summary>四态命令必须携带本地快照序号；平台时间和来源修订只保留为诊断字段。</summary>
         public static string[] CreateSetNodeVisualStateRequiredFields()
         {
-            return new[] { "sceneNodeId", "visualState", "statusUpdatedAt", "hasSourceRevision", "sourceRevision" };
+            return new[] { "sceneNodeId", "visualState", "snapshotSequence", "statusUpdatedAt", "sourceRevision" };
+        }
+
+        /// <summary>清除命令不得携带颜色或四态；基础视觉只能由当前场景已登记的模型基线决定。</summary>
+        public static string[] CreateClearNodeVisualStateRequiredFields()
+        {
+            return new[] { "sceneNodeId", "snapshotSequence" };
         }
     }
 

@@ -3,7 +3,6 @@ import { createPinia, setActivePinia } from 'pinia'
 import type { NodeId } from '@/config/scene-topology/identifiers'
 import {
   toActionId,
-  toDeviceId,
   toNodeId,
   toRouteId,
   toSceneId,
@@ -180,7 +179,6 @@ describe('VisualizationCoordinator', () => {
       type: 'selection.replace',
       nodeIds: [toNodeId('node.transformer.1'), toNodeId('node.transformer.1')],
       routeIds: [toRouteId('route.feeder.1'), toRouteId('route.feeder.1')],
-      deviceId: toDeviceId('device.transformer.1'),
       sceneNodeId: toSceneNodeId('scene-node.transformer.1'),
       source: 'topology',
     })

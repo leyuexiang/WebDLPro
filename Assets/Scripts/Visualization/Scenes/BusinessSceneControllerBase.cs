@@ -45,9 +45,23 @@ namespace WebDLPro.Unity.SceneRuntime
             return NotImplementedOrUnsupported(BusinessSceneCapability.FocusNode);
         }
 
+        /// <summary>
+        /// 默认拒绝清除选择能力。派生控制器只有在能够只撤销交互描边、且不重置场景上下文时才应声明并覆写该能力。
+        /// </summary>
+        public virtual BusinessSceneCommandResult ClearSelection()
+        {
+            return NotImplementedOrUnsupported(BusinessSceneCapability.ClearSelection);
+        }
+
         public virtual BusinessSceneCommandResult UpdateNodeVisualState(string sceneNodeId, BusinessSceneNodeVisualState visualState)
         {
             return NotImplementedOrUnsupported(BusinessSceneCapability.UpdateNodeVisualState);
+        }
+
+        /// <summary>默认拒绝恢复节点基础视觉；派生控制器必须通过显式登记的模型基线实现，不能将其转换为正常态。</summary>
+        public virtual BusinessSceneCommandResult ClearNodeVisualState(string sceneNodeId)
+        {
+            return NotImplementedOrUnsupported(BusinessSceneCapability.ClearNodeVisualState);
         }
 
         public virtual BusinessSceneCommandResult SetRouteFlow(string routeId, bool enabled, float speedMultiplier)

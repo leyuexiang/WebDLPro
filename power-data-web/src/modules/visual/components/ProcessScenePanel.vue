@@ -31,9 +31,12 @@ const requestedRuntime = computed(() => {
 /** 宿主失败时展示与静态预览一致的明确降级，而非保留可能失效的 iframe。 */
 const isRuntimeFailed = computed(() => runtimeHost?.status.value === 'failed')
 
-/** 将配置校验或运行时失败压缩为可读首因，完整问题仍由加载器与受控日志保留。 */
+/**
+ * 将配置校验或运行时失败压缩为中文降级说明，页面不显示运行时原始原因或错误码；
+ * 详细信息由运行时宿主写入控制台，供联调排查。
+ */
 const fallbackReason = computed(() => {
-  if (isRuntimeFailed.value && runtimeHost?.reason.value) return runtimeHost.reason.value
+  if (isRuntimeFailed.value) return '三维运行时暂时不可用，当前显示静态预览。'
   return props.result.issues[0]?.message ?? '网页图形运行时尚未就绪。'
 })
 

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-/** 嵌入壳与遗留页面共用的可诊断状态；调用方不能用空容器代替状态反馈。 */
+/** 嵌入壳与遗留页面共用的用户状态；页面只展示中文说明，不把内部诊断字段暴露给用户。 */
 export type AppStateKind =
   | 'loading'
   | 'initializing'
@@ -9,6 +9,7 @@ export type AppStateKind =
   | 'configuration-error'
   | 'unity-error'
   | 'topology-error'
+  | 'startup-timeout'
   | 'released'
   | 'scene-connecting'
   | 'scene-unavailable'
@@ -20,14 +21,10 @@ const props = withDefaults(
   defineProps<{
     kind: AppStateKind
     reason?: string
-    correlationId?: string
-    errorCode?: string
     primaryActionVisible?: boolean
   }>(),
   {
     reason: '',
-    correlationId: '',
-    errorCode: '',
     primaryActionVisible: true,
   },
 )
@@ -74,6 +71,12 @@ const stateDefinition = computed(() => {
     'topology-error': {
       title: '拓扑配置异常',
       description: '当前拓扑未通过完整性校验，已阻止不完整视图进入运行时。',
+      action: '重新加载',
+      event: 'retry',
+    },
+    'startup-timeout': {
+      title: '运行时启动超时',
+      description: '页面未能在规定时间内完成清单、拓扑和三维运行时准备，已停止本次启动。',
       action: '重新加载',
       event: 'retry',
     },
@@ -142,8 +145,6 @@ function triggerPrimaryAction(): void {
     <p class="eyebrow">状态提示</p>
     <h2>{{ stateDefinition.title }}</h2>
     <p>{{ reason || stateDefinition.description }}</p>
-    <p v-if="errorCode" class="app-state-panel__error-code">错误代码：{{ errorCode }}</p>
-    <p v-if="correlationId" class="app-state-panel__correlation">关联标识：{{ correlationId }}</p>
     <button v-if="primaryActionVisible" type="button" class="button button--secondary" @click="triggerPrimaryAction">
       {{ stateDefinition.action }}
     </button>
@@ -166,20 +167,8 @@ function triggerPrimaryAction(): void {
   margin: 0;
 }
 
-.app-state-panel > p:not(.eyebrow):not(.app-state-panel__correlation) {
+.app-state-panel > p:not(.eyebrow) {
   color: var(--color-text-secondary);
-}
-
-.app-state-panel__correlation {
-  color: var(--color-text-secondary);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.75rem;
-}
-
-.app-state-panel__error-code {
-  color: var(--color-text-secondary);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.75rem;
 }
 
 .app-state-panel--forbidden {

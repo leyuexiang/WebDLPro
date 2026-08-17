@@ -10,6 +10,7 @@ import { createServer } from 'vite'
  */
 function parseArguments(argumentsList) {
   const options = { manifest: undefined, report: undefined }
+  const suppliedOptions = new Set()
 
   for (let index = 0; index < argumentsList.length; index += 1) {
     const argument = argumentsList[index]
@@ -19,10 +20,12 @@ function parseArguments(argumentsList) {
     }
 
     const value = argumentsList[index + 1]
-    if (!value || value.startsWith('--')) throw new Error(`${argument}必须提供相对工作区路径。`)
-    const key = argument.slice(2)
-    if (options[key] !== undefined) throw new Error(`${argument}不能重复提供。`)
-    options[key] = value
+    if (!value || value.startsWith('--')) throw new Error(`${argument}必须提供参数值。`)
+    if (suppliedOptions.has(argument)) throw new Error(`${argument}不能重复提供。`)
+    suppliedOptions.add(argument)
+
+    if (argument === '--manifest') options.manifest = value
+    if (argument === '--report') options.report = value
     index += 1
   }
 
@@ -51,6 +54,7 @@ function resolveWorkspacePath(workspaceRoot, inputPath, optionName) {
 function createReport(manifestPath, issues) {
   return {
     status: issues.length === 0 ? 'valid' : 'invalid',
+    mode: 'structure',
     manifestPath,
     issueCount: issues.length,
     issues: issues.map((issue) => ({ code: issue.code, message: issue.message })),
@@ -77,7 +81,9 @@ async function loadValidator(workspaceRoot) {
 
   try {
     const module = await server.ssrLoadModule('/src/config/scene-topology/validator.ts')
-    if (typeof module.validateSceneTopologyManifest !== 'function') throw new Error('场景拓扑校验器未导出。')
+    if (typeof module.validateSceneTopologyManifest !== 'function') {
+      throw new Error('场景拓扑校验器未导出。')
+    }
     return module.validateSceneTopologyManifest
   } finally {
     await server.close()
@@ -99,7 +105,7 @@ async function main() {
   }
 
   if (options.help) {
-    process.stdout.write('用法：node scripts/validate-scene-topology-manifest.mjs --manifest <工作区内清单.json> [--report <工作区内报告.json>]\n')
+    process.stdout.write('用法：node scripts/validate-scene-topology-manifest.mjs --manifest <场景拓扑结构清单.json> [--report <报告.json>]\n')
     return
   }
 
@@ -118,16 +124,18 @@ async function main() {
     return
   }
 
-  let validateSceneTopologyManifest
+  let validators
   try {
-    validateSceneTopologyManifest = await loadValidator(workspaceRoot)
+    validators = await loadValidator(workspaceRoot)
   } catch {
     process.stderr.write('场景拓扑校验器加载失败。\n')
     process.exitCode = 2
     return
   }
 
-  const report = createReport(manifestLocation.relativePath, validateSceneTopologyManifest(manifestPayload))
+  // 发布、联调和运行时只存在一份结构清单，因此命令行与浏览器复用同一个严格校验器。
+  const issues = validators(manifestPayload)
+  const report = createReport(manifestLocation.relativePath, issues)
   try {
     if (reportLocation) await writeFile(reportLocation.resolvedPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8')
     writeStandardOutput(report)

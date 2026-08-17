@@ -18,12 +18,23 @@
     <section>
       <h1>网页图形运行时模拟器</h1>
       <button id="object-button" aria-label="模拟三维对象"></button>
+      <button id="stale-object-button" aria-label="模拟旧燃气三维对象"></button>
+      <button id="delayed-object-button" aria-label="安排延迟燃气三维对象"></button>
       <p>点击方块会回传稳定业务节点标识。</p>
+      <p>后两枚方块只用于任务-037的旧实例与释放后迟到事件回归。</p>
       <!--
         本地回归计数仅记录 focusNode（聚焦节点）命令次数，不记录节点标识、场景或任何业务载荷。
         它用于验证二维重复点击不会重复向 Unity 下发聚焦；正式 WebGL 页面不依赖该测试属性。
       -->
-      <p id="message" data-focus-node-count="0">正在初始化桥接。</p>
+      <p
+        id="message"
+        data-focus-node-count="0"
+        data-node-visual-state-command-count="0"
+        data-node-visual-state-failure-count="0"
+        data-clear-node-visual-state-command-count="0"
+        data-last-node-visual-state=""
+        data-active-node-visual-state-count="0"
+      >正在初始化桥接。</p>
     </section>
   </main>
 
@@ -48,15 +59,68 @@
     const timeoutDelaySceneId = query.get('timeoutDelaySceneId');
     const timeoutSceneDelayMs = Number(query.get('timeoutSceneDelayMs')) || 40;
     const failedSceneId = query.get('failedSceneId');
+    // 仅由任务-014夹具注入的四态失败开关。生产网页图形不传递此参数，因此不能借它伪造真实模型失败。
+    const failedNodeVisualState = query.get('failNodeVisualState');
     // 本地夹具与正式内层协议同步声明全部受控动作；模拟页只回传结构化结果，
     // 不伪造任何场景节点、材质或路径资源，从而不会把夹具误当成九场景业务实现。
-    const commandCapabilities = ['init', 'resize', 'switchScene', 'enterProcessStep', 'resetScene', 'focusNode', 'setNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'];
+    const commandCapabilities = ['init', 'resize', 'switchScene', 'enterProcessStep', 'resetScene', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'];
     const eventCapabilities = ['ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'disposed'];
     const message = document.querySelector('#message');
     let disposed = false;
     // 模拟 Unity 每次实际完成场景加载时的新物理实例；同场景普通命令不会改变该值。
     let sceneActivationSequence = 0;
+    let activeSceneId = '';
     let activeSceneActivationId = '';
+    // 每个场景最多保留最近一次被替换的物理实例，共九个场景上限；它只为 ABA（同值往返）浏览器回归生成过期事件。
+    const previousSceneActivationIdBySceneId = new Map();
+    // 延迟选择最多允许一个待发计时器。释放时会统一取消，避免本地夹具保留计时器或在已释放会话中继续发送事件。
+    const delayedObjectSelectionTimers = new Set();
+    // 一秒延迟为浏览器完成跨 iframe 释放命令预留足够余量；它仅服务本地回归，不属于生产超时或重试策略。
+    const delayedObjectSelectionDelayMs = 1_000;
+    // 本地夹具仅保存当前动态覆盖的受控摘要：键为已校验 sceneNodeId，容量与正式运行时一致限制为500项。
+    // 它不模拟材质、层级、对象引用或正式燃气模型；内置浏览器只据此确认命令确实穿过三层链路抵达模拟端。
+    const activeVisualStateBySceneNodeId = new Map();
+
+    /** 将本地夹具的有限状态摘要写入固定 data 属性，供浏览器测试读取，正式 WebGL 构建不会包含该元素。 */
+    function refreshVisualStateDiagnostics() {
+      message.dataset.activeNodeVisualStateCount = String(activeVisualStateBySceneNodeId.size);
+    }
+
+    /** 仅记录固定九场景目录内最近被替换的实例，避免测试输入异常时把历史标识无限保留。 */
+    function rememberPreviousSceneActivation(sceneId, sceneActivationId) {
+      previousSceneActivationIdBySceneId.delete(sceneId);
+      previousSceneActivationIdBySceneId.set(sceneId, sceneActivationId);
+      while (previousSceneActivationIdBySceneId.size > 9) {
+        previousSceneActivationIdBySceneId.delete(previousSceneActivationIdBySceneId.keys().next().value);
+      }
+    }
+
+    /** 释放测试页时取消所有尚未触发的选择回调，确保已释放会话绝不会从计时器路径继续发送内层事件。 */
+    function clearDelayedObjectSelectionTimers() {
+      for (const timerId of delayedObjectSelectionTimers) window.clearTimeout(timerId);
+      delayedObjectSelectionTimers.clear();
+    }
+
+    /**
+     * 夹具只允许燃气场景的已登记三维节点生成对象选择事件。
+     * 它刻意不根据对象名称、场景路径或上一次按钮状态推导载荷，防止测试页绕过正式映射边界。
+     */
+    function createGasObjectSelectionPayload(sceneActivationId) {
+      if (activeSceneId !== 'gas-power' || !sceneActivationId) return undefined;
+      return {
+        sceneId: 'gas-power',
+        sceneNodeId: 'scene-node.gas-turbine',
+        sceneActivationId,
+      };
+    }
+
+    /** 统一从受控三字段载荷发送选择，正常、旧实例与延迟回归均复用同一协议路径。 */
+    function postGasObjectSelection(sceneActivationId) {
+      const payload = createGasObjectSelectionPayload(sceneActivationId);
+      if (!payload) return false;
+      post('objectSelected', payload);
+      return true;
+    }
 
     /** 精确 Origin 是唯一允许的父页面地址；路径、查询和片段都会拒绝启动通信。 */
     function isExactOrigin(value) {
@@ -78,6 +142,15 @@
       return ['normal', 'alarm', 'fault', 'offline'].includes(value);
     }
 
+    /**
+     * 只为三层夹具稳定复现“Unity 单节点失败但外层二维成功”。
+     * 参数先经过既有四态白名单收敛，且只能精确匹配当前命令的视觉状态；它不影响载荷结构校验、
+     * 场景选择、正式构建或其他四态命令，避免测试开关变成任意失败注入入口。
+     */
+    function shouldFailNodeVisualState(payload) {
+      return isVisualState(failedNodeVisualState) && payload?.visualState === failedNodeVisualState;
+    }
+
     /** 状态时间必须与正式内层协议一致：有界且可解析，避免夹具放宽契约而掩盖迟到状态问题。 */
     function isStatusUpdatedAt(value) {
       return typeof value === 'string' && value.length > 0 && value.length <= 128 && Number.isFinite(Date.parse(value));
@@ -94,16 +167,22 @@
         return isIdentifier(payload?.sceneNodeId) && isIdentifier(payload?.selectionId) && typeof payload?.isolate === 'boolean';
       }
       if (type === 'setNodeVisualState') {
-        // 内层固定二元组保留外层修订号可选语义，并明确区分“未提供修订号”和“显式修订号零”。
-        const hasValidRevisionPair = typeof payload?.hasSourceRevision === 'boolean' &&
-          Number.isSafeInteger(payload?.sourceRevision) && payload.sourceRevision >= 0 &&
-          (payload.hasSourceRevision || payload.sourceRevision === 0);
+        // 只有壳内正快照序号参与迟到隔离；平台时间和来源修订继续严格校验但只作诊断。
+        const hasValidSnapshotSequence = Number.isSafeInteger(payload?.snapshotSequence) && payload.snapshotSequence > 0;
+        const hasValidSourceRevision = Number.isSafeInteger(payload?.sourceRevision) && payload.sourceRevision >= 0;
         return isIdentifier(payload?.sceneNodeId) && isVisualState(payload?.visualState) &&
-          isStatusUpdatedAt(payload?.statusUpdatedAt) && hasValidRevisionPair;
+          isStatusUpdatedAt(payload?.statusUpdatedAt) && hasValidSnapshotSequence && hasValidSourceRevision;
+      }
+      // 清除动态状态必须携带与设置命令相同的受控三维节点标识和正整数本地快照序号。
+      // 缺少该分支会让夹具错误宣称支持清除能力，却在完整快照设备消失时拒绝合法命令。
+      if (type === 'clearNodeVisualState') {
+        return isIdentifier(payload?.sceneNodeId) && Number.isSafeInteger(payload?.snapshotSequence) && payload.snapshotSequence > 0;
       }
       if (type === 'setRouteFlow') return isIdentifier(payload?.routeId) && typeof payload?.enabled === 'boolean';
       if (type === 'setNodeVisibility') return isIdentifier(payload?.sceneNodeId) && typeof payload?.enabled === 'boolean';
-      return type === 'resetScene';
+      // resetScene（场景重置）与 clearSelection（清除选择）均使用空对象载荷，
+      // 但模拟页仍按不同命令类型返回结果，确保正式链路不会用场景重置冒充描边取消。
+      return type === 'resetScene' || type === 'clearSelection';
     }
 
     /**
@@ -137,7 +216,7 @@
       } else if (data.type === 'resize') {
         message.textContent = `已同步尺寸：${data.payload?.width || 0} × ${data.payload?.height || 0}`;
         post('commandResult', { requestId: data.messageId, success: true, message: '尺寸已同步。' });
-      } else if (['enterProcessStep', 'resetScene', 'focusNode', 'setNodeVisualState', 'setRouteFlow', 'setNodeVisibility'].includes(data.type)) {
+      } else if (['enterProcessStep', 'resetScene', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility'].includes(data.type)) {
         if (!isValidActionPayload(data.type, data.payload)) {
           post('commandResult', { requestId: data.messageId, success: false, errorCode: 'action-payload-invalid', message: '动作载荷缺少合法稳定标识或固定状态。' });
           return;
@@ -146,6 +225,34 @@
         // focusNode 另以受限数字计数，供任务-028验证同一二维选择的幂等性，计数不会进入跨窗口协议。
         if (data.type === 'focusNode') {
           message.dataset.focusNodeCount = String(Number(message.dataset.focusNodeCount || '0') + 1);
+        }
+        if (data.type === 'setNodeVisualState') {
+          if (shouldFailNodeVisualState(data.payload)) {
+            // 保留固定计数而不保存节点标识或完整载荷；浏览器只据此核验模拟端确实拒绝过一次受控命令。
+            message.dataset.nodeVisualStateFailureCount = String(Number(message.dataset.nodeVisualStateFailureCount || '0') + 1);
+            message.textContent = '模拟运行时已拒绝受控节点视觉状态。';
+            post('commandResult', {
+              requestId: data.messageId,
+              success: false,
+              errorCode: 'scene-node-visual-state-simulated-failure',
+              message: '模拟节点视觉状态失败。',
+            });
+            return;
+          }
+          // 只接受已经通过协议校验的四态和节点标识；相同节点更新为最新状态，不按批次无界累积。
+          activeVisualStateBySceneNodeId.set(data.payload.sceneNodeId, data.payload.visualState);
+          while (activeVisualStateBySceneNodeId.size > 500) activeVisualStateBySceneNodeId.delete(activeVisualStateBySceneNodeId.keys().next().value);
+          message.dataset.nodeVisualStateCommandCount = String(Number(message.dataset.nodeVisualStateCommandCount || '0') + 1);
+          message.dataset.lastNodeVisualState = data.payload.visualState;
+          refreshVisualStateDiagnostics();
+        }
+        if (data.type === 'clearNodeVisualState') {
+          // 清除恢复模型基础视觉，因此必须移除动态覆盖，而不能伪装成 normal（正常）状态。
+          // 最近一次“设置”四态保持不变，便于三层回归同时核验故障已经下发与另一节点已被清除；
+          // 该受限诊断不保存节点标识或业务载荷，也不会进入正式 WebGL 页面。
+          activeVisualStateBySceneNodeId.delete(data.payload.sceneNodeId);
+          message.dataset.clearNodeVisualStateCommandCount = String(Number(message.dataset.clearNodeVisualStateCommandCount || '0') + 1);
+          refreshVisualStateDiagnostics();
         }
         message.textContent = `模拟运行时已确认 ${data.type}。`;
         post('commandResult', { requestId: data.messageId, success: true, message: `模拟运行时已确认 ${data.type}。` });
@@ -175,6 +282,11 @@
             return;
           }
           // 只有场景最终成功提交后才生成实例标识，不能用下行 transitionId 或页面时间戳冒充实例。
+          if (disposed) return;
+          if (activeSceneId && activeSceneActivationId) {
+            rememberPreviousSceneActivation(activeSceneId, activeSceneActivationId);
+          }
+          activeSceneId = payload.sceneId;
           activeSceneActivationId = `scene-activation.local-${++sceneActivationSequence}`;
           post('sceneChanged', {
             requestId: data.messageId,
@@ -192,6 +304,8 @@
       } else if (data.type === 'dispose') {
         post('disposed', { requestId: data.messageId, success: true, message: '模拟运行时已释放。' });
         disposed = true;
+        clearDelayedObjectSelectionTimers();
+        previousSceneActivationIdBySceneId.clear();
         window.removeEventListener('message', receive);
         message.textContent = '运行时已释放。';
       }
@@ -209,13 +323,30 @@
      * 它不代表正式燃气映射，更不会回传引擎对象引用、对象名称、层级或坐标。
      */
     document.querySelector('#object-button').addEventListener('click', () => {
-      // 协议明确区分二维 nodeId、三维 sceneNodeId 与物理场景实例；夹具只回传已登记的受控标识。
-      if (!activeSceneActivationId) return;
-      post('objectSelected', {
-        sceneId: 'gas-power',
-        sceneNodeId: 'scene-node.gas-turbine',
-        sceneActivationId: activeSceneActivationId,
-      });
+      // 协议明确区分二维 nodeId、三维 sceneNodeId 与物理场景实例；夹具只回传当前已登记的受控标识。
+      postGasObjectSelection(activeSceneActivationId);
+    });
+
+    /**
+     * 仅在“燃气实例一 → 其他场景 → 燃气实例二”完成后发送燃气实例一的选择。
+     * 该按钮模拟网络或引擎回调迟到，外层必须因 sceneActivationId（物理场景激活标识）不匹配而静默阻断。
+     */
+    document.querySelector('#stale-object-button').addEventListener('click', () => {
+      postGasObjectSelection(previousSceneActivationIdBySceneId.get('gas-power'));
+    });
+
+    /**
+     * 此按钮先捕获当前合法三字段载荷，再延迟发送。若期间收到 system.dispose（系统释放），
+     * 释放分支会取消计时器；浏览器回归据此验证已释放实例不会继续产生外层对象选择事件。
+     */
+    document.querySelector('#delayed-object-button').addEventListener('click', () => {
+      const payload = createGasObjectSelectionPayload(activeSceneActivationId);
+      if (!payload || delayedObjectSelectionTimers.size > 0) return;
+      const timerId = window.setTimeout(() => {
+        delayedObjectSelectionTimers.delete(timerId);
+        post('objectSelected', payload);
+      }, delayedObjectSelectionDelayMs);
+      delayedObjectSelectionTimers.add(timerId);
     });
   </script>
 </body>

@@ -56,7 +56,8 @@
       sceneMappingVersion: 'mock-mapping-1',
       resourceDigest: 'sha256:local-mock-v1',
       // 与 Unity 桥接白名单一致；夹具仅验证协议和关联，不以这些能力推断真实场景资源存在。
-      commandCapabilities: ['init', 'resize', 'switchScene', 'enterProcessStep', 'resetScene', 'focusNode', 'setNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
+      // clearSelection（清除选择）必须参与握手覆盖校验，避免模拟页遗漏能力却让回归继续执行。
+      commandCapabilities: ['init', 'resize', 'switchScene', 'enterProcessStep', 'resetScene', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
       eventCapabilities: ['ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'disposed']
     };
     const frameContainer = document.querySelector('#frame-container');
@@ -274,8 +275,10 @@
       const commands = [
         ['enterProcessStep', { processId: 'gas-power-generation', stepId: 'overview', unitId: 'all', isolate: true }],
         ['focusNode', { sceneNodeId: 'gas-turbine', selectionId: `selection.local-action-focus.${crypto.randomUUID()}`, isolate: true }],
+        // 先聚焦再清除，验证空白点击所需命令能够独立回执；该命令不得使用 resetScene（场景重置）载荷。
+        ['clearSelection', {}],
         // 直接内层命令使用与生产适配器相同的固定修订二元组；false/0 表示外层没有提供可选修订号。
-        ['setNodeVisualState', { sceneNodeId: 'gas-turbine', visualState: 'alarm', statusUpdatedAt: '2026-08-08T10:00:00.000Z', hasSourceRevision: false, sourceRevision: 0 }],
+        ['setNodeVisualState', { sceneNodeId: 'gas-turbine', visualState: 'alarm', snapshotSequence: 1, statusUpdatedAt: '2026-08-08T10:00:00.000Z', sourceRevision: 0 }],
         ['setRouteFlow', { routeId: 'route.gas-to-grid', enabled: true }],
         ['setNodeVisibility', { sceneNodeId: 'gas-turbine', enabled: true }],
         ['resetScene', {}]
@@ -284,7 +287,7 @@
         postCommand(type, payload);
         await waitFor(() => pending.size === 0, `${type} 命令超时`);
       }
-      result.textContent = '动作协议回归通过：流程、聚焦、状态、路径、显隐与复位均已确认。';
+      result.textContent = '动作协议回归通过：流程、聚焦、清除交互描边、状态、路径、显隐与复位均已确认。';
       writeLog('动作协议回归通过。');
     }
 

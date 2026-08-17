@@ -13,6 +13,7 @@ import {
   isWebglFocusNodePayload,
   isWebglSetNodeVisibilityPayload,
   isWebglSetNodeVisualStatePayload,
+  isWebglClearNodeVisualStatePayload,
   isWebglSetRouteFlowPayload,
   isWebglSwitchScenePayload,
   type WebglCommandType,
@@ -74,7 +75,6 @@ const SCENE_SWITCH_RESULT_TIMEOUT_MS = 30_000
 const HANDSHAKE_TIMEOUT_MS = 15_000
 const MAX_PENDING_COMMANDS = 64
 const MAX_REJECTION_LOGS = 50
-
 /**
  * 可在网络抖动后安全重发一次的命令。所有重试沿用同一个 messageId，
  * 子页面可据此做幂等去重，前端也不会生成第二条待确认记录。
@@ -84,7 +84,10 @@ const IDEMPOTENT_COMMANDS = new Set<WebglCommandType>([
   'resize',
   'resetScene',
   'focusNode',
+  'clearSelection',
   'setNodeVisualState',
+  // 同一快照序号的清除命令由 Unity 幂等处理；回执丢失时重发一次才能避免旧颜色长期残留。
+  'clearNodeVisualState',
   'setRouteFlow',
   'setNodeVisibility',
   'dispose',
@@ -119,18 +122,27 @@ export class WebglRuntimeConnector {
   }
 
   /**
-   * 在 iframe 元素创建后绑定其 contentWindow，并从此刻开始计算 15 秒握手时限。
-   * 未绑定 iframe 窗口时，即便来源相同也会被拒绝，防止同源其他页面伪造运行时消息。
+   * 绑定当前 iframe 的 contentWindow（内容窗口）。首次绑定才开始 15 秒握手时限；
+   * iframe 从 about:blank（初始空白页）导航到 Unity 页面后，宿主会在 load（加载完成）事件中再次调用本方法。
+   * 重新绑定只替换严格校验所使用的窗口代理，不延长既有握手期限，既避免初始空白页的代理与实际 Unity
+   * 页面消息来源不一致，也避免异常页面借由反复导航无限延长连接等待时间。
    */
   public attachChildWindow(childWindow: WindowProxy | null): void {
     if (!childWindow || this.status === 'disposed' || this.status === 'failed') return
 
+    const isInitialBinding = this.childWindow === null
     this.childWindow = childWindow
-    this.changeStatus('handshaking')
-    this.clearHandshakeTimeout()
-    this.handshakeTimeoutHandle = setTimeout(() => {
-      this.fail('网页图形运行时握手超时。')
-    }, HANDSHAKE_TIMEOUT_MS)
+
+    if (isInitialBinding) {
+      this.changeStatus('handshaking')
+      this.clearHandshakeTimeout()
+      this.handshakeTimeoutHandle = setTimeout(() => {
+        this.fail('网页图形运行时握手超时。')
+      }, HANDSHAKE_TIMEOUT_MS)
+      return
+    }
+
+    // 后续 load 只用最新 contentWindow 更新严格来源校验目标；不重置既有握手时限，防止反复导航无限延长等待。
   }
 
   /** 仅返回已通过 ready 协商的命令能力，调用方不得用配置猜测子页面实际能力。 */
@@ -311,7 +323,12 @@ export class WebglRuntimeConnector {
     eventType: 'ack' | 'commandResult',
   ): void {
     if (!isWebglRequestAcknowledgementPayload(envelope.payload)) {
-      this.reject(`${eventType} 事件缺少原始 requestId。`)
+      /*
+       * `requestId` 已存在不代表整个确认负载合法：例如 Unity 旧通用模型会把可选
+       * `sceneActivationId` 序列化为空字符串。该值一旦出现就必须是合法稳定标识，
+       * 不能把字段级协议错误误报为“缺少原始请求标识”，否则会掩盖跨端模型不一致。
+       */
+      this.reject(`${eventType} 事件确认载荷无效。`)
       return
     }
 
@@ -607,6 +624,8 @@ function isValidWebglCommandPayload(command: WebglCommandType, payload: unknown)
       return isWebglFocusNodePayload(payload)
     case 'setNodeVisualState':
       return isWebglSetNodeVisualStatePayload(payload)
+    case 'clearNodeVisualState':
+      return isWebglClearNodeVisualStatePayload(payload)
     case 'setRouteFlow':
       return isWebglSetRouteFlowPayload(payload)
     case 'setNodeVisibility':
@@ -627,6 +646,8 @@ function getWebglCommandPayloadError(command: WebglCommandType): string {
       return '聚焦命令缺少合法三维节点标识、选择标识或隔离开关。'
     case 'setNodeVisualState':
       return '设备状态命令缺少合法三维节点标识或四态状态。'
+    case 'clearNodeVisualState':
+      return '设备状态清除命令缺少合法三维节点标识或本地快照序号。'
     case 'setRouteFlow':
       return '路径命令缺少合法路径标识或开关值。'
     case 'setNodeVisibility':

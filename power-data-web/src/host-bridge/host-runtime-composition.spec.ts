@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from 'vitest'
-import { toActionId, toDeviceId, toNodeId, toSceneId, toSceneNodeId, toSessionId, toTopologyId } from '@/config/scene-topology/identifiers'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { toActionId, toNodeId, toSceneId, toSceneNodeId, toSessionId, toTopologyId } from '@/config/scene-topology/identifiers'
 import { HostBridge } from '@/host-bridge/host-bridge'
+import { HOST_COMMAND_TIMEOUT_MS } from '@/host-bridge/host-command-lifecycle'
 import { HostRuntimeComposition, type HostDeviceStatesUpdatePort, type HostViewOpenPort, type HostWorkflowTriggerPort } from '@/host-bridge/host-runtime-composition'
 import type { HostCommandMessage, HostEventMessage } from '@/host-bridge/host-protocol'
 import type { VisualizationCoordinatorFacade } from '@/modules/visual/orchestration/visualization-coordinator-facade'
@@ -19,7 +20,6 @@ function createSnapshot(overrides: Partial<VisualizationCoordinatorSnapshot> = {
     topologyStatus: 'idle',
     selectedNodeIds: [],
     selectedRouteIds: [],
-    selectedDeviceId: null,
     selectedSceneNodeId: null,
     selectionSource: 'system',
     latestDiagnostic: null,
@@ -89,8 +89,16 @@ function createCommand<TType extends HostCommandMessage['type']>(
 }
 
 describe('外层运行时组合根', () => {
+  afterEach(() => vi.useRealTimers())
+
   it('初始化复用原子 view.open，并在确认后才上报稳定视图', async () => {
-    const { composition, sent, openCalls } = createComposition()
+    const resynchronizeLatestSnapshot = vi.fn()
+    const deviceStatesUpdate: HostDeviceStatesUpdatePort = {
+      submit: vi.fn().mockResolvedValue({ success: true, status: 'completed' }),
+      resynchronizeLatestSnapshot,
+      dispose: vi.fn(),
+    }
+    const { composition, sent, openCalls } = createComposition(async () => ({ success: true }), undefined, deviceStatesUpdate)
     composition.start()
 
     await composition.handleCommand(createCommand('system.init', {
@@ -105,6 +113,38 @@ describe('外层运行时组合根', () => {
       type: 'view.changed',
       replyTo: 'parent-init-01',
       payload: expect.objectContaining({ sceneId: 'gas-power', topologyId: 'topology.gas-power', contextRevision: 1 }),
+    }))
+    // system.init 复用 view.open 成功后，才允许把最新权威快照重投影到已确认的物理场景实例。
+    expect(resynchronizeLatestSnapshot).toHaveBeenCalledTimes(1)
+    expect(resynchronizeLatestSnapshot).toHaveBeenCalledWith(undefined)
+    composition.dispose()
+  })
+
+  /**
+   * 初始化失败不走普通命令结果路径：父页面必须先收到失败确认，再收到同一 replyTo 的脱敏系统错误。
+   * 此处选用清单版本不一致，是无需伪造场景或 Unity 失败即可稳定触发的握手失败分支。
+   */
+  it('初始化失败同时发送关联失败确认和系统错误，且不提交视图', async () => {
+    const { composition, sent, openCalls } = createComposition()
+    composition.start()
+
+    await composition.handleCommand(createCommand('system.init', {
+      sceneId: toSceneId('gas-power'),
+      topologyId: toTopologyId('topology.gas-power'),
+      expectedManifestVersion: 'outdated-manifest',
+    }, 'parent-init-version-mismatch'))
+
+    expect(openCalls).toEqual([])
+    expect(sent.map((event) => event.type)).toEqual(['system.ready', 'system.ack', 'system.error'])
+    expect(sent[1]).toEqual(expect.objectContaining({
+      type: 'system.ack',
+      replyTo: 'parent-init-version-mismatch',
+      payload: expect.objectContaining({ success: false, error: expect.objectContaining({ code: 'manifest.version.mismatch' }) }),
+    }))
+    expect(sent[2]).toEqual(expect.objectContaining({
+      type: 'system.error',
+      replyTo: 'parent-init-version-mismatch',
+      payload: expect.objectContaining({ error: expect.objectContaining({ code: 'manifest.version.mismatch' }) }),
     }))
     composition.dispose()
   })
@@ -136,28 +176,26 @@ describe('外层运行时组合根', () => {
     }, 'parent-init-02'))
 
     await composition.handleCommand(createCommand('state.get', {}, 'parent-state-01'))
-    expect(composition.reportTopologyDeviceDoubleClick({
+    expect(composition.reportTopologyNodeDoubleClick({
       sceneId: toSceneId('gas-power'),
       topologyId: toTopologyId('topology.gas-power'),
       nodeId: toNodeId('node.turbine'),
-      deviceId: toDeviceId('device.turbine'),
     })).toBe(true)
-    expect(composition.reportTopologyDeviceDoubleClick({
+    expect(composition.reportTopologyNodeDoubleClick({
       sceneId: toSceneId('wind-power'),
       topologyId: toTopologyId('topology.gas-power'),
       nodeId: toNodeId('node.turbine'),
-      deviceId: toDeviceId('device.turbine'),
     })).toBe(false)
 
     expect(sent.some((event) => event.type === 'state.snapshot' && event.replyTo === 'parent-state-01')).toBe(true)
     expect(sent.at(-1)).toEqual(expect.objectContaining({
       type: 'topology.node.dblclick',
-      payload: expect.objectContaining({ deviceId: 'device.turbine', contextRevision: 1 }),
+      payload: expect.objectContaining({ nodeId: 'node.turbine' }),
     }))
     composition.dispose()
   })
 
-  it('三维反向选择仅在握手和当前稳定上下文均匹配时上报外层事件', async () => {
+  it('三维反向选择仅在握手和当前稳定上下文均匹配时上报节点事件', async () => {
     const { composition, sent } = createComposition()
     composition.start()
     await composition.handleCommand(createCommand('system.init', {
@@ -168,39 +206,40 @@ describe('外层运行时组合根', () => {
     const reported = composition.reportSceneObjectSelected({
       sceneId: toSceneId('gas-power'),
       sceneNodeId: toSceneNodeId('scene-node.turbine'),
-      deviceId: toDeviceId('device.turbine'),
+      nodeId: toNodeId('node.turbine'),
       topologyId: toTopologyId('topology.gas-power'),
-      nodeIds: [toNodeId('node.turbine')],
       contextRevision: 1,
       correlationId: 'unity-object-select-01',
     })
     const rejected = composition.reportSceneObjectSelected({
       sceneId: toSceneId('wind-power'),
       sceneNodeId: toSceneNodeId('scene-node.turbine'),
+      nodeId: toNodeId('node.turbine'),
       topologyId: toTopologyId('topology.gas-power'),
-      nodeIds: [],
       contextRevision: 1,
       correlationId: 'unity-object-select-stale',
     })
-    // 组合根不信任直接调用者：即使场景和拓扑看似匹配，没有显式设备映射也不得对父页面声明对象已选中。
+    // 组合根不信任直接调用者：即使场景看似匹配，没有静态节点映射也不得对父页面声明对象已选中。
     const unmapped = composition.reportSceneObjectSelected({
       sceneId: toSceneId('gas-power'),
       sceneNodeId: toSceneNodeId('scene-node.unmapped'),
+      nodeId: toNodeId('node.turbine'),
       topologyId: toTopologyId('topology.gas-power'),
-      nodeIds: [toNodeId('node.turbine')],
       contextRevision: 1,
       correlationId: 'unity-object-select-unmapped',
     })
 
     expect(reported).toBe(true)
     expect(rejected).toBe(false)
-    expect(unmapped).toBe(false)
+    // 该入口接收的是 UnityObjectSelectionCoordinator 已完成静态映射的意图；组合根只复核上下文，
+    // 不重复维护第二份 nodeId 与 sceneNodeId 关系，避免双事实源。
+    expect(unmapped).toBe(true)
     expect(sent.find((event) => event.type === 'system.ready')).toEqual(expect.objectContaining({
       payload: expect.objectContaining({ eventCapabilities: expect.arrayContaining(['scene.object.selected']) }),
     }))
     expect(sent.at(-1)).toEqual(expect.objectContaining({
       type: 'scene.object.selected',
-      payload: expect.objectContaining({ deviceId: 'device.turbine', contextRevision: 1 }),
+      payload: expect.objectContaining({ nodeId: 'node.turbine' }),
     }))
     composition.dispose()
   })
@@ -231,8 +270,14 @@ describe('外层运行时组合根', () => {
     }))
   })
 
-  it('缓存命令只重放关联结果，不重复执行事务或派生视图事件', async () => {
-    const { composition, sent, openCalls } = createComposition()
+  it('重复普通命令静默结束，不重复执行事务、派生事件或发送第二份结果', async () => {
+    const resynchronizeLatestSnapshot = vi.fn()
+    const deviceStatesUpdate: HostDeviceStatesUpdatePort = {
+      submit: vi.fn().mockResolvedValue({ success: true, status: 'completed' }),
+      resynchronizeLatestSnapshot,
+      dispose: vi.fn(),
+    }
+    const { composition, sent, openCalls } = createComposition(async () => ({ success: true }), undefined, deviceStatesUpdate)
     composition.start()
     await composition.handleCommand(createCommand('system.init', {
       sceneId: toSceneId('gas-power'),
@@ -252,15 +297,51 @@ describe('外层运行时组合根', () => {
       'parent-init-duplicate',
       'parent-view-duplicate',
     ])
-    expect(sent.filter((event) => event.type === 'command.result' && event.replyTo === 'parent-view-duplicate')).toHaveLength(2)
+    expect(sent.filter((event) => event.type === 'command.result' && event.replyTo === 'parent-view-duplicate')).toHaveLength(1)
+    // 初始成功和第一次 view.open 各重投影一次；相同 messageId 的重复命令不能再次触发内部同步。
+    expect(resynchronizeLatestSnapshot).toHaveBeenCalledTimes(2)
     composition.dispose()
+  })
+
+  it('内层释放超过十秒时只发送一次超时结果，迟到完成不再补发', async () => {
+    vi.useFakeTimers()
+    let resolveRelease: ((result: { success: boolean }) => void) | undefined
+    const releaseInnerRuntime = vi.fn(() => new Promise<{ success: boolean }>((resolve) => { resolveRelease = resolve }))
+    const { composition, sent } = createComposition(releaseInnerRuntime)
+    composition.start()
+    await composition.handleCommand(createCommand('system.init', {
+      sceneId: toSceneId('gas-power'),
+      topologyId: toTopologyId('topology.gas-power'),
+    }, 'parent-init-release-timeout'))
+
+    const disposePromise = composition.handleCommand(createCommand('system.dispose', { reason: 'timeout-test' }, 'parent-dispose-timeout'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(releaseInnerRuntime).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(HOST_COMMAND_TIMEOUT_MS)
+    await disposePromise
+    expect(sent.filter((event) => event.type === 'command.result' && event.replyTo === 'parent-dispose-timeout')).toEqual([
+      expect.objectContaining({
+        payload: expect.objectContaining({ success: false, error: expect.objectContaining({ code: 'command.timeout' }) }),
+      }),
+    ])
+
+    resolveRelease?.({ success: true })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(sent.filter((event) => event.type === 'command.result' && event.replyTo === 'parent-dispose-timeout')).toHaveLength(1)
   })
 
   it('安装同场景流程动作后才发布能力、转交命令并在成功时派生一次稳定视图事件', async () => {
     const workflowTrigger: HostWorkflowTriggerPort = {
       submit: vi.fn().mockResolvedValue({ success: true, status: 'completed', contextRevision: 2 }),
     }
-    const { composition, sent } = createComposition(async () => ({ success: true }), workflowTrigger)
+    const resynchronizeLatestSnapshot = vi.fn()
+    const deviceStatesUpdate: HostDeviceStatesUpdatePort = {
+      submit: vi.fn().mockResolvedValue({ success: true, status: 'completed' }),
+      resynchronizeLatestSnapshot,
+      dispose: vi.fn(),
+    }
+    const { composition, sent } = createComposition(async () => ({ success: true }), workflowTrigger, deviceStatesUpdate)
     composition.start()
     await composition.handleCommand(createCommand('system.init', {
       sceneId: toSceneId('gas-power'),
@@ -281,6 +362,47 @@ describe('外层运行时组合根', () => {
     expect(sent.filter((event) => event.type === 'view.changed').at(-1)).toEqual(expect.objectContaining({
       replyTo: 'parent-workflow-01',
     }))
+    // 同场景流程动作成功提交后，必须按当前物理场景实例再次重投影；该调用不产生额外外层事件。
+    expect(resynchronizeLatestSnapshot).toHaveBeenCalledTimes(2)
+    composition.dispose()
+  })
+
+  it('流程动作失败或普通命令重复时不触发额外重投影', async () => {
+    const workflowTrigger: HostWorkflowTriggerPort = {
+      submit: vi.fn().mockResolvedValue({
+        success: false,
+        status: 'failed',
+        error: {
+          code: 'action.execute.failed',
+          stage: 'executing-action',
+          message: '动作执行失败',
+          recoverable: true,
+        },
+      }),
+    }
+    const resynchronizeLatestSnapshot = vi.fn()
+    const deviceStatesUpdate: HostDeviceStatesUpdatePort = {
+      submit: vi.fn().mockResolvedValue({ success: true, status: 'completed' }),
+      resynchronizeLatestSnapshot,
+      dispose: vi.fn(),
+    }
+    const { composition, sent } = createComposition(async () => ({ success: true }), workflowTrigger, deviceStatesUpdate)
+    composition.start()
+
+    await composition.handleCommand(createCommand('system.init', {
+      sceneId: toSceneId('gas-power'),
+      topologyId: toTopologyId('topology.gas-power'),
+    }, 'parent-init-workflow-failed'))
+    await composition.handleCommand(createCommand('workflow.trigger', {
+      actionId: toActionId('action.gas.reset'),
+      expectedContextRevision: 1,
+    }, 'parent-workflow-failed'))
+
+    expect(sent.find((event) => event.type === 'command.result' && event.replyTo === 'parent-workflow-failed')).toEqual(
+      expect.objectContaining({ payload: expect.objectContaining({ success: false }) }),
+    )
+    // 失败动作没有提交稳定视图，不能触发重投影；初始化成功只保留一次调用。
+    expect(resynchronizeLatestSnapshot).toHaveBeenCalledTimes(1)
     composition.dispose()
   })
 
@@ -340,7 +462,7 @@ describe('外层运行时组合根', () => {
 
     await composition.handleCommand(createCommand('device.states.update', {
       sourceRevision: 1,
-      items: [{ deviceId: toDeviceId('device.turbine'), deviceStatus: 'alarm', statusUpdatedAt: '2026-08-05T00:00:00.000Z' }],
+      items: [{ nodeId: toNodeId('node.turbine'), deviceStatus: 'alarm', statusUpdatedAt: '2026-08-05T00:00:00.000Z' }],
     }, 'parent-device-states-01'))
 
     expect(deviceStatesUpdate.submit).toHaveBeenCalledWith(expect.objectContaining({

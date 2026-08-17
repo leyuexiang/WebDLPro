@@ -25,11 +25,16 @@ public static class PowerPlantPipelineUvBaker
         BakeMesh(sceneRoot, "海水进水口管道", "SeaWaterIntakeFlowUV.asset");
         BakeMesh(sceneRoot, "排水口管道1", "WaterDischargeFlowUV.asset");
         BakeMesh(sceneRoot, "凝结水到锅炉管道2", "CondensateToHrsgFlowUV.asset");
-        BakeMesh(sceneRoot, "余热锅炉管道", "HrsgFlowUV.asset");
+        // 场景中的已验证对象名带有编号后缀，必须与层级中的实际名称一致。
+        BakeMesh(sceneRoot, "余热锅炉管道001", "HrsgFlowUV.asset");
+        // 两条电线同样使用沿网格路径递增的 UV0：流动带会沿真实线缆延展，
+        // 不会受原始 FBX 贴图坐标影响而出现横向流动、断裂或停滞。
+        BakeMesh(sceneRoot, "发电机线", "GeneratorCableFlowUV.asset");
+        BakeMesh(sceneRoot, "变压器电线", "TransformerCableFlowUV.asset");
         EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
         EditorSceneManager.SaveScene(SceneManager.GetActiveScene());
         AssetDatabase.SaveAssets();
-        Debug.Log("[PowerPlantPipelineUvBaker] 已生成并绑定两条管道的流动 UV 网格。");
+        Debug.Log("[PowerPlantPipelineUvBaker] 已生成并绑定管道与电线的流动 UV 网格。");
     }
 
     private static void EnsureOutputDirectory()
@@ -55,13 +60,21 @@ public static class PowerPlantPipelineUvBaker
             return;
         }
 
+        string assetPath = OutputDirectory + "/" + assetName;
+        // 已经引用目标流向网格时直接跳过：重复执行菜单只处理尚未烘焙的新对象，
+        // 不会重新克隆旧管道网格，也不会因重复烘焙累积修改既有资产名称。
+        if (AssetDatabase.GetAssetPath(filter.sharedMesh) == assetPath)
+        {
+            Debug.Log($"[PowerPlantPipelineUvBaker] 已跳过 {objectName}：流动 UV 网格已绑定。");
+            return;
+        }
+
         Mesh source = filter.sharedMesh;
         Vector3[] sourceVertices = source.vertices;
         Mesh baked = UnityEngine.Object.Instantiate(source);
         baked.name = source.name + " Flow UV";
         baked.uv = BuildFlowUvs(sourceVertices, baked);
 
-        string assetPath = OutputDirectory + "/" + assetName;
         Debug.Log($"[PowerPlantPipelineUvBaker] {objectName}: 输出 {assetPath}");
         Mesh existing = AssetDatabase.LoadAssetAtPath<Mesh>(assetPath);
         if (existing != null)

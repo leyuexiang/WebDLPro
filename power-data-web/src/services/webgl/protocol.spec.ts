@@ -11,6 +11,7 @@ import {
   isWebglFocusNodePayload,
   isWebglSetNodeVisibilityPayload,
   isWebglSetNodeVisualStatePayload,
+  isWebglClearNodeVisualStatePayload,
   isWebglSetRouteFlowPayload,
   isWebglSwitchScenePayload,
   parseExactOrigin,
@@ -94,21 +95,26 @@ describe('网页图形协议', () => {
     const visualStatePayload = {
       sceneNodeId: 'node.gas-turbine',
       visualState: 'alarm',
+      snapshotSequence: 7,
       statusUpdatedAt: '2026-08-08T10:00:00.000Z',
-      hasSourceRevision: true,
       sourceRevision: 5,
     }
     expect(isWebglSetNodeVisualStatePayload(visualStatePayload)).toBe(true)
     expect(isWebglSetNodeVisualStatePayload({ ...visualStatePayload, sourceRevision: 0 })).toBe(true)
-    expect(isWebglSetNodeVisualStatePayload({ ...visualStatePayload, hasSourceRevision: false, sourceRevision: 0 })).toBe(true)
-    expect(isWebglSetNodeVisualStatePayload({ ...visualStatePayload, hasSourceRevision: false })).toBe(false)
+    expect(isWebglSetNodeVisualStatePayload({ ...visualStatePayload, snapshotSequence: 0 })).toBe(false)
+    expect(isWebglSetNodeVisualStatePayload({ ...visualStatePayload, snapshotSequence: 1.5 })).toBe(false)
+    expect(isWebglSetNodeVisualStatePayload({ ...visualStatePayload, snapshotSequence: Number.MAX_SAFE_INTEGER + 1 })).toBe(false)
     expect(isWebglSetNodeVisualStatePayload({ ...visualStatePayload, sourceRevision: -1 })).toBe(false)
     expect(isWebglSetNodeVisualStatePayload({ ...visualStatePayload, sourceRevision: 1.5 })).toBe(false)
     expect(isWebglSetNodeVisualStatePayload({ ...visualStatePayload, sourceRevision: Number.MAX_SAFE_INTEGER + 1 })).toBe(false)
-    expect(isWebglSetNodeVisualStatePayload({ sceneNodeId: 'node.gas-turbine', visualState: 'alarm', statusUpdatedAt: '2026-08-08T10:00:00.000Z' })).toBe(false)
+    expect(isWebglSetNodeVisualStatePayload({ sceneNodeId: 'node.gas-turbine', visualState: 'alarm', snapshotSequence: 1, statusUpdatedAt: '2026-08-08T10:00:00.000Z' })).toBe(false)
     expect(isWebglSetNodeVisualStatePayload({ sceneNodeId: 'node.gas-turbine', visualState: 'custom-color' })).toBe(false)
     expect(isWebglSetNodeVisualStatePayload({ sceneNodeId: 'node.gas-turbine', visualState: 'alarm' })).toBe(false)
     expect(isWebglSetNodeVisualStatePayload({ sceneNodeId: 'node.gas-turbine', visualState: 'alarm', statusUpdatedAt: 'not-a-time' })).toBe(false)
+    expect(isWebglClearNodeVisualStatePayload({ sceneNodeId: 'node.gas-turbine', snapshotSequence: 8 })).toBe(true)
+    expect(isWebglClearNodeVisualStatePayload({ sceneNodeId: 'node.gas-turbine', snapshotSequence: 0 })).toBe(false)
+    expect(isWebglClearNodeVisualStatePayload({ sceneNodeId: '', snapshotSequence: 8 })).toBe(false)
+    expect(isWebglClearNodeVisualStatePayload({ sceneNodeId: 'node.gas-turbine', snapshotSequence: 8, visualState: 'normal' })).toBe(false)
     expect(isWebglSetRouteFlowPayload({ routeId: 'route.gas-to-grid', enabled: true })).toBe(true)
     expect(isWebglSetRouteFlowPayload({ routeId: '', enabled: true })).toBe(false)
     expect(isWebglSetNodeVisibilityPayload({ sceneNodeId: 'node.gas-turbine', enabled: false })).toBe(true)

@@ -3,10 +3,12 @@ import { HostCommandLifecycle } from '@/host-bridge/host-command-lifecycle'
 import { HostCommandDispatcher, type HostCommandCoordinatorPort, type HostDispatchableDomainCommand } from '@/host-bridge/host-command-dispatcher'
 import { HostEventSender } from '@/host-bridge/host-event-sender'
 import { HostHandshake, type HostInitializationResult } from '@/host-bridge/host-handshake'
-import { HOST_EVENT_TYPES, type HostCommandMessage, type HostCommandType, type HostDispatchableCommandType, type HostEventType, type HostProtocolError, type HostVisualizationContext, type SceneObjectSelectedPayload } from '@/host-bridge/host-protocol'
+import { HOST_EVENT_TYPES, type HostCommandMessage, type HostCommandType, type HostDispatchableCommandType, type HostEventType, type HostProtocolError, type HostVisualizationContext } from '@/host-bridge/host-protocol'
 import type { HostBridge } from '@/host-bridge/host-bridge'
 import type { VisualizationCoordinatorFacade } from '@/modules/visual/orchestration/visualization-coordinator-facade'
-import type { TopologyDeviceDoubleClickIntent } from '@/modules/visual/topology/topology-node-interaction'
+import type { TopologyNodeDoubleClickIntent } from '@/modules/visual/topology/topology-node-interaction'
+import type { SceneObjectSelectionIntent } from '@/modules/visual/orchestration/unity-object-selection-coordinator'
+import type { SceneActivationId } from '@/config/scene-topology/identifiers'
 
 /**
  * 原子打开视图端口仅接收任务-012已经收敛的领域命令。
@@ -29,6 +31,8 @@ export interface HostWorkflowTriggerPort {
 /** 设备状态端口只接收协议已验证的批量意图；实际二维、三维与诊断处理属于任务-038协调器。 */
 export interface HostDeviceStatesUpdatePort {
   submit(command: Extract<HostDispatchableDomainCommand, { type: 'device.states.update' }>): Promise<HostCommandExecutionResult>
+  /** 场景重新激活后只重投影最新权威快照；旧测试替身可不实现该可选内部能力。 */
+  resynchronizeLatestSnapshot?(sceneActivationId?: SceneActivationId): void
   /** 组合根释放时清空有限状态诊断，不保留外层关联标识。 */
   dispose(): void
 }
@@ -60,6 +64,8 @@ export class HostRuntimeComposition implements HostCommandCoordinatorPort {
   private readonly dispatcher: HostCommandDispatcher
   private readonly lifecycle: HostCommandLifecycle
   private readonly handshake: HostHandshake
+  /** 同一释放命令链只启动一次内层清理；重复等待共享该 Promise，避免重复销毁 iframe 或 Unity 资源。 */
+  private innerReleasePromise: Promise<{ success: boolean }> | undefined
   private disposed = false
 
   public constructor(
@@ -100,6 +106,9 @@ export class HostRuntimeComposition implements HostCommandCoordinatorPort {
       eventCapabilities: INSTALLED_EVENT_CAPABILITIES,
     }, {
       onInitialize: (command) => this.initializeView(command),
+      // `system.init` 不进入普通命令生命周期；初始化失败由握手层回调此处，
+      // 确保失败确认与脱敏系统错误使用同一原始命令关联标识。
+      onInitializationFailure: (replyTo, error) => this.eventSender.sendSystemError(error, replyTo),
     })
   }
 
@@ -122,51 +131,58 @@ export class HostRuntimeComposition implements HostCommandCoordinatorPort {
       const initialized = await this.handshake.handle(command)
       // 初始化成功后的 view.changed（视图变更）仍属于原 system.init（系统初始化）命令，
       // 必须使用同一 messageId 作为 replyTo，父页面才能把确认与最终稳定视图归入同一次初始化事务。
-      if (initialized) this.reportCommittedView(undefined, command.messageId)
+      if (initialized && !this.disposed) {
+        // 初始化也建立当前物理场景代次；后续同场景补同步与跨场景清除债务据此严格隔离。
+        this.deviceStatesUpdate?.resynchronizeLatestSnapshot?.(this.facade.getSnapshot().sceneActivationId ?? undefined)
+        this.reportCommittedView(undefined, command.messageId)
+      }
       return
     }
 
-    const result = await this.lifecycle.execute(command)
-    // system.dispose 的逻辑状态先由分派器置为 released，再等待内层单实例资源实际清理；
-    // 因此 command.result 不会在 iframe 仍存活时过早承诺“已释放”。
-    if (command.type === 'system.dispose' && result.payload.success && result.payload.status === 'disposed') {
-      await this.releaseInnerRuntime()
-    }
+    const outcome = await this.lifecycle.execute(command)
+    // 重复 messageId 在生命周期层只产生忽略结果；组合根必须在释放、副作用和事件发送前静默结束。
+    // 组件若在命令等待期间已卸载，同样禁止迟到 Promise 再向已经失效的父页面会话发送结果。
+    if (outcome.status === 'ignored-duplicate' || this.disposed) return
+    const result = outcome.result
     this.reportCommandSideEffects(command, result)
     this.eventSender.sendCommandResult(result)
 
-    // `system.dispose` 的 command.result 必须先发出，否则过早释放桥接会丢失唯一确认；发送完成后再清理所有订阅与计时器。
-    if (command.type === 'system.dispose' && result.payload.success && result.payload.status === 'disposed') this.dispose()
+    // 释放成功或达到十秒总截止后，都必须先发送唯一结果再关闭桥；内层迟到完成只负责资源收尾，不再补发结果。
+    if (command.type === 'system.dispose' && (
+      (result.payload.success && result.payload.status === 'disposed') || result.source === 'timeout'
+    )) this.dispose()
   }
 
   /**
-   * 接收任务-027的正式设备双击意图。
+   * 接收任务-027的正式节点双击意图。
    * 仅在握手完成、稳定上下文就绪且场景/拓扑与当前提交值一致时上报，过期 Canvas（画布）回调、
    * 等待态节点或切换中的目标节点均被静默拒绝，绝不依标题或坐标补全映射。
    */
-  public reportTopologyDeviceDoubleClick(intent: TopologyDeviceDoubleClickIntent): boolean {
+  public reportTopologyNodeDoubleClick(intent: TopologyNodeDoubleClickIntent): boolean {
     if (this.disposed || !this.handshake.isInitialized()) return false
     const context = this.getReadyContext()
     if (!context || context.sceneId !== intent.sceneId || context.topologyId !== intent.topologyId) return false
-    return this.eventSender.sendTopologyNodeDoubleClick(intent, context.contextRevision)
+    return this.eventSender.sendTopologyNodeDoubleClick(intent)
   }
 
   /**
-   * 接收任务-037已从当前原子清单解析出的三维反向选择。
+   * 接收任务-037已从当前结构清单解析出的三维反向选择。
    * 方法再次核对握手、稳定场景、拓扑与上下文版本；即使壳层出现迟到回调，也不能将旧选择发给父页面。
    */
-  public reportSceneObjectSelected(selection: SceneObjectSelectedPayload): boolean {
+  public reportSceneObjectSelected(selection: SceneObjectSelectionIntent): boolean {
     if (this.disposed || !this.handshake.isInitialized()) return false
     const context = this.getReadyContext()
     if (!context) return false
-    // 正常路径由任务-037协调器在显式设备映射成功后才构造事件；组合根仍拒绝直接绕过该路径的空设备或空二维节点。
-    if (!selection.deviceId || selection.nodeIds.length === 0) return false
     if (
       selection.sceneId !== context.sceneId ||
       selection.topologyId !== context.topologyId ||
       selection.contextRevision !== context.contextRevision
     ) return false
-    return this.eventSender.sendSceneObjectSelected(selection)
+    return this.eventSender.sendSceneObjectSelected({
+      sceneId: selection.sceneId,
+      sceneNodeId: selection.sceneNodeId,
+      nodeId: selection.nodeId,
+    })
   }
 
   /**
@@ -199,7 +215,18 @@ export class HostRuntimeComposition implements HostCommandCoordinatorPort {
     if (!this.handshake.isInitialized()) {
       return this.failure('action.execute.failed', 'validation', '外层会话尚未完成初始化，不能执行业务命令。', true)
     }
-    return this.dispatcher.execute(command)
+    const result = await this.dispatcher.execute(command)
+    if (command.type !== 'system.dispose' || !result.success || result.status !== 'disposed') return result
+
+    // 内层释放属于 system.dispose 的完成条件，必须位于同一个十秒生命周期内；否则 iframe 卡住会让外层无限等待。
+    try {
+      const innerRelease = await this.getOrStartInnerRelease()
+      return innerRelease.success
+        ? result
+        : this.failure('action.execute.failed', 'disposing', '内层图形运行时未能完成释放。', true)
+    } catch {
+      return this.failure('action.execute.failed', 'disposing', '内层图形运行时释放失败。', true)
+    }
   }
 
   /**
@@ -208,6 +235,26 @@ export class HostRuntimeComposition implements HostCommandCoordinatorPort {
    */
   private cancelTimedOutDomainTransaction(command: HostCommandMessage): void {
     this.viewOpen.cancelTimedOutCommand?.(command.messageId)
+  }
+
+  /**
+   * 返回当前唯一内层释放任务；失败或完成后清除引用，允许尚未超时的受控新消息标识再次尝试。
+   * Promise 本身不持有外层命令或载荷，超时后继续完成也不会造成消息和状态缓存泄漏。
+   */
+  private getOrStartInnerRelease(): Promise<{ success: boolean }> {
+    if (this.innerReleasePromise) return this.innerReleasePromise
+
+    const releasePromise = this.releaseInnerRuntime()
+    this.innerReleasePromise = releasePromise
+    void releasePromise.then(
+      () => {
+        if (this.innerReleasePromise === releasePromise) this.innerReleasePromise = undefined
+      },
+      () => {
+        if (this.innerReleasePromise === releasePromise) this.innerReleasePromise = undefined
+      },
+    )
+    return releasePromise
   }
 
   /** 将 system.init 的初始目标转换为与普通 view.open 完全相同的原子事务，避免产生第二套场景切换流程。 */
@@ -239,6 +286,8 @@ export class HostRuntimeComposition implements HostCommandCoordinatorPort {
     if (!result.payload.success || result.source !== 'executed') return
 
     if (command.type === 'view.open' || command.type === 'workflow.trigger') {
+      // 视图事务已经同时提交场景与拓扑后，才允许按当前权威快照补同步新三维控制器。
+      this.deviceStatesUpdate?.resynchronizeLatestSnapshot?.(this.facade.getSnapshot().sceneActivationId ?? undefined)
       this.reportCommittedView(result.payload.transitionId, result.replyTo)
       return
     }

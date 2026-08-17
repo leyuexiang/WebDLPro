@@ -8,13 +8,16 @@ import { fileURLToPath } from 'node:url'
  * 正式设备资料或生产地址，绝不能作为任务-039—047的发布内容。
  */
 const host = '127.0.0.1'
-const port = 5510
+// 默认端口保持既有浏览器夹具契约；命令行合同测试可注入临时端口，避免抢占用户正在使用的5510。
+const port = Number.parseInt(process.env.LOCAL_SHELL_PORT ?? '5510', 10)
 const hostPagePath = fileURLToPath(new URL('./host/index.html', import.meta.url))
+const retryControllerPath = fileURLToPath(new URL('./host/device-state-retry-controller.js', import.meta.url))
 const visualBaselinePagePath = fileURLToPath(new URL('../visual-regression/host/index.html', import.meta.url))
 
 /**
  * 构造完整闭集测试清单，使嵌入壳可以走真实远端加载、校验、注册和 `system.init` 事务。
- * 仅燃气拓扑设置一枚可双击测试节点；其余八个场景为空拓扑，明确表达夹具没有伪造业务设备内容。
+ * 仅燃气拓扑设置两枚可双击测试节点；其余八个场景为空拓扑，明确表达夹具没有伪造业务设备内容。
+ * 两枚节点服务于“完整快照缺失已绑定设备”的回归，避免为了测试清除语义而构造正式协议禁止的空状态数组。
  */
 function createTestManifest() {
   const sceneIds = ['coal-power', 'gas-power', 'wind-power', 'solar-power', 'substation', 'distribution', 'consumption', 'microgrid', 'dispatch']
@@ -56,18 +59,30 @@ function createTestManifest() {
       title: `测试拓扑-${topologyId}`,
       configVersion: manifestVersion,
       // 设备测试节点只保留在燃气总览；明细图保持空白，避免把夹具当作正式设备映射。
+      // 两条映射分别具有不同二维和三维标识，确保后续完整快照省略其中一项时可验证独立二维恢复与三维清除。
       nodes: topologyId === 'topology.gas-power.overview'
-        ? [{
-            nodeId: 'node.gas-turbine',
-            title: '测试燃气轮机',
-            deviceId: 'device.gas-turbine',
-            sceneNodeId: 'scene-node.gas-turbine',
-            iconKey: 'generic-device',
-            x: 50,
-            y: 50,
-            deviceStatus: 'normal',
-            doubleClickBehavior: 'emit-device',
-          }]
+        ? [
+            {
+              nodeId: 'node.gas-turbine',
+              title: '测试燃气轮机',
+              sceneNodeId: 'scene-node.gas-turbine',
+              iconKey: 'generic-device',
+              x: 40,
+              y: 50,
+              deviceStatus: 'normal',
+              doubleClickBehavior: 'emit-node',
+            },
+            {
+              nodeId: 'node.gas-generator',
+              title: '测试燃气发电机',
+              sceneNodeId: 'scene-node.gas-generator',
+              iconKey: 'generic-device',
+              x: 60,
+              y: 50,
+              deviceStatus: 'normal',
+              doubleClickBehavior: 'emit-node',
+            },
+          ]
         : [],
       edges: [],
     }))),
@@ -93,29 +108,40 @@ function createTestManifest() {
         configVersion: manifestVersion,
       },
     ],
-    deviceMappings: [{
-      deviceId: 'device.gas-turbine',
-      sceneId: 'gas-power',
-      topologyNodeRefs: [{ topologyId: 'topology.gas-power.overview', nodeId: 'node.gas-turbine' }],
-      sceneNodeId: 'scene-node.gas-turbine',
-      configVersion: manifestVersion,
-    }],
     unitySceneMappings: scenes.map((scene) => ({
       sceneId: scene.sceneId,
       mappingVersion: scene.sceneMappingVersion,
       processSteps: [],
-      sceneNodeIds: scene.sceneId === 'gas-power' ? ['scene-node.gas-turbine'] : [],
+      // 三维节点清单与上方二维节点一一对应，保证壳从二维引用派生三维目标的真实路径能够通过校验。
+      sceneNodeIds: scene.sceneId === 'gas-power' ? ['scene-node.gas-turbine', 'scene-node.gas-generator'] : [],
       routeIds: [],
     })),
   }
 }
 
-/** 所有测试响应统一附加最小 CORS 头，允许 Vite 开发服务器读取测试清单，但不开放任何写接口。 */
-function writeResponse(response, statusCode, contentType, body) {
+/**
+ * 构造与默认资源内容等价的结构清单副本，用于验证同一结构在不同只读地址下仍能稳定加载。
+ * 平台设备编号关系属于平台私有数据，因此该副本只复制我方结构字段，不注入任何绑定事实。
+ */
+function createStructureManifestCopy() {
+  const manifest = createTestManifest()
+  return {
+    ...manifest,
+    topologies: manifest.topologies.map((topology) => ({ ...topology })),
+  }
+}
+
+/**
+ * 测试服务响应统一附加最小 CORS 头，允许嵌入壳读取合成清单，但不开放任何写接口。
+ * 默认响应使用 no-store（不存储）；清单接口单独传入 no-cache（禁止缓存），模拟正式结构清单的
+ * 版本重载契约，避免本地夹具因缓存策略过宽而掩盖生产部署问题。
+ */
+function writeResponse(response, statusCode, contentType, body, additionalHeaders = {}) {
   response.writeHead(statusCode, {
     'access-control-allow-origin': '*',
     'cache-control': 'no-store',
     'content-type': contentType,
+    ...additionalHeaders,
   })
   response.end(body)
 }
@@ -128,7 +154,35 @@ const server = createServer(async (request, response) => {
   }
 
   if (url.pathname === '/manifest.json') {
-    writeResponse(response, 200, 'application/json; charset=utf-8', JSON.stringify(createTestManifest()))
+    writeResponse(
+      response,
+      200,
+      'application/json; charset=utf-8',
+      JSON.stringify(createTestManifest()),
+      // 与生产清单接口一致：每次壳重载都必须重新验证当前完整绑定响应。
+      { 'cache-control': 'no-cache, max-age=0, must-revalidate' },
+    )
+    return
+  }
+
+  if (url.pathname === '/manifest-empty.json') {
+    writeResponse(
+      response,
+      200,
+      'application/json; charset=utf-8',
+      JSON.stringify(createStructureManifestCopy()),
+      { 'cache-control': 'no-cache, max-age=0, must-revalidate' },
+    )
+    return
+  }
+
+  // 这两个路径只用于复现合作方约定的稳定404，不读取或显示任何服务器文件路径。
+  if (url.pathname === '/missing-package/manifest.json') {
+    writeResponse(response, 404, 'application/json; charset=utf-8', JSON.stringify({ error: 'package not found' }))
+    return
+  }
+  if (url.pathname === '/missing-file/manifest.json') {
+    writeResponse(response, 404, 'application/json; charset=utf-8', JSON.stringify({ error: 'manifest file missing' }))
     return
   }
 
@@ -137,6 +191,16 @@ const server = createServer(async (request, response) => {
       writeResponse(response, 200, 'text/html; charset=utf-8', await readFile(hostPagePath, 'utf8'))
     } catch {
       writeResponse(response, 500, 'text/plain; charset=utf-8', '测试宿主页读取失败。')
+    }
+    return
+  }
+
+  // 状态重试控制器只属于任务-014测试宿主页；显式限制为单一文件，避免夹具变成任意文件服务器。
+  if (url.pathname === '/device-state-retry-controller.js') {
+    try {
+      writeResponse(response, 200, 'application/javascript; charset=utf-8', await readFile(retryControllerPath, 'utf8'))
+    } catch {
+      writeResponse(response, 500, 'text/plain; charset=utf-8', '状态重试测试控制器读取失败。')
     }
     return
   }

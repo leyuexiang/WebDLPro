@@ -31,17 +31,20 @@ const temporaryDirectories: string[] = []
  */
 function createValidMetadata(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    schemaVersion: 2,
+    schemaVersion: 4,
     unityReleaseId: 'unity-release-test',
     channel: 'power3d-unity',
     protocolVersion: 1,
+    commandCapabilities: ['init', 'resize', 'switchScene', 'enterProcessStep', 'resetScene', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
     sceneChangedSchemaVersion: 2,
     sceneChangedRequiredFields: ['requestId', 'sceneId', 'transitionId', 'sceneActivationId', 'success'],
     switchSceneRequiredFields: ['sceneId', 'transitionId', 'sceneMappingVersion', 'forceReload'],
     switchSceneRecoverySchemaVersion: 1,
     switchSceneRecoveryRequiredFields: ['requestId', 'success', 'sceneActivationId'],
-    setNodeVisualStateSchemaVersion: 2,
-    setNodeVisualStateRequiredFields: ['sceneNodeId', 'visualState', 'statusUpdatedAt', 'hasSourceRevision', 'sourceRevision'],
+    setNodeVisualStateSchemaVersion: 3,
+    setNodeVisualStateRequiredFields: ['sceneNodeId', 'visualState', 'snapshotSequence', 'statusUpdatedAt', 'sourceRevision'],
+    clearNodeVisualStateSchemaVersion: 1,
+    clearNodeVisualStateRequiredFields: ['sceneNodeId', 'snapshotSequence'],
     ...overrides,
   }
 }
@@ -84,17 +87,39 @@ describe('Unity 网页图形协议兼容性门禁', () => {
     await expect(ensureUnityBuildSupportsSceneActivation(directory, 'unity-release-test')).rejects.toThrow('sceneActivationId')
   })
 
-  it('元数据缺少四态复合修订字段时明确阻断发布', async () => {
+  it('元数据缺少壳内快照序号字段时明确阻断发布', async () => {
     const directory = await createTemporaryUnityBuild(createValidMetadata({
       setNodeVisualStateRequiredFields: ['sceneNodeId', 'visualState', 'statusUpdatedAt'],
     }))
     temporaryDirectories.push(directory)
 
-    await expect(ensureUnityBuildSupportsSceneActivation(directory, 'unity-release-test')).rejects.toThrow('hasSourceRevision')
+    await expect(ensureUnityBuildSupportsSceneActivation(directory, 'unity-release-test')).rejects.toThrow('snapshotSequence')
+  })
+
+  it('元数据缺少三维动态状态清除能力或快照序号时明确阻断发布', async () => {
+    const missingCapabilityDirectory = await createTemporaryUnityBuild(createValidMetadata({
+      commandCapabilities: ['init', 'resize', 'switchScene', 'enterProcessStep', 'resetScene', 'focusNode', 'clearSelection', 'setNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
+    }))
+    const missingFieldDirectory = await createTemporaryUnityBuild(createValidMetadata({
+      clearNodeVisualStateRequiredFields: ['sceneNodeId'],
+    }))
+    temporaryDirectories.push(missingCapabilityDirectory, missingFieldDirectory)
+
+    await expect(ensureUnityBuildSupportsSceneActivation(missingCapabilityDirectory, 'unity-release-test')).rejects.toThrow('clearNodeVisualState')
+    await expect(ensureUnityBuildSupportsSceneActivation(missingFieldDirectory, 'unity-release-test')).rejects.toThrow('snapshotSequence')
+  })
+
+  it('元数据缺少清除三维交互描边能力时明确阻断发布', async () => {
+    const directory = await createTemporaryUnityBuild(createValidMetadata({
+      commandCapabilities: ['init', 'resize', 'switchScene', 'enterProcessStep', 'resetScene', 'focusNode', 'setNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
+    }))
+    temporaryDirectories.push(directory)
+
+    await expect(ensureUnityBuildSupportsSceneActivation(directory, 'unity-release-test')).rejects.toThrow('clearSelection')
   })
 
   it('元数据仍使用旧结构版本时明确阻断发布', async () => {
-    const directory = await createTemporaryUnityBuild(createValidMetadata({ schemaVersion: 1 }))
+    const directory = await createTemporaryUnityBuild(createValidMetadata({ schemaVersion: 2 }))
     temporaryDirectories.push(directory)
 
     await expect(ensureUnityBuildSupportsSceneActivation(directory, 'unity-release-test')).rejects.toThrow('结构版本')

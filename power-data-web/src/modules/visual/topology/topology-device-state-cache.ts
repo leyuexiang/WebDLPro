@@ -1,57 +1,69 @@
-import type { DeviceId, NodeId, SceneId, SceneNodeId, TopologyId } from '@/config/scene-topology/identifiers'
+import type { NodeId, SceneId, SceneNodeId, TopologyId } from '@/config/scene-topology/identifiers'
 import type { DeviceVisualStatus } from '@/config/scene-topology/types'
-import type { TopologyRegistry } from '@/config/scene-topology/topology-registry'
+import type { RegisteredNodeStateProjection, TopologyRegistry } from '@/config/scene-topology/topology-registry'
 
 /**
- * 状态输入在到达缓存前只保留设备标识、四态候选值和来源时间。
- * 协议层会先校验正式外层命令；此处仍接受未知状态，确保内部数据源缺失或枚举漂移时安全归一为离线。
+ * 协议入口已经完成节点编号、四态和带时区时间校验，缓存只接收强类型数据。
+ * 缓存不得把未知枚举推断为离线，也不得再次用业务时间决定快照新旧。
  */
-export interface TopologyDeviceStateUpdate {
-  deviceId: DeviceId
-  deviceStatus?: unknown
+export interface TopologyNodeStateUpdate {
+  nodeId: NodeId
+  deviceStatus: DeviceVisualStatus
   statusUpdatedAt: string
 }
 
 /**
- * 本次真正变化且属于当前 Unity 场景的三维状态投影。
- * `statusUpdatedAt` 已在缓存层完成解析并规范化为 UTC ISO 时间；可选来源修订号与时间共同组成因果顺序，
- * 用于任务-038在相同业务时间下仍能识别更高修订。该投影不是原始父页面对象，也不会包含设备名称、
- * Unity 层级或任意附加字段。
+ * 当前权威快照投影到单个三维节点的最小状态。
+ * 来源修订号和状态时间仅供诊断与内层协议透传，不参与壳侧接纳、覆盖或排序判断。
  */
 export interface TopologySceneNodeVisualStateUpdate {
   visualState: DeviceVisualStatus
   statusUpdatedAt: string
-  sourceRevision?: number
+  sourceRevision: number
 }
 
-/** 单次批量更新可附带来源修订号，用于在同一时间戳下稳定拒绝重复或旧来源重放。 */
-export interface TopologyDeviceStateBatch {
-  sourceRevision?: number
-  items: readonly TopologyDeviceStateUpdate[]
+/** 每次调用都是当前资源下全部已上报逻辑节点的完整快照，后到合法快照直接替换前一份。 */
+export interface TopologyNodeStateBatch {
+  sourceRevision: number
+  items: readonly TopologyNodeStateUpdate[]
 }
 
-/** 对外返回的结果只包含稳定标识和四态快照，不泄露原始消息、时间字符串或缓存内部对象。 */
-export interface TopologyDeviceStateApplyResult {
-  acceptedDeviceIds: readonly DeviceId[]
-  outdatedDeviceIds: readonly DeviceId[]
-  unmappedDeviceIds: readonly DeviceId[]
-  invalidTimestampDeviceIds: readonly DeviceId[]
+/**
+ * 单次完整快照的二维、三维投影结果。
+ * 旧字段保留为空数组，避免任务-038改造前破坏诊断调用；它们不再表达任何拒绝语义。
+ */
+export interface TopologyNodeStateApplyResult {
+  committed: boolean
+  capacityExceeded: boolean
+  /** 壳会话内成功提交的本地单调序号；仅描述快照提交顺序，不替代外部来源修订号。 */
+  snapshotSequence: number
+  acceptedNodeIds: readonly NodeId[]
+  restoredNodeIds: readonly NodeId[]
+  outdatedNodeIds: readonly NodeId[]
+  unmappedNodeIds: readonly NodeId[]
+  invalidTimestampNodeIds: readonly NodeId[]
   activeTopologyNodeStatuses: ReadonlyMap<NodeId, DeviceVisualStatus>
   activeSceneNodeStatuses: ReadonlyMap<SceneNodeId, DeviceVisualStatus>
-  /** 仅包含当前批次新接受的、映射到当前 Unity 场景的节点增量，供动画帧合并下发使用。 */
+  /** 当前活动场景的完整三维投影；任务-038可据此合帧，但不得让其结果反向影响本次二维提交。 */
   activeSceneNodeStateUpdates: ReadonlyMap<SceneNodeId, TopologySceneNodeVisualStateUpdate>
+  /** 上一份活动场景投影存在、本次已缺失的目标；后续三维协调任务据此恢复发布基线。 */
+  clearedActiveSceneNodeIds: readonly SceneNodeId[]
 }
 
-/** 最近设备状态仅用于时间比较与被淘汰快照的按需恢复，不保存外层消息或任意设备对象。 */
-interface CachedDeviceState {
+/** 权威表只保存已识别设备的最新合法状态，不保存外层消息对象或派生渲染资源。 */
+interface CachedNodeState {
   deviceStatus: DeviceVisualStatus
-  updatedAtMilliseconds: number
-  /** 规范化后的 UTC 时间只为三维端防止迟到回包覆盖服务，不保存父页面原始时间文本。 */
   statusUpdatedAt: string
-  sourceRevision?: number
+  sourceRevision: number
 }
 
-/** 每个拓扑和场景快照都受容量限制；当前活动上下文在淘汰时受到保护。 */
+/** 构建完成但尚未提交的候选快照；画布成功应用后才允许引用交换。 */
+interface PreparedNodeStateSnapshot {
+  nextStateByNodeId: Map<NodeId, CachedNodeState>
+  result: TopologyNodeStateApplyResult
+}
+
+/** 权威设备表有固定硬上限；最近最少使用只用于可重建的拓扑和场景派生快照。 */
 export interface TopologyDeviceStateCacheOptions {
   maximumDeviceStates?: number
   maximumTopologySnapshots?: number
@@ -59,16 +71,18 @@ export interface TopologyDeviceStateCacheOptions {
 }
 
 /**
- * 设备状态到二维/三维稳定标识的有限缓存。
- * 该类只读取注册表中已发布的 `deviceId → 二维节点/三维节点` 映射；它不发送 Unity 命令，
- * 因此任务-038可以在能力、批量调度和可观测性就绪后复用同一受控快照，而不会绕过协议门禁。
+ * 完整节点状态快照到二维、三维稳定标识的有限投影缓存。
+ * 清单加载时已经预建 `nodeId → 二维目标 + 可选三维目标` 索引，因此热路径只遍历本批节点及其直接目标；
+ * 权威节点表从不做最近最少使用淘汰，只有可由权威表重建的派生快照受八份容量限制。
  */
 export class TopologyDeviceStateCache {
-  private readonly latestStateByDeviceId = new Map<DeviceId, CachedDeviceState>()
+  private latestStateByNodeId = new Map<NodeId, CachedNodeState>()
   private readonly nodeStatusesByTopologyId = new Map<TopologyId, Map<NodeId, DeviceVisualStatus>>()
   private readonly sceneNodeStatusesBySceneId = new Map<SceneId, Map<SceneNodeId, DeviceVisualStatus>>()
   private activeTopologyId: TopologyId | undefined
   private activeSceneId: SceneId | undefined
+  private snapshotSequence = 0
+  private disposed = false
 
   private readonly maximumDeviceStates: number
   private readonly maximumTopologySnapshots: number
@@ -83,267 +97,272 @@ export class TopologyDeviceStateCache {
     this.maximumSceneSnapshots = normalizeCapacity(options.maximumSceneSnapshots, 8)
   }
 
-  /**
-   * 激活上下文仅用于保护当前二维、三维快照不被 LRU（最近最少使用）淘汰。
-   * 切换时调用方应在画布换图后立即设置它，缓存不会自行创建场景、拓扑或渲染对象。
-   */
+  /** 激活上下文只决定本次返回和派生缓存保护范围，不会创建场景、画布或 Unity（统一引擎）对象。 */
   public setActiveContext(sceneId: SceneId | undefined, topologyId: TopologyId | undefined): void {
+    if (this.disposed) return
     this.activeSceneId = sceneId
     this.activeTopologyId = topologyId
   }
 
   /**
-   * 合并批量设备状态并返回当前活动二维、三维的投影快照。
-   * 同批同设备先按最新时间选取，时间相同则保留最后一项；跨批旧时间或相同时间的重复来源不会覆盖现有状态。
+   * 构建候选完整快照，并在可选的同步二维提交成功后原子替换权威表。
+   * `beforeCommit` 只供唯一画布写入候选二维投影；若其抛错，本方法不交换权威表、不清派生缓存，
+   * 从而保证画布和缓存不会出现一边是新快照、一边仍是旧快照的半提交状态。
    */
-  public apply(batch: TopologyDeviceStateBatch): TopologyDeviceStateApplyResult {
-    const latestItemByDeviceId = new Map<DeviceId, { item: TopologyDeviceStateUpdate; updatedAtMilliseconds: number }>()
-    const invalidTimestampDeviceIds: DeviceId[] = []
+  public apply(
+    batch: TopologyNodeStateBatch,
+    beforeCommit?: (candidate: TopologyNodeStateApplyResult) => void,
+  ): TopologyNodeStateApplyResult {
+    if (this.disposed) return this.createUncommittedResult(false)
+    if (batch.items.length > this.maximumDeviceStates) return this.createUncommittedResult(true)
 
-    for (const item of batch.items) {
-      const updatedAtMilliseconds = Date.parse(item.statusUpdatedAt)
-      if (!Number.isFinite(updatedAtMilliseconds)) {
-        invalidTimestampDeviceIds.push(item.deviceId)
-        continue
-      }
+    const prepared = this.prepareSnapshot(batch)
+    beforeCommit?.(prepared.result)
 
-      const current = latestItemByDeviceId.get(item.deviceId)
-      // Map 覆盖保留输入批次中的最后一项，确保同批同设备只进入一次映射更新；
-      // 同一动画帧内的多次画布绘制由 CanvasTopologyAdapter 继续合并，避免在状态缓存层重复持有帧调度器。
-      if (!current || updatedAtMilliseconds >= current.updatedAtMilliseconds) {
-        latestItemByDeviceId.set(item.deviceId, { item, updatedAtMilliseconds })
-      }
-    }
-
-    const acceptedDeviceIds: DeviceId[] = []
-    const outdatedDeviceIds: DeviceId[] = []
-    const unmappedDeviceIds: DeviceId[] = []
-    const activeSceneNodeStateUpdates = new Map<SceneNodeId, TopologySceneNodeVisualStateUpdate>()
-
-    for (const [deviceId, candidate] of latestItemByDeviceId) {
-      const previous = this.latestStateByDeviceId.get(deviceId)
-      if (previous && isOutdated(candidate.updatedAtMilliseconds, batch.sourceRevision, previous)) {
-        outdatedDeviceIds.push(deviceId)
-        continue
-      }
-
-      const mapping = this.registry.getDeviceMapping(deviceId)
-      if (!mapping) {
-        // 未映射设备既不进入时间缓存，也不触发任何二维/三维更新，防止后续相同名称节点被误关联。
-        unmappedDeviceIds.push(deviceId)
-        continue
-      }
-
-      const state: CachedDeviceState = {
-        deviceStatus: normalizeDeviceVisualStatus(candidate.item.deviceStatus),
-        updatedAtMilliseconds: candidate.updatedAtMilliseconds,
-        // 统一输出 UTC ISO 时间，避免同一时刻的多种时区写法在后续内层协议中形成不必要的字符串差异。
-        statusUpdatedAt: new Date(candidate.updatedAtMilliseconds).toISOString(),
-        ...(batch.sourceRevision !== undefined ? { sourceRevision: batch.sourceRevision } : {}),
-      }
-      this.cacheDeviceState(deviceId, state)
-      this.applyMappedDeviceState(deviceId, state.deviceStatus)
-      this.collectActiveSceneNodeStateUpdate(deviceId, state, activeSceneNodeStateUpdates)
-      acceptedDeviceIds.push(deviceId)
-    }
+    /*
+     * 候选构建和画布写入均为同步过程；只有全部成功后才交换权威表。
+     * 随后清空可重建派生缓存并播种当前上下文，避免其他拓扑继续持有上一份完整快照的颜色覆盖。
+     */
+    this.latestStateByNodeId = prepared.nextStateByNodeId
+    this.snapshotSequence += 1
+    this.nodeStatusesByTopologyId.clear()
+    this.sceneNodeStatusesBySceneId.clear()
+    this.seedActiveSnapshots(prepared.result.activeTopologyNodeStatuses, prepared.result.activeSceneNodeStatuses)
 
     return {
-      acceptedDeviceIds,
-      outdatedDeviceIds,
-      unmappedDeviceIds,
-      invalidTimestampDeviceIds,
-      activeTopologyNodeStatuses: this.getActiveTopologyNodeStatuses(),
-      activeSceneNodeStatuses: this.getActiveSceneNodeStatuses(),
-      activeSceneNodeStateUpdates,
+      ...prepared.result,
+      committed: true,
+      snapshotSequence: this.snapshotSequence,
     }
   }
 
-  /** 返回当前拓扑的防御性状态快照；被 LRU 淘汰的非活动图会从有限设备时间缓存按需恢复。 */
+  /** 返回指定拓扑相对发布基线的动态覆盖；派生缓存淘汰后从权威表按需重建。 */
   public getTopologyNodeStatuses(topologyId: TopologyId): ReadonlyMap<NodeId, DeviceVisualStatus> {
-    this.hydrateTopologySnapshot(topologyId)
-    const snapshot = this.nodeStatusesByTopologyId.get(topologyId)
-    return new Map(snapshot)
+    if (this.disposed) return new Map()
+    const cached = this.nodeStatusesByTopologyId.get(topologyId)
+    if (cached) {
+      this.touchTopologySnapshot(topologyId, cached)
+      return new Map(cached)
+    }
+
+    const hydrated = this.buildTopologyProjection(this.latestStateByNodeId, topologyId)
+    this.touchTopologySnapshot(topologyId, hydrated)
+    return new Map(hydrated)
   }
 
-  /** 返回指定场景的已映射三维节点状态；不含 sceneNodeId 的设备永远不会虚构三维目标。 */
+  /** 返回指定场景当前全部已识别设备的三维状态；没有三维目标的设备不会虚构目标。 */
   public getSceneNodeStatuses(sceneId: SceneId): ReadonlyMap<SceneNodeId, DeviceVisualStatus> {
-    this.hydrateSceneSnapshot(sceneId)
-    const snapshot = this.sceneNodeStatusesBySceneId.get(sceneId)
-    return new Map(snapshot)
+    if (this.disposed) return new Map()
+    const cached = this.sceneNodeStatusesBySceneId.get(sceneId)
+    if (cached) {
+      this.touchSceneSnapshot(sceneId, cached)
+      return new Map(cached)
+    }
+
+    const hydrated = this.buildSceneProjection(this.latestStateByNodeId, sceneId).statuses
+    this.touchSceneSnapshot(sceneId, hydrated)
+    return new Map(hydrated)
   }
 
-  /** 当前活动二维状态供单画布增量重绘使用；无活动拓扑时明确返回空快照。 */
+  /** 无活动拓扑时明确返回空快照，禁止按默认拓扑或标题猜测当前画布。 */
   public getActiveTopologyNodeStatuses(): ReadonlyMap<NodeId, DeviceVisualStatus> {
     return this.activeTopologyId ? this.getTopologyNodeStatuses(this.activeTopologyId) : new Map()
   }
 
-  /** 当前活动三维状态供后续任务-038的受控 Unity 批量协调器读取；此处不直接发送命令。 */
+  /** 无活动场景时明确返回空快照，禁止把其他场景三维状态误投到当前 Unity。 */
   public getActiveSceneNodeStatuses(): ReadonlyMap<SceneNodeId, DeviceVisualStatus> {
     return this.activeSceneId ? this.getSceneNodeStatuses(this.activeSceneId) : new Map()
   }
 
-  /** 释放全部有限快照与活动标识，组件卸载后不再保留状态时间或节点引用。 */
+  /**
+   * 为 Unity 恢复或场景重新激活现场重建最新权威三维投影。
+   * 返回值只来自当前完整设备表，不读取历史异步队列；状态时间和来源修订继续仅作诊断透传。
+   */
+  public getActiveSceneNodeStateSnapshot(): {
+    snapshotSequence: number
+    updates: ReadonlyMap<SceneNodeId, TopologySceneNodeVisualStateUpdate>
+  } {
+    if (this.disposed || !this.activeSceneId || this.snapshotSequence <= 0) {
+      return { snapshotSequence: this.snapshotSequence, updates: new Map() }
+    }
+    return {
+      snapshotSequence: this.snapshotSequence,
+      updates: this.buildSceneProjection(this.latestStateByNodeId, this.activeSceneId).updates,
+    }
+  }
+
+  /** 释放是终态：清空权威表、派生表和活动上下文，后续状态调用只返回未提交空结果。 */
   public dispose(): void {
-    this.latestStateByDeviceId.clear()
+    if (this.disposed) return
+    this.disposed = true
+    this.latestStateByNodeId.clear()
     this.nodeStatusesByTopologyId.clear()
     this.sceneNodeStatusesBySceneId.clear()
-    this.activeTopologyId = undefined
     this.activeSceneId = undefined
+    this.activeTopologyId = undefined
   }
 
-  /** 将已映射设备状态写入所有明确登记的二维引用及可选三维节点，不遍历无关拓扑或场景。 */
-  private applyMappedDeviceState(deviceId: DeviceId, deviceStatus: DeviceVisualStatus): void {
-    const mapping = this.registry.getDeviceMapping(deviceId)
-    if (!mapping) return
+  /** 单次遍历归一完整快照；同一节点重复出现时 Map（映射）无条件以数组最后一项覆盖。 */
+  private prepareSnapshot(batch: TopologyNodeStateBatch): PreparedNodeStateSnapshot {
+    const nextStateByNodeId = new Map<NodeId, CachedNodeState>()
+    const acceptedNodeIds: NodeId[] = []
+    const unmappedNodeIds: NodeId[] = []
+    const acceptedSet = new Set<NodeId>()
+    const unmappedSet = new Set<NodeId>()
 
-    for (const reference of mapping.topologyNodeRefs) {
-      const node = this.registry.getTopologyNode(reference.topologyId, reference.nodeId)
-      if (!node) continue
-      this.setTopologyNodeStatus(reference.topologyId, reference.nodeId, node.deviceStatus, deviceStatus)
+    for (const item of batch.items) {
+      const projection = this.registry.getNodeStateProjection(item.nodeId)
+      if (!projection) {
+        if (!unmappedSet.has(item.nodeId)) {
+          unmappedSet.add(item.nodeId)
+          unmappedNodeIds.push(item.nodeId)
+        }
+        continue
+      }
+
+      if (!acceptedSet.has(item.nodeId)) {
+        acceptedSet.add(item.nodeId)
+        acceptedNodeIds.push(item.nodeId)
+      }
+      nextStateByNodeId.set(item.nodeId, {
+        deviceStatus: item.deviceStatus,
+        statusUpdatedAt: item.statusUpdatedAt,
+        sourceRevision: batch.sourceRevision,
+      })
     }
 
-    if (mapping.sceneNodeId) {
-      const sceneSnapshot = this.getMutableSceneSnapshot(mapping.sceneId)
-      sceneSnapshot.set(mapping.sceneNodeId, deviceStatus)
-      this.touchSceneSnapshot(mapping.sceneId, sceneSnapshot)
+    const restoredNodeIds: NodeId[] = []
+    for (const nodeId of this.latestStateByNodeId.keys()) {
+      if (!nextStateByNodeId.has(nodeId)) restoredNodeIds.push(nodeId)
+    }
+
+    const previousActiveSceneStatuses = this.activeSceneId
+      ? this.buildSceneProjection(this.latestStateByNodeId, this.activeSceneId).statuses
+      : new Map<SceneNodeId, DeviceVisualStatus>()
+    const activeTopologyNodeStatuses = this.activeTopologyId
+      ? this.buildTopologyProjection(nextStateByNodeId, this.activeTopologyId)
+      : new Map<NodeId, DeviceVisualStatus>()
+    const activeSceneProjection = this.activeSceneId
+      ? this.buildSceneProjection(nextStateByNodeId, this.activeSceneId)
+      : { statuses: new Map<SceneNodeId, DeviceVisualStatus>(), updates: new Map<SceneNodeId, TopologySceneNodeVisualStateUpdate>() }
+    const clearedActiveSceneNodeIds: SceneNodeId[] = []
+    for (const sceneNodeId of previousActiveSceneStatuses.keys()) {
+      if (!activeSceneProjection.statuses.has(sceneNodeId)) clearedActiveSceneNodeIds.push(sceneNodeId)
+    }
+
+    return {
+      nextStateByNodeId,
+      result: {
+        committed: false,
+        capacityExceeded: false,
+        snapshotSequence: this.snapshotSequence,
+        acceptedNodeIds,
+        restoredNodeIds,
+        // 合作方确认来源修订号和状态时间只作诊断；后到合法完整快照永远不进入“过期”分支。
+        outdatedNodeIds: [],
+        unmappedNodeIds,
+        // 非法时间已由外层协议整体拒绝，缓存不再跳过单项或推断状态。
+        invalidTimestampNodeIds: [],
+        activeTopologyNodeStatuses,
+        activeSceneNodeStatuses: activeSceneProjection.statuses,
+        activeSceneNodeStateUpdates: activeSceneProjection.updates,
+        clearedActiveSceneNodeIds,
+      },
     }
   }
 
   /**
-   * 只投影本批已接受设备在当前活动场景中的显式三维节点。
-   * 同一节点若被两个正式设备映射命中（发布校验通常会阻止此配置），仍按较新的时间保留最终状态，
-   * 使后续动画帧合并始终是确定性的常数时间覆盖而不是依赖遍历顺序的猜测。
+   * 只遍历权威表中已识别节点及其直接二维目标，生成指定拓扑相对发布基线的覆盖表。
+   * 状态等于节点配置基线时不保存覆盖，使节点从后续快照缺失后自然恢复原始图元状态。
    */
-  private collectActiveSceneNodeStateUpdate(
-    deviceId: DeviceId,
-    state: CachedDeviceState,
-    target: Map<SceneNodeId, TopologySceneNodeVisualStateUpdate>,
-  ): void {
-    const mapping = this.registry.getDeviceMapping(deviceId)
-    if (!mapping || mapping.sceneId !== this.activeSceneId || !mapping.sceneNodeId) return
-
-    const previous = target.get(mapping.sceneNodeId)
-    if (previous && Date.parse(previous.statusUpdatedAt) > state.updatedAtMilliseconds) return
-
-    target.set(mapping.sceneNodeId, {
-      visualState: state.deviceStatus,
-      statusUpdatedAt: state.statusUpdatedAt,
-      // 来源修订号只在父页面显式提供且已通过缓存时序校验后透传；缺失时保持可选兼容语义。
-      ...(state.sourceRevision !== undefined ? { sourceRevision: state.sourceRevision } : {}),
-    })
-  }
-
-  /**
-   * 配置基线状态不存覆盖值；空 Map（映射表）本身仍保留为“已水合”标记。
-   * 这避免基线状态下的活动拓扑每次读取都重新扫描最多 500 条设备状态，
-   * 同时空表也参与既有 LRU（最近最少使用）容量限制，不会形成无界副本。
-   */
-  private setTopologyNodeStatus(
+  private buildTopologyProjection(
+    states: ReadonlyMap<NodeId, CachedNodeState>,
     topologyId: TopologyId,
-    nodeId: NodeId,
-    configuredStatus: DeviceVisualStatus,
-    deviceStatus: DeviceVisualStatus,
-  ): void {
-    const snapshot = this.getMutableTopologySnapshot(topologyId)
-    if (deviceStatus === configuredStatus) snapshot.delete(nodeId)
-    else snapshot.set(nodeId, deviceStatus)
-
-    this.touchTopologySnapshot(topologyId, snapshot)
-  }
-
-  /** 被淘汰的非活动拓扑进入当前视图时只扫描有限的设备状态缓存一次，随后继续走常数时间快照读取。 */
-  private hydrateTopologySnapshot(topologyId: TopologyId): void {
-    if (this.nodeStatusesByTopologyId.has(topologyId)) {
-      this.touchTopologySnapshot(topologyId, this.nodeStatusesByTopologyId.get(topologyId)!)
-      return
-    }
-
-    for (const [deviceId, state] of this.latestStateByDeviceId) {
-      const mapping = this.registry.getDeviceMapping(deviceId)
-      if (!mapping) continue
-      for (const reference of mapping.topologyNodeRefs) {
-        if (reference.topologyId !== topologyId) continue
-        const node = this.registry.getTopologyNode(reference.topologyId, reference.nodeId)
-        if (node) this.setTopologyNodeStatus(reference.topologyId, reference.nodeId, node.deviceStatus, state.deviceStatus)
+  ): Map<NodeId, DeviceVisualStatus> {
+    const statuses = new Map<NodeId, DeviceVisualStatus>()
+    for (const [nodeId, state] of states) {
+      const projection = this.registry.getNodeStateProjection(nodeId)
+      if (!projection) continue
+      for (const target of projection.topologyTargets) {
+        if (target.topologyId !== topologyId || target.configuredStatus === state.deviceStatus) continue
+        statuses.set(target.nodeId, state.deviceStatus)
       }
     }
-
-    // 没有设备映射或全部命中配置基线时也要记录空快照，避免每次读取重复扫描有限设备缓存。
-    if (!this.nodeStatusesByTopologyId.has(topologyId)) this.touchTopologySnapshot(topologyId, new Map<NodeId, DeviceVisualStatus>())
+    return statuses
   }
 
-  /** 场景快照按同样的有限设备缓存按需恢复，避免为九场景长期保存无限状态副本。 */
-  private hydrateSceneSnapshot(sceneId: SceneId): void {
-    if (this.sceneNodeStatusesBySceneId.has(sceneId)) {
-      this.touchSceneSnapshot(sceneId, this.sceneNodeStatusesBySceneId.get(sceneId)!)
-      return
+  /** 一个逻辑节点最多派生一个三维目标；注册表已校验目标不会被其他节点重复驱动。 */
+  private buildSceneProjection(
+    states: ReadonlyMap<NodeId, CachedNodeState>,
+    sceneId: SceneId,
+  ): {
+    statuses: Map<SceneNodeId, DeviceVisualStatus>
+    updates: Map<SceneNodeId, TopologySceneNodeVisualStateUpdate>
+  } {
+    const statuses = new Map<SceneNodeId, DeviceVisualStatus>()
+    const updates = new Map<SceneNodeId, TopologySceneNodeVisualStateUpdate>()
+
+    for (const [nodeId, state] of states) {
+      const projection = this.registry.getNodeStateProjection(nodeId)
+      if (!projection || projection.sceneId !== sceneId) continue
+      this.appendSceneTargets(projection, state, statuses, updates)
     }
 
-    for (const [deviceId, state] of this.latestStateByDeviceId) {
-      const mapping = this.registry.getDeviceMapping(deviceId)
-      if (!mapping || mapping.sceneId !== sceneId || !mapping.sceneNodeId) continue
-      const snapshot = this.getMutableSceneSnapshot(sceneId)
-      snapshot.set(mapping.sceneNodeId, state.deviceStatus)
-      this.touchSceneSnapshot(sceneId, snapshot)
-    }
-
-    // 无三维映射的场景同样保留受容量约束的空快照，保证读取路径不会退化为重复全表扫描。
-    if (!this.sceneNodeStatusesBySceneId.has(sceneId)) this.touchSceneSnapshot(sceneId, new Map<SceneNodeId, DeviceVisualStatus>())
+    return { statuses, updates }
   }
 
-  /** 最近设备状态容量到顶时移除最旧映射产生的二维、三维覆盖，确保淘汰不会残留无法比较的状态。 */
-  private cacheDeviceState(deviceId: DeviceId, state: CachedDeviceState): void {
-    this.latestStateByDeviceId.delete(deviceId)
-    this.latestStateByDeviceId.set(deviceId, state)
-
-    while (this.latestStateByDeviceId.size > this.maximumDeviceStates) {
-      const oldestDeviceId = this.latestStateByDeviceId.keys().next().value as DeviceId | undefined
-      if (!oldestDeviceId) return
-      this.latestStateByDeviceId.delete(oldestDeviceId)
-      this.removeMappedDeviceState(oldestDeviceId)
-    }
-  }
-
-  /** 清理被设备 LRU 淘汰的所有显式目标；发布校验保证同一二维节点只属于其登记设备。 */
-  private removeMappedDeviceState(deviceId: DeviceId): void {
-    const mapping = this.registry.getDeviceMapping(deviceId)
-    if (!mapping) return
-
-    for (const reference of mapping.topologyNodeRefs) {
-      const snapshot = this.nodeStatusesByTopologyId.get(reference.topologyId)
-      if (!snapshot) continue
-      snapshot.delete(reference.nodeId)
-      // 被淘汰设备恢复到基线后保留空快照标记，避免下一次活动读取重新扫描全部设备状态。
-      this.touchTopologySnapshot(reference.topologyId, snapshot)
-    }
-
-    if (mapping.sceneNodeId) {
-      const snapshot = this.sceneNodeStatusesBySceneId.get(mapping.sceneId)
-      if (!snapshot) return
-      snapshot.delete(mapping.sceneNodeId)
-      // 三维快照遵循与二维相同的空表标记规则，并继续受场景快照 LRU 容量约束。
-      this.touchSceneSnapshot(mapping.sceneId, snapshot)
+  /** 将预计算且已去重的三维目标写入完整场景投影，避免为每个目标重复查注册表。 */
+  private appendSceneTargets(
+    projection: RegisteredNodeStateProjection,
+    state: CachedNodeState,
+    statuses: Map<SceneNodeId, DeviceVisualStatus>,
+    updates: Map<SceneNodeId, TopologySceneNodeVisualStateUpdate>,
+  ): void {
+    for (const sceneNodeId of projection.sceneNodeIds) {
+      statuses.set(sceneNodeId, state.deviceStatus)
+      updates.set(sceneNodeId, {
+        visualState: state.deviceStatus,
+        statusUpdatedAt: state.statusUpdatedAt,
+        sourceRevision: state.sourceRevision,
+      })
     }
   }
 
-  /** 为单个拓扑创建轻量状态覆盖表；该表只保存偏离配置基线的节点。 */
-  private getMutableTopologySnapshot(topologyId: TopologyId): Map<NodeId, DeviceVisualStatus> {
-    return this.nodeStatusesByTopologyId.get(topologyId) ?? new Map<NodeId, DeviceVisualStatus>()
+  /** 提交后只播种当前上下文；其他派生快照首次访问时再从权威表重建，避免九场景重复存储。 */
+  private seedActiveSnapshots(
+    activeTopologyNodeStatuses: ReadonlyMap<NodeId, DeviceVisualStatus>,
+    activeSceneNodeStatuses: ReadonlyMap<SceneNodeId, DeviceVisualStatus>,
+  ): void {
+    if (this.activeTopologyId) this.touchTopologySnapshot(this.activeTopologyId, new Map(activeTopologyNodeStatuses))
+    if (this.activeSceneId) this.touchSceneSnapshot(this.activeSceneId, new Map(activeSceneNodeStatuses))
   }
 
-  /** 场景三维快照只保存已声明 sceneNodeId 的状态，不引入任何 Unity 层级或对象引用。 */
-  private getMutableSceneSnapshot(sceneId: SceneId): Map<SceneNodeId, DeviceVisualStatus> {
-    return this.sceneNodeStatusesBySceneId.get(sceneId) ?? new Map<SceneNodeId, DeviceVisualStatus>()
+  /** 未提交结果始终返回当前已提交权威投影，容量错误或释放都不会泄露候选半状态。 */
+  private createUncommittedResult(capacityExceeded: boolean): TopologyNodeStateApplyResult {
+    return {
+      committed: false,
+      capacityExceeded,
+      snapshotSequence: this.snapshotSequence,
+      acceptedNodeIds: [],
+      restoredNodeIds: [],
+      outdatedNodeIds: [],
+      unmappedNodeIds: [],
+      invalidTimestampNodeIds: [],
+      activeTopologyNodeStatuses: this.disposed ? new Map() : this.getActiveTopologyNodeStatuses(),
+      activeSceneNodeStatuses: this.disposed ? new Map() : this.getActiveSceneNodeStatuses(),
+      activeSceneNodeStateUpdates: new Map(),
+      clearedActiveSceneNodeIds: [],
+    }
   }
 
-  /** 以 LRU 顺序保留有限拓扑快照，并永远跳过当前活动拓扑，防止实时后台更新使可见图回退。 */
+  /** 以最近使用顺序保留有限拓扑派生快照，并保护当前活动拓扑。 */
   private touchTopologySnapshot(topologyId: TopologyId, snapshot: Map<NodeId, DeviceVisualStatus>): void {
     this.nodeStatusesByTopologyId.delete(topologyId)
     this.nodeStatusesByTopologyId.set(topologyId, snapshot)
     this.evictSnapshot(this.nodeStatusesByTopologyId, this.maximumTopologySnapshots, this.activeTopologyId)
   }
 
-  /** 场景三维快照同样采用有限 LRU，并保护当前活动场景以保障可见状态稳定。 */
+  /** 场景派生快照采用相同有限策略；淘汰后可由权威设备表无损重建。 */
   private touchSceneSnapshot(sceneId: SceneId, snapshot: Map<SceneNodeId, DeviceVisualStatus>): void {
     this.sceneNodeStatusesBySceneId.delete(sceneId)
     this.sceneNodeStatusesBySceneId.set(sceneId, snapshot)
@@ -351,36 +370,21 @@ export class TopologyDeviceStateCache {
   }
 
   /**
-   * 淘汰最早的非活动快照；若容量为一且唯一条目正是活动项，则保留该项而不破坏当前可见状态。
-   * 直接遍历 Map（映射）迭代器，不为最多八项的淘汰路径创建临时键数组，避免高频状态流产生无意义短命对象。
+   * 淘汰最早的非活动派生快照；直接遍历最多八个键，不创建临时键数组。
+   * 若容量为一且唯一条目正是活动项，则保留活动项，避免可见状态为满足缓存数字而被清空。
    */
   private evictSnapshot<TKey, TValue>(cache: Map<TKey, TValue>, maximumSize: number, protectedKey: TKey | undefined): void {
     while (cache.size > maximumSize) {
       let deleted = false
-
       for (const key of cache.keys()) {
         if (key === protectedKey) continue
         cache.delete(key)
         deleted = true
         break
       }
-
       if (!deleted) return
     }
   }
-}
-
-/** 非法、缺失或未来数据源新增的状态统一显示为离线，不让未知枚举进入二维或三维渲染器。 */
-function normalizeDeviceVisualStatus(value: unknown): DeviceVisualStatus {
-  return value === 'normal' || value === 'alarm' || value === 'fault' || value === 'offline' ? value : 'offline'
-}
-
-/** 同一时间戳仅接受更高来源修订；来源修订缺失时把重复时间视为幂等重放并丢弃。 */
-function isOutdated(updatedAtMilliseconds: number, sourceRevision: number | undefined, previous: CachedDeviceState): boolean {
-  if (updatedAtMilliseconds < previous.updatedAtMilliseconds) return true
-  if (updatedAtMilliseconds > previous.updatedAtMilliseconds) return false
-  if (sourceRevision === undefined || previous.sourceRevision === undefined) return true
-  return sourceRevision <= previous.sourceRevision
 }
 
 /** 缓存容量必须是正安全整数；错误配置回退到任务定义的固定安全值。 */

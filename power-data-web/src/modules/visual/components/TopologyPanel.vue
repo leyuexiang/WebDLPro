@@ -16,10 +16,13 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   selectNode: [nodeId: ProcessNodeId]
+  /** 面板只透传空白取消意图，不在展示层自行修改选择快照。 */
+  clearSelection: []
   /** 双击只转发稳定二维节点标识；正式设备事件由上层运行时按清单明确映射。 */
   doubleClickNode: [nodeId: ProcessNodeId]
 }>()
 
+const panelElement = ref<HTMLElement | null>(null)
 const isFullscreen = ref(false)
 const topologyCanvas = ref<TopologyCanvasController | null>(null)
 
@@ -38,23 +41,44 @@ defineExpose({ getCanvasController })
 /** 展示模型只从当前拓扑计算，切换场景或拓扑时无需复制组件或维护燃气专用条件分支。 */
 const presentation = computed(() => createTopologyPanelPresentation(props.topology, props.nodeStatuses))
 
-/** 采用参考原型的视口遮罩模式，全屏时保留现有画布实例、选中状态和缩放平移状态。 */
-function toggleFullscreen(): void {
-  isFullscreen.value = !isFullscreen.value
+/**
+ * 全屏状态只以浏览器实际登记的全屏元素为准，不能在点击后直接反转本地布尔值。
+ * 平台通过 iframe（内嵌框架）承载本应用时，只要父 iframe 声明 fullscreen（全屏）权限，
+ * 当前面板就会与三维容器一样越过平台内容区进入浏览器原生全屏；按 Esc、浏览器拒绝请求
+ * 或其他元素接管全屏时，按钮名称和画布尺寸都会跟随 fullscreenchange（全屏变化）恢复。
+ */
+function synchronizeFullscreenState(): void {
+  isFullscreen.value = document.fullscreenElement === panelElement.value
 }
 
-/** 仅在拓扑遮罩已打开时响应 Esc，避免干扰页面上其他组件的键盘交互。 */
-function handleKeydown(event: KeyboardEvent): void {
-  if (event.key === 'Escape' && isFullscreen.value) isFullscreen.value = false
+/**
+ * 请求当前拓扑面板进入浏览器原生全屏，并始终复用已挂载的唯一画布实例。
+ * 请求失败时不伪造全屏状态，也不重建拓扑、清空选择或改变三维运行时；用户可继续使用常规布局。
+ */
+async function toggleFullscreen(): Promise<void> {
+  const panel = panelElement.value
+  if (!panel) return
+
+  try {
+    if (document.fullscreenElement === panel) {
+      await document.exitFullscreen()
+      return
+    }
+
+    await panel.requestFullscreen()
+  } catch {
+    // 权限策略或浏览器窗口状态可能拒绝原生全屏；重新读取真实状态，禁止显示虚假的退出按钮。
+    synchronizeFullscreenState()
+  }
 }
 
-/** 键盘监听与组件生命周期绑定，路由切换后不遗留全局事件监听器。 */
-onMounted(() => globalThis.addEventListener('keydown', handleKeydown))
-onBeforeUnmount(() => globalThis.removeEventListener('keydown', handleKeydown))
+/** 监听浏览器原生 Esc 与权限状态变化；组件卸载后立即移除，避免多拓扑切换累积监听器。 */
+onMounted(() => document.addEventListener('fullscreenchange', synchronizeFullscreenState))
+onBeforeUnmount(() => document.removeEventListener('fullscreenchange', synchronizeFullscreenState))
 </script>
 
 <template>
-  <section :class="['topology-panel', { 'topology-panel--fullscreen': isFullscreen }]" :aria-label="presentation.title">
+  <section ref="panelElement" :class="['topology-panel', { 'topology-panel--fullscreen': isFullscreen }]" :aria-label="presentation.title">
     <header class="topology-panel__header">
       <div>
         <p class="eyebrow">控制网络拓扑</p>
@@ -73,7 +97,7 @@ onBeforeUnmount(() => globalThis.removeEventListener('keydown', handleKeydown))
           :aria-label="isFullscreen ? '退出拓扑图全屏展示' : '全屏展示拓扑图'"
           :aria-pressed="isFullscreen"
           :title="isFullscreen ? '退出全屏' : '全屏展示'"
-          @click="toggleFullscreen"
+          @click="void toggleFullscreen()"
         >
           <span aria-hidden="true">{{ isFullscreen ? '×' : '⛶' }}</span>
         </button>
@@ -90,6 +114,7 @@ onBeforeUnmount(() => globalThis.removeEventListener('keydown', handleKeydown))
       :node-statuses="props.nodeStatuses"
       :fullscreen="isFullscreen"
       @select-node="emit('selectNode', $event)"
+      @clear-selection="emit('clearSelection')"
       @double-click-node="emit('doubleClickNode', $event)"
     />
     <!-- 空态提示与隐藏的唯一预备画布独立渲染：保留实例避免切换时重建资源，提示仍准确说明尚无已激活拓扑。 -->
@@ -231,17 +256,23 @@ onBeforeUnmount(() => globalThis.removeEventListener('keydown', handleKeydown))
   text-align: center;
 }
 
-/* 参考原型的全视口遮罩：不调用浏览器原生全屏，Esc 与关闭按钮均可稳定退出。 */
+/*
+ * 浏览器原生全屏元素直接占满物理屏幕可用区域，与三维容器使用相同机制。
+ * 不再使用 fixed（固定定位）遮罩，因此嵌入平台后不会被限制在平台为 iframe 分配的内容尺寸内。
+ */
 .topology-panel--fullscreen {
-  position: fixed;
-  inset: 12px;
-  z-index: 1200;
-  /* 尺寸完全由 inset 约束，避免不同浏览器的动态视口单位造成底部越界。 */
+  position: relative;
+  inline-size: 100%;
+  block-size: 100%;
+  min-inline-size: 0;
+  min-block-size: 0;
   box-sizing: border-box;
   overflow: hidden;
   padding: clamp(12px, 1.5vw, 22px);
-  border-color: rgba(34, 211, 238, 0.78);
-  box-shadow: 0 0 0 100vmax rgba(2, 8, 23, 0.84), 0 18px 54px rgba(2, 8, 23, 0.8);
+  border: 0;
+  border-radius: 0;
+  background: #03111d;
+  box-shadow: none;
 }
 
 /* 全屏时画布接管面板最后一行；ResizeObserver 会在尺寸变更后重绘而不重建缓存。 */
@@ -276,10 +307,6 @@ onBeforeUnmount(() => globalThis.removeEventListener('keydown', handleKeydown))
   .topology-panel__actions {
     inline-size: 100%;
     justify-content: space-between;
-  }
-
-  .topology-panel--fullscreen {
-    inset: 6px;
   }
 
   .topology-panel__fullscreen-hint {

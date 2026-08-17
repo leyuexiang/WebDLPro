@@ -25,7 +25,6 @@
     { "topologyId": "topology.dispatch.overview", "sceneId": "dispatch", "title": "测试调度拓扑", "configVersion": "fixture-contract.1", "nodes": [], "edges": [] }
   ],
   "actions": [],
-  "deviceMappings": [],
   "unitySceneMappings": [
     { "sceneId": "coal-power", "mappingVersion": "mapping.coal-power.1", "processSteps": [], "sceneNodeIds": [], "routeIds": [] },
     { "sceneId": "gas-power", "mappingVersion": "mapping.gas-power.1", "processSteps": [], "sceneNodeIds": [], "routeIds": [] },

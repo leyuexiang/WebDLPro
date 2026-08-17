@@ -66,6 +66,7 @@ jobs:
         run: mkdir -p artifacts
 
       - name: 校验清单并执行发布构建
+        # 发布、联调和运行时共用我方唯一结构清单；旧 base/runtime 双模式已删除。
         run: npm run build:release -- --manifest "$MANIFEST_PATH" --report "$CONTRACT_REPORT_PATH"
 
       # 仅归档脱敏、有限的 JSON 报告；不上传场景清单、构建产物、Unity 资源或测试缓存。

@@ -69,7 +69,8 @@ export function createTopologyPanelPresentation(
   return {
     title: toDisplayTitle(topology.title),
     legends,
-    statusSummary: `当前拓扑已配置 ${topology.nodes.length} 个节点：${statusItems}。状态以当前拓扑配置为准。`,
+    // 同时展示节点和连线数量，便于回归测试确认流程过滤没有误删连线或仍停留在总图。
+    statusSummary: `当前拓扑已配置 ${topology.nodes.length} 个节点、${topology.edges.length} 条连线：${statusItems}。状态以当前拓扑配置为准。`,
     isEmpty: false,
   }
 }

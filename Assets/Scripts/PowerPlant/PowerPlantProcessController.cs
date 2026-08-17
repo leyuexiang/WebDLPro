@@ -3,10 +3,11 @@ using System.Collections.Generic;
 using HighlightPlus;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using WebDLPro.Unity.SceneRuntime;
 
 /// <summary>
-/// 燃气发电厂的场景状态控制器。
-/// 外部平台只传递流程、步骤、机组和路由 ID；模型名称、显隐集合、材质与相机策略全部保留在 Unity 内。
+/// 发电厂业务场景的状态控制器。
+/// 外部平台只传递流程、步骤、机组和路由标识；模型名称、显隐集合、材质与描边策略全部保留在 Unity 内。
 /// </summary>
 [DisallowMultipleComponent]
 public sealed class PowerPlantProcessController : MonoBehaviour
@@ -14,7 +15,6 @@ public sealed class PowerPlantProcessController : MonoBehaviour
     private const string GasPowerGenerationProcessId = "gas-power-generation";
     private const string OverviewStepId = "overview";
     private const string AllUnitsId = "all";
-
     [Serializable]
     private sealed class SceneNodeBinding
     {
@@ -27,7 +27,79 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         public SceneNodeBinding(string id, GameObject[] targets)
         {
             _id = id;
-            _targets = targets;
+            _targets = targets ?? Array.Empty<GameObject>();
+        }
+    }
+
+    /// <summary>
+    /// 燃气真实模型的动态四态登记项。
+    /// 三维节点标识与目标对象均由场景序列化显式提供，初始化阶段只从这些目标收集渲染器；
+    /// 禁止按模型名称、层级路径或二维拓扑节点推断绑定，避免设备状态误着色到相邻模型。
+    /// </summary>
+    [Serializable]
+    private sealed class SceneNodeVisualStateBinding
+    {
+        [SerializeField] private string _sceneNodeId;
+        [SerializeField] private GameObject[] _targets = Array.Empty<GameObject>();
+
+        public string SceneNodeId => _sceneNodeId;
+        public GameObject[] Targets => _targets;
+
+        public SceneNodeVisualStateBinding(string sceneNodeId, GameObject[] targets)
+        {
+            _sceneNodeId = sceneNodeId;
+            _targets = targets ?? Array.Empty<GameObject>();
+        }
+    }
+
+    /// <summary>
+    /// 单个流程步骤的场景映射。
+    /// stepId、unitId、可见节点和描边节点全部由场景属性面板显式保存；运行时不再按流程名称、模型名称或
+    /// 数组顺序猜测目标。unitId 使用归一化后的 all、1、2，允许同一个步骤为总览和不同机组分别登记。
+    /// </summary>
+    [Serializable]
+    private sealed class SceneProcessStepBinding
+    {
+        [SerializeField] private string _stepId;
+        [SerializeField] private string _unitId = AllUnitsId;
+        [SerializeField] private string[] _visibleNodeIds = Array.Empty<string>();
+        [SerializeField] private string _focusNodeId;
+
+        public string StepId => _stepId;
+        public string UnitId => string.IsNullOrWhiteSpace(_unitId) ? AllUnitsId : _unitId;
+        public string[] VisibleNodeIds => _visibleNodeIds ?? Array.Empty<string>();
+        public string FocusNodeId => _focusNodeId;
+
+        public SceneProcessStepBinding(
+            string stepId,
+            string unitId,
+            string[] visibleNodeIds,
+            string focusNodeId)
+        {
+            _stepId = stepId;
+            _unitId = string.IsNullOrWhiteSpace(unitId) ? AllUnitsId : unitId;
+            _visibleNodeIds = visibleNodeIds ?? Array.Empty<string>();
+            _focusNodeId = focusNodeId;
+        }
+    }
+
+    /// <summary>
+    /// 场景允许接收的机组标识别名。
+    /// canonicalUnitId（规范机组标识）与 aliases（别名）均由属性面板保存；运行时不按流程名称拼接或猜测机组。
+    /// </summary>
+    [Serializable]
+    private sealed class SceneUnitIdBinding
+    {
+        [SerializeField] private string _canonicalUnitId;
+        [SerializeField] private string[] _aliases = Array.Empty<string>();
+
+        public string CanonicalUnitId => _canonicalUnitId;
+        public string[] Aliases => _aliases ?? Array.Empty<string>();
+
+        public SceneUnitIdBinding(string canonicalUnitId, string[] aliases)
+        {
+            _canonicalUnitId = canonicalUnitId;
+            _aliases = aliases ?? Array.Empty<string>();
         }
     }
 
@@ -38,30 +110,52 @@ public sealed class PowerPlantProcessController : MonoBehaviour
     }
 
     [Header("场景引用")]
+    // 场景控制器通过该序列化标识区分燃气与燃煤流程，避免把燃气步骤误发到燃煤场景。
+    // 该值属于场景属性，不由运行时代码根据对象名称推断；旧燃气场景缺省时仍兼容燃气默认值。
+    [SerializeField] private string _configuredProcessId = GasPowerGenerationProcessId;
     [SerializeField] private Transform _sceneRoot;
+    [Tooltip("相机由 PowerPlantFreeCameraController 直接控制；流程、总览和拓扑选择均不会改变当前视角。")]
     [SerializeField] private Camera _interactionCamera;
     [SerializeField] private Material _contextFadeMaterial;
     [SerializeField, Range(0.05f, 0.95f)] private float _contextOpacity = 0.22f;
     [SerializeField] private GameObject[] _groundObjects = Array.Empty<GameObject>();
     [SerializeField] private GameObject[] _persistentFlowObjects = Array.Empty<GameObject>();
 
-    [Header("运行时相机")]
-    [SerializeField, Min(0.15f)] private float _cameraTransitionDuration = 1.45f;
-    [SerializeField, Range(25f, 80f)] private float _focusFieldOfView = 52f;
-    [SerializeField] private Vector3 _cameraViewDirection = new Vector3(1f, 0.65f, -1f);
-
     [Header("高亮描边")]
     [Tooltip("流程聚焦对象的轮廓颜色。使用高饱和青色，确保在深色与浅色设备表面均有明显区分。")]
     [SerializeField, ColorUsage(true, true)] private Color _processOutlineColor = new Color(0f, 1f, 0.921f, 1f);
-    [Tooltip("流程聚焦对象的恒定屏幕空间轮廓宽度。当前值高于插件默认值，用于提升远景大型设备的辨识度。")]
-    [SerializeField, Min(0f)] private float _processOutlineWidth = 0.8f;
+    [Tooltip("流程聚焦对象的恒定屏幕空间轮廓宽度。按当前视觉反馈从 0.8 减半到 0.4，保留清晰边界并避免遮挡模型细节。")]
+    [SerializeField, Min(0f)] private float _processOutlineWidth = 0.4f;
     [Tooltip("告警对象的轮廓颜色。")]
     [SerializeField, ColorUsage(true, true)] private Color _alarmOutlineColor = new Color(1f, 0.018f, 0f, 1f);
-    [Tooltip("告警轮廓略宽于普通流程轮廓，使告警优先级在同一画面中更突出。")]
-    [SerializeField, Min(0f)] private float _alarmOutlineWidth = 1f;
+    [Tooltip("告警轮廓宽度。按当前视觉反馈从 1.0 减半到 0.5，仍略宽于流程轮廓以保留告警优先级。")]
+    [SerializeField, Min(0f)] private float _alarmOutlineWidth = 0.5f;
 
-    [Header("由场景配置工具写入")]
+    [Header("场景节点绑定（属性面板）")]
+    [Tooltip("每个元素由稳定 sceneNodeId 和一个或多个场景对象组成。燃煤绑定请直接在属性面板（Inspector）拖拽对象，不要依赖模型名称查找。")]
     [SerializeField] private SceneNodeBinding[] _nodes = Array.Empty<SceneNodeBinding>();
+
+    [Header("设备动态四态视觉（属性面板）")]
+    [Tooltip("按材质实际暴露的属性名填写候选列表，例如 _BaseColor、_BASE_COLOR；注册时只在初始化阶段按该列表为每个材质槽建立索引。")]
+    [SerializeField] private string[] _visualStateColorPropertyNames = { "_BaseColor" };
+    [Tooltip("正常态颜色。Normal（正常态）只在平台明确下发时使用。")]
+    [SerializeField, ColorUsage(true, true)] private Color _normalStateColor = new Color(46f / 255f, 189f / 255f, 107f / 255f, 1f);
+    [Tooltip("告警态颜色。Alarm（告警态）只由平台状态驱动。")]
+    [SerializeField, ColorUsage(true, true)] private Color _alarmStateColor = new Color(242f / 255f, 176f / 255f, 30f / 255f, 1f);
+    [Tooltip("故障态颜色。Fault（故障态）只由平台状态驱动。")]
+    [SerializeField, ColorUsage(true, true)] private Color _faultStateColor = new Color(229f / 255f, 72f / 255f, 77f / 255f, 1f);
+    [Tooltip("离线态颜色。Offline（离线态）只由平台状态驱动。")]
+    [SerializeField, ColorUsage(true, true)] private Color _offlineStateColor = new Color(154f / 255f, 164f / 255f, 178f / 255f, 1f);
+    [Tooltip("仅登记资料明确为红色且允许聚焦描边的目标；黑色模型和无模型节点必须留空。")]
+    [SerializeField] private SceneNodeVisualStateBinding[] _visualStateBindings = Array.Empty<SceneNodeVisualStateBinding>();
+
+    [Header("流程步骤映射（属性面板）")]
+    [Tooltip("每个步骤由 stepId、机组、可见 sceneNodeId 列表和描边 sceneNodeId 组成。请直接在属性面板配置，不要在代码中按模型名称补齐。")]
+    [SerializeField] private SceneProcessStepBinding[] _processStepBindings = Array.Empty<SceneProcessStepBinding>();
+
+    [Header("机组标识映射（属性面板）")]
+    [Tooltip("平台传入的机组标识在这里登记为规范 unitId；燃气和燃煤的别名差异只保存在当前场景资产，不写入运行时分支。")]
+    [SerializeField] private SceneUnitIdBinding[] _unitIdBindings = Array.Empty<SceneUnitIdBinding>();
 
     public void ConfigureForCurrentSampleScene(
         Transform sceneRoot,
@@ -78,6 +172,7 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         GameObject generator,
         GameObject gridOutput)
     {
+        _configuredProcessId = GasPowerGenerationProcessId;
         _sceneRoot = sceneRoot;
         _interactionCamera = interactionCamera;
         _contextFadeMaterial = contextFadeMaterial;
@@ -98,6 +193,24 @@ public sealed class PowerPlantProcessController : MonoBehaviour
             CreateNode("grid-output", new[] { gridOutput })
         };
 
+        // 配置工具只写入已经确认映射到二维拓扑的三个真实模型；
+        // 不把重叠的 node.hrsg.1、node.hrsg.2 或未映射流程节点注册为独立四态目标。
+        _visualStateBindings = new[]
+        {
+            new SceneNodeVisualStateBinding("gas-turbine", new[] { gasTurbine }),
+            new SceneNodeVisualStateBinding("hrsg", new[] { hrsg }),
+            new SceneNodeVisualStateBinding("steam-turbine", new[] { steamTurbine })
+        };
+
+        // 燃气样例使用通用渲染管线属性；这只是编辑器迁移入口写入场景资产的默认值，
+        // 运行时仍只读取控制器序列化的 _visualStateColorPropertyNames 和四态颜色。
+        _visualStateColorPropertyNames = new[] { "_BaseColor" };
+
+        _unitIdBindings = CreateGasUnitIdBindings();
+
+        // 燃气菜单仍可重新生成样例场景，但步骤目标同样写入序列化数组；运行时不再依赖 switch 分支。
+        _processStepBindings = CreateGasProcessStepBindings();
+
         CacheSceneBindings();
     }
 
@@ -108,18 +221,23 @@ public sealed class PowerPlantProcessController : MonoBehaviour
     private readonly HashSet<GameObject> _groundObjectSet = new HashSet<GameObject>();
     private readonly HashSet<GameObject> _persistentFlowObjectSet = new HashSet<GameObject>();
     private readonly HashSet<Renderer> _highlightRendererSet = new HashSet<Renderer>();
+    // 仅在场景初始化时建立的四态渲染器临时集合；状态变化时只由注册表直达目标渲染器，
+    // 不重复扫描模型层级，也不分配新的集合。
+    private readonly HashSet<Renderer> _visualStateRendererSet = new HashSet<Renderer>();
+    private readonly List<string> _registeredVisualStateNodeIds = new List<string>();
+    // 步骤映射在场景初始化时建立常数时间索引；enterProcessStep 高频调用不会重复扫描序列化数组。
+    private readonly Dictionary<string, SceneProcessStepBinding> _processStepsByKey =
+        new Dictionary<string, SceneProcessStepBinding>(StringComparer.Ordinal);
+    // 机组别名在场景初始化时建立不区分大小写索引；enterProcessStep 高频路径只做一次字典查询。
+    private readonly Dictionary<string, string> _unitIdsByAlias =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    private bool _processStepBindingsValid;
+    private bool _unitIdBindingsValid;
 
     private HighlightEffect _processHighlightEffect;
     private HighlightEffect _alarmHighlightEffect;
+    private BusinessSceneVisualStateRegistry _visualStateRegistry;
 
-    private Vector3 _cameraTransitionStartPosition;
-    private Quaternion _cameraTransitionStartRotation;
-    private float _cameraTransitionStartFieldOfView;
-    private Vector3 _cameraTargetPosition;
-    private Quaternion _cameraTargetRotation;
-    private float _cameraTargetFieldOfView;
-    private float _cameraTransitionElapsed;
-    private bool _hasCameraTransition;
     private bool _runtimeResourcesReleased;
     private string _currentProcessId = GasPowerGenerationProcessId;
     private string _currentStepId = OverviewStepId;
@@ -128,10 +246,24 @@ public sealed class PowerPlantProcessController : MonoBehaviour
     public string CurrentProcessId => _currentProcessId;
     public string CurrentStepId => _currentStepId;
     public string CurrentUnitId => _currentUnitId;
+    /// <summary>返回场景配置时写入的流程标识，适配器据此阻止跨场景复用错误的控制器。</summary>
+    public string ConfiguredProcessId => _configuredProcessId;
+
+    /// <summary>
+    /// 适配器仅在当前场景的真实模型全部完成四态登记时声明状态能力。
+    /// 任一配置目标、渲染器或材质属性不合法都会使能力整体不可用，防止部分节点带色、部分节点静默失败。
+    /// </summary>
+    public bool SupportsNodeVisualState => _visualStateRegistry != null && !_runtimeResourcesReleased;
 
     private void Awake()
     {
+        // 初始运行状态必须与当前场景属性面板配置一致。字段声明保留燃气默认值只用于旧场景反序列化兼容，
+        // 燃煤场景若不在唤醒时同步，会在 sceneChanged（场景完成事件）中短暂上报错误的燃气流程。
+        _currentProcessId = _configuredProcessId;
+        _currentStepId = OverviewStepId;
+        _currentUnitId = AllUnitsId;
         CacheSceneBindings();
+        InitializeVisualStateRegistry();
         EnsureHighlightEffects();
     }
 
@@ -142,7 +274,6 @@ public sealed class PowerPlantProcessController : MonoBehaviour
             return;
         }
 
-        UpdateCameraTransition();
         HandlePointerSelection();
     }
 
@@ -164,7 +295,7 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         }
 
         _runtimeResourcesReleased = true;
-        _hasCameraTransition = false;
+        RestoreAndReleaseVisualStateRegistry();
         ClearProcessHighlight();
         ClearAlarmHighlight();
         if (_processHighlightEffect != null)
@@ -186,11 +317,11 @@ public sealed class PowerPlantProcessController : MonoBehaviour
     }
 
     /// <summary>
-    /// 进入已配置流程步骤并更新场景显示与镜头；管道流动由场景静态材质持续播放，不参与步骤切换。
+    /// 进入已配置流程步骤并更新场景显隐与描边；管道流动由场景静态材质持续播放，不参与步骤切换。
     /// </summary>
     public bool TryEnterProcessStep(string processId, string stepId, string unitId, bool isolate, out string message)
     {
-        if (!string.Equals(processId, GasPowerGenerationProcessId, StringComparison.Ordinal))
+        if (!string.Equals(processId, _configuredProcessId, StringComparison.Ordinal))
         {
             message = $"不支持流程：{processId}";
             return false;
@@ -209,15 +340,25 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         }
 
         // 流程步骤只能引用已由场景序列化配置登记的稳定三维节点标识。
-        // 在修改可见性或镜头前先完整校验，避免未知节点被 FocusNode 静默忽略后仍向网页返回“成功”。
+        // 在修改可见性或描边前先完整校验，避免未知节点被描边方法静默忽略后仍向网页返回“成功”。
         if (!TryValidateResolvedSceneNodes(visibleNodeIds, focusNodeId, out string missingSceneNodeId))
         {
             message = $"流程步骤 {stepId} 引用了未登记的场景节点：{missingSceneNodeId}";
             return false;
         }
 
+        // 视觉联动不得劫持用户当前视角：流程、总览和拓扑选择均只更新显隐与描边。
+        // 总览始终恢复全厂模型且明确不描边。
+        bool isOverviewStep = string.Equals(stepId, OverviewStepId, StringComparison.Ordinal);
         ClearProcessHighlight();
-        if (isolate)
+        if (isOverviewStep)
+        {
+            // 总览用于恢复完整厂区视图：清除告警描边并强制显示所有场景根模型，
+            // 不受调用方 isolate 参数或模型初始显隐状态影响，且不移动当前镜头。
+            ClearAlarmHighlight();
+            ShowAllSceneModels();
+        }
+        else if (isolate)
         {
             SetIsolatedVisibility(visibleNodeIds);
         }
@@ -226,13 +367,16 @@ public sealed class PowerPlantProcessController : MonoBehaviour
             RestoreInitialVisibility();
         }
 
-        ClearProcessHighlight();
+        if (!isOverviewStep)
+        {
+            // 关键流程只描边唯一业务节点，不移动镜头，也不把关联管线错误纳入描边。
+            ApplyProcessHighlightForNode(focusNodeId);
+        }
 
-        FocusProcessTargets(focusNodeId, visibleNodeIds, normalizedUnitId);
         _currentProcessId = processId;
         _currentStepId = stepId;
         _currentUnitId = normalizedUnitId;
-        message = $"已进入 {stepId}（机组：{normalizedUnitId}）。";
+        message = $"已进入 {stepId}（机组：{normalizedUnitId}），已更新描边且保持当前视角。";
         return true;
     }
 
@@ -241,11 +385,10 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         ClearProcessHighlight();
         ClearAlarmHighlight();
         RestoreInitialVisibility();
-        FocusNode("plant.overview");
-        _currentProcessId = GasPowerGenerationProcessId;
+        _currentProcessId = _configuredProcessId;
         _currentStepId = OverviewStepId;
         _currentUnitId = AllUnitsId;
-        message = "已恢复全景场景。";
+        message = "已恢复全景场景并保持当前视角。";
         return true;
     }
 
@@ -257,26 +400,78 @@ public sealed class PowerPlantProcessController : MonoBehaviour
             return false;
         }
 
+        // 二维节点选中只能更新交互描边，绝不能改变用户当前观察视角。
         ClearProcessHighlight();
         if (isolate)
         {
             SetIsolatedVisibility(new List<string> { nodeId });
         }
+        else
+        {
+            RestoreInitialVisibility();
+        }
 
-        _highlightRendererSet.Clear();
-        CollectNodeRenderers(nodeId, _highlightRendererSet);
-        ApplyHighlight(_processHighlightEffect, _highlightRendererSet);
-        FocusNode(nodeId);
-        message = $"已聚焦节点：{nodeId}";
+        // 节点测试和网页 focusNode 指令统一经过该方法，运行时缺少组件时会自动补建，
+        // 防止资源释放或延迟初始化后出现“选择已提交但没有描边”的不一致状态。
+        ApplyProcessHighlightForNode(nodeId);
+        message = $"已描边节点：{nodeId}，当前视角保持不变。";
         return true;
     }
 
     /// <summary>
-    /// 由自由相机控制器在检测到手动输入时调用，防止流程镜头动画和玩家控制互相覆盖。
+    /// 取消当前拓扑节点驱动的三维交互描边。
+    /// 该操作故意不清除告警描边、不改变显隐，也不修改当前流程上下文；
+    /// 它只撤销由 ApplyProcessHighlightForNode 产生的交互选择视觉效果。
     /// </summary>
-    public void CancelCameraTransition()
+    public bool TryClearSelection(out string message)
     {
-        _hasCameraTransition = false;
+        if (_runtimeResourcesReleased)
+        {
+            message = "当前发电场景控制器已经释放，不能清除三维选择。";
+            return false;
+        }
+
+        ClearProcessHighlight();
+        message = "已清除三维交互选择描边。";
+        return true;
+    }
+
+    /// <summary>
+    /// 将平台已标准化的四态应用到场景中已显式登记的真实模型。
+    /// 状态只写入注册表预先校验的渲染器和基础颜色属性；它不改变流程描边、交互选择、显隐或镜头，
+    /// 因而可与二维选中和 Highlight Plus（高亮组件）的描边独立叠加。
+    /// </summary>
+    public BusinessSceneCommandResult UpdateNodeVisualState(string sceneNodeId, BusinessSceneNodeVisualState visualState)
+    {
+        if (_runtimeResourcesReleased)
+        {
+            return BusinessSceneCommandResult.Failed("scene-controller-released", "燃气场景控制器已经释放，不能更新节点四态。");
+        }
+        if (_visualStateRegistry == null)
+        {
+            return BusinessSceneCommandResult.Unsupported(BusinessSceneCapability.UpdateNodeVisualState);
+        }
+
+        return _visualStateRegistry.UpdateNodeVisualState(sceneNodeId, visualState);
+    }
+
+    /// <summary>
+    /// 清除平台状态覆盖并恢复模型登记时的基础颜色。
+    /// 这不是将模型设置为 Normal（正常态）；Normal 仍只表示平台明确下发的状态，
+    /// 该操作用于完整快照中设备消失或当前物理场景卸载前的视觉恢复。
+    /// </summary>
+    public BusinessSceneCommandResult ClearNodeVisualState(string sceneNodeId)
+    {
+        if (_runtimeResourcesReleased)
+        {
+            return BusinessSceneCommandResult.Failed("scene-controller-released", "燃气场景控制器已经释放，不能清除节点四态。");
+        }
+        if (_visualStateRegistry == null)
+        {
+            return BusinessSceneCommandResult.Unsupported(BusinessSceneCapability.ClearNodeVisualState);
+        }
+
+        return _visualStateRegistry.ClearNodeVisualState(sceneNodeId);
     }
 
     /// <summary>
@@ -447,6 +642,18 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         effect.SetHighlighted(true);
     }
 
+    /// <summary>
+    /// 为当前流程或节点的唯一描边模型刷新视觉效果。
+    /// 该方法集中处理运行时组件创建、渲染器收集和目标替换，避免不同调用入口遗漏高亮步骤。
+    /// </summary>
+    private void ApplyProcessHighlightForNode(string nodeId)
+    {
+        EnsureHighlightEffects();
+        _highlightRendererSet.Clear();
+        CollectNodeRenderers(nodeId, _highlightRendererSet);
+        ApplyHighlight(_processHighlightEffect, _highlightRendererSet);
+    }
+
     private void ClearProcessHighlight()
     {
         if (_processHighlightEffect != null)
@@ -463,9 +670,110 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// 一次性建立当前场景真实模型的四态索引。
+    /// 仅接受场景序列化的稳定节点和目标对象；每个目标的子渲染器只在这里收集一次，
+    /// 后续状态更新由注册表按节点直接访问，不在设备状态高频路径扫描场景层级。
+    /// 任一登记项不完整时整套能力都不对外声明，避免同一完整快照只给部分模型着色。
+    /// </summary>
+    private void InitializeVisualStateRegistry()
+    {
+        RestoreAndReleaseVisualStateRegistry();
+        if (_visualStateBindings == null || _visualStateBindings.Length == 0 ||
+            _visualStateColorPropertyNames == null || _visualStateColorPropertyNames.Length == 0)
+        {
+            return;
+        }
+
+        // 四态颜色和材质属性均来自当前场景属性面板；这里仅把序列化值转换为运行时不可变调色板。
+        BusinessSceneVisualStatePalette visualStatePalette = new BusinessSceneVisualStatePalette(
+            _normalStateColor,
+            _alarmStateColor,
+            _faultStateColor,
+            _offlineStateColor);
+        BusinessSceneVisualStateRegistry registry = new BusinessSceneVisualStateRegistry();
+        for (int bindingIndex = 0; bindingIndex < _visualStateBindings.Length; bindingIndex++)
+        {
+            SceneNodeVisualStateBinding visualBinding = _visualStateBindings[bindingIndex];
+            if (visualBinding == null || !_nodesById.ContainsKey(visualBinding.SceneNodeId))
+            {
+                registry.Release();
+                return;
+            }
+
+            _visualStateRendererSet.Clear();
+            GameObject[] targets = visualBinding.Targets;
+            for (int targetIndex = 0; targetIndex < targets.Length; targetIndex++)
+            {
+                GameObject target = targets[targetIndex];
+                if (target == null)
+                {
+                    continue;
+                }
+
+                Renderer[] renderers = target.GetComponentsInChildren<Renderer>(true);
+                for (int rendererIndex = 0; rendererIndex < renderers.Length; rendererIndex++)
+                {
+                    Renderer renderer = renderers[rendererIndex];
+                    if (renderer != null)
+                    {
+                        _visualStateRendererSet.Add(renderer);
+                    }
+                }
+            }
+
+            // 注册表需长期持有稳定数组，因此初始化时以当前集合创建一次数组；
+            // 该分配不位于状态更新、镜头动画或输入循环内。
+            Renderer[] registeredRenderers = new List<Renderer>(_visualStateRendererSet).ToArray();
+            BusinessSceneCommandResult registerResult = registry.Register(new BusinessSceneVisualStateBinding(
+                visualBinding.SceneNodeId,
+                registeredRenderers,
+                _visualStateColorPropertyNames,
+                visualStatePalette));
+            if (!registerResult.Success)
+            {
+                registry.Release();
+                return;
+            }
+
+            _registeredVisualStateNodeIds.Add(visualBinding.SceneNodeId);
+        }
+
+        _visualStateRegistry = registry;
+    }
+
+    /// <summary>
+    /// 场景卸载前撤销仍存在的动态颜色，再释放登记引用和复用属性块。
+    /// 清除失败不阻断其余资源释放：物理场景即将卸载，失败只可能来自已销毁的渲染器，
+    /// 但剩余有效模型仍必须恢复基础颜色，避免编辑器内重复加载遗留视觉覆盖。
+    /// </summary>
+    private void RestoreAndReleaseVisualStateRegistry()
+    {
+        if (_visualStateRegistry == null)
+        {
+            _registeredVisualStateNodeIds.Clear();
+            _visualStateRendererSet.Clear();
+            return;
+        }
+
+        for (int nodeIndex = 0; nodeIndex < _registeredVisualStateNodeIds.Count; nodeIndex++)
+        {
+            _visualStateRegistry.ClearNodeVisualState(_registeredVisualStateNodeIds[nodeIndex]);
+        }
+
+        _visualStateRegistry.Release();
+        _visualStateRegistry = null;
+        _registeredVisualStateNodeIds.Clear();
+        _visualStateRendererSet.Clear();
+    }
+
     private void CacheSceneBindings()
     {
         _nodesById.Clear();
+        _processStepsByKey.Clear();
+        _processStepBindingsValid = true;
+        _unitIdsByAlias.Clear();
+        _unitIdBindingsValid = true;
         _selectionNodeByObject.Clear();
         _initialRootActiveStates.Clear();
         _groundObjectSet.Clear();
@@ -473,7 +781,9 @@ public sealed class PowerPlantProcessController : MonoBehaviour
 
         if (_sceneRoot == null)
         {
-            Debug.LogError($"[{nameof(PowerPlantProcessController)}] 未配置场景根节点。请运行 Tools/WebDLPro/Configure Current Power Plant Scene。", this);
+            Debug.LogError(
+                $"[{nameof(PowerPlantProcessController)}] 未配置场景根节点。请在 PowerPlantProcessController 的属性面板（Inspector）中填写场景引用。",
+                this);
             return;
         }
 
@@ -531,10 +841,118 @@ public sealed class PowerPlantProcessController : MonoBehaviour
                 EnsureClickCollider(target);
             }
         }
+
+        CacheProcessStepBindings();
+        CacheUnitIdBindings();
     }
 
     /// <summary>
-    /// 校验流程分支解析出的可见节点与聚焦节点均来自当前场景的显式登记。
+    /// 将属性面板中的步骤数组转换为运行时索引，并拒绝空标识或重复的 stepId + unitId。
+    /// 配置错误只会使流程步骤不可用，不会覆盖或猜测其他节点绑定。
+    /// </summary>
+    private void CacheProcessStepBindings()
+    {
+        if (_processStepBindings == null || _processStepBindings.Length == 0)
+        {
+            _processStepBindingsValid = false;
+            return;
+        }
+
+        for (int bindingIndex = 0; bindingIndex < _processStepBindings.Length; bindingIndex++)
+        {
+            SceneProcessStepBinding binding = _processStepBindings[bindingIndex];
+            if (binding == null || string.IsNullOrWhiteSpace(binding.StepId) ||
+                string.IsNullOrWhiteSpace(binding.FocusNodeId))
+            {
+                _processStepBindingsValid = false;
+                continue;
+            }
+
+            string key = BuildProcessStepKey(binding.StepId, binding.UnitId);
+            if (_processStepsByKey.ContainsKey(key))
+            {
+                _processStepBindingsValid = false;
+                continue;
+            }
+
+            _processStepsByKey.Add(key, binding);
+        }
+    }
+
+    /// <summary>
+    /// 将属性面板中的机组别名数组转换为常数时间索引。
+    /// 步骤中出现的规范 unitId 会自动登记自身，但别名必须由场景作者明确填写；重复别名会使机组映射整体失效。
+    /// </summary>
+    private void CacheUnitIdBindings()
+    {
+        if (_unitIdBindings != null)
+        {
+            for (int bindingIndex = 0; bindingIndex < _unitIdBindings.Length; bindingIndex++)
+            {
+                SceneUnitIdBinding binding = _unitIdBindings[bindingIndex];
+                if (binding == null || string.IsNullOrWhiteSpace(binding.CanonicalUnitId))
+                {
+                    _unitIdBindingsValid = false;
+                    continue;
+                }
+
+                string canonicalUnitId = binding.CanonicalUnitId.Trim();
+                string[] aliases = binding.Aliases;
+                for (int aliasIndex = 0; aliasIndex < aliases.Length; aliasIndex++)
+                {
+                    string alias = aliases[aliasIndex];
+                    if (string.IsNullOrWhiteSpace(alias) ||
+                        !TryRegisterUnitAlias(alias.Trim(), canonicalUnitId))
+                    {
+                        _unitIdBindingsValid = false;
+                    }
+                }
+
+                if (!TryRegisterUnitAlias(canonicalUnitId, canonicalUnitId))
+                {
+                    _unitIdBindingsValid = false;
+                }
+            }
+        }
+
+        // 步骤数组中的规范机组即使没有重复填写到别名列表，也必须能直接作为请求值使用。
+        if (_processStepBindings == null)
+        {
+            return;
+        }
+
+        foreach (SceneProcessStepBinding binding in _processStepBindings)
+        {
+            if (binding == null || string.Equals(binding.UnitId, AllUnitsId, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!TryRegisterUnitAlias(binding.UnitId, binding.UnitId))
+            {
+                _unitIdBindingsValid = false;
+            }
+        }
+    }
+
+    private bool TryRegisterUnitAlias(string alias, string canonicalUnitId)
+    {
+        if (_unitIdsByAlias.TryGetValue(alias, out string existingCanonicalUnitId))
+        {
+            return string.Equals(existingCanonicalUnitId, canonicalUnitId, StringComparison.OrdinalIgnoreCase);
+        }
+
+        _unitIdsByAlias.Add(alias, canonicalUnitId);
+        return true;
+    }
+
+    private static string BuildProcessStepKey(string stepId, string unitId)
+    {
+        return $"{stepId}\u001f{unitId}";
+    }
+
+    /// <summary>
+    /// 校验流程分支解析出的可见节点与描边节点均来自当前场景的显式登记。
     /// 该校验只比较稳定场景节点标识，不读取模型名称、层级路径或二维拓扑节点，防止流程配置错误被静默吞掉。
     /// </summary>
     private bool TryValidateResolvedSceneNodes(IReadOnlyList<string> visibleNodeIds, string focusNodeId, out string missingSceneNodeId)
@@ -560,83 +978,43 @@ public sealed class PowerPlantProcessController : MonoBehaviour
     }
 
     /// <summary>
-    /// 将流程步骤解析为当前场景中已经登记的可见节点和聚焦节点。
-    /// 机组分组继续决定隔离时的可见范围；镜头聚焦固定落在已序列化的步骤节点，不能按机组号拼接未登记标识。
+    /// 将流程步骤解析为当前场景中已经登记的可见节点和描边节点。
+    /// 机组分组继续决定隔离时的可见范围；描边固定落在已序列化的步骤节点，不能按机组号拼接未登记标识。
     /// </summary>
     private bool TryResolveStep(string stepId, string unitId, out List<string> visibleNodeIds, out string focusNodeId)
     {
         visibleNodeIds = new List<string>();
         focusNodeId = string.Empty;
-
-        if (string.Equals(stepId, OverviewStepId, StringComparison.Ordinal))
+        if (!_processStepBindingsValid || string.IsNullOrWhiteSpace(stepId))
         {
-            visibleNodeIds.Add("plant.overview");
-            focusNodeId = "plant.overview";
-            return true;
-        }
-
-        if (string.Equals(stepId, "grid-output", StringComparison.Ordinal))
-        {
-            // 场景只登记了 grid-output；utility.grid 与 node.grid 仅是旧流程分支中的未登记候选，不得继续使用。
-            visibleNodeIds.Add("grid-output");
-            focusNodeId = "grid-output";
-            return true;
-        }
-
-        if (string.Equals(stepId, "gas-network", StringComparison.Ordinal))
-        {
-            // 当前场景没有登记独立燃气管网节点；旧分支同时引用未登记的 steam-train，
-            // 若继续降级为任意进气或总览对象会伪造业务映射，因此明确拒绝并等待场景负责人补充登记。
             return false;
         }
 
-        switch (stepId)
+        string normalizedUnitId = string.IsNullOrWhiteSpace(unitId) ? AllUnitsId : unitId;
+        if (!_processStepsByKey.TryGetValue(BuildProcessStepKey(stepId, normalizedUnitId), out SceneProcessStepBinding binding) &&
+            !string.Equals(normalizedUnitId, AllUnitsId, StringComparison.Ordinal))
         {
-            case "inlet-duct":
-                AddUnitNodeIds(visibleNodeIds, unitId, "gas-train");
-                focusNodeId = unitId == AllUnitsId ? "plant.overview" : "inlet-duct";
-                return true;
-
-            case "gas-turbine":
-                AddUnitNodeIds(visibleNodeIds, unitId, "gas-train");
-                focusNodeId = unitId == AllUnitsId ? "plant.overview" : "gas-turbine";
-                return true;
-
-            case "hrsg":
-                AddUnitNodeIds(visibleNodeIds, unitId, "gas-train");
-                focusNodeId = "hrsg";
-                return true;
-
-            case "steam-turbine":
-                // 旧 steam-train 分组未写入场景序列化配置；使用已登记的流程节点维持受控聚焦和隔离边界。
-                visibleNodeIds.Add("steam-turbine");
-                focusNodeId = unitId == AllUnitsId ? "plant.overview" : "steam-turbine";
-                return true;
-
-            case "generator":
-                AddUnitNodeIds(visibleNodeIds, unitId, "gas-train");
-                // 发电步骤所需的汽机和送出区均使用已登记的直接节点，不能保留未登记 steam-train 或 utility.grid。
-                visibleNodeIds.Add("steam-turbine");
-                visibleNodeIds.Add("grid-output");
-                focusNodeId = unitId == AllUnitsId ? "grid-output" : "generator";
-                return true;
-
-            default:
-                return false;
-        }
-    }
-
-    private void AddUnitNodeIds(List<string> destination, string unitId, string trainName)
-    {
-        if (unitId == AllUnitsId || unitId == "1")
-        {
-            destination.Add($"unit.ccgt.1.{trainName}");
+            // 未登记机组沿用 all 条目；具体场景仍必须在属性面板显式登记该条目。
+            _processStepsByKey.TryGetValue(BuildProcessStepKey(stepId, AllUnitsId), out binding);
         }
 
-        if (unitId == AllUnitsId || unitId == "2")
+        if (binding == null)
         {
-            destination.Add($"unit.ccgt.2.{trainName}");
+            return false;
         }
+
+        string[] configuredVisibleNodeIds = binding.VisibleNodeIds;
+        visibleNodeIds = new List<string>(configuredVisibleNodeIds.Length);
+        for (int nodeIndex = 0; nodeIndex < configuredVisibleNodeIds.Length; nodeIndex++)
+        {
+            if (!string.IsNullOrWhiteSpace(configuredVisibleNodeIds[nodeIndex]))
+            {
+                visibleNodeIds.Add(configuredVisibleNodeIds[nodeIndex]);
+            }
+        }
+
+        focusNodeId = binding.FocusNodeId;
+        return visibleNodeIds.Count > 0 && !string.IsNullOrWhiteSpace(focusNodeId);
     }
 
     private void SetIsolatedVisibility(List<string> visibleNodeIds)
@@ -685,6 +1063,22 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// 总览时恢复被上下文材质替换的渲染器，并显示场景根节点下的全部模型。
+    /// 该行为独立于初始显隐缓存，确保此前隐藏或启动时关闭的模型也能进入总览与包围盒计算。
+    /// </summary>
+    private void ShowAllSceneModels()
+    {
+        RestoreAllContextFades();
+        foreach (GameObject target in _initialRootActiveStates.Keys)
+        {
+            if (target != null)
+            {
+                target.SetActive(true);
+            }
+        }
+    }
+
     private void RestoreInitialVisibility()
     {
         RestoreAllContextFades();
@@ -694,77 +1088,6 @@ public sealed class PowerPlantProcessController : MonoBehaviour
             {
                 entry.Key.SetActive(entry.Value);
             }
-        }
-    }
-
-    private void FocusProcessTargets(string focusNodeId, List<string> visibleNodeIds, string unitId)
-    {
-        if (unitId == AllUnitsId && TryCalculateBounds(visibleNodeIds, out Bounds processBounds))
-        {
-            BeginCameraTransition(processBounds);
-            return;
-        }
-
-        FocusNode(focusNodeId);
-    }
-
-    private void FocusNode(string nodeId)
-    {
-        if (_interactionCamera == null || !_nodesById.TryGetValue(nodeId, out SceneNodeBinding node))
-        {
-            return;
-        }
-
-        if (!TryCalculateBounds(node.Targets, out Bounds bounds))
-        {
-            return;
-        }
-
-        BeginCameraTransition(bounds);
-    }
-
-    private void BeginCameraTransition(Bounds bounds)
-    {
-        if (_interactionCamera == null)
-        {
-            return;
-        }
-
-        Vector3 direction = _cameraViewDirection.sqrMagnitude > 0.001f ? _cameraViewDirection.normalized : new Vector3(1f, 0.65f, -1f).normalized;
-        float verticalFovRadians = _focusFieldOfView * Mathf.Deg2Rad;
-        float radius = Mathf.Max(bounds.extents.magnitude, 3f);
-        float distance = radius / Mathf.Tan(verticalFovRadians * 0.5f) * 1.25f;
-
-        Transform cameraTransform = _interactionCamera.transform;
-        _cameraTransitionStartPosition = cameraTransform.position;
-        _cameraTransitionStartRotation = cameraTransform.rotation;
-        _cameraTransitionStartFieldOfView = _interactionCamera.fieldOfView;
-        _cameraTargetPosition = bounds.center + direction * distance;
-        _cameraTargetRotation = Quaternion.LookRotation(bounds.center - _cameraTargetPosition, Vector3.up);
-        _cameraTargetFieldOfView = _focusFieldOfView;
-        _cameraTransitionElapsed = 0f;
-        _hasCameraTransition = true;
-    }
-
-    private void UpdateCameraTransition()
-    {
-        if (!_hasCameraTransition || _interactionCamera == null)
-        {
-            return;
-        }
-
-        _cameraTransitionElapsed += Time.unscaledDeltaTime;
-        float duration = Mathf.Max(_cameraTransitionDuration, 0.15f);
-        float progress = Mathf.Clamp01(_cameraTransitionElapsed / duration);
-        float blend = progress * progress * (3f - 2f * progress);
-        Transform cameraTransform = _interactionCamera.transform;
-        cameraTransform.position = Vector3.Lerp(_cameraTransitionStartPosition, _cameraTargetPosition, blend);
-        cameraTransform.rotation = Quaternion.Slerp(_cameraTransitionStartRotation, _cameraTargetRotation, blend);
-        _interactionCamera.fieldOfView = Mathf.Lerp(_cameraTransitionStartFieldOfView, _cameraTargetFieldOfView, blend);
-
-        if (progress >= 1f)
-        {
-            _hasCameraTransition = false;
         }
     }
 
@@ -807,20 +1130,40 @@ public sealed class PowerPlantProcessController : MonoBehaviour
 
     private void EnsureClickCollider(GameObject target)
     {
+        if (target == null)
+        {
+            return;
+        }
+
         if (target.GetComponent<Collider>() != null)
         {
             return;
         }
 
-        Renderer renderer = target.GetComponent<Renderer>();
-        if (renderer == null)
+        // FBX 根对象不一定直接持有 Renderer；燃煤模型的部分根对象把网格放在子节点中。
+        // 只在初始化阶段合并一次子渲染器包围盒，避免点击时重复遍历层级或产生运行时分配。
+        Renderer[] renderers = target.GetComponentsInChildren<Renderer>(true);
+        if (renderers.Length == 0)
         {
             return;
         }
 
+        Bounds worldBounds = renderers[0].bounds;
+        for (int rendererIndex = 1; rendererIndex < renderers.Length; rendererIndex++)
+        {
+            if (renderers[rendererIndex] != null)
+            {
+                worldBounds.Encapsulate(renderers[rendererIndex].bounds);
+            }
+        }
+
         BoxCollider collider = target.AddComponent<BoxCollider>();
-        collider.center = renderer.localBounds.center;
-        collider.size = renderer.localBounds.size;
+        collider.center = target.transform.InverseTransformPoint(worldBounds.center);
+        Vector3 scale = target.transform.lossyScale;
+        collider.size = new Vector3(
+            Mathf.Abs(scale.x) > Mathf.Epsilon ? worldBounds.size.x / Mathf.Abs(scale.x) : worldBounds.size.x,
+            Mathf.Abs(scale.y) > Mathf.Epsilon ? worldBounds.size.y / Mathf.Abs(scale.y) : worldBounds.size.y,
+            Mathf.Abs(scale.z) > Mathf.Epsilon ? worldBounds.size.z / Mathf.Abs(scale.z) : worldBounds.size.z);
     }
 
     private void ApplyContextFade(GameObject target)
@@ -897,7 +1240,7 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         {
             if (activeMaterials.RuntimeMaterials[materialIndex] != null)
             {
-                Destroy(activeMaterials.RuntimeMaterials[materialIndex]);
+                DestroyRuntimeMaterial(activeMaterials.RuntimeMaterials[materialIndex]);
             }
         }
 
@@ -920,12 +1263,33 @@ public sealed class PowerPlantProcessController : MonoBehaviour
             {
                 if (activeMaterials.RuntimeMaterials[materialIndex] != null)
                 {
-                    Destroy(activeMaterials.RuntimeMaterials[materialIndex]);
+                    DestroyRuntimeMaterial(activeMaterials.RuntimeMaterials[materialIndex]);
                 }
             }
         }
 
         _activeContextFades.Clear();
+    }
+
+    /// <summary>
+    /// 释放仅由本控制器创建的上下文半透明材质。
+    /// 运行模式使用延迟销毁以适配当前帧渲染；编辑器配置和自动验证则必须立即销毁，
+    /// 否则 Unity 会拒绝延迟销毁并留下错误日志。
+    /// </summary>
+    private static void DestroyRuntimeMaterial(Material material)
+    {
+        if (material == null)
+        {
+            return;
+        }
+
+        if (Application.isPlaying)
+        {
+            Destroy(material);
+            return;
+        }
+
+        DestroyImmediate(material);
     }
 
     private bool IsGroundObject(GameObject target)
@@ -993,7 +1357,7 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         }
     }
 
-    private static bool TryNormalizeUnit(string unitId, out string normalizedUnitId)
+    private bool TryNormalizeUnit(string unitId, out string normalizedUnitId)
     {
         if (string.IsNullOrWhiteSpace(unitId) || string.Equals(unitId, AllUnitsId, StringComparison.OrdinalIgnoreCase))
         {
@@ -1001,15 +1365,8 @@ public sealed class PowerPlantProcessController : MonoBehaviour
             return true;
         }
 
-        if (unitId == "1" || string.Equals(unitId, "unit-1", StringComparison.OrdinalIgnoreCase) || string.Equals(unitId, "unit.ccgt.1", StringComparison.OrdinalIgnoreCase))
+        if (_unitIdBindingsValid && _unitIdsByAlias.TryGetValue(unitId.Trim(), out normalizedUnitId))
         {
-            normalizedUnitId = "1";
-            return true;
-        }
-
-        if (unitId == "2" || string.Equals(unitId, "unit-2", StringComparison.OrdinalIgnoreCase) || string.Equals(unitId, "unit.ccgt.2", StringComparison.OrdinalIgnoreCase))
-        {
-            normalizedUnitId = "2";
             return true;
         }
 
@@ -1076,6 +1433,66 @@ public sealed class PowerPlantProcessController : MonoBehaviour
     private static SceneNodeBinding CreateNode(string id, GameObject[] targets)
     {
         return new SceneNodeBinding(id, targets);
+    }
+
+    private static SceneProcessStepBinding CreateProcessStep(
+        string stepId,
+        string unitId,
+        string[] visibleNodeIds,
+        string focusNodeId)
+    {
+        return new SceneProcessStepBinding(stepId, unitId, visibleNodeIds, focusNodeId);
+    }
+
+    /// <summary>
+    /// 仅供燃气历史配置菜单迁移样例场景使用的默认步骤数组。
+    /// 该数组会写回 GasPower.unity；运行时读取的仍是场景序列化结果，燃煤场景不会调用此方法。
+    /// </summary>
+    private static SceneProcessStepBinding[] CreateGasProcessStepBindings()
+    {
+        return new[]
+        {
+            CreateProcessStep("overview", AllUnitsId, new[] { "plant.overview" }, "plant.overview"),
+            CreateProcessStep("grid-output", AllUnitsId, new[] { "grid-output" }, "grid-output"),
+            CreateProcessStep(
+                "inlet-duct",
+                AllUnitsId,
+                new[] { "unit.ccgt.1.gas-train", "unit.ccgt.2.gas-train" },
+                "plant.overview"),
+            CreateProcessStep("inlet-duct", "1", new[] { "unit.ccgt.1.gas-train" }, "inlet-duct"),
+            CreateProcessStep("inlet-duct", "2", new[] { "unit.ccgt.2.gas-train" }, "inlet-duct"),
+            CreateProcessStep("gas-turbine", AllUnitsId, new[] { "gas-turbine" }, "gas-turbine"),
+            CreateProcessStep("hrsg", AllUnitsId, new[] { "hrsg" }, "hrsg"),
+            CreateProcessStep("steam-turbine", AllUnitsId, new[] { "steam-turbine" }, "steam-turbine"),
+            CreateProcessStep(
+                "generator",
+                AllUnitsId,
+                new[] { "unit.ccgt.1.gas-train", "unit.ccgt.2.gas-train", "steam-turbine", "grid-output" },
+                "grid-output"),
+            CreateProcessStep(
+                "generator",
+                "1",
+                new[] { "unit.ccgt.1.gas-train", "steam-turbine", "grid-output" },
+                "generator"),
+            CreateProcessStep(
+                "generator",
+                "2",
+                new[] { "unit.ccgt.2.gas-train", "steam-turbine", "grid-output" },
+                "generator")
+        };
+    }
+
+    /// <summary>
+    /// 燃气历史配置菜单使用的机组别名默认值。
+    /// 菜单执行后会把数组写入 GasPower.unity；运行时不会调用本方法，也不会覆盖属性面板修改。
+    /// </summary>
+    private static SceneUnitIdBinding[] CreateGasUnitIdBindings()
+    {
+        return new[]
+        {
+            new SceneUnitIdBinding("1", new[] { "1", "unit-1", "unit.ccgt.1" }),
+            new SceneUnitIdBinding("2", new[] { "2", "unit-2", "unit.ccgt.2" })
+        };
     }
 
 }

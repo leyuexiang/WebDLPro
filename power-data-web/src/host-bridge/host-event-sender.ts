@@ -1,5 +1,5 @@
 import type { TransitionId } from '@/config/scene-topology/identifiers'
-import type { TopologyDeviceDoubleClickIntent } from '@/modules/visual/topology/topology-node-interaction'
+import type { TopologyNodeDoubleClickIntent } from '@/modules/visual/topology/topology-node-interaction'
 import {
   isHostEventMessage,
   type CommandResultPayload,
@@ -58,6 +58,7 @@ const SAFE_HOST_PROTOCOL_ERROR_MESSAGES = Object.freeze({
   'topology.activate.failed': '目标拓扑激活未能完成。',
   'command.timeout': '外层命令等待执行结果超时。',
   'command.superseded': '外层命令已被更新的事务取代。',
+  'runtime.startup.timeout': '页面未能在启动期限内完成运行时准备。',
   'runtime.disposed': '可视化子应用已经释放。',
 }) satisfies Readonly<Record<HostProtocolErrorCode, string>>
 
@@ -112,22 +113,16 @@ export class HostEventSender {
   }
 
   /**
-   * 发送二维拓扑节点产生的设备双击意图。
-   * 意图只能由正式清单的 `emit-device` 节点生成，因此 deviceId（设备标识）在此方法签名中强制存在；
-   * 关联标识复用本事件 messageId，使父页面可以将本次用户操作与随后业务处理日志安全关联。
+   * 发送二维拓扑节点产生的节点双击意图。
+   * 意图只能由正式清单的 `emit-node` 节点生成；发送器逐字段投影，旧设备编号或三维内部标识不会外泄。
    */
-  public sendTopologyNodeDoubleClick(intent: TopologyDeviceDoubleClickIntent, contextRevision: number): boolean {
-    const correlationId = this.createMessageId('topology.node.dblclick')
+  public sendTopologyNodeDoubleClick(intent: TopologyNodeDoubleClickIntent): boolean {
     return this.send('topology.node.dblclick', {
       // 逐项选择协议字段，不展开来源对象；即使调用方在运行时被错误强制转换，也不会携带层级路径或凭据等附加数据。
       sceneId: intent.sceneId,
       topologyId: intent.topologyId,
       nodeId: intent.nodeId,
-      deviceId: intent.deviceId,
-      ...(intent.sceneNodeId !== undefined ? { sceneNodeId: intent.sceneNodeId } : {}),
-      contextRevision,
-      correlationId,
-    }, undefined, correlationId)
+    })
   }
 
   /**
@@ -139,12 +134,7 @@ export class HostEventSender {
     return this.send('scene.object.selected', {
       sceneId: payload.sceneId,
       sceneNodeId: payload.sceneNodeId,
-      ...(payload.deviceId !== undefined ? { deviceId: payload.deviceId } : {}),
-      ...(payload.topologyId !== undefined ? { topologyId: payload.topologyId } : {}),
-      // 复制有限节点数组，避免调用方在 postMessage（跨窗口消息）前后改变同一数组引用。
-      nodeIds: [...payload.nodeIds],
-      contextRevision: payload.contextRevision,
-      correlationId: payload.correlationId,
+      nodeId: payload.nodeId,
     })
   }
 

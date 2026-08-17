@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
-  SCENE_IDS,
   toActionId,
-  toDeviceId,
+  SCENE_IDS,
   toNodeId,
+  toRouteId,
+  toSceneId,
   toSceneNodeId,
   toTopologyId,
   toUnityRuntimeKey,
@@ -11,15 +12,44 @@ import {
 } from '@/config/scene-topology/identifiers'
 import { SceneTopologyManifestLoader } from '@/config/scene-topology/loader'
 import type { SceneTopologyManifest } from '@/config/scene-topology/types'
-import { validateSceneTopologyManifest } from '@/config/scene-topology/validator'
+import { MAX_DEVICE_STATE_SCENE_NODE_TARGETS_PER_SCENE, validateSceneTopologyManifest } from '@/config/scene-topology/validator'
 
-const manifestVersion = 'test-manifest.1'
+const manifestVersion = 'node-protocol-test.1'
 
 /**
- * 构造完整九场景测试清单而非生产资料。
- * 测试数据仅用于证明校验器能识别九场景闭集，不代表任何 Unity 文件名、正式拓扑或业务映射。
+ * 构造一份九场景、单燃气来源拓扑的完整清单。
+ * 测试只使用逻辑 nodeId（节点标识）；真实设备编号属于平台自己的映射表，不出现在夹具中。
  */
-function createValidManifest(): SceneTopologyManifest {
+function createValidManifest(options: { gasNodes?: SceneTopologyManifest['topologies'][number]['nodes']; gasEdges?: SceneTopologyManifest['topologies'][number]['edges']; flow?: SceneTopologyManifest['topologies'][number] } = {}): SceneTopologyManifest {
+  const gasOverviewId = toTopologyId('topology.gas-power.overview')
+  const gasNodes = options.gasNodes ?? [
+    {
+      nodeId: toNodeId('node.gas.turbine'),
+      title: '燃气轮机',
+      sceneNodeId: toSceneNodeId('scene-node.gas.turbine'),
+      iconKey: 'gas-turbine',
+      x: 30,
+      y: 50,
+      deviceStatus: 'offline' as const,
+      doubleClickBehavior: 'emit-node' as const,
+    },
+    {
+      nodeId: toNodeId('node.gas.generator'),
+      title: '发电机',
+      sceneNodeId: toSceneNodeId('scene-node.gas.generator'),
+      iconKey: 'generator',
+      x: 70,
+      y: 50,
+      deviceStatus: 'offline' as const,
+      doubleClickBehavior: 'emit-node' as const,
+    },
+  ]
+  const gasEdges = options.gasEdges ?? [{
+    edgeId: toRouteId('route.gas.turbine-generator'),
+    fromNodeId: gasNodes[0]!.nodeId,
+    toNodeId: gasNodes[1]!.nodeId,
+    title: '机械连接',
+  }]
   const scenes = SCENE_IDS.map((sceneId) => {
     const topologyId = toTopologyId(`topology.${sceneId}.overview`)
     return {
@@ -29,347 +59,212 @@ function createValidManifest(): SceneTopologyManifest {
       defaultTopologyId: topologyId,
       topologyIds: [topologyId],
       supportedActionIds: [],
-      sceneMappingVersion: `mapping.${sceneId}.1`,
-      resourceVersion: `resource.${sceneId}.1`,
+      sceneMappingVersion: `${manifestVersion}.${sceneId}`,
+      resourceVersion: `${manifestVersion}.${sceneId}`,
       switchStrategy: 'unload-first' as const,
     }
   })
-
+  const topologies = scenes.map((scene) => scene.sceneId === 'gas-power'
+    ? {
+        topologyId: gasOverviewId,
+        sceneId: scene.sceneId,
+        title: '燃气总览',
+        configVersion: manifestVersion,
+        nodes: gasNodes,
+        edges: gasEdges,
+      }
+    : {
+        topologyId: scene.defaultTopologyId,
+        sceneId: scene.sceneId,
+        title: `测试拓扑-${scene.sceneId}`,
+        configVersion: manifestVersion,
+        nodes: [],
+        edges: [],
+      })
   return {
     manifestVersion,
-    unityBuildId: 'test-build.1',
-    unityRuntimeKey: toUnityRuntimeKey('test-runtime'),
+    unityBuildId: 'node-protocol-build.1',
+    unityRuntimeKey: toUnityRuntimeKey('node-protocol-runtime'),
     scenes,
-    topologies: scenes.map((scene) => ({
-      topologyId: scene.defaultTopologyId,
-      sceneId: scene.sceneId,
-      title: `测试拓扑-${scene.sceneId}`,
-      configVersion: manifestVersion,
-      nodes: [],
-      edges: [],
-    })),
+    topologies: options.flow ? [...topologies, options.flow] : topologies,
     actions: [],
-    deviceMappings: [],
     unitySceneMappings: scenes.map((scene) => ({
       sceneId: scene.sceneId,
       mappingVersion: scene.sceneMappingVersion,
       processSteps: [],
-      sceneNodeIds: [],
+      sceneNodeIds: scene.sceneId === 'gas-power' ? gasNodes.flatMap((node) => node.sceneNodeId ? [node.sceneNodeId] : []) : [],
       routeIds: [],
     })),
   }
 }
 
-/** 任务-005回归：每个原子发布缺口必须显式阻止加载，不得根据标题或数组顺序补全。 */
-describe('场景拓扑原子清单校验器', () => {
-  it('接受包含九个固定场景及一致版本的完整测试清单', () => {
+function issueCodes(manifest: unknown): readonly string[] {
+  return validateSceneTopologyManifest(manifest).map((issue) => issue.code)
+}
+
+describe('场景拓扑节点协议清单校验', () => {
+  it('接受九场景闭集和节点主键清单', () => {
     expect(validateSceneTopologyManifest(createValidManifest())).toEqual([])
   })
 
-  it('拒绝缺失固定场景的清单', () => {
-    const manifest = createValidManifest()
-    const missingScene = {
-      ...manifest,
-      scenes: manifest.scenes.filter((scene) => scene.sceneId !== SCENE_IDS[0]),
-    }
-
-    expect(validateSceneTopologyManifest(missingScene).some((issue) => issue.code === 'scene.missing')).toBe(true)
+  it('严格拒绝旧设备映射、平台绑定计数、运行时清单和节点设备编号字段', () => {
+    const manifest = createValidManifest() as unknown as Record<string, unknown>
+    manifest.deviceMappings = []
+    manifest.platformBindingCount = 0
+    manifest.runtimeManifest = {}
+    const gasTopology = (manifest.topologies as Array<Record<string, unknown>>).find((topology) => topology.sceneId === 'gas-power')!
+    gasTopology.nodes = [{ ...(gasTopology.nodes as Array<Record<string, unknown>>)[0], deviceId: 'node.legacy' }]
+    const codes = issueCodes(manifest)
+    expect(codes).toEqual(expect.arrayContaining([
+      'manifest.legacy-device-identifier',
+      'manifest.legacy-device-mapping',
+      'manifest.legacy-binding-metadata',
+      'manifest.legacy-runtime-manifest',
+    ]))
   })
 
-  it('拒绝不属于所属场景的默认拓扑', () => {
-    const manifest = createValidManifest()
-    const gasScene = manifest.scenes.find((scene) => scene.sceneId === 'gas-power')
-    const coalScene = manifest.scenes.find((scene) => scene.sceneId === 'coal-power')
-    if (!gasScene || !coalScene) throw new Error('测试清单必须包含燃气和燃煤场景。')
-
-    const invalid = {
-      ...manifest,
-      scenes: manifest.scenes.map((scene) =>
-        scene.sceneId === gasScene.sceneId
-          ? { ...scene, defaultTopologyId: coalScene.defaultTopologyId, topologyIds: [coalScene.defaultTopologyId] }
-          : scene,
-      ),
-    }
-
-    const issues = validateSceneTopologyManifest(invalid).map((issue) => issue.code)
-    expect(issues).toContain('scene.default-topology')
-    expect(issues).toContain('scene.topology-scene')
-  })
-
-  it('拒绝场景、拓扑、动作和设备映射之间的发布版本错配', () => {
-    const manifest = createValidManifest()
-    const gasScene = manifest.scenes.find((scene) => scene.sceneId === 'gas-power')
-    if (!gasScene) throw new Error('测试清单必须包含燃气场景。')
-    const deviceId = toDeviceId('device.gas-turbine.01')
-    const nodeId = toNodeId('gas-power.turbine-node')
-    const sceneNodeId = toSceneNodeId('scene-node.gas-turbine.01')
-
-    const invalid = {
-      ...manifest,
-      topologies: manifest.topologies.map((topology) =>
-        topology.topologyId === gasScene.defaultTopologyId
-          ? {
-              ...topology,
-              configVersion: 'stale-topology.1',
-              nodes: [{ nodeId, title: '测试燃机节点', deviceId, sceneNodeId, iconKey: 'gas-turbine', x: 50, y: 50, deviceStatus: 'offline' as const, doubleClickBehavior: 'emit-device' as const }],
-            }
-          : topology,
-      ),
-      deviceMappings: [{ deviceId, sceneId: gasScene.sceneId, topologyNodeRefs: [{ topologyId: gasScene.defaultTopologyId, nodeId }], sceneNodeId, configVersion: 'stale-device.1' }],
-    }
-
-    const issues = validateSceneTopologyManifest(invalid).map((issue) => issue.code)
-    expect(issues).toContain('topology.version')
-    expect(issues).toContain('device-mapping.version')
-  })
-
-  it('拒绝可双击但未登记设备标识的节点', () => {
-    const manifest = createValidManifest()
-    const gasScene = manifest.scenes.find((scene) => scene.sceneId === 'gas-power')
-    if (!gasScene) throw new Error('测试清单必须包含燃气场景。')
-
-    const invalid = {
-      ...manifest,
-      topologies: manifest.topologies.map((topology) =>
-        topology.topologyId === gasScene.defaultTopologyId
-          ? {
-              ...topology,
-              nodes: [
-                {
-                  nodeId: toNodeId('gas-power.turbine-node'),
-                  title: '测试燃机节点',
-                  iconKey: 'gas-turbine',
-                  x: 50,
-                  y: 50,
-                  deviceStatus: 'offline' as const,
-                  doubleClickBehavior: 'emit-device' as const,
-                },
-              ],
-            }
-          : topology,
-      ),
-    }
-
-    expect(validateSceneTopologyManifest(invalid).some((issue) => issue.code === 'topology.double-click-device')).toBe(true)
-  })
-
-  it('拒绝设备映射存在但未显式引用可双击二维节点的清单', () => {
-    const manifest = createValidManifest()
-    const gasScene = manifest.scenes.find((scene) => scene.sceneId === 'gas-power')
-    if (!gasScene) throw new Error('测试清单必须包含燃气场景。')
-    const deviceId = toDeviceId('device.gas-turbine.01')
-    const nodeId = toNodeId('gas-power.turbine-node')
-
-    const invalid = {
-      ...manifest,
-      topologies: manifest.topologies.map((topology) => topology.topologyId === gasScene.defaultTopologyId
-        ? {
-            ...topology,
-            nodes: [{
-              nodeId,
-              title: '测试燃机节点',
-              deviceId,
-              iconKey: 'gas-turbine',
-              x: 50,
-              y: 50,
-              deviceStatus: 'offline' as const,
-              doubleClickBehavior: 'emit-device' as const,
-            }],
-          }
-        : topology),
-      // 设备本身存在但没有关联到二维节点；旧校验会误将其视为完整映射。
-      deviceMappings: [{
-        deviceId,
-        sceneId: gasScene.sceneId,
-        topologyNodeRefs: [],
+  it('递归拒绝任意层级、大小写和分隔符变体的旧绑定职责', () => {
+    const flowTopologyId = toTopologyId('topology.gas-power.flow')
+    const actionId = toActionId('action.gas-power.reset')
+    const baseManifest = createValidManifest({
+      flow: {
+        topologyId: flowTopologyId,
+        sceneId: toSceneId('gas-power'),
+        title: '燃气流程',
+        configVersion: manifestVersion,
+        nodes: [],
+        edges: [],
+        filter: {
+          sourceTopologyId: toTopologyId('topology.gas-power.overview'),
+          visibleNodeIds: [toNodeId('node.gas.turbine'), toNodeId('node.gas.generator')],
+          visibleEdgeIds: [toRouteId('route.gas.turbine-generator')],
+          nodeLayoutOverrides: [
+            { nodeId: toNodeId('node.gas.turbine'), x: 30, y: 50 },
+            { nodeId: toNodeId('node.gas.generator'), x: 70, y: 50 },
+          ],
+        },
+      },
+    })
+    const validManifest: SceneTopologyManifest = {
+      ...baseManifest,
+      scenes: baseManifest.scenes.map((scene) => scene.sceneId === 'gas-power'
+        ? { ...scene, topologyIds: [...scene.topologyIds, flowTopologyId], supportedActionIds: [actionId] }
+        : scene),
+      actions: [{
+        actionId,
+        title: '燃气复位',
+        targetSceneId: toSceneId('gas-power'),
+        targetTopologyId: toTopologyId('topology.gas-power.overview'),
+        allowedParameters: [],
+        unityAction: { type: 'resetScene' },
+        failurePolicy: 'keep-current-context',
         configVersion: manifestVersion,
       }],
     }
+    expect(validateSceneTopologyManifest(validManifest)).toEqual([])
 
-    expect(validateSceneTopologyManifest(invalid).some((issue) => issue.code === 'device-mapping.node-unmapped')).toBe(true)
-  })
+    type MutableManifest = Record<string, unknown>
+    const cases: ReadonlyArray<{
+      code: string
+      field: string
+      select: (manifest: MutableManifest) => Record<string, unknown>
+    }> = [
+      { code: 'manifest.legacy-device-identifier', field: 'DeviceId', select: (manifest) => manifest },
+      { code: 'manifest.legacy-device-identifier', field: 'selected-device-id', select: (manifest) => (manifest.scenes as Record<string, unknown>[])[0]! },
+      { code: 'manifest.legacy-device-mapping', field: 'DEVICE_MAPPINGS', select: (manifest) => (manifest.topologies as Record<string, unknown>[])[0]! },
+      { code: 'manifest.legacy-device-identifier', field: 'selectedDeviceId', select: (manifest) => ((manifest.topologies as Record<string, unknown>[]).find((topology) => topology.sceneId === 'gas-power')!.nodes as Record<string, unknown>[])[0]! },
+      { code: 'manifest.legacy-runtime-manifest', field: 'injected.runtime.manifest', select: (manifest) => ((manifest.topologies as Record<string, unknown>[]).find((topology) => topology.filter)!.filter as Record<string, unknown>) },
+      { code: 'manifest.legacy-binding-metadata', field: 'bindingRevision', select: (manifest) => (manifest.actions as Record<string, unknown>[])[0]! },
+      { code: 'manifest.legacy-device-identifier', field: 'platformInjectsDeviceIds', select: (manifest) => ((manifest.actions as Record<string, unknown>[])[0]!.unityAction as Record<string, unknown>) },
+      { code: 'manifest.legacy-device-mapping', field: 'DeviceMappings', select: (manifest) => (manifest.unitySceneMappings as Record<string, unknown>[])[0]! },
+    ]
 
-  it('拒绝二维设备节点与设备映射之间缺失三维节点标识的情况', () => {
-    const manifest = createValidManifest()
-    const gasScene = manifest.scenes.find((scene) => scene.sceneId === 'gas-power')
-    if (!gasScene) throw new Error('测试清单必须包含燃气场景。')
-    const deviceId = toDeviceId('device.gas-turbine.01')
-    const sceneNodeId = toSceneNodeId('gas-turbine')
-    const nodeId = toNodeId('gas-power.turbine-node')
-
-    const invalid = {
-      ...manifest,
-      topologies: manifest.topologies.map((topology) =>
-        topology.topologyId === gasScene.defaultTopologyId
-          ? {
-              ...topology,
-              nodes: [
-                {
-                  nodeId,
-                  title: '测试燃机节点',
-                  deviceId,
-                  sceneNodeId,
-                  iconKey: 'gas-turbine',
-                  x: 50,
-                  y: 50,
-                  deviceStatus: 'offline' as const,
-                  doubleClickBehavior: 'emit-device' as const,
-                },
-              ],
-            }
-          : topology,
-      ),
-      deviceMappings: [
-        {
-          deviceId,
-          sceneId: gasScene.sceneId,
-          topologyNodeRefs: [{ topologyId: gasScene.defaultTopologyId, nodeId }],
-          configVersion: manifestVersion,
-        },
-      ],
+    for (const testCase of cases) {
+      const candidate = structuredClone(validManifest) as unknown as MutableManifest
+      testCase.select(candidate)[testCase.field] = '旧字段不得进入运行时'
+      expect(issueCodes(candidate), testCase.field).toEqual([testCase.code])
     }
-
-    expect(validateSceneTopologyManifest(invalid).some((issue) => issue.code === 'device-mapping.scene-node')).toBe(true)
   })
 
-  it('拒绝二维节点与设备映射共同引用所属Unity场景未登记的三维节点', () => {
-    const manifest = createValidManifest()
-    const gasScene = manifest.scenes.find((scene) => scene.sceneId === 'gas-power')
-    if (!gasScene) throw new Error('测试清单必须包含燃气场景。')
-    const deviceId = toDeviceId('device.gas-turbine.01')
-    const nodeId = toNodeId('gas-power.turbine-node')
-    const missingSceneNodeId = toSceneNodeId('scene-node.unregistered')
-
-    const invalid = {
-      ...manifest,
-      topologies: manifest.topologies.map((topology) => topology.topologyId === gasScene.defaultTopologyId
-        ? {
-            ...topology,
-            nodes: [{
-              nodeId,
-              title: '测试燃机节点',
-              deviceId,
-              sceneNodeId: missingSceneNodeId,
-              iconKey: 'gas-turbine',
-              x: 50,
-              y: 50,
-              deviceStatus: 'offline' as const,
-              doubleClickBehavior: 'emit-device' as const,
-            }],
-          }
-        : topology),
-      deviceMappings: [{
-        deviceId,
-        sceneId: gasScene.sceneId,
-        topologyNodeRefs: [{ topologyId: gasScene.defaultTopologyId, nodeId }],
-        sceneNodeId: missingSceneNodeId,
-        configVersion: manifestVersion,
-      }],
-      // 燃气 Unity 映射保持为空，明确模拟“二维已声明、三维未发布”的错误组合。
-      unitySceneMappings: manifest.unitySceneMappings,
+  it('保留合法节点字段和安全扩展，只按键名拒绝旧职责且不会递归溢出', () => {
+    const manifest = createValidManifest() as unknown as Record<string, unknown>
+    const extension: Record<string, unknown> = {
+      deviceStatusPalette: { offline: '#888888' },
+      deviceIdentity: '仅为普通扩展名称，不是设备编号字段',
+      note: '字段值提到 deviceId 不得触发键名规则',
     }
+    extension.self = extension
+    manifest.extensions = extension
 
-    const issueCodes = validateSceneTopologyManifest(invalid).map((issue) => issue.code)
-    expect(issueCodes).toContain('topology.scene-node-unregistered')
-    expect(issueCodes).toContain('device-mapping.scene-node-unregistered')
+    expect(validateSceneTopologyManifest(manifest)).toEqual([])
   })
 
-  it('拒绝Unity场景映射中重复登记的节点、路径和流程步骤', () => {
-    const manifest = createValidManifest()
-    const gasScene = manifest.scenes.find((scene) => scene.sceneId === 'gas-power')
-    if (!gasScene) throw new Error('测试清单必须包含燃气场景。')
-
-    const duplicateSceneNodeId = toSceneNodeId('scene-node.gas-turbine')
-    const invalid = {
-      ...manifest,
-      unitySceneMappings: manifest.unitySceneMappings.map((mapping) => mapping.sceneId === gasScene.sceneId
-        ? {
-            ...mapping,
-            // 三类重复都来自显式映射字段；测试不依赖标题、数组下标或对象名称推断归属。
-            sceneNodeIds: [duplicateSceneNodeId, duplicateSceneNodeId],
-            routeIds: ['route.gas-turbine.exhaust', 'route.gas-turbine.exhaust'],
-            processSteps: [
-              { processId: 'gas-power-generation', stepId: 'gas-turbine' },
-              { processId: 'gas-power-generation', stepId: 'gas-turbine' },
-            ],
-          }
-        : mapping),
-    }
-
-    const issueCodes = validateSceneTopologyManifest(invalid).map((issue) => issue.code)
-    expect(issueCodes).toContain('unity-mapping.duplicate-node')
-    expect(issueCodes).toContain('unity-mapping.duplicate-route')
-    expect(issueCodes).toContain('unity-mapping.duplicate-process-step')
-  })
-
-  it('拒绝多个设备状态源映射到同一场景三维节点', () => {
-    const manifest = createValidManifest()
-    const gasScene = manifest.scenes.find((scene) => scene.sceneId === 'gas-power')
-    if (!gasScene) throw new Error('测试清单必须包含燃气场景。')
-    const sharedSceneNodeId = toSceneNodeId('scene-node.shared')
-    const firstDeviceId = toDeviceId('device.gas-turbine.01')
-    const secondDeviceId = toDeviceId('device.gas-turbine.02')
-    const firstNodeId = toNodeId('node.gas-turbine.01')
-    const secondNodeId = toNodeId('node.gas-turbine.02')
-
-    const invalid = {
-      ...manifest,
-      topologies: manifest.topologies.map((topology) => topology.topologyId === gasScene.defaultTopologyId
-        ? {
-            ...topology,
-            nodes: [
-              { nodeId: firstNodeId, title: '设备一', deviceId: firstDeviceId, sceneNodeId: sharedSceneNodeId, iconKey: 'generic-device', x: 30, y: 50, deviceStatus: 'offline' as const, doubleClickBehavior: 'none' as const },
-              { nodeId: secondNodeId, title: '设备二', deviceId: secondDeviceId, sceneNodeId: sharedSceneNodeId, iconKey: 'generic-device', x: 70, y: 50, deviceStatus: 'offline' as const, doubleClickBehavior: 'none' as const },
-            ],
-          }
-        : topology),
-      deviceMappings: [
-        { deviceId: firstDeviceId, sceneId: gasScene.sceneId, topologyNodeRefs: [{ topologyId: gasScene.defaultTopologyId, nodeId: firstNodeId }], sceneNodeId: sharedSceneNodeId, configVersion: manifestVersion },
-        { deviceId: secondDeviceId, sceneId: gasScene.sceneId, topologyNodeRefs: [{ topologyId: gasScene.defaultTopologyId, nodeId: secondNodeId }], sceneNodeId: sharedSceneNodeId, configVersion: manifestVersion },
-      ],
-      unitySceneMappings: manifest.unitySceneMappings.map((mapping) => mapping.sceneId === gasScene.sceneId
-        ? { ...mapping, sceneNodeIds: [sharedSceneNodeId] }
-        : mapping),
-    }
-
-    expect(validateSceneTopologyManifest(invalid).some((issue) => issue.code === 'device-mapping.scene-node-duplicate')).toBe(true)
-  })
-
-  it('拒绝目标拓扑不属于动作目标场景的动作', () => {
-    const manifest = createValidManifest()
-    const gasScene = manifest.scenes.find((scene) => scene.sceneId === 'gas-power')
-    const coalScene = manifest.scenes.find((scene) => scene.sceneId === 'coal-power')
-    if (!gasScene || !coalScene) throw new Error('测试清单必须包含燃气和燃煤场景。')
-
-    const invalid = {
-      ...manifest,
-      scenes: manifest.scenes.map((scene) =>
-        scene.sceneId === 'gas-power' ? { ...scene, supportedActionIds: [toActionId('gas-power.invalid-target')] } : scene,
-      ),
-      actions: [
-        {
-          actionId: toActionId('gas-power.invalid-target'),
-          title: '无效目标动作',
-          targetSceneId: gasScene.sceneId,
-          targetTopologyId: coalScene.defaultTopologyId,
-          allowedParameters: [],
-          unityAction: { type: 'none' as const },
-          failurePolicy: 'keep-current-context' as const,
-          configVersion: manifestVersion,
-        },
-      ],
-    }
-
-    expect(validateSceneTopologyManifest(invalid).some((issue) => issue.code === 'action.topology-scene')).toBe(true)
-  })
-
-  it('无效更新不会覆盖加载器最近一次验证通过的清单', () => {
+  it('旧字段清单不会替换加载器最近一次合法快照', () => {
     const loader = new SceneTopologyManifestLoader()
     const validManifest = createValidManifest()
     expect(loader.load(validManifest).status).toBe('ready')
-    expect(loader.load({ manifestVersion: 'invalid' }).status).toBe('invalid')
+
+    const invalidManifest = structuredClone(validManifest) as unknown as Record<string, unknown>
+    invalidManifest.selectedDeviceId = 'legacy-device'
+    expect(loader.load(invalidManifest)).toMatchObject({
+      status: 'invalid',
+      issues: [{ code: 'manifest.legacy-device-identifier' }],
+    })
     expect(loader.getLastValidManifest()).toBe(validManifest)
-    loader.dispose()
-    expect(loader.getLastValidManifest()).toBeUndefined()
+  })
+
+  it('要求来源拓扑所有节点统一声明 emit-node，并保证 nodeId 与 sceneNodeId 唯一', () => {
+    const manifest = createValidManifest()
+    const gasTopology = manifest.topologies.find((topology) => topology.sceneId === 'gas-power')!
+    const duplicateNode = { ...gasTopology.nodes[1]!, nodeId: gasTopology.nodes[0]!.nodeId, doubleClickBehavior: 'none' as const }
+    const duplicateSceneNode = { ...gasTopology.nodes[1]!, nodeId: toNodeId('node.gas.other'), sceneNodeId: gasTopology.nodes[0]!.sceneNodeId }
+    const invalid = {
+      ...manifest,
+      topologies: manifest.topologies.map((topology) => topology === gasTopology
+        ? { ...topology, nodes: [gasTopology.nodes[0]!, duplicateNode, duplicateSceneNode] }
+        : topology),
+    }
+    const codes = issueCodes(invalid)
+    expect(codes).toEqual(expect.arrayContaining([
+      'topology.duplicate-source-node',
+      'topology.source-node-reporting-permission',
+      'topology.scene-node-duplicate',
+    ]))
+  })
+
+  it('过滤拓扑只能引用来源总图的节点和连线，并为每个可见节点给出排布', () => {
+    const manifest = createValidManifest({
+      flow: {
+        topologyId: toTopologyId('topology.gas-power.flow'),
+        sceneId: toSceneId('gas-power'),
+        title: '燃机流程',
+        configVersion: manifestVersion,
+        nodes: [],
+        edges: [],
+        filter: {
+          sourceTopologyId: toTopologyId('topology.gas-power.overview'),
+          visibleNodeIds: [toNodeId('node.gas.turbine'), toNodeId('node.unknown')],
+          visibleEdgeIds: [toRouteId('route.unknown')],
+          nodeLayoutOverrides: [{ nodeId: toNodeId('node.gas.turbine'), x: 30, y: 50 }],
+        },
+      },
+    })
+    const codes = issueCodes(manifest)
+    expect(codes).toEqual(expect.arrayContaining(['topology.filter-node', 'topology.filter-edge']))
+  })
+
+  it('限制单场景三维状态目标数量，防止状态快照造成无界三维任务', () => {
+    const nodes = Array.from({ length: MAX_DEVICE_STATE_SCENE_NODE_TARGETS_PER_SCENE + 1 }, (_, index) => ({
+      nodeId: toNodeId(`node.capacity.${index}`),
+      title: `节点${index}`,
+      sceneNodeId: toSceneNodeId(`scene-node.capacity.${index}`),
+      iconKey: 'generic-device',
+      x: index % 100,
+      y: Math.floor(index / 10),
+      deviceStatus: 'offline' as const,
+      doubleClickBehavior: 'emit-node' as const,
+    }))
+    const manifest = createValidManifest({ gasNodes: nodes })
+    expect(issueCodes(manifest)).toContain('topology.scene-node-capacity')
   })
 })

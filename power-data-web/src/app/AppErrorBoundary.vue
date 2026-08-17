@@ -10,7 +10,9 @@ const route = useRoute()
 const errorMessage = ref('')
 
 onErrorCaptured((error) => {
-  errorMessage.value = error instanceof Error ? error.message : '发生了无法识别的页面异常。'
+  // 页面只显示固定中文说明；完整异常对象留在控制台，供联调排查而不干扰普通用户判断。
+  console.error('[页面渲染异常]', error)
+  errorMessage.value = '页面暂时无法显示，请重新尝试。'
   return false
 })
 

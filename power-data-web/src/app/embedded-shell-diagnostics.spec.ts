@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { createEmbeddedShellDiagnostic } from '@/app/embedded-shell-diagnostics'
+import {
+  createContainerTooSmallReason,
+  createEmbeddedShellDiagnostic,
+} from '@/app/embedded-shell-diagnostics'
 
-/** 任务-006回归：嵌入壳只显示固定错误码和关联标识，不从异常对象透传诊断细节。 */
+/** 任务-006回归：嵌入壳只保留受控诊断，不从异常对象透传细节；普通生命周期提示不展示技术字段。 */
 describe('嵌入壳诊断模型', () => {
   it('为基础状态生成固定错误码和关联标识', () => {
     expect(createEmbeddedShellDiagnostic('configuration-error', {
@@ -25,5 +28,11 @@ describe('嵌入壳诊断模型', () => {
       code: 'manifest.timeout',
       correlationId: 'embedded-shell-test-02',
     })
+  })
+
+  it('尺寸不足提示包含与部署配置一致的最小宽高', () => {
+    expect(createContainerTooSmallReason(1280, 720)).toBe(
+      '当前窗口可用区域不足，请将窗口调整至不小于 1280 × 720 像素后重试。',
+    )
   })
 })

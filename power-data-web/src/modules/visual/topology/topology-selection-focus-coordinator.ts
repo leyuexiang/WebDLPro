@@ -5,6 +5,8 @@ import type { VisualizationSelectionSource } from '@/modules/visual/orchestratio
 export interface TopologyFocusPort {
   supportsFocusNode(): boolean
   focusNode(sceneNodeId: SceneNodeId, selectionId: SelectionId): Promise<{ success: boolean }>
+  supportsClearSelection(): boolean
+  clearSelection(): Promise<{ success: boolean }>
 }
 
 /** 单击聚焦请求只保存稳定来源、关联标识和显式三维节点，不携带 Canvas 坐标、标题或模型路径。 */
@@ -37,6 +39,16 @@ export class TopologySelectionFocusCoordinator {
 
     this.rememberSelection(request.selectionId)
     const result = await this.focusPort.focusNode(request.sceneNodeId, request.selectionId)
+    return result.success
+  }
+
+  /**
+   * 仅请求 Unity 清除当前交互选中描边，不重置场景、流程、显隐或镜头。
+   * 空白点击时二维选择已经先行提交，三维失败只返回 false，不回滚二维状态。
+   */
+  public async requestClearSelection(): Promise<boolean> {
+    if (this.disposed || !this.focusPort.supportsClearSelection()) return false
+    const result = await this.focusPort.clearSelection()
     return result.success
   }
 

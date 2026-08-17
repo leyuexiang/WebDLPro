@@ -1,6 +1,5 @@
 import type {
   ActionId,
-  DeviceId,
   NodeId,
   RouteId,
   SceneActivationId,
@@ -69,7 +68,6 @@ export type VisualizationDomainCommand =
       nodeIds: readonly NodeId[]
       routeIds: readonly RouteId[]
       source: VisualizationSelectionSource
-      deviceId?: DeviceId | null
       sceneNodeId?: SceneNodeId | null
     }
   | { type: 'diagnostic.record'; diagnostic: VisualizationDiagnostic }
@@ -121,7 +119,6 @@ export interface VisualizationCoordinatorStatePort {
   readonly sceneLoadProgress: VisualizationSceneLoadProgress | null
   readonly selectedNodeIds: readonly NodeId[]
   readonly selectedRouteIds: readonly RouteId[]
-  readonly selectedDeviceId: DeviceId | null
   readonly selectedSceneNodeId: SceneNodeId | null
   readonly selectionSource: VisualizationSelectionSource
   readonly latestDiagnostic: VisualizationDiagnostic | null
@@ -154,7 +151,6 @@ export interface VisualizationCoordinatorStatePort {
     nodeIds: readonly NodeId[],
     routeIds: readonly RouteId[],
     source: VisualizationSelectionSource,
-    deviceId?: DeviceId | null,
     sceneNodeId?: SceneNodeId | null,
   ): void
   recordDiagnostic(diagnostic: VisualizationDiagnostic): void
@@ -180,7 +176,6 @@ export interface VisualizationCoordinatorSnapshot {
   sceneLoadProgress?: VisualizationSceneLoadProgress | null
   selectedNodeIds: readonly NodeId[]
   selectedRouteIds: readonly RouteId[]
-  selectedDeviceId: DeviceId | null
   selectedSceneNodeId: SceneNodeId | null
   selectionSource: VisualizationSelectionSource
   latestDiagnostic: VisualizationDiagnostic | null
@@ -241,7 +236,6 @@ export class VisualizationCoordinator {
       sceneLoadProgress: this.state.sceneLoadProgress ? { ...this.state.sceneLoadProgress } : null,
       selectedNodeIds: [...this.state.selectedNodeIds],
       selectedRouteIds: [...this.state.selectedRouteIds],
-      selectedDeviceId: this.state.selectedDeviceId,
       selectedSceneNodeId: this.state.selectedSceneNodeId,
       selectionSource: this.state.selectionSource,
       latestDiagnostic: this.state.latestDiagnostic ? { ...this.state.latestDiagnostic } : null,
@@ -404,7 +398,6 @@ export class VisualizationCoordinator {
       [...new Set(command.nodeIds)],
       [...new Set(command.routeIds)],
       command.source,
-      command.deviceId ?? null,
       command.sceneNodeId ?? null,
     )
     return { status: 'accepted', contextRevision: this.state.stableContext.contextRevision }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { readDeploymentConfiguration } from '@/config/deployment/deployment-config'
+import { RUNTIME_PARENT_ORIGIN, RUNTIME_SELF_ORIGIN, readDeploymentConfiguration } from '@/config/deployment/deployment-config'
 
 const productionEnvironment = {
   DEV: false,
@@ -47,5 +47,45 @@ describe('部署配置读取器', () => {
     expect(result.issues.map((issue) => issue.code)).toContain('deployment.parent-origin')
     expect(result.issues.map((issue) => issue.code)).toContain('deployment.unity-parent-origin')
     expect(result.issues.map((issue) => issue.code)).toContain('deployment.minimum-viewport')
+  })
+
+  it('合作方运行时模式从当前服务来源派生 Unity 和结构清单', () => {
+    const result = readDeploymentConfiguration({
+      DEV: false,
+      VITE_POWER_PARENT_ORIGIN: RUNTIME_PARENT_ORIGIN,
+      VITE_POWER_UNITY_PARENT_ORIGIN: RUNTIME_SELF_ORIGIN,
+      VITE_POWER_UNITY_ENTRY_URL: `${RUNTIME_SELF_ORIGIN}/unity/index.html`,
+      VITE_POWER_MANIFEST_URL: `${RUNTIME_SELF_ORIGIN}/scene-topology-manifest.json`,
+      VITE_POWER_MINIMUM_VIEWPORT_WIDTH: '600',
+      VITE_POWER_MINIMUM_VIEWPORT_HEIGHT: '600',
+    }, {
+      selfOrigin: 'http://192.168.1.20:5546',
+      parentOrigin: 'http://platform.lan:8080',
+    })
+
+    expect(result.status).toBe('ready')
+    expect(result.configuration).toMatchObject({
+      addressMode: 'runtime-self-origin',
+      parentOrigin: 'http://platform.lan:8080',
+      unityParentOrigin: 'http://192.168.1.20:5546',
+      unityEntryUrl: 'http://192.168.1.20:5546/unity/index.html',
+      manifestUrl: 'http://192.168.1.20:5546/scene-topology-manifest.json',
+    })
+  })
+
+  it('运行时模式直接访问时不依赖平台父页面仍可启动页面资源', () => {
+    const result = readDeploymentConfiguration({
+      DEV: false,
+      VITE_POWER_PARENT_ORIGIN: RUNTIME_PARENT_ORIGIN,
+      VITE_POWER_UNITY_PARENT_ORIGIN: RUNTIME_SELF_ORIGIN,
+      VITE_POWER_UNITY_ENTRY_URL: `${RUNTIME_SELF_ORIGIN}/unity/index.html`,
+      VITE_POWER_MANIFEST_URL: `${RUNTIME_SELF_ORIGIN}/scene-topology-manifest.json`,
+      VITE_POWER_MINIMUM_VIEWPORT_WIDTH: '600',
+      VITE_POWER_MINIMUM_VIEWPORT_HEIGHT: '600',
+    }, { selfOrigin: 'http://192.168.1.20:5546' })
+
+    expect(result.status).toBe('ready')
+    expect(result.configuration?.parentOrigin).toBe('http://192.168.1.20:5546')
+    expect(result.configuration?.addressMode).toBe('runtime-self-origin')
   })
 })

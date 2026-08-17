@@ -77,6 +77,8 @@ export class ViewOpenTransactionHandler {
     private readonly unity: ViewOpenUnityPort,
     private readonly coordinator: VisualizationCoordinatorFacade,
     private readonly createTransitionId: ViewOpenTransitionIdFactory = createDefaultTransitionId,
+    /** 物理 Unity 恢复完成后的内部回调；只用于把最新权威三维快照重投影到新实例，不产生外层回执。 */
+    private readonly onPhysicalRuntimeRecovered: (sceneActivationId?: SceneActivationId) => void = () => undefined,
   ) {}
 
   /**
@@ -287,6 +289,7 @@ export class ViewOpenTransactionHandler {
       outcome,
       ...(restoredSceneActivationId ? { restoredSceneActivationId } : {}),
     })
+    if (outcome === 'recovered') this.notifyPhysicalRuntimeRecovered(restoredSceneActivationId)
     return this.failure(code, stage, message, transitionId, payload)
   }
 
@@ -352,6 +355,8 @@ export class ViewOpenTransactionHandler {
       outcome: 'recovered',
       restoredSceneActivationId: recoveryResult.sceneActivationId,
     })
+    // 超时补偿在外层命令已经失败后才完成；新 Unity 实例仍必须接收当前权威快照，不能等待平台再次推送。
+    this.notifyPhysicalRuntimeRecovered(recoveryResult.sceneActivationId)
   }
 
   /** 不能安全证明补偿结果时清空稳定上下文，禁止保留可能已与物理 Unity 脱节的旧二维视图。 */
@@ -362,6 +367,18 @@ export class ViewOpenTransactionHandler {
       transitionId,
       diagnostic: this.createDiagnostic('command.timeout', activeTransaction.correlationId),
     })
+  }
+
+  /**
+   * 三维状态重投影是恢复完成后的尽力内部操作，绝不能让其实现异常反向推翻已经稳定的二维恢复和外层失败回执。
+   * 正式协调器自身会将 Unity 异步失败收敛为有限诊断；此处额外隔离未来替换端口的同步异常。
+   */
+  private notifyPhysicalRuntimeRecovered(sceneActivationId: SceneActivationId | undefined): void {
+    try {
+      this.onPhysicalRuntimeRecovered(sceneActivationId)
+    } catch {
+      // 事务已恢复完成，不能为重投影回调再创建一次恢复事务、抛出原始异常或改变外层语义。
+    }
   }
 
   /**

@@ -26,19 +26,30 @@
       <p id="result">正在等待可视化子应用就绪。</p>
       <button id="run-button">执行基础三层回归</button>
       <button id="advanced-run-button">执行超时与恢复回归</button>
+      <button id="object-selection-regression-button">准备三维反向选择回归</button>
       <button id="workflow-button">触发同场景流程动作</button>
       <button id="cross-scene-workflow-button">触发跨场景流程动作</button>
-      <button id="device-state-button">发送合成设备状态</button>
+      <button id="device-state-button">发送合成节点状态</button>
+      <button id="device-snapshot-regression-button">执行连续完整快照回归</button>
+      <button id="device-state-boundary-regression-button">执行状态边界三层回归</button>
+      <button id="device-state-retry-regression-button">执行状态单在途重试回归</button>
       <button id="state-button">查询有限状态快照</button>
       <button id="dispose-button" class="secondary">释放子应用</button>
       <p class="hint">链路：本宿主页 → 正式嵌入壳 → Unity 模拟页。</p>
       <p class="hint">测试清单仅验证九场景闭集和燃气双击协议，不代表正式业务映射。</p>
       <pre id="logs" aria-live="polite"></pre>
     </aside>
-    <iframe id="shell-frame" title="可视化子应用测试实例"></iframe>
+    <!--
+      该夹具模拟平台直接嵌入我方独立服务。原生全屏权限不会自动跨 iframe 继承；若宿主不显式授权，
+      三维和拓扑组件的 requestFullscreen() 都会被浏览器拒绝，无法验证正式包要求的整屏展示。
+      同时保留现代权限策略和兼容属性，使测试条件与平台接入说明一致，不影响消息来源或会话校验。
+    -->
+    <iframe id="shell-frame" title="可视化子应用测试实例" allow="fullscreen" allowfullscreen></iframe>
   </main>
 
-  <script>
+  <script type="module">
+    import { LocalShellDeviceStateRetryController } from './device-state-retry-controller.js';
+
     /**
      * 此页是外层父页面测试夹具，只通过 power-scene-topology-shell（外层协议通道）与嵌入壳通信。
      * 它不向 Unity 模拟页直发消息、不读取 iframe 内部状态，也不接受未校验的来源、窗口、实例或会话。
@@ -53,6 +64,9 @@
     const instanceId = `local-shell-${crypto.randomUUID()}`;
     let sessionId = '';
     let sequence = 0;
+    // 仅用于本地夹具强制 iframe 发生一次真实导航；不参与外层协议身份、会话或业务载荷。
+    // 释放后的壳地址若完全不变，浏览器会保留原页面，导致没有新 system.ready 可供建立新会话。
+    let localShellGeneration = 0;
     let initialized = false;
     // 保存本页主动发送的初始化命令标识，只用于验证 system.ack 与首个 view.changed 都归属同一父命令。
     let initializationRequestId;
@@ -61,6 +75,9 @@
      * 不保存完整 payload（载荷）、异常文本或 Unity 对象，避免测试页成为不可信消息的旁路存储。
      */
     const observedEvents = [];
+    // 只在“状态单在途重试回归”期间存在。它属于测试宿主页，不能进入嵌入壳或平台交付包。
+    let stateRetryController;
+    let ignoredStateRetryReplyTo;
 
     /** 日志限制为 80 行，只记录事件类型、受控标识和固定结果，不保存完整载荷。 */
     function writeLog(text) {
@@ -91,16 +108,28 @@
     }
 
     /**
+     * 仅为本地夹具提供受限等待，不读取子应用或 Unity 模拟页的内部对象。
+     * 每次等待固定在 150 毫秒以上，使当前浏览器动画帧、连接器确认和模拟 Unity 回执都有机会完成；
+     * 它不是生产重试、平台轮询或状态超时策略，正式命令的十秒截止仍由嵌入壳协议生命周期统一管理。
+     */
+    function waitForLocalStateDelivery() {
+      return new Promise((resolve) => window.setTimeout(resolve, 180));
+    }
+
+    /**
      * 等待已收集的受控事件摘要。超时仅用于测试页显示失败，不会修改嵌入壳、Unity 或外层协议状态。
      */
-    function waitForEvent(predicate, timeoutMessage, timeoutMs = 4000) {
-      const existing = observedEvents.find(predicate);
+    function waitForEvent(predicate, timeoutMessage, timeoutMs = 4000, startIndex = 0) {
+      // 重新创建内嵌壳后，旧会话残留的受控事件仍可保留在有限日志中；等待新会话时必须从指定下标开始查找，
+      // 防止旧 system.ack 或 command.result 被误认作新实例的确认。这只约束本地夹具，不改变正式协议去重规则。
+      const findEvent = () => observedEvents.slice(startIndex).find(predicate);
+      const existing = findEvent();
       if (existing) return Promise.resolve(existing);
 
       return new Promise((resolve, reject) => {
         const deadline = Date.now() + timeoutMs;
         const timer = window.setInterval(() => {
-          const event = observedEvents.find(predicate);
+          const event = findEvent();
           if (event) {
             window.clearInterval(timer);
             resolve(event);
@@ -132,7 +161,7 @@
       });
     }
 
-    /** 等待符合谓词的事件达到指定数量，用于验证重复请求的确认重放与全局副作用隔离。 */
+    /** 等待符合谓词的事件达到指定数量，供测试页验证单次回执与事件不重复派生。 */
     function waitForEventCount(predicate, expectedCount, timeoutMessage) {
       return new Promise((resolve, reject) => {
         const deadline = Date.now() + 4000;
@@ -189,6 +218,39 @@
       });
     }
 
+    /**
+     * 生产 `system.dispose`（系统释放）会关闭当前握手和命令路由，这是不可逆的正确语义。
+     * 本地夹具为让多个独立回归按钮可连续操作，才重新加载整个内嵌壳并等待新的 `system.init`；
+     * 它不会向已释放会话发送重启命令，也不会出现在生产构建、平台清单或 Unity WebGL 包中。
+     */
+    async function recreateLocalShellAfterDispose() {
+      const eventStartIndex = observedEvents.length;
+      initialized = false;
+      sessionId = '';
+      initializationRequestId = undefined;
+      // 维持受控实例标识不变，仅递增夹具地址的无业务代次，确保浏览器销毁已释放的 iframe 文档后重新加载嵌入壳。
+      localShellGeneration += 1;
+      frame.src = createShellUrl();
+
+      await waitForEvent(
+        (event) => event.type === 'system.ack'
+          && event.replyTo === initializationRequestId
+          && event.success === true,
+        '重新加载后的 system.init 未完成。',
+        5_000,
+        eventStartIndex,
+      );
+    }
+
+    /**
+     * 正常场景不重载，避免覆盖正在进行的真实回归；只有前一轮已释放运行时时才创建新 iframe 会话。
+     * 该门槛使测试页始终遵守“已释放子应用拒绝业务命令”的生产约束，而非伪造一次重新初始化。
+     */
+    async function ensureLocalShellReady() {
+      if (initialized) return;
+      await recreateLocalShellAfterDispose();
+    }
+
     window.addEventListener('message', (event) => {
       const message = event.data;
       if (event.origin !== shellOrigin || event.source !== frame.contentWindow) return;
@@ -240,18 +302,35 @@
       }
 
       if (message.type === 'topology.node.dblclick') {
-        writeLog(`topology.node.dblclick：设备 ${message.payload.deviceId}`);
+        writeLog(`topology.node.dblclick：节点 ${message.payload.nodeId}`);
         return;
       }
 
-      // 任务-037回归只展示清单映射后的设备与二维节点数量；不显示 Unity 原始对象、节点名称或完整载荷。
+      // 任务-037回归只展示清单映射后的节点标识；不显示 Unity 原始对象、节点名称或完整载荷。
       if (message.type === 'scene.object.selected') {
-        writeLog(`scene.object.selected：设备 ${message.payload.deviceId ?? '未映射'}，二维节点 ${Array.isArray(message.payload.nodeIds) ? message.payload.nodeIds.length : 0}`);
+        writeLog(`scene.object.selected：节点 ${message.payload.nodeId ?? '未映射'}`);
         return;
       }
 
       if (message.type === 'command.result') {
         writeLog(`command.result：${message.payload.status}，关联 ${message.replyTo ?? '缺失'}`);
+        if (message.payload.status === 'disposed') {
+          // 释放结果必须优先终止当前会话，即使它并不关联节点状态命令，也不能遗留轮询或十秒计时器。
+          stateRetryController?.handleCommandResult(message.replyTo, message.payload);
+          initialized = false;
+          stateRetryController = undefined;
+          ignoredStateRetryReplyTo = undefined;
+          return;
+        }
+        if (stateRetryController?.isAwaiting(message.replyTo)) {
+          if (message.replyTo === ignoredStateRetryReplyTo) {
+            // 仅在受控回归中模拟父页面丢失首个确认；嵌入壳仍已真实返回结果，不能据此改变生产命令语义。
+            writeLog('状态重试回归：已按计划忽略首个命令确认。');
+          } else {
+            // 已消费的状态结果由控制器判别可恢复性；不可恢复失败会阻断相同状态内容的再次发送。
+            stateRetryController.handleCommandResult(message.replyTo, message.payload);
+          }
+        }
       }
     });
 
@@ -262,14 +341,289 @@
 
     /**
      * 任务-038三层回归的固定测试批次。
-     * 此处只使用本地测试清单已登记的一个燃气设备和三维节点映射，验证“宿主→嵌入壳→Unity模拟页”的状态链路；
-     * 它不是正式燃气设备数据，也不会被生产构建或正式清单复用。
+     * 此处只使用本地测试清单已登记的两个燃气节点及其静态三维映射，验证“宿主→嵌入壳→Unity模拟页”的状态链路；
+     * 它不是平台真实设备数据，也不会被生产构建或正式清单复用。
      */
     document.querySelector('#device-state-button').addEventListener('click', () => {
-      if (!initialized) return writeLog('初始化尚未完成，拒绝发送设备状态。');
+      if (!initialized) return writeLog('初始化尚未完成，拒绝发送节点状态。');
       postCommand('device.states.update', {
         sourceRevision: Date.now(),
-        items: [{ deviceId: 'device.gas-turbine', deviceStatus: 'alarm', statusUpdatedAt: new Date().toISOString() }],
+        // 必须与本地结构清单的受控稳定节点标识一致，避免状态回归绕过 nodeId 唯一性和引用门禁。
+        items: [{ nodeId: 'node.gas-turbine', deviceStatus: 'alarm', statusUpdatedAt: new Date().toISOString() }],
+      });
+    });
+
+    /**
+     * 任务-038与任务-050的本地连续完整快照入口。
+     * 两批均为“完整节点表”而非增量：先让两个节点进入告警，再以较小来源修订号仅保留燃机节点故障。
+     * 第二批省略的发电机节点必须恢复二维基础状态并清除三维动态覆盖；协议仍拒绝空数组，符合正式通道
+     * “没有节点状态时不发送空数组”的约束。每批只确认一次外层 `command.result`（命令结果），证明二维提交的唯一成功边界；
+     * 三维命令到达和清除效果由内置浏览器读取真实 iframe 层级的受限可视提示验证，避免测试宿主页跨层读取或伪造 Unity 回执。
+     */
+    document.querySelector('#device-snapshot-regression-button').addEventListener('click', () => {
+      void (async () => {
+        await ensureLocalShellReady();
+        result.textContent = '连续完整快照回归执行中。';
+        const initialTimestamp = '2026-08-14T00:00:00.000Z';
+
+        const alarmRequestId = postCommand('device.states.update', {
+          sourceRevision: 300,
+          // 首份完整表覆盖夹具内全部两个节点；不是平台设备绑定表，也不是为后续节点省略构造的增量补丁。
+          items: [
+            { nodeId: 'node.gas-turbine', deviceStatus: 'alarm', statusUpdatedAt: initialTimestamp },
+            { nodeId: 'node.gas-generator', deviceStatus: 'alarm', statusUpdatedAt: initialTimestamp },
+          ],
+        });
+        if (!alarmRequestId) throw new Error('告警完整快照未能发送。');
+        const alarmResult = await waitForEvent(
+          (event) => event.type === 'command.result' && event.replyTo === alarmRequestId,
+          '告警完整快照未收到关联结果。',
+        );
+        if (alarmResult.success !== true || alarmResult.status !== 'completed') throw new Error('告警完整快照未按二维边界成功。');
+        await waitForLocalStateDelivery();
+
+        const replacementRequestId = postCommand('device.states.update', {
+          // 合作方当前契约规定后到合法快照按到达顺序整体替换，较小来源修订仅作诊断，不能阻止燃机故障覆盖。
+          sourceRevision: 1,
+          // 发电机节点未出现在新的非空完整表中：二维必须清除其覆盖，三维必须下发独立清除命令。
+          items: [{ nodeId: 'node.gas-turbine', deviceStatus: 'fault', statusUpdatedAt: '2026-08-13T00:00:00.000Z' }],
+        });
+        if (!replacementRequestId) throw new Error('替换完整快照未能发送。');
+        const replacementResult = await waitForEvent(
+          (event) => event.type === 'command.result' && event.replyTo === replacementRequestId,
+          '替换完整快照未收到关联结果。',
+        );
+        if (replacementResult.success !== true || replacementResult.status !== 'completed') throw new Error('替换完整快照未按二维边界成功。');
+        await waitForLocalStateDelivery();
+
+        result.textContent = '连续完整快照已确认：双节点告警、较小来源修订下燃机节点故障和缺失节点清除均只返回一次二维成功。';
+        writeLog('连续完整快照回归已完成，等待内置浏览器核验三维命令和二维基础状态恢复。');
+      })().catch((error) => {
+        // 测试页只显示本页构造的固定失败摘要，不泄露嵌入壳、Unity 模拟页或外层协议的原始载荷。
+        result.textContent = `连续完整快照回归失败：${error instanceof Error ? error.message : '未知测试错误。'}`;
+        writeLog('连续完整快照回归失败。');
+      });
+    });
+
+    /**
+     * 为状态边界回归创建干净会话。
+     * 完整快照的“缺失即清除”语义会受上一轮测试留下的权威状态影响，因此该回归不能复用未知状态的
+     * 已初始化 iframe。这里先走正式的 system.dispose（系统释放）并等待唯一释放回执，再重建整个
+     * 本地嵌入壳；不向已释放会话发送任何业务命令，也不把此测试便利逻辑带入生产入口。
+     */
+    async function restartLocalShellForStateBoundaryRegression() {
+      const eventStartIndex = observedEvents.length;
+      if (initialized) {
+        const disposeRequestId = postCommand('system.dispose', { reason: 'local-shell-state-boundary-regression' });
+        if (!disposeRequestId) throw new Error('状态边界回归未能发送释放命令。');
+        await waitForEvent(
+          (event) => event.type === 'command.result' && event.replyTo === disposeRequestId && event.status === 'disposed',
+          '状态边界回归未收到关联释放确认。',
+          5_000,
+          eventStartIndex,
+        );
+      }
+
+      const rebuiltEventStartIndex = observedEvents.length;
+      await recreateLocalShellAfterDispose();
+      if (!initializationRequestId) throw new Error('状态边界回归重建后缺少初始化关联标识。');
+      await waitForEvent(
+        (event) => event.type === 'view.changed'
+          && event.replyTo === initializationRequestId
+          && event.sceneId === 'gas-power'
+          && event.topologyId === 'topology.gas-power.overview',
+        '状态边界回归重建后未提交燃气稳定视图。',
+        5_000,
+        rebuiltEventStartIndex,
+      );
+    }
+
+    /**
+     * 任务-014剩余状态边界的真实三层回归。
+     * 1. 单条合法完整快照内重复出现同一节点时，最后一项必须覆盖前一项；
+     * 2. 保存后的完整快照在“燃气 → 风电 → 燃气”后必须由当前壳重投影，无需父页面重推；
+     * 3. 本地 Unity 模拟页仅拒绝 offline（离线）状态，以验证三维异步失败不会撤销或重复二维成功。
+     *
+     * 外层宿主页只断言可公开观察的唯一 command.result（命令结果）与稳定视图。模拟页实际拒绝和
+     * 重投影到达由内置浏览器读取其受限诊断属性核验，避免把 Unity 内部失败原因扩展到正式外层协议。
+     */
+    document.querySelector('#device-state-boundary-regression-button').addEventListener('click', () => {
+      void (async () => {
+        result.textContent = '状态边界三层回归执行中。';
+        await restartLocalShellForStateBoundaryRegression();
+
+        const duplicateRequestId = postCommand('device.states.update', {
+          sourceRevision: 80,
+          items: [
+            { nodeId: 'node.gas-turbine', deviceStatus: 'alarm', statusUpdatedAt: '2026-08-14T01:00:00.000Z' },
+            // 同一完整表内的后项必须覆盖前项；不得将首项缓存为增量状态或生成两次三维设置命令。
+            { nodeId: 'node.gas-turbine', deviceStatus: 'fault', statusUpdatedAt: '2026-08-14T01:00:01.000Z' },
+          ],
+        });
+        if (!duplicateRequestId) throw new Error('重复节点完整快照未能发送。');
+        const duplicateResult = await waitForEvent(
+          (event) => event.type === 'command.result' && event.replyTo === duplicateRequestId,
+          '重复节点完整快照未收到关联结果。',
+        );
+        if (duplicateResult.success !== true || duplicateResult.status !== 'completed') {
+          throw new Error('同批重复节点未按二维提交边界完成。');
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 500));
+        if (observedEvents.filter((event) => event.type === 'command.result' && event.replyTo === duplicateRequestId).length !== 1) {
+          throw new Error('同批重复节点不应产生第二份外层成功回执。');
+        }
+        await waitForLocalStateDelivery();
+
+        const windRequestId = postViewOpen('wind-power');
+        if (!windRequestId) throw new Error('跨场景重投影未能发送风电切换。');
+        await waitForEvent(
+          (event) => event.type === 'view.changed' && event.replyTo === windRequestId && event.sceneId === 'wind-power',
+          '跨场景重投影未提交风电稳定视图。',
+        );
+        const gasRequestId = postViewOpen('gas-power');
+        if (!gasRequestId) throw new Error('跨场景重投影未能发送燃气返回。');
+        await waitForEvent(
+          (event) => event.type === 'view.changed' && event.replyTo === gasRequestId && event.sceneId === 'gas-power',
+          '跨场景重投影未在返回燃气后提交稳定视图。',
+        );
+        await waitForLocalStateDelivery();
+
+        const failedUnityRequestId = postCommand('device.states.update', {
+          sourceRevision: 81,
+          // 本地模拟页由专用启动参数拒绝 offline；正式运行时不会读取该参数或伪造状态失败。
+          items: [{ nodeId: 'node.gas-turbine', deviceStatus: 'offline', statusUpdatedAt: '2026-08-14T01:00:02.000Z' }],
+        });
+        if (!failedUnityRequestId) throw new Error('三维失败隔离快照未能发送。');
+        const failedUnityResult = await waitForEvent(
+          (event) => event.type === 'command.result' && event.replyTo === failedUnityRequestId,
+          '三维失败隔离快照未收到关联结果。',
+        );
+        if (failedUnityResult.success !== true || failedUnityResult.status !== 'completed') {
+          throw new Error('三维失败不应改变二维成功回执。');
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 500));
+        if (observedEvents.filter((event) => event.type === 'command.result' && event.replyTo === failedUnityRequestId).length !== 1) {
+          throw new Error('三维失败隔离快照不应重复外层成功回执。');
+        }
+        await waitForLocalStateDelivery();
+
+        result.textContent = '状态边界三层回归通过：同批最后项、跨场景重投影与三维失败二维成功均已确认。';
+        writeLog('状态边界三层回归通过，等待内置浏览器核验模拟页受限诊断。');
+      })().catch((error) => {
+        // 夹具只显示自己定义的固定阶段摘要，不能把 iframe 内部错误或协议载荷回显到父页面。
+        result.textContent = `状态边界三层回归失败：${error instanceof Error ? error.message : '未知测试错误。'}`;
+        writeLog('状态边界三层回归失败。');
+      });
+    });
+
+    /**
+     * 任务-014的父页面单在途契约回归。
+     * 首轮发送后故意不消费它的命令结果，模拟父页面在跨窗口链路上丢失确认；五秒后更新“数据源”的
+     * 最新完整快照，十秒截止释放在途槽位后再由下一轮检查读取新快照并生成新 messageId。此过程不改写
+     * 嵌入壳的十秒生命周期，也不会把本地轮询代码编入平台发布包。
+     */
+    document.querySelector('#device-state-retry-regression-button').addEventListener('click', () => {
+      void (async () => {
+        await ensureLocalShellReady();
+        stateRetryController?.stop();
+        const retryAttempts = [];
+        let skippedCount = 0;
+        let timeoutCount = 0;
+        let latestSnapshot = {
+          sourceRevision: 300,
+          items: [
+            { nodeId: 'node.gas-turbine', deviceStatus: 'alarm', statusUpdatedAt: '2026-08-14T00:00:00.000Z' },
+            { nodeId: 'node.gas-generator', deviceStatus: 'alarm', statusUpdatedAt: '2026-08-14T00:00:00.000Z' },
+          ],
+        };
+        ignoredStateRetryReplyTo = undefined;
+        result.textContent = '状态单在途重试回归执行中，约需十五秒。';
+        // 每次回归保存自己的控制器引用。收到 system.dispose 后全局控制器会被释放；异步断言必须
+        // 识别这种正常取消，不能把“没有继续重试”误报为十秒超时失败。
+        const retryController = new LocalShellDeviceStateRetryController({
+          // 每轮发送前重新读取变量，而不是缓存首轮对象，确保超时后的命令使用数据源当时的最新完整表。
+          readLatestSnapshot: () => latestSnapshot,
+          sendSnapshot: (snapshot) => postCommand('device.states.update', {
+            sourceRevision: snapshot.sourceRevision,
+            items: snapshot.items.map((item) => ({ ...item })),
+          }),
+          onAttempt: ({ messageId, snapshot }) => {
+            retryAttempts.push({ messageId, sourceRevision: snapshot.sourceRevision });
+            if (retryAttempts.length === 1) ignoredStateRetryReplyTo = messageId;
+            writeLog(`状态重试回归：第${retryAttempts.length}次发送 ${messageId}。`);
+          },
+          onSkipped: () => { skippedCount += 1; },
+          onTimeout: () => { timeoutCount += 1; },
+        });
+        stateRetryController = retryController;
+        retryController.start();
+
+        // 首个五秒检查仍在等待首轮确认；随后只改数据源快照，不能立刻越过在途槽位发送第二条命令。
+        await new Promise((resolve) => window.setTimeout(resolve, 5_200));
+        if (stateRetryController !== retryController) {
+          result.textContent = '状态单在途重试已随系统释放停止。';
+          writeLog('状态重试回归已因系统释放正常停止。');
+          return;
+        }
+        latestSnapshot = {
+          sourceRevision: 1,
+          items: [{ nodeId: 'node.gas-turbine', deviceStatus: 'fault', statusUpdatedAt: '2026-08-13T00:00:00.000Z' }],
+        };
+        writeLog('状态重试回归：已更新待重试的最新完整快照。');
+
+        const retryWaitResult = await new Promise((resolve, reject) => {
+          const deadline = Date.now() + 12_000;
+          const timer = window.setInterval(() => {
+            // 释放会销毁当前控制器。此处先结束本轮回归，确保已清理的会话不会继续等待或报错。
+            if (stateRetryController !== retryController) {
+              window.clearInterval(timer);
+              resolve('disposed');
+              return;
+            }
+            if (retryAttempts.length >= 2) {
+              window.clearInterval(timer);
+              resolve('retried');
+              return;
+            }
+            if (Date.now() >= deadline) {
+              window.clearInterval(timer);
+              reject(new Error('十秒超时后未以新标识发送最新完整快照。'));
+            }
+          }, 30);
+        });
+        if (retryWaitResult === 'disposed') {
+          result.textContent = '状态单在途重试已随系统释放停止。';
+          writeLog('状态重试回归已因系统释放正常停止。');
+          return;
+        }
+
+        const [firstAttempt, retryAttempt] = retryAttempts;
+        if (
+          !firstAttempt || !retryAttempt
+          || firstAttempt.messageId === retryAttempt.messageId
+          || firstAttempt.sourceRevision !== 300
+          || retryAttempt.sourceRevision !== 1
+          || skippedCount < 1
+          || timeoutCount !== 1
+        ) throw new Error('状态单在途、十秒超时或最新快照重读断言失败。');
+
+        const retryResult = await waitForEvent(
+          (event) => event.type === 'command.result' && event.replyTo === retryAttempt.messageId,
+          '新标识重试未收到关联命令结果。',
+        );
+        if (retryResult.success !== true || retryResult.status !== 'completed') throw new Error('新标识重试未按二维提交边界成功。');
+
+        retryController.stop();
+        if (stateRetryController === retryController) stateRetryController = undefined;
+        ignoredStateRetryReplyTo = undefined;
+        result.textContent = '状态单在途重试已确认：五秒跳过、十秒超时、最新快照重读与新标识回执均通过。';
+        writeLog('状态重试回归已完成。');
+      })().catch((error) => {
+        stateRetryController?.stop();
+        stateRetryController = undefined;
+        ignoredStateRetryReplyTo = undefined;
+        result.textContent = `状态单在途重试回归失败：${error instanceof Error ? error.message : '未知测试错误。'}`;
+        writeLog('状态重试回归失败。');
       });
     });
     document.querySelector('#dispose-button').addEventListener('click', () => {
@@ -279,7 +633,7 @@
 
     /**
      * 本地夹具动作只对应清单中的 `action.gas.reset`，用于任务-034验证。
-     * 它会从燃气总览切至空的燃气明细拓扑，但不携带参数、不接受页面输入，也不代表正式燃气流程或设备映射。
+     * 它会从燃气总览切至空的燃气明细拓扑，但不携带参数、不接受页面输入，也不代表正式燃气流程或节点映射。
      */
     document.querySelector('#workflow-button').addEventListener('click', () => {
       if (!initialized) return writeLog('初始化尚未完成，拒绝发送流程动作。');
@@ -290,6 +644,41 @@
     document.querySelector('#cross-scene-workflow-button').addEventListener('click', () => {
       if (!initialized) return writeLog('初始化尚未完成，拒绝发送跨场景流程动作。');
       postCommand('workflow.trigger', { actionId: 'action.wind.reset' });
+    });
+
+    /**
+     * 任务-037的浏览器准备步骤只通过外层 view.open（原子打开视图）创建“燃气实例一 → 风电 → 燃气实例二”。
+     * 宿主页不向 Unity 模拟页直接发消息，也不读取其内部激活标识；后续旧实例、当前实例和延迟选择均由
+     * 浏览器点击模拟页可见按钮产生，确保验证仍穿过正式嵌入壳的来源、会话和协议门禁。
+     */
+    document.querySelector('#object-selection-regression-button').addEventListener('click', () => {
+      void (async () => {
+        await ensureLocalShellReady();
+        result.textContent = '三维反向选择回归准备中：正在切换燃气 → 风电 → 燃气。';
+
+        const windRequestId = postViewOpen('wind-power');
+        if (!windRequestId) throw new Error('旧实例回归未能发送风电切换。');
+        await waitForEvent(
+          (event) => event.type === 'view.changed' && event.replyTo === windRequestId
+            && event.sceneId === 'wind-power' && event.topologyId === 'topology.wind-power.overview',
+          '旧实例回归未提交风电稳定视图。',
+        );
+
+        const gasRequestId = postViewOpen('gas-power');
+        if (!gasRequestId) throw new Error('旧实例回归未能发送燃气返回。');
+        await waitForEvent(
+          (event) => event.type === 'view.changed' && event.replyTo === gasRequestId
+            && event.sceneId === 'gas-power' && event.topologyId === 'topology.gas-power.overview',
+          '旧实例回归未提交新的燃气稳定视图。',
+        );
+
+        result.textContent = '三维反向选择回归已准备：请依次测试旧实例、当前实例和释放后延迟事件。';
+        writeLog('任务-037：已形成燃气实例一 → 风电 → 燃气实例二。');
+      })().catch((error) => {
+        // 只输出本夹具主动构造的固定阶段说明，不泄露嵌入壳、Unity 模拟页或完整外层消息。
+        result.textContent = `三维反向选择回归准备失败：${error instanceof Error ? error.message : '未知测试错误。'}`;
+        writeLog('任务-037回归准备失败。');
+      });
     });
 
     /** 用只读状态快照确认异常或被取代的事务没有覆盖上一个稳定燃气上下文。 */
@@ -311,7 +700,7 @@
      */
     document.querySelector('#run-button').addEventListener('click', () => {
       void (async () => {
-        if (!initialized) throw new Error('初始化尚未完成。');
+        await ensureLocalShellReady();
         result.textContent = '基础三层回归执行中。';
 
         if (!initializationRequestId) throw new Error('初始化命令缺少可验证的关联标识。');
@@ -336,10 +725,14 @@
           timestamp: Date.now(),
           payload: {},
         };
-        // 两次发送严格复用同一 messageId；生命周期应只执行一次，第二次仅重放关联确认。
+        // 两次发送严格复用同一 messageId；当前协议要求重复命令静默丢弃，绝不能重放第二份业务回执或状态快照。
         frame.contentWindow.postMessage(duplicateMessage, shellOrigin);
         frame.contentWindow.postMessage(duplicateMessage, shellOrigin);
-        await waitForEventCount((event) => event.type === 'command.result' && event.replyTo === duplicateMessageId, 2, '重复消息未得到两次关联确认。');
+        await waitForEvent((event) => event.type === 'command.result' && event.replyTo === duplicateMessageId, '首个重复标识命令未得到关联结果。');
+        await new Promise((resolve) => window.setTimeout(resolve, 600));
+        if (observedEvents.filter((event) => event.type === 'command.result' && event.replyTo === duplicateMessageId).length !== 1) {
+          throw new Error('重复消息不应发送第二份命令结果。');
+        }
         if (observedEvents.filter((event) => event.type === 'state.snapshot' && event.replyTo === duplicateMessageId).length !== 1) {
           throw new Error('重复消息不应重复派生状态快照。');
         }
@@ -388,7 +781,7 @@
      */
     document.querySelector('#advanced-run-button').addEventListener('click', () => {
       void (async () => {
-        if (!initialized) throw new Error('初始化尚未完成。');
+        await ensureLocalShellReady();
         result.textContent = '超时与恢复三层回归执行中。';
 
         const fastStartIndex = observedEvents.length;
@@ -471,12 +864,21 @@
       });
     });
 
-    /** 监听器先于 iframe 地址设置，保证嵌入壳的 ready 事件不会因快速加载丢失。 */
-    const shellUrl = new URL(`${shellOrigin}/`);
-    shellUrl.searchParams.set('parentOrigin', window.location.origin);
-    shellUrl.searchParams.set('instanceId', instanceId);
-    shellUrl.searchParams.set('protocolVersion', String(version));
-    frame.src = shellUrl.toString();
+    /**
+     * 监听器先于 iframe 地址设置，保证嵌入壳的 ready 事件不会因快速加载丢失。
+     * 每次重建复用同一受控实例标识，避免测试夹具借由任意实例标识绕过正式来源、窗口和会话校验。
+     */
+    function createShellUrl() {
+      const shellUrl = new URL(`${shellOrigin}/`);
+      shellUrl.searchParams.set('parentOrigin', window.location.origin);
+      shellUrl.searchParams.set('instanceId', instanceId);
+      shellUrl.searchParams.set('protocolVersion', String(version));
+      // 嵌入壳忽略此测试专用参数；它只保证释放后的本地夹具不会把相同 src 误判为无需重载。
+      shellUrl.searchParams.set('localShellGeneration', String(localShellGeneration));
+      return shellUrl.toString();
+    }
+
+    frame.src = createShellUrl();
   </script>
 </body>
 </html>

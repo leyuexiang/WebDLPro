@@ -1,6 +1,6 @@
 /**
  * 场景拓扑模块的稳定标识类型。
- * 每个标识都携带不可互换的品牌标记，避免调用方将二维节点、外部设备和 Unity 三维节点
+ * 每个标识都携带不可互换的品牌标记，避免调用方将二维节点和 Unity 三维节点
  * 误传到同一个接口；所有工厂函数同时执行运行时格式校验，不仅依赖编译期类型。
  */
 declare const sceneTopologyIdentifierBrand: unique symbol
@@ -28,7 +28,6 @@ export type SceneId = (typeof sceneIdValues)[number] & StableIdentifier<'scene'>
 export type TopologyId = StableIdentifier<'topology'>
 export type ActionId = StableIdentifier<'action'>
 export type NodeId = StableIdentifier<'topology-node'>
-export type DeviceId = StableIdentifier<'device'>
 export type SceneNodeId = StableIdentifier<'scene-node'>
 /** 一次二维选择事务的稳定关联标识；它与场景切换事务、消息标识均不可互换。 */
 export type SelectionId = StableIdentifier<'selection'>
@@ -110,7 +109,6 @@ export function isSceneId(value: unknown): value is SceneId {
 export const toTopologyId = (value: string): TopologyId => createStableIdentifier('topology', value)
 export const toActionId = (value: string): ActionId => createStableIdentifier('action', value)
 export const toNodeId = (value: string): NodeId => createStableIdentifier('topology-node', value)
-export const toDeviceId = (value: string): DeviceId => createStableIdentifier('device', value)
 export const toSceneNodeId = (value: string): SceneNodeId => createStableIdentifier('scene-node', value)
 export const toSelectionId = (value: string): SelectionId => createStableIdentifier('selection', value)
 export const toSessionId = (value: string): SessionId => createStableIdentifier('session', value)

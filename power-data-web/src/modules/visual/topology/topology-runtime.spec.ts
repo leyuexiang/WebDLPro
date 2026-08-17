@@ -1,14 +1,15 @@
 import { describe, expect, it, vi } from 'vitest'
-import { SCENE_IDS, toDeviceId, toNodeId, toSceneId, toSceneNodeId, toTopologyId, toTransitionId } from '@/config/scene-topology/identifiers'
+import { SCENE_IDS, toNodeId, toSceneId, toSceneNodeId, toTopologyId, toTransitionId } from '@/config/scene-topology/identifiers'
 import { TopologyRegistry } from '@/config/scene-topology/topology-registry'
 import { TopologyRuntime, type TopologyCanvasPort } from '@/modules/visual/topology/topology-runtime'
 
 /** 生成九场景注册表测试数据；只验证运行时边界，不声明任何真实设备或三维资源映射。 */
 function createRegistry(): TopologyRegistry {
   const version = 'test-version-01'
-  const gasDeviceId = toDeviceId('device.gas-turbine')
   const gasNodeId = toNodeId('node.gas-turbine')
   const gasSceneNodeId = toSceneNodeId('scene-node.gas-turbine')
+  const passiveNodeId = toNodeId('node.gas-passive-controller')
+  const passiveSceneNodeId = toSceneNodeId('scene-node.gas-passive-controller')
   const scenes = SCENE_IDS.map((sceneId) => ({
     sceneId,
     title: `${sceneId}测试场景`,
@@ -33,21 +34,19 @@ function createRegistry(): TopologyRegistry {
         title: `${sceneId}总览拓扑`,
         configVersion: version,
         nodes: sceneId === 'gas-power'
-          ? [{ nodeId: gasNodeId, title: '燃气测试节点', deviceId: gasDeviceId, sceneNodeId: gasSceneNodeId, iconKey: 'generic-device', x: 50, y: 50, deviceStatus: 'offline' as const, doubleClickBehavior: 'none' as const }]
+          ? [
+              { nodeId: gasNodeId, title: '燃气测试节点', sceneNodeId: gasSceneNodeId, iconKey: 'generic-device', x: 38, y: 50, deviceStatus: 'offline' as const, doubleClickBehavior: 'emit-node' as const },
+              // 第二个节点仍登记三维对象，验证用户选择和聚焦不依赖平台内部真实设备绑定。
+              // 所有来源节点都已有 nodeId 并发布 emit-node 许可；平台是否绑定真实设备不进入我方清单。
+              { nodeId: passiveNodeId, title: '燃气备用控制器', sceneNodeId: passiveSceneNodeId, iconKey: 'generic-device', x: 62, y: 50, deviceStatus: 'offline' as const, doubleClickBehavior: 'emit-node' as const },
+            ]
           : [],
         edges: [],
       })),
       { topologyId: 'gas-power.detail', sceneId: 'gas-power', title: '燃气测试明细拓扑', configVersion: version, nodes: [], edges: [] },
     ],
     actions: [],
-    deviceMappings: [{
-      deviceId: gasDeviceId,
-      sceneId: toSceneId('gas-power'),
-      topologyNodeRefs: [{ topologyId: toTopologyId('gas-power.overview'), nodeId: gasNodeId }],
-      sceneNodeId: gasSceneNodeId,
-      configVersion: version,
-    }],
-    unitySceneMappings: SCENE_IDS.map((sceneId) => ({ sceneId, mappingVersion: version, processSteps: [], sceneNodeIds: sceneId === 'gas-power' ? [gasSceneNodeId] : [], routeIds: [] })),
+    unitySceneMappings: SCENE_IDS.map((sceneId) => ({ sceneId, mappingVersion: version, processSteps: [], sceneNodeIds: sceneId === 'gas-power' ? [gasSceneNodeId, passiveSceneNodeId] : [], routeIds: [] })),
   })
   if (result.status !== 'ready') throw new Error('测试清单必须通过注册表校验。')
   return result.registry
@@ -163,7 +162,7 @@ describe('单画布多拓扑运行时', () => {
     })
   })
 
-  it('设备状态只增量写入当前画布，保留选择、缩放与拓扑定义', () => {
+  it('设备完整快照只更新当前画布状态，保留选择、缩放与拓扑定义', () => {
     const canvas = createCanvas()
     const runtime = new TopologyRuntime(createRegistry(), canvas)
     const transitionId = toTransitionId('transition-status')
@@ -176,15 +175,120 @@ describe('单画布多拓扑运行时', () => {
 
     const result = runtime.applyDeviceStates({
       sourceRevision: 1,
-      items: [{ deviceId: toDeviceId('device.gas-turbine'), deviceStatus: 'alarm', statusUpdatedAt: '2026-08-05T00:00:00.000Z' }],
+      items: [{ nodeId: toNodeId('node.gas-turbine'), deviceStatus: 'alarm', statusUpdatedAt: '2026-08-05T00:00:00.000Z' }],
     })
 
-    expect(result.acceptedDeviceIds).toEqual([toDeviceId('device.gas-turbine')])
+    expect(result.acceptedNodeIds).toEqual([toNodeId('node.gas-turbine')])
     expect(result.activeTopologyNodeStatuses).toEqual(new Map([[toNodeId('node.gas-turbine'), 'alarm']]))
     expect(result.activeSceneNodeStatuses).toEqual(new Map([[toSceneNodeId('scene-node.gas-turbine'), 'alarm']]))
     expect(canvas.setNodeStatuses).toHaveBeenLastCalledWith(new Map([[toNodeId('node.gas-turbine'), 'alarm']]))
     expect(canvas.setTopology).toHaveBeenCalledTimes(topologyCallsBefore)
     expect(canvas.setSelection).toHaveBeenCalledTimes(selectionCallsBefore)
     expect(canvas.restoreViewState).toHaveBeenCalledTimes(restoreCallsBefore)
+  })
+
+  it('二维画布写入失败时不提交候选权威快照，恢复后重试才整体生效', () => {
+    const canvas = createCanvas()
+    const runtime = new TopologyRuntime(createRegistry(), canvas)
+    const transitionId = toTransitionId('transition-atomic-status')
+    const prepared = runtime.prepare(toSceneId('gas-power'), toTopologyId('gas-power.overview'), transitionId)
+    expect(runtime.activate(prepared!, transitionId)).toBe(true)
+
+    runtime.applyDeviceStates({
+      sourceRevision: 1,
+      items: [{ nodeId: toNodeId('node.gas-turbine'), deviceStatus: 'alarm', statusUpdatedAt: '2026-08-05T00:00:00.000Z' }],
+    })
+    expect(runtime.getActiveSceneNodeStatuses()).toEqual(new Map([[toSceneNodeId('scene-node.gas-turbine'), 'alarm']]))
+
+    const topologyCallsBeforeFailure = canvas.setTopology.mock.calls.length
+    const selectionCallsBeforeFailure = canvas.setSelection.mock.calls.length
+    canvas.setNodeStatuses.mockImplementationOnce(() => {
+      throw new Error('模拟画布状态写入失败')
+    })
+
+    expect(() => runtime.applyDeviceStates({
+      sourceRevision: 2,
+      items: [{ nodeId: toNodeId('node.gas-turbine'), deviceStatus: 'fault', statusUpdatedAt: '2026-08-05T00:00:01.000Z' }],
+    })).toThrow('模拟画布状态写入失败')
+
+    // 失败只影响本次状态写入；权威快照、拓扑定义和选择均继续保持上一份已提交结果。
+    expect(runtime.getActiveSceneNodeStatuses()).toEqual(new Map([[toSceneNodeId('scene-node.gas-turbine'), 'alarm']]))
+    expect(canvas.setTopology).toHaveBeenCalledTimes(topologyCallsBeforeFailure)
+    expect(canvas.setSelection).toHaveBeenCalledTimes(selectionCallsBeforeFailure)
+
+    const retried = runtime.applyDeviceStates({
+      sourceRevision: 2,
+      items: [{ nodeId: toNodeId('node.gas-turbine'), deviceStatus: 'fault', statusUpdatedAt: '2026-08-05T00:00:01.000Z' }],
+    })
+    expect(retried.committed).toBe(true)
+    expect(runtime.getActiveSceneNodeStatuses()).toEqual(new Map([[toSceneNodeId('scene-node.gas-turbine'), 'fault']]))
+  })
+
+  it('完整快照切换到同场景子图后立即重投影，无需平台再次推送状态', () => {
+    const canvas = createCanvas()
+    const runtime = new TopologyRuntime(createRegistry(), canvas)
+    const sceneId = toSceneId('gas-power')
+    const overviewId = toTopologyId('gas-power.overview')
+    const detailId = toTopologyId('gas-power.detail')
+    const overview = runtime.prepare(sceneId, overviewId, toTransitionId('transition-reproject-overview'))
+
+    expect(runtime.activate(overview!, toTransitionId('transition-reproject-overview'))).toBe(true)
+    runtime.applyDeviceStates({
+      sourceRevision: 7,
+      items: [{ nodeId: toNodeId('node.gas-turbine'), deviceStatus: 'alarm', statusUpdatedAt: '2026-08-14T09:00:00.000+08:00' }],
+    })
+    expect(canvas.setNodeStatuses).toHaveBeenLastCalledWith(new Map([[toNodeId('node.gas-turbine'), 'alarm']]))
+
+    const detail = runtime.prepare(sceneId, detailId, toTransitionId('transition-reproject-detail'))
+    expect(runtime.activate(detail!, toTransitionId('transition-reproject-detail'))).toBe(true)
+    // 明细图没有该设备二维节点，但同一份权威快照仍须即时投影到当前场景的三维节点。
+    expect(canvas.setNodeStatuses).toHaveBeenLastCalledWith(new Map())
+    expect(runtime.getActiveSceneNodeStateSnapshot()).toEqual({
+      snapshotSequence: 1,
+      updates: new Map([[toSceneNodeId('scene-node.gas-turbine'), {
+        visualState: 'alarm',
+        statusUpdatedAt: '2026-08-14T09:00:00.000+08:00',
+        sourceRevision: 7,
+      }]]),
+    })
+  })
+
+  it('派生状态缓存被淘汰后切回总览从权威快照重建，缺失设备恢复配置基线', () => {
+    const canvas = createCanvas()
+    const runtime = new TopologyRuntime(createRegistry(), canvas, 8, 8, 500, 1)
+    const sceneId = toSceneId('gas-power')
+    const overviewId = toTopologyId('gas-power.overview')
+    const detailId = toTopologyId('gas-power.detail')
+    const overview = runtime.prepare(sceneId, overviewId, toTransitionId('transition-evict-overview'))
+
+    expect(runtime.activate(overview!, toTransitionId('transition-evict-overview'))).toBe(true)
+    runtime.applyDeviceStates({
+      sourceRevision: 11,
+      items: [{ nodeId: toNodeId('node.gas-turbine'), deviceStatus: 'fault', statusUpdatedAt: '2026-08-14T09:01:00.000+08:00' }],
+    })
+    const detail = runtime.prepare(sceneId, detailId, toTransitionId('transition-evict-detail'))
+    expect(runtime.activate(detail!, toTransitionId('transition-evict-detail'))).toBe(true)
+    // 第二份完整快照不含旧设备，权威表替换后所有被淘汰或未淘汰的派生表都必须回到清单基线。
+    runtime.applyDeviceStates({ sourceRevision: 12, items: [] })
+
+    const restoredOverview = runtime.prepare(sceneId, overviewId, toTransitionId('transition-evict-restore-overview'))
+    expect(runtime.activate(restoredOverview!, toTransitionId('transition-evict-restore-overview'))).toBe(true)
+    expect(canvas.setNodeStatuses).toHaveBeenLastCalledWith(new Map())
+    expect(runtime.getActiveSceneNodeStatuses()).toEqual(new Map())
+  })
+
+  it('首次激活写入状态失败时不保留候选场景状态上下文', () => {
+    const canvas = createCanvas()
+    canvas.setNodeStatuses.mockImplementationOnce(() => {
+      throw new Error('首次状态绘制失败')
+    })
+    const runtime = new TopologyRuntime(createRegistry(), canvas)
+    const prepared = runtime.prepare(toSceneId('gas-power'), toTopologyId('gas-power.overview'), toTransitionId('transition-first-activate-failed'))
+
+    expect(runtime.activate(prepared!, toTransitionId('transition-first-activate-failed'))).toBe(false)
+    // 失败前尚未提交完整设备快照，仍必须显式证明候选场景不会被当作活动三维上下文暴露。
+    expect(runtime.getActiveTopology()).toBeUndefined()
+    expect(runtime.getActiveSceneNodeStatuses()).toEqual(new Map())
+    expect(runtime.getActiveSceneNodeStateSnapshot()).toEqual({ snapshotSequence: 0, updates: new Map() })
   })
 })

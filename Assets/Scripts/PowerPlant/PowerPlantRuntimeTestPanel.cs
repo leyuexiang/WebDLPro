@@ -91,7 +91,11 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
         StopAutoTest();
     }
 
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
+    /// <summary>
+    /// 运行时测试面板仅供 Unity 编辑器内调试。
+    /// 所有 WebGL 构建（含开发构建）都不会编译 OnGUI，避免测试文字覆盖正式三维画面；运行状态改由浏览器控制台查看。
+    /// </summary>
+#if UNITY_EDITOR
     private void Update()
     {
         if (Keyboard.current != null && Keyboard.current.f8Key.wasPressedThisFrame)
@@ -138,7 +142,7 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
 
         GUILayout.Space(4f);
         GUILayout.Label("交互验证", _sectionStyle);
-        GUILayout.Label("隐藏面板后，左键点击设备应更新桥接状态为“已选择对象”；WASD/QE、Shift、右键拖动可验证自由相机并取消镜头转场。");
+        GUILayout.Label("隐藏面板后，左键点击设备应更新桥接状态为“已选择对象”；流程、总览和节点描边均应保持当前视角；WASD/QE、Shift、右键拖动可验证自由相机。 ");
         GUILayout.EndScrollView();
         GUILayout.EndArea();
     }
@@ -147,7 +151,7 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
     private void DrawProcessControls()
     {
         GUILayout.Space(4f);
-        GUILayout.Label("流程、显隐与镜头", _sectionStyle);
+        GUILayout.Label("流程、显隐与描边", _sectionStyle);
         GUILayout.BeginHorizontal();
         GUILayout.Label("机组", GUILayout.Width(38f));
         DrawUnitButton("全部", "all");
@@ -195,9 +199,9 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
         GUILayout.EndHorizontal();
 
         GUILayout.BeginHorizontal();
-        if (GUILayout.Button("聚焦"))
+        if (GUILayout.Button("描边"))
         {
-            RunNodeAction("聚焦", () => _processController.TryFocusNode(_nodeId, _isolate, out string message), out string result);
+            RunNodeAction("描边", () => _processController.TryFocusNode(_nodeId, _isolate, out string message), out string result);
             Report(result);
         }
 

@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>燃气拓扑视觉回归</title>
+  <style>
+    html, body, #app { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #000; }
+    #app { display: grid; place-items: center; }
+    .gas-topology-test-shell { width: min(100%, 1280px); height: min(100%, 720px); }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <!-- 该入口只由本地视觉回归打开，不进入生产构建入口或正式路由。 -->
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>

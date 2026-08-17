@@ -56,12 +56,3 @@ body {
 #unity-footer {
   display: none;
 }
-
-#unity-warning {
-  position: absolute;
-  inset: 16px 16px auto;
-  display: none;
-  padding: 10px 12px;
-  color: #fff;
-  background: #b91c1c;
-}

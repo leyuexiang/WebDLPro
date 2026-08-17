@@ -57,7 +57,7 @@ export function createRuntimeRegistry(configurationResult: DeploymentConfigurati
         childOrigin: configurationResult.configuration.unityChildOrigin,
         // Unity iframe 的直接父窗口是本嵌入壳；必须使用独立精确来源，不能错误沿用外层宿主页来源。
         allowedParentOrigin: configurationResult.configuration.unityParentOrigin,
-        capabilities: ['init', 'resize', 'switchScene', 'enterProcessStep', 'resetScene', 'focusNode', 'setNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
+        capabilities: ['init', 'resize', 'switchScene', 'enterProcessStep', 'resetScene', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
         eventCapabilities: ['ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'disposed'],
         resourceBudget: {
           initialMemoryMb: 256,

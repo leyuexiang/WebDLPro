@@ -13,6 +13,7 @@ const deploymentConfiguration = {
   manifestUrl: 'https://config.example.test/power/manifest.json',
   minimumViewportWidth: 1280,
   minimumViewportHeight: 720,
+  addressMode: 'fixed-origin',
 } as const
 const sessionId = toSessionId('session-test-01')
 
@@ -58,6 +59,8 @@ describe('外层桥安全边界', () => {
     router.route({ data: { ...createCommandEnvelope(), instanceId: 'other-shell-01' }, origin: deploymentConfiguration.parentOrigin, source: parentWindow as unknown as MessageEventSource } as MessageEvent<unknown>)
     router.route({ data: { ...createCommandEnvelope(), sessionId: 'old-session-01' }, origin: deploymentConfiguration.parentOrigin, source: parentWindow as unknown as MessageEventSource } as MessageEvent<unknown>)
     router.route({ data: createCommandEnvelope(), origin: deploymentConfiguration.parentOrigin, source: parentWindow as unknown as MessageEventSource } as MessageEvent<unknown>)
+    router.route({ data: createCommandEnvelope(), origin: deploymentConfiguration.parentOrigin, source: parentWindow as unknown as MessageEventSource } as MessageEvent<unknown>)
+    router.route({ data: createCommandEnvelope(), origin: deploymentConfiguration.parentOrigin, source: parentWindow as unknown as MessageEventSource } as MessageEvent<unknown>)
 
     expect(receivedMessageIds).toEqual(['parent-command-01'])
     // 同源但非当前父窗口、错误实例和旧会话都必须在业务回调前被拦截，不能因来源字符串相同而放行。
@@ -66,6 +69,8 @@ describe('外层桥安全边界', () => {
       'protocol.source.rejected',
       'protocol.envelope.invalid',
       'protocol.envelope.invalid',
+      // 同一当前会话标识的首次重复只记录一次；第三次重放完全静默。
+      'protocol.message.duplicate',
     ])
     bridge.dispose()
   })
@@ -98,5 +103,59 @@ describe('外层桥安全边界', () => {
     expect(bridge.send(event)).toBe(true)
     expect(sent).toEqual([[event, deploymentConfiguration.parentOrigin]])
     expect(bridge.send({ ...event, sessionId: toSessionId('old-session-01') })).toBe(false)
+    bridge.dispose()
+    expect(bridge.send(event)).toBe(false)
+    expect(sent).toHaveLength(1)
+  })
+
+  it('messageId 在类型和载荷校验前登记，修正载荷后复用同一标识仍被静默拒绝', () => {
+    const router = new WindowMessageRouter()
+    const parentWindow = { postMessage: () => undefined }
+    const receivedMessageIds: string[] = []
+    const bridge = new HostBridge(
+      { parentOrigin: deploymentConfiguration.parentOrigin, instanceId: 'visual-shell-01', sessionId },
+      parentWindow,
+      router,
+      { onCommand: (command) => receivedMessageIds.push(command.messageId) },
+    )
+    bridge.start()
+
+    const invalidPayload = { ...createCommandEnvelope(), messageId: 'parent-invalid-then-fixed', payload: { unexpected: true } }
+    const correctedPayload = { ...createCommandEnvelope(), messageId: 'parent-invalid-then-fixed' }
+    router.route({ data: invalidPayload, origin: deploymentConfiguration.parentOrigin, source: parentWindow as unknown as MessageEventSource } as MessageEvent<unknown>)
+    router.route({ data: correctedPayload, origin: deploymentConfiguration.parentOrigin, source: parentWindow as unknown as MessageEventSource } as MessageEvent<unknown>)
+
+    expect(receivedMessageIds).toEqual([])
+    expect(bridge.getRejections().map((rejection) => rejection.code)).toEqual([
+      'protocol.payload.invalid',
+      'protocol.message.duplicate',
+    ])
+    bridge.dispose()
+  })
+
+  it('初始化命令同样在统一入口去重，不会绕过普通命令生命周期重复初始化', () => {
+    const router = new WindowMessageRouter()
+    const parentWindow = { postMessage: () => undefined }
+    const receivedMessageIds: string[] = []
+    const bridge = new HostBridge(
+      { parentOrigin: deploymentConfiguration.parentOrigin, instanceId: 'visual-shell-01', sessionId },
+      parentWindow,
+      router,
+      { onCommand: (command) => receivedMessageIds.push(command.messageId) },
+    )
+    bridge.start()
+
+    const initialization = {
+      ...createCommandEnvelope(),
+      messageId: 'parent-init-duplicate',
+      type: 'system.init',
+      payload: { sceneId: 'gas-power', topologyId: 'gas-power.overview' },
+    }
+    router.route({ data: initialization, origin: deploymentConfiguration.parentOrigin, source: parentWindow as unknown as MessageEventSource } as MessageEvent<unknown>)
+    router.route({ data: initialization, origin: deploymentConfiguration.parentOrigin, source: parentWindow as unknown as MessageEventSource } as MessageEvent<unknown>)
+
+    expect(receivedMessageIds).toEqual(['parent-init-duplicate'])
+    expect(bridge.getRejections().map((rejection) => rejection.code)).toEqual(['protocol.message.duplicate'])
+    bridge.dispose()
   })
 })

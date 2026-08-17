@@ -2,12 +2,18 @@
 import { computed, onBeforeUnmount, onMounted, provide, ref, shallowRef, watch } from 'vue'
 import { readDeploymentConfiguration } from '@/config/deployment/deployment-config'
 import { toSceneId, toTransitionId } from '@/config/scene-topology/identifiers'
-import { createEmbeddedShellCorrelationId, createEmbeddedShellDiagnostic } from '@/app/embedded-shell-diagnostics'
+import {
+  createContainerTooSmallReason,
+  createEmbeddedShellCorrelationId,
+  createEmbeddedShellDiagnostic,
+} from '@/app/embedded-shell-diagnostics'
+import { EmbeddedShellStartupDeadline } from '@/app/embedded-shell-startup-deadline'
 import { RemoteSceneTopologyManifestLoader, type SceneTopologyManifestRequestFailureCode } from '@/config/scene-topology/remote-manifest-loader'
 import type { SceneTopologyManifest } from '@/config/scene-topology/types'
 import { TopologyRegistry } from '@/config/scene-topology/topology-registry'
 import { localProcessConfigLoader } from '@/config/process/local-process-config'
 import { createHostBridgeStartup, HostBridge } from '@/host-bridge/host-bridge'
+import { HostEventSender } from '@/host-bridge/host-event-sender'
 import { HostRuntimeComposition } from '@/host-bridge/host-runtime-composition'
 import ProcessScenePanel from '@/modules/visual/components/ProcessScenePanel.vue'
 import ManifestTopologyRuntimePanel from '@/modules/visual/topology/ManifestTopologyRuntimePanel.vue'
@@ -24,9 +30,12 @@ import { DeviceStatesUpdateCoordinator } from '@/modules/visual/orchestration/de
 import { UnityObjectSelectionCoordinator } from '@/modules/visual/orchestration/unity-object-selection-coordinator'
 import { VisualizationRuntimeViewOpenPort } from '@/modules/visual/runtime/visualization-runtime-view-open-port'
 import { VisualizationRuntimeDeviceStatePort } from '@/modules/visual/runtime/visualization-runtime-device-state-port'
-import type { VisualizationRuntimeHostController } from '@/modules/visual/runtime/visualization-runtime-host'
+import type {
+  VisualizationRuntimeHostController,
+  VisualizationRuntimeLifecycle,
+} from '@/modules/visual/runtime/visualization-runtime-host'
 import type { TopologyRuntime } from '@/modules/visual/topology/topology-runtime'
-import type { TopologyDeviceDoubleClickIntent } from '@/modules/visual/topology/topology-node-interaction'
+import type { TopologyNodeDoubleClickIntent } from '@/modules/visual/topology/topology-node-interaction'
 import AppStatePanel from '@/shared/components/AppStatePanel.vue'
 
 /**
@@ -40,12 +49,56 @@ const isContainerTooSmall = ref(false)
 const shellCorrelationId = createEmbeddedShellCorrelationId()
 let shellResizeObserver: ResizeObserver | undefined
 let manifestAbortController: AbortController | undefined
+const startupTimedOut = ref(false)
 /** 运行时宿主组件引用只用于读取受控控制器，不向壳层泄露 iframe、连接器或 Unity 窗口。 */
 const visualizationRuntimeHost = ref<InstanceType<typeof VisualizationRuntimeHost> | null>(null)
 /** 正式拓扑运行时在单画布端口就绪后由子组件交付，外层桥必须等到此实例存在才可处理初始化。 */
 const topologyRuntime = shallowRef<TopologyRuntime | undefined>()
 /** 通信组合根只保留一个实例；失败的启动参数不会构造桥，也不会留下半注册监听器。 */
 let hostRuntimeComposition: HostRuntimeComposition | undefined
+/**
+ * 合法嵌入参数在页面脚本初始化时即固定为唯一桥接实例。
+ * 这样页面级 15 秒截止既从真实加载阶段开始计时，也能在 ready 之前向同一受信父页面发送一次受控超时错误。
+ */
+const hostBridgeStartup = deploymentConfiguration.configuration
+  ? createHostBridgeStartup(window.location.search, deploymentConfiguration.configuration)
+  : undefined
+/**
+ * 根地址直接打开时，入口脚本会用当前服务来源补齐 directAccess（直接访问）参数。
+ * 只有顶层窗口且参数完整时才启用本地初始化；平台 iframe 即使伪造该标记，
+ * 也会因 window.parent 不是当前窗口而跳过，继续等待平台发送 system.init。
+ */
+const directAccessMode = new URLSearchParams(window.location.search).get('directAccess') === '1' && window.parent === window
+let removeDirectAccessBootstrapListener: (() => void) | undefined
+const hostBridge = hostBridgeStartup?.status === 'ready'
+  ? new HostBridge(hostBridgeStartup.context, window.parent, undefined, {
+    onCommand: (command) => {
+      // 组合根尚未就绪时不会接收早到命令；成功启动后回调只转交到同一个组合根。
+      void hostRuntimeComposition?.handleCommand(command)
+    },
+  })
+  : undefined
+const startupErrorSender = hostBridge ? new HostEventSender(hostBridge) : undefined
+const startupDeadline = hostBridge
+  ? new EmbeddedShellStartupDeadline(() => {
+    startupTimedOut.value = true
+    manifestAbortController?.abort()
+    manifestAbortController = undefined
+    /*
+     * 未发送 system.ready 的会话没有父命令可关联，因此只发送一次无 replyTo 的系统错误。
+     * 发送器会重新投影固定错误说明，不能将清单地址、Unity 异常或任意载荷带到父页面。
+     */
+    startupErrorSender?.sendSystemError({
+      code: 'runtime.startup.timeout',
+      message: '页面未能在启动期限内完成运行时准备。',
+      stage: 'handshake',
+      recoverable: true,
+    })
+    hostBridge?.dispose()
+  })
+  : undefined
+// 合法内嵌页面一开始加载即启动总期限，不能把挂载或任一子运行时准备时间排除在 15 秒之外。
+startupDeadline?.start()
 /** 三维反向选择订阅只在组合根存在期间保留；壳层释放时必须解除，不能让旧 Unity 回调存活。 */
 let unsubscribeUnityObjectSelected: (() => void) | undefined
 /** 跨场景加载反馈只在壳层存在期间订阅；卸载时撤销，避免旧 Unity 事件更新新壳。 */
@@ -82,12 +135,26 @@ const transitionOverlay = computed(() => getVisualizationTransitionOverlayState(
   targetSceneId: visualizationStore.targetSceneId,
   targetTopologyId: visualizationStore.targetTopologyId,
   runtimeStatus: visualizationStore.runtimeStatus,
-  sceneLoadProgress: visualizationStore.sceneLoadProgress,
 }))
 
 /**
- * 壳层只向用户显示有限、脱敏的诊断模型；部署地址、外部消息和 Unity 原始错误均不进入界面。
- * 配置错误优先级最高，其次是尺寸不足和原子清单校验，最后才处理本地燃气基线的拓扑校验失败。
+ * 启动遮罩直接读取唯一宿主控制器的生命周期，并与协调器的稳定上下文合并判断。
+ * Unity ready 只代表通信可用；首个稳定视图提交前仍保持整区遮挡，失败或释放时立即让出遮罩显示中文状态。
+ */
+const runtimeHostStatus = computed<VisualizationRuntimeLifecycle>(() => (
+  visualizationRuntimeHost.value?.getRuntimeHostController().status.value ?? 'idle'
+))
+const visualizationMaskVisible = computed(() => {
+  const status = runtimeHostStatus.value
+  if (status === 'failed' || status === 'disposed') return false
+
+  return status !== 'ready' || !visualizationStore.hasStableContext || transitionOverlay.value.visible
+})
+
+/**
+ * 壳层只向用户显示有限、脱敏的中文状态；部署地址、错误码、关联标识、外部消息和 Unity 原始错误均不进入界面。
+ * 完整诊断模型仍保留给控制台和父页面协议使用。配置错误优先级最高，其次是尺寸不足和原子清单校验，
+ * 最后才处理本地燃气基线的拓扑校验失败。
  */
 const shellDiagnostic = computed(() => {
   if (deploymentConfiguration.status === 'invalid') {
@@ -99,7 +166,14 @@ const shellDiagnostic = computed(() => {
 
   if (isContainerTooSmall.value) {
     return createEmbeddedShellDiagnostic('container-too-small', {
-      reason: '父页面提供的可用区域未达到当前部署配置要求。',
+      reason: getContainerTooSmallReason(),
+      correlationId: shellCorrelationId,
+    })
+  }
+
+  if (startupTimedOut.value) {
+    return createEmbeddedShellDiagnostic('startup-timeout', {
+      reason: '页面加载后 15 秒内未完成运行时准备，已停止启动。',
       correlationId: shellCorrelationId,
     })
   }
@@ -140,6 +214,41 @@ const shellDiagnostic = computed(() => {
   return undefined
 })
 
+/**
+ * 状态面板不展示技术字段，但联调仍需要能够定位问题；这里将固定诊断投影到浏览器控制台。
+ * 诊断对象只包含已脱敏的代码、关联标识和中文原因，不记录原始响应、地址或异常对象。
+ */
+let lastLoggedShellDiagnostic: string | undefined
+
+watch(shellDiagnostic, (diagnostic) => {
+  if (!diagnostic) return
+
+  const serializedDiagnostic = JSON.stringify({
+    kind: diagnostic.kind,
+    code: diagnostic.code,
+    correlationId: diagnostic.correlationId,
+    reason: diagnostic.reason,
+  })
+  // 同一响应式状态可能因无关布局更新重新计算；只输出首次结果，避免联调控制台被重复诊断淹没。
+  if (serializedDiagnostic === lastLoggedShellDiagnostic) return
+
+  lastLoggedShellDiagnostic = serializedDiagnostic
+  console.warn('[嵌入壳诊断]', serializedDiagnostic)
+}, { immediate: true })
+
+/**
+ * 将部署配置中的真实下限转换成用户可执行的中文提示。
+ *
+ * 容器尺寸判断和提示共用同一份配置，避免出现“提示尺寸”和“实际校验尺寸”不一致；
+ * 文案只面向用户说明调整窗口的动作，不把内部错误码、关联标识或部署细节暴露到界面。
+ */
+function getContainerTooSmallReason(): string {
+  const configuration = deploymentConfiguration.configuration
+  if (!configuration) return '当前窗口可用区域不足，请调整窗口尺寸后重试。'
+
+  return createContainerTooSmallReason(configuration.minimumViewportWidth, configuration.minimumViewportHeight)
+}
+
 /** 容器尺寸由部署配置声明；只在尺寸或配置可用性改变时更新状态，不在每帧轮询布局。 */
 function synchronizeContainerSize(): void {
   const configuration = deploymentConfiguration.configuration
@@ -161,10 +270,13 @@ function retryEmbeddedShell(): void {
 function getManifestFailureReason(code: SceneTopologyManifestRequestFailureCode): string {
   const reasonByCode: Record<SceneTopologyManifestRequestFailureCode, string> = {
     'manifest.http-status': '场景拓扑清单服务未返回可用内容。',
+    'manifest.package-not-found': '当前联动包不存在，请确认资源标识和平台配置。',
+    'manifest.file-missing': '当前联动包缺少场景拓扑清单文件。',
     'manifest.payload': '场景拓扑清单内容无法按发布格式解析。',
     'manifest.timeout': '场景拓扑清单在限定时间内未完成读取。',
     'manifest.aborted': '场景拓扑清单读取已被当前页面生命周期取消。',
     'manifest.network': '场景拓扑清单暂时无法连接。',
+    'manifest.cache-policy': '场景拓扑清单服务未返回约定的禁止缓存策略。',
     'manifest.invalid': '场景拓扑清单未通过完整性和版本一致性校验。',
   }
 
@@ -176,6 +288,7 @@ function getManifestFailureReason(code: SceneTopologyManifestRequestFailureCode)
  * 任一阶段失败都不创建半份拓扑索引或画布运行时；组件卸载后迟到响应不会更新状态。
  */
 async function loadManifest(): Promise<void> {
+  if (startupTimedOut.value) return
   const configuration = deploymentConfiguration.configuration
   if (!configuration) return
 
@@ -185,7 +298,7 @@ async function loadManifest(): Promise<void> {
   manifestState.value = { status: 'loading' }
   const result = await new RemoteSceneTopologyManifestLoader().load(configuration.manifestUrl, controller.signal)
 
-  if (controller.signal.aborted || manifestAbortController !== controller) return
+  if (startupTimedOut.value || controller.signal.aborted || manifestAbortController !== controller) return
   if (result.status !== 'ready') {
     manifestState.value = { status: 'failed', code: result.code }
     return
@@ -202,16 +315,62 @@ async function loadManifest(): Promise<void> {
  * 壳层不自行创建第二个拓扑运行时，保证 `view.open`（原子打开视图）只操作同一个预备/激活画布。
  */
 function handleTopologyRuntimeReady(runtime: TopologyRuntime): void {
+  if (startupTimedOut.value) return
   topologyRuntime.value = runtime
   startHostRuntimeCompositionIfReady()
 }
 
 /**
  * 任务-027的双击意图只交给已启动的外层通信组合根。
- * 组合根会再次核对握手、稳定上下文、场景和拓扑；壳层不根据标题、坐标或旧燃气配置补全设备映射。
+ * 组合根会再次核对握手、稳定上下文、场景和拓扑；壳层不根据标题、坐标或旧燃气配置补全节点映射。
  */
-function handleTopologyDeviceDoubleClick(intent: TopologyDeviceDoubleClickIntent): void {
-  hostRuntimeComposition?.reportTopologyDeviceDoubleClick(intent)
+function handleTopologyNodeDoubleClick(intent: TopologyNodeDoubleClickIntent): void {
+  hostRuntimeComposition?.reportTopologyNodeDoubleClick(intent)
+}
+
+/**
+ * 直接访问模式复用同一套 HostBridge（外层桥）和事务组合根，只补一条本窗口初始化消息。
+ * 监听器在 composition.start（组合根启动）前注册，避免极快的 system.ready（系统就绪）丢失；
+ * 发送一次后立即解除，平台嵌入模式不会创建这条本地回环路径。
+ */
+function installDirectAccessBootstrap(): void {
+  if (!directAccessMode || !hostBridgeStartup || hostBridgeStartup.status !== 'ready') return
+
+  const context = hostBridgeStartup.context
+  let initialized = false
+  const handleReady = (event: MessageEvent<unknown>): void => {
+    if (initialized || event.source !== window || event.origin !== context.parentOrigin) return
+    const message = event.data
+    if (!message || typeof message !== 'object' || Array.isArray(message)) return
+    const candidate = message as Record<string, unknown>
+    if (
+      candidate.channel !== 'power-scene-topology-shell' ||
+      candidate.version !== 1 ||
+      candidate.instanceId !== context.instanceId ||
+      candidate.sessionId !== context.sessionId ||
+      candidate.type !== 'system.ready'
+    ) return
+
+    initialized = true
+    window.postMessage({
+      channel: 'power-scene-topology-shell',
+      version: 1,
+      instanceId: context.instanceId,
+      sessionId: context.sessionId,
+      messageId: `direct-access-init-${Date.now()}`,
+      type: 'system.init',
+      timestamp: Date.now(),
+      payload: {
+        sceneId: 'gas-power',
+        topologyId: 'topology.gas-power.overview',
+      },
+    }, context.parentOrigin)
+    removeDirectAccessBootstrapListener?.()
+    removeDirectAccessBootstrapListener = undefined
+  }
+
+  window.addEventListener('message', handleReady)
+  removeDirectAccessBootstrapListener = () => window.removeEventListener('message', handleReady)
 }
 
 /**
@@ -228,7 +387,7 @@ function getRuntimeHostController(): VisualizationRuntimeHostController | undefi
  * 被合法父页面嵌入时，三个参数仍须与部署白名单同时匹配，任一不匹配均不会注册窗口监听器。
  */
 function startHostRuntimeCompositionIfReady(): void {
-  if (hostRuntimeComposition) return
+  if (hostRuntimeComposition || startupTimedOut.value) return
   const configuration = deploymentConfiguration.configuration
   const manifest = manifestState.value.status === 'ready' ? manifestState.value.manifest : undefined
   const registry = manifestState.value.status === 'ready' ? manifestState.value.registry : undefined
@@ -236,22 +395,24 @@ function startHostRuntimeCompositionIfReady(): void {
   const runtimeHost = getRuntimeHostController()
   if (!configuration || !manifest || !registry || !runtime || !runtimeHost || runtimeHost.status.value !== 'ready') return
 
-  const startup = createHostBridgeStartup(window.location.search, configuration)
-  if (startup.status !== 'ready') return
-
-  // 回调闭包先引用局部变量，赋值完成后才 start；因此桥接一开始接收消息时组合根已经完整构造。
-  let composition: HostRuntimeComposition | undefined
-  const bridge = new HostBridge(startup.context, window.parent, undefined, {
-    onCommand: (command) => {
-      // 生命周期、握手和事务内部均将错误收敛为协议事件；这里不记录或展示不可信命令载荷。
-      void composition?.handleCommand(command)
-    },
-  })
+  const bridge = hostBridge
+  if (!bridge || hostBridgeStartup?.status !== 'ready') return
+  /**
+   * 批量状态协调器复用已经就绪的唯一拓扑运行时与 Unity 宿主端口。
+   * 它必须先于视图事务处理器构造，才能让失败回退和超时补偿直接重投影当前权威快照。
+   */
+  const deviceStatesUpdate = new DeviceStatesUpdateCoordinator(
+    runtime,
+    new VisualizationRuntimeDeviceStatePort(runtimeHost),
+  )
   const viewOpen = new ViewOpenTransactionHandler(
     registry,
     runtime,
     new VisualizationRuntimeViewOpenPort(runtimeHost),
     visualizationCoordinatorFacade,
+    undefined,
+    // 失败回退或超时补偿会产生新的 Unity 物理实例；无需等待平台重推，直接从有限权威快照重投影。
+    (sceneActivationId) => deviceStatesUpdate.resynchronizeLatestSnapshot(sceneActivationId),
   )
   /*
    * 只有清单实际登记动作时，才构造流程路由并向外层组合根注入能力。
@@ -268,15 +429,7 @@ function startHostRuntimeCompositionIfReady(): void {
       new WorkflowTriggerTransactionHandler(registry, viewOpen, visualizationCoordinatorFacade, 'cross-scene'),
     )
     : undefined
-  /**
-   * 批量状态协调器复用已经就绪的唯一拓扑运行时与 Unity 宿主端口。
-   * 它不会创建第二画布或第二 Unity 实例；未协商四态能力时由协调器返回受控失败并记录有限摘要。
-   */
-  const deviceStatesUpdate = new DeviceStatesUpdateCoordinator(
-    runtime,
-    new VisualizationRuntimeDeviceStatePort(runtimeHost),
-  )
-  composition = new HostRuntimeComposition(
+  const composition = new HostRuntimeComposition(
     bridge,
     visualizationCoordinatorFacade,
     viewOpen,
@@ -312,8 +465,11 @@ function startHostRuntimeCompositionIfReady(): void {
       progress: payload.progress,
     })
   })
-  hostRuntimeComposition = composition
-  composition.start()
+ hostRuntimeComposition = composition
+  installDirectAccessBootstrap()
+ composition.start()
+  // 只有组合根完整启动后才算通过页面级就绪期限；此前任何单个子运行时 ready 都不能提前停止计时。
+  startupDeadline?.succeed()
 }
 
 onMounted(() => {
@@ -322,6 +478,7 @@ onMounted(() => {
   shellResizeObserver = new ResizeObserver(synchronizeContainerSize)
   shellResizeObserver.observe(shellElement.value)
   synchronizeContainerSize()
+  // 页面级启动期限已在脚本初始化阶段按合法嵌入参数启动，此处只开始异步清单读取。
   void loadManifest()
 })
 
@@ -340,7 +497,10 @@ onBeforeUnmount(() => {
   shellResizeObserver = undefined
   manifestAbortController?.abort()
   manifestAbortController = undefined
-  unsubscribeUnityObjectSelected?.()
+ startupDeadline?.dispose()
+  removeDirectAccessBootstrapListener?.()
+  removeDirectAccessBootstrapListener = undefined
+ unsubscribeUnityObjectSelected?.()
   unsubscribeUnityObjectSelected = undefined
   unsubscribeUnitySceneLoadProgress?.()
   unsubscribeUnitySceneLoadProgress = undefined
@@ -349,6 +509,7 @@ onBeforeUnmount(() => {
   // 先解除外层窗口监听和命令计时器，再释放协调器；避免迟到的父页面命令观察到已销毁的运行时门面。
   hostRuntimeComposition?.dispose()
   hostRuntimeComposition = undefined
+  hostBridge?.dispose()
   // 壳销毁时由唯一协调器清空可序列化上下文，迟到的下游回调无法再提交旧状态。
   visualizationCoordinatorFacade.submit({ type: 'system.release' })
 })
@@ -366,8 +527,6 @@ onBeforeUnmount(() => {
       class="embedded-visualization-shell__state"
       :kind="shellDiagnostic.kind"
       :reason="shellDiagnostic.reason"
-      :error-code="shellDiagnostic.code"
-      :correlation-id="shellDiagnostic.correlationId"
       @retry="retryEmbeddedShell"
     />
 
@@ -375,14 +534,14 @@ onBeforeUnmount(() => {
     <div
       v-else-if="gasBaseline.bundle && manifestState.status === 'ready'"
       class="embedded-visualization-shell__content"
-      :aria-busy="transitionOverlay.visible ? 'true' : 'false'"
+      :aria-busy="visualizationMaskVisible ? 'true' : 'false'"
     >
       <VisualizationRuntimeHost ref="visualizationRuntimeHost" v-slot="{ status }">
         <!-- 上半区复用已验证的 Unity 单实例视口和蓝色视觉基线。 -->
         <section
           class="embedded-visualization-shell__scene"
           aria-label="三维场景容器"
-          :inert="transitionOverlay.visible"
+          :inert="visualizationMaskVisible"
         >
           <ProcessScenePanel :result="gasBaseline" />
           <!-- 运行时尚未就绪时遮罩三维区域，但底层面板仍会登记视口并完成唯一实例初始化。 -->
@@ -391,8 +550,6 @@ onBeforeUnmount(() => {
             class="embedded-visualization-shell__runtime-state"
             kind="initializing"
             reason="正在等待 Unity 三维运行时完成初始化。"
-            error-code="runtime.initializing"
-            :correlation-id="shellCorrelationId"
             :primary-action-visible="false"
           />
           <!-- Unity 失败和释放均以固定诊断呈现，不显示子页面返回的原始错误载荷。 -->
@@ -401,8 +558,6 @@ onBeforeUnmount(() => {
             class="embedded-visualization-shell__runtime-state"
             kind="unity-error"
             reason="Unity 三维运行时未能完成安全连接。"
-            error-code="unity.runtime-failed"
-            :correlation-id="shellCorrelationId"
             @retry="retryEmbeddedShell"
           />
           <AppStatePanel
@@ -410,8 +565,6 @@ onBeforeUnmount(() => {
             class="embedded-visualization-shell__runtime-state"
             kind="released"
             reason="Unity 三维运行时已经释放，当前页面不会继续向其发送命令。"
-            error-code="runtime.disposed"
-            :correlation-id="shellCorrelationId"
             @retry="retryEmbeddedShell"
           />
         </section>
@@ -420,48 +573,29 @@ onBeforeUnmount(() => {
         <section
           class="embedded-visualization-shell__topology"
           aria-label="二维拓扑容器"
-          :inert="transitionOverlay.visible"
+          :inert="visualizationMaskVisible"
         >
           <ManifestTopologyRuntimePanel
             :registry="manifestState.registry"
             @ready="handleTopologyRuntimeReady"
-            @device-double-click="handleTopologyDeviceDoubleClick"
+            @node-double-click="handleTopologyNodeDoubleClick"
           />
         </section>
       </VisualizationRuntimeHost>
 
       <!--
-        事务遮罩覆盖两个容器并以 inert（非活动）阻断原有焦点，确保屏幕阅读器与键盘用户
-        都不会在“旧三维 + 新拓扑”尚未提交的短暂窗口继续操作。它不是对话框，因此不使用 aria-modal。
+        启动与事务遮罩覆盖两个容器并以 inert（非活动）阻断原有焦点，确保 Unity 内部加载画面、
+        旧三维与新拓扑都不会在首个稳定视图前透出或被操作。它不是对话框，因此不使用 aria-modal。
       -->
       <div
-        v-if="transitionOverlay.visible"
+        v-if="visualizationMaskVisible"
         class="embedded-visualization-shell__transition-mask"
         role="status"
+        aria-label="正在加载可视化内容"
         aria-live="polite"
         aria-atomic="true"
       >
-        <div class="embedded-visualization-shell__transition-card">
-          <span class="embedded-visualization-shell__transition-indicator" aria-hidden="true" />
-          <p>{{ transitionOverlay.message }}</p>
-          <!-- 只有 Unity 回传当前事务的有效进度时渲染进度条；等待首条反馈时不伪造百分比。 -->
-          <div
-            v-if="transitionOverlay.progressPercent !== null"
-            class="embedded-visualization-shell__transition-progress"
-            role="progressbar"
-            aria-label="三维场景切换进度"
-            aria-valuemin="0"
-            aria-valuemax="100"
-            :aria-valuenow="transitionOverlay.progressPercent"
-          >
-            <span class="embedded-visualization-shell__transition-progress-track" aria-hidden="true">
-              <span
-                class="embedded-visualization-shell__transition-progress-value"
-                :style="{ inlineSize: `${transitionOverlay.progressPercent}%` }"
-              />
-            </span>
-          </div>
-        </div>
+        <span class="embedded-visualization-shell__transition-indicator" aria-hidden="true" />
       </div>
     </div>
   </main>
@@ -511,8 +645,9 @@ onBeforeUnmount(() => {
 }
 
 /*
- * 切换遮罩与网格同尺寸，不依赖固定像素：2K、4K、8K 与带鱼屏均由容器自身边界决定覆盖范围。
- * 半透明背景保留当前稳定画面作为切换反馈，同时 pointer-events 阻断鼠标交互；inert 负责键盘焦点隔离。
+ * 启动和切换遮罩与网格同尺寸，不依赖固定像素：2K、4K、8K 与带鱼屏均由容器自身边界决定覆盖范围。
+ * 使用不透明背景完全挡住 Unity iframe 的品牌图和内部加载层，直到协调器确认首个稳定视图后才移除；
+ * pointer-events 阻断鼠标交互，inert 负责键盘焦点隔离。
  */
 .embedded-visualization-shell__transition-mask {
   position: absolute;
@@ -522,47 +657,7 @@ onBeforeUnmount(() => {
   place-items: center;
   padding: clamp(16px, 2cqw, 32px);
   pointer-events: auto;
-  background: rgb(2 6 23 / 68%);
-  backdrop-filter: blur(3px);
-}
-
-/* 卡片宽度只相对当前嵌入壳收缩，避免超宽屏将状态文字拉成难以阅读的超长行。 */
-.embedded-visualization-shell__transition-card {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-3);
-  max-inline-size: min(100%, 42rem);
-  padding: var(--space-4) var(--space-5);
-  border: 1px solid rgb(103 232 249 / 58%);
-  border-radius: var(--radius-lg);
-  color: #e0f2fe;
-  background: rgb(8 47 73 / 92%);
-  box-shadow: 0 12px 30px rgb(0 0 0 / 30%);
-}
-
-.embedded-visualization-shell__transition-card p {
-  margin: 0;
-}
-
-/* 进度条仅由 transform/宽度在小型遮罩卡片中变化，不触发 Unity iframe 或拓扑画布的布局重算。 */
-.embedded-visualization-shell__transition-progress {
-  inline-size: min(12rem, 36cqw);
-}
-
-.embedded-visualization-shell__transition-progress-track {
-  display: block;
-  block-size: 0.375rem;
-  overflow: hidden;
-  border-radius: 999px;
-  background: rgb(186 230 253 / 28%);
-}
-
-.embedded-visualization-shell__transition-progress-value {
-  display: block;
-  block-size: 100%;
-  border-radius: inherit;
-  background: #67e8f9;
-  transition: inline-size 120ms ease-out;
+  background: #020617;
 }
 
 /* 轻量旋转指示器仅使用合成层动画，不触发拓扑画布或 Unity iframe 的重排。 */

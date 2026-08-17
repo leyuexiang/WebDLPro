@@ -24,13 +24,31 @@ public static class BusinessSceneBootstrapGenerator
     /// </summary>
     private static readonly SceneDefinition[] BusinessScenes =
     {
-        new SceneDefinition("coal-power", "Assets/Scenes/Business/CoalPower.unity", BusinessSceneCapability.Release, true),
+        new SceneDefinition(
+            "coal-power",
+            "Assets/Scenes/Business/CoalPower.unity",
+            // 燃煤场景已交付显式模型绑定，能力清单与燃气场景保持同一套受控接口；路径流仍未确认。
+            BusinessSceneCapability.Initialize |
+            BusinessSceneCapability.EnterProcessStep |
+            BusinessSceneCapability.FocusNode |
+            BusinessSceneCapability.ClearSelection |
+            BusinessSceneCapability.UpdateNodeVisualState |
+            BusinessSceneCapability.ClearNodeVisualState |
+            BusinessSceneCapability.SetNodeVisibility |
+            BusinessSceneCapability.ResetScene |
+            BusinessSceneCapability.Release,
+            false),
         new SceneDefinition(
             "gas-power",
             "Assets/Scenes/Business/GasPower.unity",
             BusinessSceneCapability.Initialize |
             BusinessSceneCapability.EnterProcessStep |
             BusinessSceneCapability.FocusNode |
+            BusinessSceneCapability.ClearSelection |
+            // 燃气场景的四态能力由运行时显式登记三台真实模型后再次校验；
+            // 目录提前声明用于让场景解析器核对预期能力，适配器仍会在登记失败时拒绝命令。
+            BusinessSceneCapability.UpdateNodeVisualState |
+            BusinessSceneCapability.ClearNodeVisualState |
             BusinessSceneCapability.SetNodeVisibility |
             BusinessSceneCapability.ResetScene |
             BusinessSceneCapability.Release,

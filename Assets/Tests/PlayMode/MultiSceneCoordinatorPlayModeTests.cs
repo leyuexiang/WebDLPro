@@ -10,9 +10,9 @@ using WebDLPro.Unity.SceneRuntime;
 namespace WebDLPro.Unity.Tests
 {
     /// <summary>
-    /// 以正式 Bootstrap、燃气和空业务场景执行多场景协调器的播放模式验证。
-    /// 测试不为八个空场景伪造控制器或资源：它们必须初始化失败、被卸载，
-    /// 然后由协调器恢复此前已成功进入的燃气场景。
+    /// 以正式 Bootstrap、燃气、燃煤和空业务场景执行多场景协调器的播放模式验证。
+    /// 测试不为七个空场景伪造控制器或资源：它们必须初始化失败、被卸载，
+    /// 然后由协调器恢复此前已成功进入的稳定发电场景。
     /// </summary>
     public sealed class MultiSceneCoordinatorPlayModeTests
     {
@@ -30,12 +30,12 @@ namespace WebDLPro.Unity.Tests
         private bool _bridgeLogSubscribed;
 
         /// <summary>
-        /// 验证真实成功路径、失败恢复和单活动场景约束。
-        /// 燃气场景由正式组合适配器初始化；燃煤空场景由占位控制器返回内容未交付，
-        /// 结果必须保留原始请求标识、报告结构化失败并恢复到燃气场景。
+        /// 验证燃煤真实成功路径、失败恢复和单活动场景约束。
+        /// 燃气和燃煤场景均由正式组合适配器初始化；空场景由占位控制器返回内容未交付，
+        /// 失败结果必须保留原始请求标识、报告结构化失败并恢复到燃煤场景。
         /// </summary>
         [UnityTest]
-        public IEnumerator 燃气成功加载后空场景失败会恢复燃气且不保留隐藏业务场景()
+        public IEnumerator 燃气成功加载后燃煤成功且空场景失败会恢复燃煤()
         {
             yield return LoadBootstrap();
             SceneSwitchResult gasResult = default;
@@ -70,24 +70,99 @@ namespace WebDLPro.Unity.Tests
             };
 
             Assert.That(_coordinator.RequestSwitchScene("coal-power", "transition.playmode.coal"), Is.True);
-            yield return WaitForCompletion(() => coalCompleted, "空业务场景失败恢复未在帧预算内结束。");
-            Assert.That(coalResult.Success, Is.False);
-            Assert.That(coalResult.ErrorCode, Is.EqualTo("scene-content-unavailable"));
-            Assert.That(coalResult.Recovered, Is.True);
-            Assert.That(coalResult.RestoredSceneId, Is.EqualTo("gas-power"));
-            Assert.That(coalResult.RestoredSceneActivationId, Is.Not.Empty, "恢复结果必须携带新物理场景实例标识。\n");
-            Assert.That(coalResult.RestoredSceneActivationId, Is.Not.EqualTo(initialSceneActivationId), "恢复不得继续暴露已卸载燃气实例的旧标识。\n");
-            Assert.That(coalResult.RestoredSceneActivationId, Is.EqualTo(_coordinator.ActiveSceneActivationId), "恢复结果必须与协调器当前活动实例一致。\n");
+            yield return WaitForCompletion(() => coalCompleted, "燃煤场景加载未在帧预算内结束。");
+            Assert.That(coalResult.Success, Is.True, coalResult.Message);
+            Assert.That(coalResult.SceneId, Is.EqualTo("coal-power"));
             Assert.That(_coordinator.State, Is.EqualTo(MultiSceneCoordinatorState.Ready));
-            Assert.That(_coordinator.ActiveSceneId, Is.EqualTo("gas-power"));
-            Assert.That(SceneManager.GetSceneByPath(GasPowerScenePath).isLoaded, Is.True);
-            Assert.That(SceneManager.GetSceneByPath(CoalPowerScenePath).isLoaded, Is.False);
+            Assert.That(_coordinator.ActiveSceneId, Is.EqualTo("coal-power"));
+            Assert.That(SceneManager.GetSceneByPath(GasPowerScenePath).isLoaded, Is.False);
+            Assert.That(SceneManager.GetSceneByPath(CoalPowerScenePath).isLoaded, Is.True);
+            Assert.That(CountLoadedBusinessScenes(), Is.EqualTo(1));
+            string coalSceneActivationId = _coordinator.ActiveSceneActivationId;
+            Assert.That(coalSceneActivationId, Is.Not.EqualTo(initialSceneActivationId));
+
+            SceneSwitchResult unavailableResult = default;
+            bool unavailableCompleted = false;
+            _coordinator.SceneSwitchCompleted += result =>
+            {
+                if (result.TransitionId == "transition.playmode.coal-recovery")
+                {
+                    unavailableResult = result;
+                    unavailableCompleted = true;
+                }
+            };
+
+            Assert.That(_coordinator.RequestSwitchScene("wind-power", "transition.playmode.coal-recovery"), Is.True);
+            yield return WaitForCompletion(() => unavailableCompleted, "空场景失败恢复未在帧预算内结束。");
+            Assert.That(unavailableResult.Success, Is.False);
+            Assert.That(unavailableResult.ErrorCode, Is.EqualTo("scene-content-unavailable"));
+            Assert.That(unavailableResult.Recovered, Is.True);
+            Assert.That(unavailableResult.RestoredSceneId, Is.EqualTo("coal-power"));
+            Assert.That(unavailableResult.RestoredSceneActivationId, Is.Not.Empty, "恢复结果必须携带新物理场景实例标识。\n");
+            Assert.That(unavailableResult.RestoredSceneActivationId, Is.Not.EqualTo(coalSceneActivationId), "恢复结果不得继续暴露已卸载燃煤实例的旧标识。\n");
+            Assert.That(unavailableResult.RestoredSceneActivationId, Is.EqualTo(_coordinator.ActiveSceneActivationId), "恢复结果必须与协调器当前活动实例一致。\n");
+            Assert.That(_coordinator.State, Is.EqualTo(MultiSceneCoordinatorState.Ready));
+            Assert.That(_coordinator.ActiveSceneId, Is.EqualTo("coal-power"));
+            Assert.That(SceneManager.GetSceneByPath(CoalPowerScenePath).isLoaded, Is.True);
+            Assert.That(SceneManager.GetSceneByPath("Assets/Scenes/Business/WindPower.unity").isLoaded, Is.False);
             Assert.That(CountLoadedBusinessScenes(), Is.EqualTo(1));
         }
 
         /// <summary>
+        /// 初始化确认属于 requestId（原始请求标识）关联消息，不能携带空的 sceneActivationId（物理场景激活标识）。
+        /// 此用例直接经过真实桥接公开入口和 JsonUtility（Unity 内置 JSON 序列化工具），
+        /// 防止通用负载新增可选字段后又被自动序列化为前端协议不允许的空字符串。
+        /// </summary>
+        [UnityTest]
+        public IEnumerator 初始化确认只发送协议允许的最小字段()
+        {
+            yield return LoadBootstrap();
+            _bridgeManager = FindBridgeManager();
+            Assert.That(_bridgeManager, Is.Not.Null, "Bootstrap 未创建常驻 Unity 桥接管理器。");
+            SubscribeBridgeOutboundLogs();
+
+            const string requestId = "request.bridge.init.minimal-payload";
+            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage("init", "{}", requestId));
+            yield return WaitForCompletion(
+                () => HasNotice("ack", requestId, string.Empty),
+                "初始化确认未在时限内回传。");
+
+            string acknowledgementLog = _bridgeOutboundLogs[_bridgeOutboundLogs.Count - 1];
+            Assert.That(acknowledgementLog, Does.Contain("\"type\":\"ack\""));
+            Assert.That(acknowledgementLog, Does.Contain($"\"requestId\":\"{requestId}\""));
+            Assert.That(acknowledgementLog, Does.Not.Contain("\"sceneActivationId\":"), "初始化确认不得携带空或无关的物理场景激活标识。");
+        }
+
+        /// <summary>
+        /// 场景切换的 ack（接收确认）必须先于协调器首个加载进度和最终完成事件。
+        /// 协调器允许同步发出进度，若桥接器晚于它发送确认，前端就会因尚未登记等待状态而拒绝合法进度；
+        /// 同时断言确认不携带空 sceneActivationId，避免与初始化确认出现同一序列化回归。
+        /// </summary>
+        [UnityTest]
+        public IEnumerator 场景切换确认先于加载进度且不携带空恢复标识()
+        {
+            yield return LoadBootstrap();
+            _bridgeManager = FindBridgeManager();
+            Assert.That(_bridgeManager, Is.Not.Null, "Bootstrap 未创建常驻 Unity 桥接管理器。");
+            SubscribeBridgeOutboundLogs();
+
+            const string requestId = "request.bridge.switch.ack-before-progress";
+            const string transitionId = "transition.bridge.switch.ack-before-progress";
+            InvokeBridgeMethod("ReceiveFromParent", CreateSceneSwitchMessage("gas-power", transitionId, requestId));
+            yield return WaitForCompletion(
+                () => HasNotice("sceneChanged", requestId, transitionId),
+                "燃气场景切换未在时限内完成。");
+
+            int acknowledgementIndex = FindBridgeNoticeIndex("ack", requestId);
+            int completionIndex = FindBridgeNoticeIndex("sceneChanged", requestId);
+            Assert.That(acknowledgementIndex, Is.GreaterThanOrEqualTo(0), "场景切换必须先回传接收确认。");
+            Assert.That(completionIndex, Is.GreaterThan(acknowledgementIndex), "场景完成事件不能早于接收确认。");
+            Assert.That(_bridgeOutboundLogs[acknowledgementIndex], Does.Not.Contain("\"sceneActivationId\":"), "场景接收确认不得携带空恢复标识。");
+        }
+
+        /// <summary>
         /// 在旧请求已经进入卸载或加载阶段后发出最新请求，验证协调器层面的事务取代。
-        /// 旧请求必须只产生 command-superseded，不能在异步操作收尾后把空燃煤场景提交为活动场景；
+        /// 旧请求必须只产生 command-superseded，不能在异步操作收尾后把尚未完成的目标场景提交为活动场景；
         /// 最新燃气请求则必须以自身 transitionId 成功完成。更底层的迟到令牌失效由编辑模式事务门测试覆盖。
         /// </summary>
         [UnityTest]
@@ -135,7 +210,7 @@ namespace WebDLPro.Unity.Tests
 
         /// <summary>
         /// 通过真实 Bootstrap 中常驻的桥接管理器依次请求九项正式目录场景。
-        /// 燃气场景应成功完成；其余空场景按既有占位约束失败并恢复燃气。无论成功或失败，
+        /// 燃气和燃煤场景应成功完成；其余空场景按既有占位约束失败并恢复最近一次稳定发电场景。无论成功或失败，
         /// 桥接实例、浏览器初始化次数和协调器订阅数均必须保持唯一；释放后不允许再产生对象选择回调。
         /// </summary>
         [UnityTest]
@@ -149,12 +224,14 @@ namespace WebDLPro.Unity.Tests
 
             SubscribeBridgeOutboundLogs();
             // 九项目录的声明顺序不承担加载前置条件；先请求已确认交付的燃气场景建立可恢复基线，
-            // 再逐一验证其余目录项。仍只发送九次请求，也不按文件名或场景对象名称推断业务身份。
+            // 再逐一验证其余目录项。燃煤成功后，空场景失败会恢复燃煤；仍只发送九次请求，
+            // 也不按文件名或场景对象名称推断业务身份。
             List<string> sceneIds = new List<string>(BusinessSceneCatalog.GetRequiredSceneIds());
             int gasPowerIndex = sceneIds.IndexOf("gas-power");
             Assert.That(gasPowerIndex, Is.GreaterThanOrEqualTo(0), "正式九场景目录必须包含已交付的燃气发电场景。");
             sceneIds.RemoveAt(gasPowerIndex);
             sceneIds.Insert(0, "gas-power");
+            string stableSceneId = "gas-power";
             for (int index = 0; index < sceneIds.Count; index++)
             {
                 string sceneId = sceneIds[index];
@@ -166,9 +243,11 @@ namespace WebDLPro.Unity.Tests
                     () => HasTerminalNotice(requestId, transitionId),
                     $"桥接场景请求 {sceneId} 未在时限内返回结构化终态。");
 
-                if (sceneId == "gas-power")
+                bool isConfiguredPowerPlant = sceneId == "gas-power" || sceneId == "coal-power";
+                if (isConfiguredPowerPlant)
                 {
-                    Assert.That(HasNotice("sceneChanged", requestId, transitionId), Is.True, "燃气场景必须经桥接回传 sceneChanged。");
+                    Assert.That(HasNotice("sceneChanged", requestId, transitionId), Is.True, "已配置发电场景必须经桥接回传 sceneChanged。");
+                    stableSceneId = sceneId;
                 }
                 else
                 {
@@ -183,16 +262,17 @@ namespace WebDLPro.Unity.Tests
                 Assert.That(GetBridgeIntProperty("BrowserBridgeInitializationCount"), Is.EqualTo(1));
                 Assert.That(GetBridgeIntProperty("SceneCoordinatorSubscriptionCount"), Is.EqualTo(1));
                 Assert.That(GetBridgeObjectProperty("CurrentSceneController"), Is.SameAs(_coordinator.ActiveController));
-                Assert.That(_coordinator.ActiveSceneId, Is.EqualTo("gas-power"));
+                Assert.That(_coordinator.ActiveSceneId, Is.EqualTo(stableSceneId));
                 Assert.That(CountLoadedBusinessScenes(), Is.EqualTo(1));
                 Assert.That(
                     CountRuntimeContextMaterials(),
                     Is.EqualTo(0),
                     $"场景请求 {sceneId} 完成后仍残留上一轮运行时半透明材质。");
 
-                // 每轮都在当前燃气场景创建一组真实运行时材质，下一轮切换必须在卸载前主动清理。
+                // 每轮都在当前已配置发电场景创建一组真实运行时材质，下一轮切换必须在卸载前主动清理。
                 // 这样九次请求验证的是实际资源生命周期，而不是仅统计协调器或场景实例数量。
-                BusinessSceneCommandResult fadeResult = _coordinator.ActiveController.SetNodeVisibility("gas-turbine", false);
+                string fadeNodeId = stableSceneId == "coal-power" ? "node.coal-boiler" : "gas-turbine";
+                BusinessSceneCommandResult fadeResult = _coordinator.ActiveController.SetNodeVisibility(fadeNodeId, false);
                 Assert.That(fadeResult.Success, Is.True, fadeResult.Message);
                 Assert.That(CountRuntimeContextMaterials(), Is.GreaterThan(0), "测试前置条件失败：未创建运行时半透明材质。");
             }
@@ -281,8 +361,8 @@ namespace WebDLPro.Unity.Tests
 
         /// <summary>
         /// 动作命令必须经真实桥接器进入当前燃气控制器，且只传递稳定业务标识。
-        /// 本用例不伪造四态材质或路径对象：燃气尚未登记这两项能力时必须明确返回不支持，
-        /// 而格式错误、未知节点和未知流程则分别保留可供前端关联的稳定错误码。
+        /// 本用例使用正式场景中显式登记的燃机、余热锅炉和蒸汽轮机验证四态与清除都实际到达模型登记器；
+        /// 路径能力仍未交付，格式错误、未登记状态节点和未知流程则必须保留可供前端关联的稳定错误码。
         /// </summary>
         [UnityTest]
         public IEnumerator 受控场景动作只转发稳定标识并返回明确结果()
@@ -315,11 +395,37 @@ namespace WebDLPro.Unity.Tests
                 "未知流程未返回命令结果。");
             Assert.That(HasBridgeLogFragmentForRequest("request.bridge.actions.process-missing", "\"errorCode\":\"invalid-process-step\""), Is.True);
 
-            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage("setNodeVisualState", "{\"sceneNodeId\":\"gas-turbine\",\"visualState\":\"alarm\",\"statusUpdatedAt\":\"2026-08-08T10:00:00.000Z\",\"hasSourceRevision\":false,\"sourceRevision\":0}", "request.bridge.actions.visual-unsupported"));
+            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage("setNodeVisualState", "{\"sceneNodeId\":\"gas-turbine\",\"visualState\":\"alarm\",\"snapshotSequence\":1,\"statusUpdatedAt\":\"2026-08-08T10:00:00.000Z\",\"sourceRevision\":0}", "request.bridge.actions.visual-gas-turbine"));
             yield return WaitForCompletion(
-                () => HasNotice("commandResult", "request.bridge.actions.visual-unsupported", string.Empty),
-                "未登记四态能力未返回命令结果。");
-            Assert.That(HasBridgeLogFragmentForRequest("request.bridge.actions.visual-unsupported", "\"errorCode\":\"capability-unsupported\""), Is.True);
+                () => HasNotice("commandResult", "request.bridge.actions.visual-gas-turbine", string.Empty),
+                "燃气轮机四态命令未返回结果。");
+            Assert.That(HasBridgeLogFragmentForRequest("request.bridge.actions.visual-gas-turbine", "\"success\":true"), Is.True);
+
+            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage("setNodeVisualState", "{\"sceneNodeId\":\"hrsg\",\"visualState\":\"fault\",\"snapshotSequence\":1,\"statusUpdatedAt\":\"2026-08-08T10:00:00.000Z\",\"sourceRevision\":0}", "request.bridge.actions.visual-hrsg"));
+            yield return WaitForCompletion(
+                () => HasNotice("commandResult", "request.bridge.actions.visual-hrsg", string.Empty),
+                "余热锅炉四态命令未返回结果。");
+            Assert.That(HasBridgeLogFragmentForRequest("request.bridge.actions.visual-hrsg", "\"success\":true"), Is.True);
+
+            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage("setNodeVisualState", "{\"sceneNodeId\":\"steam-turbine\",\"visualState\":\"offline\",\"snapshotSequence\":1,\"statusUpdatedAt\":\"2026-08-08T10:00:00.000Z\",\"sourceRevision\":0}", "request.bridge.actions.visual-steam-turbine"));
+            yield return WaitForCompletion(
+                () => HasNotice("commandResult", "request.bridge.actions.visual-steam-turbine", string.Empty),
+                "蒸汽轮机四态命令未返回结果。");
+            Assert.That(HasBridgeLogFragmentForRequest("request.bridge.actions.visual-steam-turbine", "\"success\":true"), Is.True);
+
+            // 清除与设置共用同一节点的本地快照序号。第二个序号证明真实模型能撤销动态颜色，
+            // 既不把设备缺失伪装成正常，也不依赖场景卸载才能恢复基础材质。
+            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage("clearNodeVisualState", "{\"sceneNodeId\":\"gas-turbine\",\"snapshotSequence\":2}", "request.bridge.actions.visual-gas-turbine-clear"));
+            yield return WaitForCompletion(
+                () => HasNotice("commandResult", "request.bridge.actions.visual-gas-turbine-clear", string.Empty),
+                "燃气轮机四态清除命令未返回结果。");
+            Assert.That(HasBridgeLogFragmentForRequest("request.bridge.actions.visual-gas-turbine-clear", "\"success\":true"), Is.True);
+
+            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage("setNodeVisualState", "{\"sceneNodeId\":\"generator\",\"visualState\":\"normal\",\"snapshotSequence\":1,\"statusUpdatedAt\":\"2026-08-08T10:00:00.000Z\",\"sourceRevision\":0}", "request.bridge.actions.visual-unmapped"));
+            yield return WaitForCompletion(
+                () => HasNotice("commandResult", "request.bridge.actions.visual-unmapped", string.Empty),
+                "未映射的发电机节点未返回结果。");
+            Assert.That(HasBridgeLogFragmentForRequest("request.bridge.actions.visual-unmapped", "\"errorCode\":\"invalid-node\""), Is.True);
 
             InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage("setRouteFlow", "{\"routeId\":\"route.not-registered\",\"enabled\":true}", "request.bridge.actions.route-unsupported"));
             yield return WaitForCompletion(
@@ -365,10 +471,20 @@ namespace WebDLPro.Unity.Tests
                 "focusNode",
                 "{\"sceneNodeId\":\"scene-node.test\",\"selectionId\":\"selection.bridge.full-capability.focus\",\"isolate\":false}",
                 "request.bridge.full-capability.focus-retry"));
+            // clearSelection（清除选择）必须作为独立命令到达活动控制器；
+            // 空载荷不能被误分派为 resetScene（场景重置），否则会改变流程、显隐和镜头上下文。
+            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage(
+                "clearSelection",
+                "{}",
+                "request.bridge.full-capability.clear-selection"));
             InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage(
                 "setNodeVisualState",
-                "{\"sceneNodeId\":\"scene-node.test\",\"visualState\":\"alarm\",\"statusUpdatedAt\":\"2026-08-08T10:00:00.000Z\",\"hasSourceRevision\":false,\"sourceRevision\":0}",
+                "{\"sceneNodeId\":\"scene-node.test\",\"visualState\":\"alarm\",\"snapshotSequence\":1,\"statusUpdatedAt\":\"2026-08-08T10:00:00.000Z\",\"sourceRevision\":0}",
                 "request.bridge.full-capability.state"));
+            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage(
+                "clearNodeVisualState",
+                "{\"sceneNodeId\":\"scene-node.test\",\"snapshotSequence\":2}",
+                "request.bridge.full-capability.state-clear"));
             InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage(
                 "setRouteFlow",
                 "{\"routeId\":\"route.test\",\"enabled\":true}",
@@ -383,7 +499,7 @@ namespace WebDLPro.Unity.Tests
                 "request.bridge.full-capability.reset"));
             InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage(
                 "setNodeVisualState",
-                "{\"sceneNodeId\":\"scene-node.missing\",\"visualState\":\"fault\",\"statusUpdatedAt\":\"2026-08-08T10:00:01.000Z\",\"hasSourceRevision\":true,\"sourceRevision\":2}",
+                "{\"sceneNodeId\":\"scene-node.missing\",\"visualState\":\"fault\",\"snapshotSequence\":2,\"statusUpdatedAt\":\"2026-08-08T10:00:01.000Z\",\"sourceRevision\":2}",
                 "request.bridge.full-capability.state-missing"));
             InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage(
                 "setRouteFlow",
@@ -399,7 +515,9 @@ namespace WebDLPro.Unity.Tests
             Assert.That(controller.FocusCalls, Is.EqualTo(1));
             Assert.That(controller.LastFocusedNodeId, Is.EqualTo("scene-node.test"));
             Assert.That(controller.LastFocusIsolate, Is.False);
+            Assert.That(controller.ClearSelectionCalls, Is.EqualTo(1));
             Assert.That(controller.VisualStateCalls, Is.EqualTo(1));
+            Assert.That(controller.ClearVisualStateCalls, Is.EqualTo(1));
             Assert.That(controller.LastVisualStateNodeId, Is.EqualTo("scene-node.test"));
             Assert.That(controller.LastVisualState, Is.EqualTo(BusinessSceneNodeVisualState.Alarm));
             Assert.That(controller.RouteFlowCalls, Is.EqualTo(1));
@@ -418,7 +536,9 @@ namespace WebDLPro.Unity.Tests
                 "request.bridge.full-capability.process",
                 "request.bridge.full-capability.focus",
                 "request.bridge.full-capability.focus-retry",
+                "request.bridge.full-capability.clear-selection",
                 "request.bridge.full-capability.state",
+                "request.bridge.full-capability.state-clear",
                 "request.bridge.full-capability.route",
                 "request.bridge.full-capability.visibility",
                 "request.bridge.full-capability.reset"
@@ -432,8 +552,8 @@ namespace WebDLPro.Unity.Tests
         }
 
         /// <summary>
-        /// 浏览器可能在旧状态回执丢失后重发原命令；桥接必须以“来源时间＋可选修订号”阻止旧状态覆盖新状态。
-        /// 相同时间的更高修订必须应用，而同修订重试和低修订迟到应直接成功且不重复触发材质更新。
+        /// 浏览器可能因旧状态回执丢失而重发原命令；桥接必须只用壳内快照序号阻止旧状态覆盖新状态。
+        /// 平台时间和来源修订可以倒退，只要本地序号更大仍必须应用；同序号重试和小序号迟到应幂等忽略。
         /// </summary>
         [UnityTest]
         public IEnumerator 设备状态迟到重试不能覆盖较新的四态结果()
@@ -448,26 +568,36 @@ namespace WebDLPro.Unity.Tests
             Assert.That(activeControllerField, Is.Not.Null, "多场景协调器缺少当前控制器字段，测试不能绕过正式活动控制器读取路径。");
             activeControllerField.SetValue(_coordinator, controller);
 
-            const string repeatedTimestamp = "2026-08-08T10:00:01.000Z";
             InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage(
                 "setNodeVisualState",
-                $"{{\"sceneNodeId\":\"scene-node.test\",\"visualState\":\"alarm\",\"statusUpdatedAt\":\"{repeatedTimestamp}\",\"hasSourceRevision\":true,\"sourceRevision\":4}}",
-                "request.bridge.state.revision-four"));
-            const string newestPayload = "{\"sceneNodeId\":\"scene-node.test\",\"visualState\":\"fault\",\"statusUpdatedAt\":\"2026-08-08T10:00:01.000Z\",\"hasSourceRevision\":true,\"sourceRevision\":5}";
-            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage("setNodeVisualState", newestPayload, "request.bridge.state.revision-five"));
-            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage("setNodeVisualState", newestPayload, "request.bridge.state.revision-five-retry"));
+                "{\"sceneNodeId\":\"scene-node.test\",\"visualState\":\"alarm\",\"snapshotSequence\":4,\"statusUpdatedAt\":\"2026-08-08T10:00:01.000Z\",\"sourceRevision\":100}",
+                "request.bridge.state.sequence-four"));
+            const string newestPayload = "{\"sceneNodeId\":\"scene-node.test\",\"visualState\":\"fault\",\"snapshotSequence\":5,\"statusUpdatedAt\":\"2026-08-07T10:00:01.000Z\",\"sourceRevision\":1}";
+            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage("setNodeVisualState", newestPayload, "request.bridge.state.sequence-five"));
+            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage("setNodeVisualState", newestPayload, "request.bridge.state.sequence-five-retry"));
             InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage(
                 "setNodeVisualState",
-                $"{{\"sceneNodeId\":\"scene-node.test\",\"visualState\":\"alarm\",\"statusUpdatedAt\":\"{repeatedTimestamp}\",\"hasSourceRevision\":true,\"sourceRevision\":4}}",
-                "request.bridge.state.revision-four-stale"));
+                "{\"sceneNodeId\":\"scene-node.test\",\"visualState\":\"alarm\",\"snapshotSequence\":4,\"statusUpdatedAt\":\"2026-08-09T10:00:01.000Z\",\"sourceRevision\":999}",
+                "request.bridge.state.sequence-four-stale"));
+            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage(
+                "clearNodeVisualState",
+                "{\"sceneNodeId\":\"scene-node.test\",\"snapshotSequence\":6}",
+                "request.bridge.state.sequence-six-clear"));
+            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage(
+                "setNodeVisualState",
+                "{\"sceneNodeId\":\"scene-node.test\",\"visualState\":\"alarm\",\"snapshotSequence\":5,\"statusUpdatedAt\":\"2026-08-10T10:00:01.000Z\",\"sourceRevision\":1000}",
+                "request.bridge.state.sequence-five-after-clear"));
             yield return null;
 
-            Assert.That(controller.VisualStateCalls, Is.EqualTo(2), "同时间更高修订必须执行一次；同修订重试和低修订迟到不得再次调用控制器。");
-            Assert.That(controller.LastVisualState, Is.EqualTo(BusinessSceneNodeVisualState.Fault), "低修订状态不得覆盖较新的故障状态。");
-            Assert.That(HasBridgeLogFragmentForRequest("request.bridge.state.revision-four", "\"success\":true"), Is.True);
-            Assert.That(HasBridgeLogFragmentForRequest("request.bridge.state.revision-five", "\"success\":true"), Is.True);
-            Assert.That(HasBridgeLogFragmentForRequest("request.bridge.state.revision-five-retry", "\"success\":true"), Is.True);
-            Assert.That(HasBridgeLogFragmentForRequest("request.bridge.state.revision-four-stale", "\"success\":true"), Is.True);
+            Assert.That(controller.VisualStateCalls, Is.EqualTo(2), "更大本地序号必须执行；同序号重试和较小序号迟到不得再次调用控制器。");
+            Assert.That(controller.ClearVisualStateCalls, Is.EqualTo(1), "清除必须真实到达控制器，随后较小序号设置不得让旧动态颜色复活。");
+            Assert.That(controller.LastVisualState, Is.EqualTo(BusinessSceneNodeVisualState.Fault), "更大的平台时间或修订不得让较小本地序号覆盖最新故障状态。");
+            Assert.That(HasBridgeLogFragmentForRequest("request.bridge.state.sequence-four", "\"success\":true"), Is.True);
+            Assert.That(HasBridgeLogFragmentForRequest("request.bridge.state.sequence-five", "\"success\":true"), Is.True);
+            Assert.That(HasBridgeLogFragmentForRequest("request.bridge.state.sequence-five-retry", "\"success\":true"), Is.True);
+            Assert.That(HasBridgeLogFragmentForRequest("request.bridge.state.sequence-four-stale", "\"success\":true"), Is.True);
+            Assert.That(HasBridgeLogFragmentForRequest("request.bridge.state.sequence-six-clear", "\"success\":true"), Is.True);
+            Assert.That(HasBridgeLogFragmentForRequest("request.bridge.state.sequence-five-after-clear", "\"success\":true"), Is.True);
         }
 
         /// <summary>
@@ -509,6 +639,132 @@ namespace WebDLPro.Unity.Tests
                 () => HasNotice("commandResult", gasNetworkRequestId, string.Empty),
                 "未登记燃气管网步骤未返回明确拒绝结果。");
             Assert.That(HasBridgeLogFragmentForRequest(gasNetworkRequestId, "\"errorCode\":\"invalid-process-step\""), Is.True, "未登记燃气管网步骤不得伪造成功或聚焦到其他节点。");
+        }
+
+        /// <summary>
+        /// 通过正式启动场景、统一桥接和燃煤真实控制器验证完整业务链。
+        /// 用例只使用燃煤场景属性面板中显式登记的流程与三维节点标识，依次覆盖流程步骤、选择描边、
+        /// 选择清除、上下文半透明、三设备四态、复位和未交付路径能力，避免只验证“场景能加载”却遗漏核心交互。
+        /// </summary>
+        [UnityTest]
+        public IEnumerator 燃煤真实场景通过桥接完成流程节点四态显隐与复位()
+        {
+            yield return LoadBootstrap();
+            _bridgeManager = FindBridgeManager();
+            Assert.That(_bridgeManager, Is.Not.Null, "Bootstrap 未创建常驻 Unity 桥接管理器。");
+            SubscribeBridgeOutboundLogs();
+
+            const string sceneRequestId = "request.bridge.coal-actions.scene";
+            const string sceneTransitionId = "transition.bridge.coal-actions.scene";
+            InvokeBridgeMethod("ReceiveFromParent", CreateSceneSwitchMessage("coal-power", sceneTransitionId, sceneRequestId));
+            yield return WaitForCompletion(
+                () => HasNotice("sceneChanged", sceneRequestId, sceneTransitionId),
+                "燃煤场景未在业务功能验证前完成加载。");
+
+            Assert.That(_coordinator.ActiveSceneId, Is.EqualTo("coal-power"));
+            Assert.That(_coordinator.ActiveController, Is.Not.Null);
+            Assert.That(SceneManager.GetSceneByPath(CoalPowerScenePath).isLoaded, Is.True);
+            Assert.That(CountLoadedBusinessScenes(), Is.EqualTo(1));
+
+            // 四个步骤逐一经过正式桥接分派。每步使用独立请求标识，防止前一步成功日志掩盖后一步失败。
+            string[] stepIds = { "overview", "combustion", "water-steam-cycle", "power-output" };
+            for (int stepIndex = 0; stepIndex < stepIds.Length; stepIndex++)
+            {
+                string stepId = stepIds[stepIndex];
+                string requestId = $"request.bridge.coal-actions.step.{stepId}";
+                string payload = $"{{\"processId\":\"coal-power-generation\",\"stepId\":\"{stepId}\",\"unitId\":\"all\",\"isolate\":true}}";
+                InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage("enterProcessStep", payload, requestId));
+                yield return WaitForCompletion(
+                    () => HasNotice("commandResult", requestId, string.Empty),
+                    $"燃煤流程步骤 {stepId} 未返回命令结果。");
+                Assert.That(HasBridgeLogFragmentForRequest(requestId, "\"success\":true"), Is.True, $"燃煤流程步骤 {stepId} 未成功执行。");
+            }
+            Assert.That(_coordinator.ActiveController.GetStateDescription(), Does.Contain("step=power-output"));
+
+            const string focusRequestId = "request.bridge.coal-actions.focus";
+            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage(
+                "focusNode",
+                "{\"sceneNodeId\":\"node.coal-boiler\",\"selectionId\":\"selection.bridge.coal-actions.boiler\",\"isolate\":true}",
+                focusRequestId));
+            yield return WaitForCompletion(
+                () => HasNotice("commandResult", focusRequestId, string.Empty),
+                "燃煤锅炉聚焦未返回命令结果。");
+            Assert.That(HasBridgeLogFragmentForRequest(focusRequestId, "\"success\":true"), Is.True);
+
+            const string clearSelectionRequestId = "request.bridge.coal-actions.clear-selection";
+            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage("clearSelection", "{}", clearSelectionRequestId));
+            yield return WaitForCompletion(
+                () => HasNotice("commandResult", clearSelectionRequestId, string.Empty),
+                "燃煤选择清除未返回命令结果。");
+            Assert.That(HasBridgeLogFragmentForRequest(clearSelectionRequestId, "\"success\":true"), Is.True);
+
+            // 半透明命令必须实际创建运行时上下文材质；恢复显示后应立即释放，不能等待场景卸载才清理。
+            const string fadeRequestId = "request.bridge.coal-actions.visibility.fade";
+            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage(
+                "setNodeVisibility",
+                "{\"sceneNodeId\":\"node.coal-boiler\",\"enabled\":false}",
+                fadeRequestId));
+            yield return WaitForCompletion(
+                () => HasNotice("commandResult", fadeRequestId, string.Empty),
+                "燃煤锅炉半透明命令未返回结果。");
+            Assert.That(HasBridgeLogFragmentForRequest(fadeRequestId, "\"success\":true"), Is.True);
+            int materialCountAfterFade = CountRuntimeContextMaterials();
+            Assert.That(materialCountAfterFade, Is.GreaterThan(0), "燃煤显隐命令未作用到真实模型材质。");
+
+            const string showRequestId = "request.bridge.coal-actions.visibility.show";
+            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage(
+                "setNodeVisibility",
+                "{\"sceneNodeId\":\"node.coal-boiler\",\"enabled\":true}",
+                showRequestId));
+            yield return WaitForCompletion(
+                () => HasNotice("commandResult", showRequestId, string.Empty),
+                "燃煤锅炉恢复显示命令未返回结果。");
+            Assert.That(HasBridgeLogFragmentForRequest(showRequestId, "\"success\":true"), Is.True);
+            Assert.That(CountRuntimeContextMaterials(), Is.LessThan(materialCountAfterFade), "燃煤锅炉恢复显示后未释放该节点的运行时上下文材质。");
+
+            // 三个已登记设备分别应用固定四态，再以更大的本地快照序号清除，验证映射和撤销路径均可用。
+            string[] visualNodeIds = { "node.coal-boiler", "node.coal-steam-turbine", "node.coal-generator" };
+            string[] visualStates = { "alarm", "fault", "offline" };
+            for (int nodeIndex = 0; nodeIndex < visualNodeIds.Length; nodeIndex++)
+            {
+                string nodeId = visualNodeIds[nodeIndex];
+                string stateRequestId = $"request.bridge.coal-actions.visual.{nodeIndex}";
+                string statePayload = $"{{\"sceneNodeId\":\"{nodeId}\",\"visualState\":\"{visualStates[nodeIndex]}\",\"snapshotSequence\":1,\"statusUpdatedAt\":\"2026-08-08T10:00:00.000Z\",\"sourceRevision\":0}}";
+                InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage("setNodeVisualState", statePayload, stateRequestId));
+                yield return WaitForCompletion(
+                    () => HasNotice("commandResult", stateRequestId, string.Empty),
+                    $"燃煤四态节点 {nodeId} 未返回设置结果。");
+                Assert.That(HasBridgeLogFragmentForRequest(stateRequestId, "\"success\":true"), Is.True, $"燃煤四态节点 {nodeId} 未成功应用状态。");
+
+                string clearStateRequestId = $"request.bridge.coal-actions.visual-clear.{nodeIndex}";
+                string clearStatePayload = $"{{\"sceneNodeId\":\"{nodeId}\",\"snapshotSequence\":2}}";
+                InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage("clearNodeVisualState", clearStatePayload, clearStateRequestId));
+                yield return WaitForCompletion(
+                    () => HasNotice("commandResult", clearStateRequestId, string.Empty),
+                    $"燃煤四态节点 {nodeId} 未返回清除结果。");
+                Assert.That(HasBridgeLogFragmentForRequest(clearStateRequestId, "\"success\":true"), Is.True, $"燃煤四态节点 {nodeId} 未成功清除状态。");
+            }
+
+            // 燃煤三维路径尚未交付，路径命令应稳定拒绝而不是伪造成功。
+            const string routeRequestId = "request.bridge.coal-actions.route-unsupported";
+            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage(
+                "setRouteFlow",
+                "{\"routeId\":\"route.coal.not-registered\",\"enabled\":true}",
+                routeRequestId));
+            yield return WaitForCompletion(
+                () => HasNotice("commandResult", routeRequestId, string.Empty),
+                "燃煤未交付路径能力未返回命令结果。");
+            Assert.That(HasBridgeLogFragmentForRequest(routeRequestId, "\"errorCode\":\"capability-unsupported\""), Is.True);
+
+            const string resetRequestId = "request.bridge.coal-actions.reset";
+            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage("resetScene", "{}", resetRequestId));
+            yield return WaitForCompletion(
+                () => HasNotice("commandResult", resetRequestId, string.Empty),
+                "燃煤场景复位未返回命令结果。");
+            Assert.That(HasBridgeLogFragmentForRequest(resetRequestId, "\"success\":true"), Is.True);
+            Assert.That(_coordinator.ActiveController.GetStateDescription(), Does.Contain("process=coal-power-generation"));
+            Assert.That(_coordinator.ActiveController.GetStateDescription(), Does.Contain("step=overview"));
+            Assert.That(CountRuntimeContextMaterials(), Is.EqualTo(0), "燃煤场景复位后仍残留运行时上下文材质。");
         }
 
         /// <summary>
@@ -571,7 +827,9 @@ namespace WebDLPro.Unity.Tests
                 BusinessSceneCapability.Initialize |
                 BusinessSceneCapability.EnterProcessStep |
                 BusinessSceneCapability.FocusNode |
+                BusinessSceneCapability.ClearSelection |
                 BusinessSceneCapability.UpdateNodeVisualState |
+                BusinessSceneCapability.ClearNodeVisualState |
                 BusinessSceneCapability.SetRouteFlow |
                 BusinessSceneCapability.ResetScene |
                 BusinessSceneCapability.Release |
@@ -587,7 +845,9 @@ namespace WebDLPro.Unity.Tests
             public int FocusCalls { get; private set; }
             public string LastFocusedNodeId { get; private set; }
             public bool LastFocusIsolate { get; private set; }
+            public int ClearSelectionCalls { get; private set; }
             public int VisualStateCalls { get; private set; }
+            public int ClearVisualStateCalls { get; private set; }
             public string LastVisualStateNodeId { get; private set; }
             public BusinessSceneNodeVisualState LastVisualState { get; private set; }
             public int RouteFlowCalls { get; private set; }
@@ -623,6 +883,12 @@ namespace WebDLPro.Unity.Tests
                 return BusinessSceneCommandResult.Completed("聚焦命令已记录。");
             }
 
+            public BusinessSceneCommandResult ClearSelection()
+            {
+                ClearSelectionCalls++;
+                return BusinessSceneCommandResult.Completed("清除选择命令已记录。");
+            }
+
             public BusinessSceneCommandResult UpdateNodeVisualState(string sceneNodeId, BusinessSceneNodeVisualState visualState)
             {
                 if (!string.Equals(sceneNodeId, "scene-node.test", System.StringComparison.Ordinal))
@@ -635,6 +901,17 @@ namespace WebDLPro.Unity.Tests
                 LastVisualStateNodeId = sceneNodeId;
                 LastVisualState = visualState;
                 return BusinessSceneCommandResult.Completed("节点四态命令已记录。");
+            }
+
+            public BusinessSceneCommandResult ClearNodeVisualState(string sceneNodeId)
+            {
+                if (!string.Equals(sceneNodeId, "scene-node.test", System.StringComparison.Ordinal))
+                {
+                    return BusinessSceneCommandResult.Failed("invalid-node", $"未知三维节点：{sceneNodeId}");
+                }
+
+                ClearVisualStateCalls++;
+                return BusinessSceneCommandResult.Completed("节点动态状态清除命令已记录。");
             }
 
             public BusinessSceneCommandResult SetRouteFlow(string routeId, bool enabled, float speedMultiplier)
@@ -899,6 +1176,25 @@ namespace WebDLPro.Unity.Tests
                 }
             }
             return false;
+        }
+
+        /// <summary>
+        /// 在固定容量的桥接日志中查找指定事件和原请求标识的位置。
+        /// 仅测试消息先后顺序，不解析任意业务载荷、模型名称或场景层级，因此不会把日志断言变成隐式映射来源。
+        /// </summary>
+        private int FindBridgeNoticeIndex(string type, string requestId)
+        {
+            string typeFragment = $"\"type\":\"{type}\"";
+            string requestFragment = $"\"requestId\":\"{requestId}\"";
+            for (int index = 0; index < _bridgeOutboundLogs.Count; index++)
+            {
+                string log = _bridgeOutboundLogs[index];
+                if (log.Contains(typeFragment) && log.Contains(requestFragment))
+                {
+                    return index;
+                }
+            }
+            return -1;
         }
 
         /// <summary>将错误码与原请求关联，避免前一条命令的同类错误掩盖后续命令的路由错误。</summary>

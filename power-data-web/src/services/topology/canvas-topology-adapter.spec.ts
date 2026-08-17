@@ -15,6 +15,38 @@ interface AdapterCacheInspection {
   getIconImage(node: TopologyNodeDefinition, deviceStatus: TopologyDeviceStatus): HTMLImageElement | undefined
 }
 
+/** 测试只读观察的矩形结构，与生产适配器缓存的画布坐标一一对应。 */
+interface BoundsInspection {
+  left: number
+  top: number
+  right: number
+  bottom: number
+}
+
+/**
+ * 布局与路由属于适配器内部缓存，测试通过结构化只读视图核对几何结果，不把调试接口暴露给业务代码。
+ */
+interface AdapterGeometryInspection extends AdapterCacheInspection {
+  layoutByNodeId: Map<string, {
+    node: TopologyNodeDefinition
+    x: number
+    y: number
+    width: number
+    height: number
+    titleBounds: BoundsInspection
+    hitBounds: BoundsInspection
+    routeBounds: BoundsInspection
+  }>
+  routeByEdgeId: Map<string, { points: readonly { x: number; y: number }[] }>
+  createNodeLayouts(): void
+  rebuildEdgeRoutesIfNeeded(): void
+  findAvailableEdgeLabelPlacement(
+    route: { points: readonly { x: number; y: number }[] },
+    labelWidth: number,
+    labelHeight: number,
+  ): { x: number; y: number; width: number; height: number } | undefined
+}
+
 /**
  * 测试替身完整保留画布适配器会写入的图片字段，却不触发网络请求或真实 SVG 解码。
  * 因此能稳定检查加载回调是否在释放时断开，且不会让测试环境的 DOM（文档对象模型）状态影响结果。
@@ -50,6 +82,76 @@ function createTopology(): TopologyDefinition {
     ],
     edges: [],
   }
+}
+
+/** 五层坐标与正式燃气发布一致，用来验证低矮画布中最容易重叠的底部两层。 */
+function createFiveLayerTopology(): TopologyDefinition {
+  const layers = [
+    { layerId: 'layer-enterprise', title: '企业层', y: 8, color: '#7dd3fc' },
+    { layerId: 'layer-dmz', title: '隔离区层', y: 28, color: '#60a5fa' },
+    { layerId: 'layer-plant', title: '厂级层', y: 50, color: '#38bdf8' },
+    { layerId: 'layer-unit', title: '单元层', y: 69, color: '#22c55e' },
+    { layerId: 'layer-field', title: '现场层', y: 88, color: '#fb923c' },
+  ] as const
+
+  return {
+    topologyKey: toTopologyKey('topology.geometry-regression'),
+    title: '响应式几何回归拓扑',
+    configVersion: '2026.08.13.1' as never,
+    layers,
+    nodes: layers.map((layer, index) => ({
+      nodeId: toProcessNodeId(`geometry-node-${index}`),
+      title: `第${index + 1}层完整节点名称`,
+      x: 50,
+      y: layer.y,
+      layerId: layer.layerId,
+      iconKey: 'plc' as const,
+      deviceStatus: 'offline' as const,
+      metricKeys: [],
+    })),
+    edges: [],
+  }
+}
+
+/** 生成最小路由拓扑，调用方只需给出百分比坐标和边端点。 */
+function createRouteTopology(
+  nodes: ReadonlyArray<{ id: string; x: number; y: number }>,
+  edges: ReadonlyArray<{ id: string; from: string; to: string; protocolLabel?: string }>,
+): TopologyDefinition {
+  return {
+    topologyKey: toTopologyKey('topology.route-regression'),
+    title: '连线路由回归拓扑',
+    configVersion: '2026.08.13.1' as never,
+    nodes: nodes.map((node) => ({
+      nodeId: toProcessNodeId(node.id),
+      title: node.id,
+      x: node.x,
+      y: node.y,
+      iconKey: 'plc',
+      deviceStatus: 'offline',
+      metricKeys: [],
+    })),
+    edges: edges.map((edge) => ({
+      edgeId: edge.id as never,
+      fromNodeId: toProcessNodeId(edge.from),
+      toNodeId: toProcessNodeId(edge.to),
+      title: edge.id,
+      protocolLabel: edge.protocolLabel,
+      evidenceStatus: 'verified',
+      sceneRouteIds: [],
+    })),
+  }
+}
+
+/** 手动驱动布局与路由，避免单元测试依赖动画帧和真实浏览器 Canvas（画布）。 */
+function prepareGeometry(adapter: CanvasTopologyAdapter, topology: TopologyDefinition, width: number, height: number): AdapterGeometryInspection {
+  adapter.resize(width, height)
+  adapter.setTopology(topology)
+  const inspection = adapter as unknown as AdapterGeometryInspection
+  inspection.layoutByNodeId.clear()
+  inspection.createNodeLayouts()
+  inspection.rebuildEdgeRoutesIfNeeded()
+  return inspection
 }
 
 /** 根据受控图元键构造最小节点；该节点不进入业务清单，只用于驱动登记资源的缓存验证。 */
@@ -206,5 +308,111 @@ describe('CanvasTopologyAdapter 节点状态增量', () => {
     expect(canvas.height).toBe(0)
     expect(canvas.style.width).toBe('')
     expect(canvas.style.height).toBe('')
+  })
+})
+
+describe('CanvasTopologyAdapter 响应式布局与直线优先路由', () => {
+  it.each([
+    [500, 108],
+    [677, 188],
+    [600, 240],
+    [770, 336],
+    [942, 257],
+    [1280, 720],
+    [3440, 1440],
+  ])('%d×%d 下完整节点边界不与相邻层重叠', (width, height) => {
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const adapter = new CanvasTopologyAdapter(createCanvas())
+    const inspection = prepareGeometry(adapter, createFiveLayerTopology(), width, height)
+    const layouts = [...inspection.layoutByNodeId.values()].sort((left, right) => left.y - right.y)
+
+    const expectedMinimumNodeSize = height < 160 ? 8 : height < 240 ? 18 : 28
+    expect(layouts.every((layout) => layout.width >= expectedMinimumNodeSize && layout.width <= 40 && layout.width === layout.height)).toBe(true)
+    expect(layouts.every((layout) => layout.hitBounds.right - layout.hitBounds.left >= 40)).toBe(true)
+    for (let index = 1; index < layouts.length; index += 1) {
+      expect(layouts[index]?.routeBounds.top).toBeGreaterThanOrEqual(layouts[index - 1]?.routeBounds.bottom ?? 0)
+    }
+
+    adapter.dispose()
+  })
+
+  it('图标缩小后标题仍可命中，缩放和平移时使用相同逆变换', () => {
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const adapter = new CanvasTopologyAdapter(createCanvas())
+    const inspection = prepareGeometry(adapter, createFiveLayerTopology(), 600, 240)
+    const layout = inspection.layoutByNodeId.get('geometry-node-2')
+    expect(layout).toBeDefined()
+    if (!layout) return
+
+    adapter.zoomBy(0.4)
+    adapter.panBy(30, -15)
+    const state = adapter.getViewState()
+    const contentX = (layout.titleBounds.left + layout.titleBounds.right) / 2
+    const contentY = (layout.titleBounds.top + layout.titleBounds.bottom) / 2
+    const screenX = 600 / 2 + (contentX - 600 / 2) * state.zoom + state.offsetX
+    const screenY = 240 / 2 + (contentY - 240 / 2) * state.zoom + state.offsetY
+
+    expect(adapter.pickNodeAt(screenX, screenY)).toBe(toProcessNodeId('geometry-node-2'))
+    expect(adapter.pickNodeAt(2, 2)).toBeUndefined()
+    adapter.dispose()
+  })
+
+  it('无障碍斜向关系直接使用两点直线，并能在法线方向放置水平协议标签', () => {
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const adapter = new CanvasTopologyAdapter(createCanvas())
+    const topology = createRouteTopology(
+      [{ id: 'route-a', x: 20, y: 20 }, { id: 'route-b', x: 80, y: 70 }],
+      [{ id: 'edge.diagonal', from: 'route-a', to: 'route-b', protocolLabel: 'DNP3' }],
+    )
+    const inspection = prepareGeometry(adapter, topology, 800, 480)
+    const route = inspection.routeByEdgeId.get('edge.diagonal')
+
+    expect(route?.points).toHaveLength(2)
+    expect(route?.points[0]?.x).not.toBe(route?.points[1]?.x)
+    expect(route?.points[0]?.y).not.toBe(route?.points[1]?.y)
+    expect(route && inspection.findAvailableEdgeLabelPlacement(route, 40, 12)).toBeDefined()
+    adapter.dispose()
+  })
+
+  it('直线穿过第三方节点时改用最少拐点绕行', () => {
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const adapter = new CanvasTopologyAdapter(createCanvas())
+    const topology = createRouteTopology(
+      [
+        { id: 'obstacle-a', x: 20, y: 50 },
+        { id: 'obstacle-middle', x: 50, y: 50 },
+        { id: 'obstacle-b', x: 80, y: 50 },
+      ],
+      [{ id: 'edge.obstacle', from: 'obstacle-a', to: 'obstacle-b' }],
+    )
+    const inspection = prepareGeometry(adapter, topology, 800, 480)
+
+    expect(inspection.routeByEdgeId.get('edge.obstacle')?.points.length).toBeGreaterThan(2)
+    adapter.dispose()
+  })
+
+  it('后计算的直线与已接受路径非端点交叉时自动绕行', () => {
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const adapter = new CanvasTopologyAdapter(createCanvas())
+    const topology = createRouteTopology(
+      [
+        { id: 'cross-left', x: 20, y: 50 }, { id: 'cross-right', x: 80, y: 50 },
+        { id: 'cross-top', x: 50, y: 15 }, { id: 'cross-bottom', x: 50, y: 85 },
+      ],
+      [
+        { id: 'edge.a-horizontal', from: 'cross-left', to: 'cross-right' },
+        { id: 'edge.b-vertical', from: 'cross-top', to: 'cross-bottom' },
+      ],
+    )
+    const inspection = prepareGeometry(adapter, topology, 800, 480)
+
+    expect(inspection.routeByEdgeId.get('edge.a-horizontal')?.points).toHaveLength(2)
+    expect(inspection.routeByEdgeId.get('edge.b-vertical')?.points.length).toBeGreaterThan(2)
+    adapter.dispose()
   })
 })

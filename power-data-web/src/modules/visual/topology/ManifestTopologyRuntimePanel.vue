@@ -8,7 +8,7 @@ import type { TopologyRuntime } from '@/modules/visual/topology/topology-runtime
 import { TopologyRuntime as TopologyRuntimeImplementation } from '@/modules/visual/topology/topology-runtime'
 import { ManifestTopologyCanvasPort } from '@/modules/visual/topology/manifest-topology-canvas-port'
 import TopologyPanel from '@/modules/visual/components/TopologyPanel.vue'
-import { resolveTopologyDeviceDoubleClick, type TopologyDeviceDoubleClickIntent } from '@/modules/visual/topology/topology-node-interaction'
+import { resolveTopologyNodeDoubleClick, type TopologyNodeDoubleClickIntent } from '@/modules/visual/topology/topology-node-interaction'
 import { visualizationCoordinatorFacadeKey } from '@/modules/visual/orchestration/visualization-coordinator-facade'
 import { TopologySelectionFocusCoordinator } from '@/modules/visual/topology/topology-selection-focus-coordinator'
 import { visualizationRuntimeHostKey } from '@/modules/visual/runtime/visualization-runtime-host'
@@ -19,7 +19,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   ready: [runtime: TopologyRuntime]
-  deviceDoubleClick: [intent: TopologyDeviceDoubleClickIntent]
+  nodeDoubleClick: [intent: TopologyNodeDoubleClickIntent]
 }>()
 
 const visualizationCoordinatorFacade = inject(visualizationCoordinatorFacadeKey)
@@ -29,7 +29,7 @@ const topologyPanel = ref<InstanceType<typeof TopologyPanel> | null>(null)
 
 /**
  * 未收到合法 `system.init`（系统初始化）前的唯一展示状态。
- * 它不是任一业务场景、拓扑或设备的替代品；空节点配置仅用于在同一个组件内预先创建唯一画布端口，
+ * 它不是任一业务场景、拓扑或节点的替代品；空节点配置仅用于在同一个组件内预先创建唯一画布端口，
  * 使后续 prepare（准备）阶段无需通过可见目标拓扑来抢建第二个 Canvas（画布）。
  */
 const awaitingTopology: CanvasTopologyDefinition = Object.freeze({
@@ -46,7 +46,7 @@ const displayedTopology = ref<CanvasTopologyDefinition>(awaitingTopology)
 const selectedNodeIds = ref<readonly ProcessNodeId[]>([])
 const selectedRouteIds = ref<readonly ProcessRouteId[]>([])
 /**
- * 设备状态是运行时快照，不写入清单定义；浅引用避免 Vue 递归代理 Map（映射）并让每批更新只触发一次属性同步。
+ * 节点状态是运行时快照，不写入清单定义；浅引用避免 Vue 递归代理 Map（映射）并让每批更新只触发一次属性同步。
  * 空映射会让画布回退到拓扑发布的节点基线状态，不需要创建全节点离线覆盖。
  */
 const nodeStatuses = shallowRef<ReadonlyMap<ProcessNodeId, TopologyDeviceStatus>>(new Map())
@@ -61,6 +61,10 @@ const topologySelectionFocusCoordinator = new TopologySelectionFocusCoordinator(
   supportsFocusNode: () => visualizationRuntimeHost?.capabilities.value.includes('focusNode') ?? false,
   focusNode: (sceneNodeId, selectionId) => visualizationRuntimeHost
     ? visualizationRuntimeHost.sendCommandAndWait('focusNode', { sceneNodeId, selectionId, isolate: false })
+    : Promise.resolve({ success: false }),
+  supportsClearSelection: () => visualizationRuntimeHost?.capabilities.value.includes('clearSelection') ?? false,
+  clearSelection: () => visualizationRuntimeHost
+    ? visualizationRuntimeHost.sendCommandAndWait('clearSelection', {})
     : Promise.resolve({ success: false }),
 })
 
@@ -122,7 +126,6 @@ function handleSelectNode(processNodeId: string): void {
     nodeIds: [nodeId],
     routeIds,
     source: 'topology',
-    deviceId: node.deviceId ?? null,
     sceneNodeId: node.sceneNodeId ?? null,
   })
   if (result.status !== 'accepted') return
@@ -137,6 +140,35 @@ function handleSelectNode(processNodeId: string): void {
 }
 
 /**
+ * 空白单击经与节点选择相同的稳定上下文门禁提交空选择，并通知 Unity 清除交互选中描边。
+ * 三维命令是独立的最小操作，不会重置场景、流程、显隐或镜头；拖拽结束不会触发此入口。
+ */
+function handleClearSelection(): void {
+  const runtime = topologyRuntime
+  const activeTopology = runtime?.getActiveTopology()
+  const facade = visualizationCoordinatorFacade
+  if (!runtime || !activeTopology || !facade) return
+
+  const snapshot = facade.getSnapshot()
+  if (snapshot.runtimeStatus !== 'ready' || snapshot.stableContext?.sceneId !== activeTopology.sceneId || snapshot.stableContext.topologyId !== activeTopology.topologyId) return
+  const hasTwoDimensionalSelection = snapshot.selectedNodeIds.length > 0 || snapshot.selectedRouteIds.length > 0
+  if (hasTwoDimensionalSelection) {
+    const result = facade.submit({
+      type: 'selection.replace',
+      nodeIds: [],
+      routeIds: [],
+      source: 'topology',
+      sceneNodeId: null,
+    })
+    if (result.status !== 'accepted') return
+    runtime.setSelection([], [])
+  }
+
+  // 三维清除失败不影响已完成的二维取消；页面继续保持当前流程和场景上下文。
+  void topologySelectionFocusCoordinator.requestClearSelection()
+}
+
+/**
  * 每次已接受的二维选择创建一个跨前端与 Unity 的选择标识（selectionId）。
  * 该值只用于聚焦幂等关联，不写入状态仓库或外层协议；长度固定受 128 字符协议边界约束。
  */
@@ -147,7 +179,7 @@ function createTopologySelectionId(): SelectionId {
 }
 
 /**
- * 双击仅在当前激活拓扑中解析明示的设备映射；概念节点、等待态和过期节点均不产生外部事件。
+ * 双击仅在当前激活拓扑中解析明示的节点上报许可；未许可节点、等待态和过期节点均不产生外部事件。
  * 单击已经独立即时执行，本函数不重复提交选择，也不发送三维聚焦命令，避免双击导致重复副作用。
  */
 function handleDoubleClickNode(processNodeId: string): void {
@@ -157,13 +189,13 @@ function handleDoubleClickNode(processNodeId: string): void {
   /*
    * 命中结果必须回到当前已激活拓扑的已声明节点，再传给双击意图解析器。
    * 不能把画布传来的字符串转换为新的节点标识：那会绕过“节点确实属于当前拓扑”的边界，
-   * 并可能让旧画布回调或伪造标识进入设备事件链路。
+   * 并可能让旧画布回调或伪造标识进入节点事件链路。
    */
   const node = activeTopology.topology.nodes.find((item) => String(item.nodeId) === processNodeId)
   if (!node) return
 
-  const intent = resolveTopologyDeviceDoubleClick(activeTopology.topology, node.nodeId)
-  if (intent) emit('deviceDoubleClick', intent)
+  const intent = resolveTopologyNodeDoubleClick(activeTopology.topology, node.nodeId)
+  if (intent) emit('nodeDoubleClick', intent)
 }
 
 onMounted(() => {
@@ -189,6 +221,7 @@ defineExpose({ getTopologyRuntime })
     :selected-route-ids="selectedRouteIds"
     :node-statuses="nodeStatuses"
     @select-node="handleSelectNode"
+    @clear-selection="handleClearSelection"
     @double-click-node="handleDoubleClickNode"
   />
 </template>
