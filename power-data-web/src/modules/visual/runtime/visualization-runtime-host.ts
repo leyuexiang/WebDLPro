@@ -1,6 +1,6 @@
 import type { InjectionKey, Ref } from 'vue'
 import type { WebglRuntimeRegistration } from '@/config/process/types'
-import type { WebglCommandType, WebglObjectSelectedPayload, WebglSceneLoadProgressPayload } from '@/services/webgl/protocol'
+import type { WebglCommandType, WebglObjectSelectedPayload, WebglSceneLoadProgressPayload, WebglSelectionClearedPayload } from '@/services/webgl/protocol'
 
 /**
  * 可视化布局唯一宿主对外公开的生命周期状态。
@@ -19,6 +19,12 @@ export type VisualizationRuntimeLifecycle =
 /** 业务页面订阅到的对象选中事件只包含稳定业务标识，不暴露 Unity 层级或跨窗口对象。 */
 export interface VisualizationObjectSelection {
   payload: WebglObjectSelectedPayload
+  messageId: string
+}
+
+/** 三维空白清除事件只携带已校验的场景与物理实例标识。 */
+export interface VisualizationSelectionCleared {
+  payload: WebglSelectionClearedPayload
   messageId: string
 }
 
@@ -52,6 +58,7 @@ export interface VisualizationRuntimeHostController {
   /** 基于连接器已经校验的原请求回执完成等待；失败、超时和释放都会结算，不保留悬挂 Promise。 */
   sendCommandAndWait: (command: Exclude<WebglCommandType, 'init'>, payload: unknown) => Promise<VisualizationRuntimeCommandResult>
   subscribeObjectSelected: (listener: (selection: VisualizationObjectSelection) => void) => () => void
+  subscribeSelectionCleared: (listener: (selection: VisualizationSelectionCleared) => void) => () => void
   /** 订阅当前 Unity 场景切换的受控进度；返回值必须在壳层卸载时执行，防止旧组合根保留回调。 */
   subscribeSceneLoadProgress: (listener: (progress: VisualizationSceneLoadProgressEvent) => void) => () => void
 }

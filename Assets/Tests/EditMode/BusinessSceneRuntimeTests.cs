@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
 using WebDLPro.Unity.SceneRuntime;
@@ -10,6 +11,73 @@ namespace WebDLPro.Unity.Tests
     /// <summary>验证九场景目录、能力登记和事务过滤的纯逻辑，不依赖用户正在编辑的 SampleScene。</summary>
     public sealed class BusinessSceneRuntimeTests
     {
+        /// <summary>
+        /// 未配置碰撞体的已登记模型仍应由渲染器包围盒命中；这是燃煤场景三维反向选择的低成本后备路径。
+        /// 测试目标只携带显式 sceneNodeId（三维节点标识），不使用对象名称推断映射。
+        /// </summary>
+        [Test]
+        public void 渲染器后备命中支持无碰撞体的显式三维节点()
+        {
+            GameObject target = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            try
+            {
+                UnityEngine.Object.DestroyImmediate(target.GetComponent<Collider>());
+                Renderer renderer = target.GetComponent<Renderer>();
+                SceneNodeRendererPickTarget[] targets =
+                {
+                    new SceneNodeRendererPickTarget("node.coal-boiler", target, renderer)
+                };
+
+                bool selected = SceneNodeRendererPicker.TryPick(
+                    new Ray(new Vector3(0f, 0f, -5f), Vector3.forward),
+                    targets,
+                    float.PositiveInfinity,
+                    out string sceneNodeId,
+                    out GameObject selectedRoot,
+                    out float hitDistance);
+
+                Assert.That(selected, Is.True);
+                Assert.That(sceneNodeId, Is.EqualTo("node.coal-boiler"));
+                Assert.That(selectedRoot, Is.SameAs(target));
+                Assert.That(hitDistance, Is.EqualTo(4.5f).Within(0.001f));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(target);
+            }
+        }
+
+        /// <summary>
+        /// 前方未映射碰撞体距离必须阻断后方包围盒命中，避免后备路径穿过地面或建筑选择不可见设备。
+        /// </summary>
+        [Test]
+        public void 渲染器后备命中遵守前方物理遮挡距离()
+        {
+            GameObject target = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            try
+            {
+                UnityEngine.Object.DestroyImmediate(target.GetComponent<Collider>());
+                SceneNodeRendererPickTarget[] targets =
+                {
+                    new SceneNodeRendererPickTarget("node.coal-generator", target, target.GetComponent<Renderer>())
+                };
+
+                bool selected = SceneNodeRendererPicker.TryPick(
+                    new Ray(new Vector3(0f, 0f, -5f), Vector3.forward),
+                    targets,
+                    4f,
+                    out _,
+                    out _,
+                    out _);
+
+                Assert.That(selected, Is.False);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(target);
+            }
+        }
+
         /// <summary>记录资源句柄的精确释放次数，用于验证幂等与释放后迟到登记行为。</summary>
         private sealed class TrackingDisposable : System.IDisposable
         {
@@ -110,8 +178,8 @@ namespace WebDLPro.Unity.Tests
         }
 
         /// <summary>
-        /// 四态视觉适配器必须只修改显式登记渲染器的材质属性块，并在高频状态切换中保持共享材质引用不变。
-        /// 该测试使用 Unity 内置立方体的现有共享材质，不创建业务材质或猜测正式场景颜色；
+        /// 四态视觉登记器必须保持显式模型的基础材质颜色不变，并在高频状态切换中保持共享材质引用不变。
+        /// 三态的半透明颜色与同色描边由业务控制器上的 Highlight Plus（高亮插件）负责；登记器只保存并恢复基础色，
         /// 同时覆盖未知节点和释放后调用的结构化失败，避免桥接收到静默成功。
         /// </summary>
         [Test]
@@ -156,21 +224,21 @@ namespace WebDLPro.Unity.Tests
                 Assert.That(updateResult.Success, Is.True, updateResult.Message);
             }
 
-            // 共享材质引用不变可证明状态更新没有调用 Renderer.material 或替换共享材质数组。
+            // 共享材质和属性块颜色均保持登记时基线，证明三态不会再把模型涂成不透明纯色。
             Assert.That(renderer.sharedMaterial, Is.SameAs(originalSharedMaterial));
             MaterialPropertyBlock inspectionBlock = new MaterialPropertyBlock();
             renderer.GetPropertyBlock(inspectionBlock, 0);
             Color appliedColor = inspectionBlock.GetColor(Shader.PropertyToID(colorPropertyName));
-            Assert.That(appliedColor.r, Is.EqualTo(offlineColor.r).Within(0.001f));
-            Assert.That(appliedColor.g, Is.EqualTo(offlineColor.g).Within(0.001f));
-            Assert.That(appliedColor.b, Is.EqualTo(offlineColor.b).Within(0.001f));
-            Assert.That(appliedColor.a, Is.EqualTo(offlineColor.a).Within(0.001f));
+            Color expectedBaselineColor = originalSharedMaterial.GetColor(Shader.PropertyToID(colorPropertyName));
+            Assert.That(appliedColor.r, Is.EqualTo(expectedBaselineColor.r).Within(0.001f));
+            Assert.That(appliedColor.g, Is.EqualTo(expectedBaselineColor.g).Within(0.001f));
+            Assert.That(appliedColor.b, Is.EqualTo(expectedBaselineColor.b).Within(0.001f));
+            Assert.That(appliedColor.a, Is.EqualTo(expectedBaselineColor.a).Within(0.001f));
 
             BusinessSceneCommandResult clearResult = registry.ClearNodeVisualState("scene-node.test");
             Assert.That(clearResult.Success, Is.True, clearResult.Message);
             renderer.GetPropertyBlock(inspectionBlock, 0);
             Color restoredColor = inspectionBlock.GetColor(Shader.PropertyToID(colorPropertyName));
-            Color expectedBaselineColor = originalSharedMaterial.GetColor(Shader.PropertyToID(colorPropertyName));
             Assert.That(restoredColor.r, Is.EqualTo(expectedBaselineColor.r).Within(0.001f));
             Assert.That(restoredColor.g, Is.EqualTo(expectedBaselineColor.g).Within(0.001f));
             Assert.That(restoredColor.b, Is.EqualTo(expectedBaselineColor.b).Within(0.001f));
@@ -187,6 +255,90 @@ namespace WebDLPro.Unity.Tests
             Assert.That(releasedResult.ErrorCode, Is.EqualTo("scene-controller-released"));
 
             Object.DestroyImmediate(visualRoot);
+        }
+
+        /// <summary>
+        /// 告警、故障状态通过材质属性块临时覆盖基础颜色后，恢复路径必须同时恢复状态前已有的实例参数；
+        /// 原本没有属性块的槽位则必须传回 null（空引用）清除状态覆盖，不能遗留一个空属性块。
+        /// 该用例直接覆盖控制器的私有缓存与恢复逻辑，避免只验证材质数组而遗漏渲染器槽位级别的属性状态。
+        /// </summary>
+        [Test]
+        public void 状态材质恢复保留原属性块并清除空槽位覆盖()
+        {
+            GameObject visualRoot = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            Material runtimeStateMaterial = null;
+            try
+            {
+                Renderer renderer = visualRoot.GetComponent<Renderer>();
+                Material[] originalMaterials = renderer.sharedMaterials;
+                int originalColorPropertyId = Shader.PropertyToID("_BaseColor");
+                int preservedFloatPropertyId = Shader.PropertyToID("_WebDLProPreservedRuntimeValue");
+                MaterialPropertyBlock originalPropertyBlock = new MaterialPropertyBlock();
+                originalPropertyBlock.SetColor(originalColorPropertyId, new Color(0.12f, 0.34f, 0.56f, 0.78f));
+                originalPropertyBlock.SetFloat(preservedFloatPropertyId, 42f);
+                renderer.SetPropertyBlock(originalPropertyBlock, 0);
+
+                // 通过反射（reflection）调用私有工具方法，测试实际运行时逻辑且不向生产控制器暴露测试专用接口。
+                Type activeMaterialsType = typeof(PowerPlantProcessController).GetNestedType(
+                    "ActiveVisualStateMaterials",
+                    BindingFlags.NonPublic);
+                MethodInfo captureMethod = typeof(PowerPlantProcessController).GetMethod(
+                    "CaptureMaterialPropertyBlocks",
+                    BindingFlags.NonPublic | BindingFlags.Static);
+                MethodInfo restoreMethod = typeof(PowerPlantProcessController).GetMethod(
+                    "RestoreRendererVisualStateMaterials",
+                    BindingFlags.NonPublic | BindingFlags.Static);
+                Assert.That(activeMaterialsType, Is.Not.Null);
+                Assert.That(captureMethod, Is.Not.Null);
+                Assert.That(restoreMethod, Is.Not.Null);
+
+                MaterialPropertyBlock[] capturedPropertyBlocks = (MaterialPropertyBlock[])captureMethod.Invoke(
+                    null,
+                    new object[] { renderer, originalMaterials.Length });
+                Assert.That(capturedPropertyBlocks[0], Is.Not.Null, "已有实例参数必须在状态开始前被保存。");
+
+                runtimeStateMaterial = new Material(originalMaterials[0]);
+                renderer.sharedMaterials = new[] { runtimeStateMaterial };
+                MaterialPropertyBlock statePropertyBlock = new MaterialPropertyBlock();
+                statePropertyBlock.SetColor(originalColorPropertyId, Color.red);
+                statePropertyBlock.SetFloat(preservedFloatPropertyId, 0f);
+                renderer.SetPropertyBlock(statePropertyBlock, 0);
+
+                object activeMaterials = Activator.CreateInstance(activeMaterialsType, true);
+                activeMaterialsType.GetField("OriginalMaterials").SetValue(activeMaterials, originalMaterials);
+                activeMaterialsType.GetField("OriginalPropertyBlocks").SetValue(activeMaterials, capturedPropertyBlocks);
+                restoreMethod.Invoke(null, new[] { (object)renderer, activeMaterials });
+
+                MaterialPropertyBlock inspectionBlock = new MaterialPropertyBlock();
+                renderer.GetPropertyBlock(inspectionBlock, 0);
+                Color restoredColor = inspectionBlock.GetColor(originalColorPropertyId);
+                Assert.That(restoredColor.r, Is.EqualTo(0.12f).Within(0.001f));
+                Assert.That(restoredColor.g, Is.EqualTo(0.34f).Within(0.001f));
+                Assert.That(restoredColor.b, Is.EqualTo(0.56f).Within(0.001f));
+                Assert.That(restoredColor.a, Is.EqualTo(0.78f).Within(0.001f));
+                Assert.That(inspectionBlock.GetFloat(preservedFloatPropertyId), Is.EqualTo(42f).Within(0.001f));
+
+                // 空槽位也走相同恢复函数，确认 null 会删除告警、故障留下的属性块而非只恢复材质引用。
+                renderer.SetPropertyBlock(null, 0);
+                MaterialPropertyBlock[] emptyPropertyBlocks = (MaterialPropertyBlock[])captureMethod.Invoke(
+                    null,
+                    new object[] { renderer, originalMaterials.Length });
+                Assert.That(emptyPropertyBlocks[0], Is.Null, "未配置属性块时应记录为空引用，供恢复路径明确清除覆盖。");
+                renderer.SetPropertyBlock(statePropertyBlock, 0);
+                activeMaterialsType.GetField("OriginalPropertyBlocks").SetValue(activeMaterials, emptyPropertyBlocks);
+                restoreMethod.Invoke(null, new[] { (object)renderer, activeMaterials });
+                renderer.GetPropertyBlock(inspectionBlock, 0);
+                Assert.That(inspectionBlock.isEmpty, Is.True, "恢复无属性块槽位后不得残留状态颜色或空实例覆盖。");
+            }
+            finally
+            {
+                if (runtimeStateMaterial != null)
+                {
+                    Object.DestroyImmediate(runtimeStateMaterial);
+                }
+
+                Object.DestroyImmediate(visualRoot);
+            }
         }
 
         /// <summary>
@@ -456,7 +608,8 @@ namespace WebDLPro.Unity.Tests
 
         /// <summary>
         /// 静态保护构建边界：正式包必须走独立入口且不能默认附带开发模式；
-        /// 资源治理禁止在切换循环中调用全局未使用资源卸载，以免造成帧卡顿。
+        /// 资源治理禁止在每帧循环中调用全局未使用资源卸载，但必须在真实跨场景事务边界
+        /// 等待一次回收，否则燃煤、燃气大模型连续往返时旧资源会叠加到下一次加载峰值。
         /// </summary>
         [Test]
         public void WebGL构建模式分离且场景切换不做每帧全局资源回收()
@@ -497,6 +650,7 @@ namespace WebDLPro.Unity.Tests
             Assert.That(coordinatorSource, Does.Contain("RecordRuntimeStage"));
             Assert.That(coordinatorSource, Does.Contain("_sceneBundleLoader.LoadSceneAsync"));
             Assert.That(coordinatorSource, Does.Contain("ReleaseSceneBundle"));
+            Assert.That(coordinatorSource, Does.Contain("ReleaseSceneBundleAndUnusedAssetsAsync"));
             Assert.That(coordinatorSource, Does.Not.Contain("Resources.UnloadUnusedAssets"));
             Assert.That(coordinatorSource, Does.Not.Contain("private void Update()"));
             Assert.That(bundleLoaderSource, Does.Contain("UnityWebRequestAssetBundle.GetAssetBundle"));
@@ -504,6 +658,8 @@ namespace WebDLPro.Unity.Tests
             Assert.That(bundleLoaderSource, Does.Contain("SupportedCatalogSchemaVersion = 2"));
             Assert.That(bundleLoaderSource, Does.Contain("document.sizeBytes <= 0"));
             Assert.That(bundleLoaderSource, Does.Contain("ReleaseSceneBundle"));
+            Assert.That(bundleLoaderSource, Does.Contain("ReleaseSceneBundleAndUnusedAssetsAsync"));
+            Assert.That(bundleLoaderSource, Does.Contain("Resources.UnloadUnusedAssets"));
             // 资源包负责下载与内容校验，场景必须由 Unity 的场景管理器加载；禁止回归到不存在的 AssetBundle.LoadSceneAsync 调用。
             Assert.That(bundleLoaderSource, Does.Contain("SceneManager.LoadSceneAsync(entry.ScenePath, LoadSceneMode.Additive)"));
             Assert.That(bundleLoaderSource, Does.Not.Contain("sceneBundle.LoadSceneAsync"));
@@ -513,6 +669,20 @@ namespace WebDLPro.Unity.Tests
             Assert.That(resourceScopeSource, Does.Not.Contain("Resources.UnloadUnusedAssets"));
             Assert.That(resourceScopeSource, Does.Not.Contain("GC.Collect"));
             Assert.That(resourceScopeSource, Does.Not.Contain("private void Update()"));
+        }
+
+        /// <summary>
+        /// 高亮目标扩容必须保留旧槽位中的运行时材质引用，使插件能够继续复用并在销毁时释放它们。
+        /// 该保护防止流程或节点聚焦的目标数量逐步增加时，把旧材质数组变成无法回收的悬空资源。
+        /// </summary>
+        [Test]
+        public void 高亮目标扩容保留可释放的运行时材质()
+        {
+            string highlightEffectPath = Path.Combine(Application.dataPath, "HighlightPlus", "Runtime", "Scripts", "HighlightEffect.cs");
+            string highlightEffectSource = File.ReadAllText(highlightEffectPath);
+
+            Assert.That(highlightEffectSource, Does.Contain("System.Array.Resize(ref rms, rr.Length)"));
+            Assert.That(highlightEffectSource, Does.Not.Contain("rms = new ModelMaterials[rr.Length]"));
         }
 
         /// <summary>

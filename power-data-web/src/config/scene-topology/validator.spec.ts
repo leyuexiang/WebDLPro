@@ -107,6 +107,26 @@ describe('场景拓扑节点协议清单校验', () => {
     expect(validateSceneTopologyManifest(createValidManifest())).toEqual([])
   })
 
+  it('接受资料声明的连线颜色与线型，并拒绝非法样式值', () => {
+    const manifest = createValidManifest()
+    const gasTopology = manifest.topologies.find((topology) => topology.sceneId === 'gas-power')!
+    const styledManifest: SceneTopologyManifest = {
+      ...manifest,
+      topologies: manifest.topologies.map((topology) => topology === gasTopology
+        ? {
+            ...topology,
+            edges: [{ ...topology.edges[0]!, lineColor: '#3b82f6', lineStyle: 'dashed' as const }],
+          }
+        : topology),
+    }
+    expect(validateSceneTopologyManifest(styledManifest)).toEqual([])
+
+    const invalid = structuredClone(styledManifest) as unknown as Record<string, unknown>
+    const invalidGasTopology = (invalid.topologies as Array<Record<string, unknown>>).find((topology) => topology.sceneId === 'gas-power')!
+    invalidGasTopology.edges = [{ ...(invalidGasTopology.edges as Array<Record<string, unknown>>)[0], lineColor: 'blue', lineStyle: 'dot' }]
+    expect(issueCodes(invalid)).toEqual(expect.arrayContaining(['topology.edge-line-color', 'topology.edge-line-style']))
+  })
+
   it('严格拒绝旧设备映射、平台绑定计数、运行时清单和节点设备编号字段', () => {
     const manifest = createValidManifest() as unknown as Record<string, unknown>
     manifest.deviceMappings = []

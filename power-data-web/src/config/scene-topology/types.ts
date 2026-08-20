@@ -89,6 +89,13 @@ export interface TopologyEdgeDefinition {
   title: string
   /** 仅用于二维线路标签；没有该字段时画布不显示协议名称。 */
   protocolLabel?: string
+  /**
+   * 原始拓扑图中连线的六位十六进制颜色；这是二维资料复现字段，不代表实时状态或协议语义。
+   * 未声明时由画布按 evidenceStatus（证据状态）使用中性色，避免从标题猜测颜色。
+   */
+  lineColor?: string
+  /** 原始拓扑图中的线型；未声明时由证据状态保持既有默认线型。 */
+  lineStyle?: 'solid' | 'dashed'
   /** 已核验、待确认或概念性关系只影响二维视觉表达，不创建额外业务副作用。 */
   evidenceStatus?: 'verified' | 'pending-confirmation' | 'conceptual'
 }

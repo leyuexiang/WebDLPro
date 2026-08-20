@@ -64,11 +64,11 @@
 
 **前置：** 任务-016、018。
 
-**需求：** 将 `enterProcessStep`、`focusNode`、`clearSelection`、`setNodeVisualState`、`setRouteFlow` 和 `resetScene` 转发给当前场景控制器；统一使用稳定映射标识。`clearSelection` 只取消拓扑选择对应的三维交互描边，不得重置场景、流程、显隐或镜头。
+**需求：** 将 `enterProcessStep`、`focusNode`、`clearSelection`、`setNodeVisualState`、`setRouteFlow` 和 `resetScene` 转发给当前场景控制器；统一使用稳定映射标识。`focusNode` 更新交互描边，并由 `_focusOnSelection` 统一开关决定是否聚焦镜头；`clearSelection` 只取消拓扑选择对应的三维交互描边，不得重置场景、流程、显隐或镜头。Unity 鼠标空白点击另通过 `selectionCleared` 上行事件同步清除二维拓扑选择。
 
 **交付：** Unity 场景命令适配层和命令结果。
 
-**验收：** 命令不再写死燃气默认流程；节点和路径不存在时返回明确错误；状态更新复用材质或材质属性，不为每次更新克隆资源。
+**验收：** 命令不再写死燃气默认流程；节点和路径不存在时返回明确错误；状态更新复用材质或材质属性，不为每次更新克隆资源；流程、总览和复位保持当前镜头，节点交互聚焦可由统一开关控制。
 
 ## 任务-022：Unity 资源释放与运行诊断
 

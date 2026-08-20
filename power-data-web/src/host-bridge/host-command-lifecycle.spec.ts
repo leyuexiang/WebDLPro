@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { toNodeId, toSessionId } from '@/config/scene-topology/identifiers'
-import { HOST_COMMAND_TIMEOUT_MS, HostCommandLifecycle, HostMessageReceiptRegistry } from '@/host-bridge/host-command-lifecycle'
+import { toNodeId, toSceneId, toSessionId, toTopologyId } from '@/config/scene-topology/identifiers'
+import { HOST_COMMAND_TIMEOUT_MS, HOST_SCENE_TRANSACTION_TIMEOUT_MS, HostCommandLifecycle, HostMessageReceiptRegistry } from '@/host-bridge/host-command-lifecycle'
 import type { HostCommandMessage } from '@/host-bridge/host-protocol'
 
 /** 生命周期基础夹具使用无业务副作用的状态查询命令，具体测试只替换消息标识。 */
@@ -14,6 +14,23 @@ function createStateGetCommand(messageId = 'parent-command-01'): HostCommandMess
     type: 'state.get',
     timestamp: 1,
     payload: {},
+  }
+}
+
+/** 跨场景夹具只使用稳定标识，用于验证长事务上限，不引入模型名或资源路径。 */
+function createViewOpenCommand(messageId = 'parent-view-open-timeout'): HostCommandMessage {
+  return {
+    channel: 'power-scene-topology-shell',
+    version: 1,
+    instanceId: 'visual-shell-01',
+    sessionId: toSessionId('session-test-01'),
+    messageId,
+    type: 'view.open',
+    timestamp: 1,
+    payload: {
+      sceneId: toSceneId('coal-power'),
+      topologyId: toTopologyId('topology.coal-power.overview'),
+    },
   }
 }
 
@@ -67,6 +84,25 @@ describe('外层命令生命周期', () => {
 
     resolveExecution?.({ success: true, status: 'completed' })
     await firstPromise
+    expect(lifecycle.getPendingCount()).toBe(0)
+  })
+
+  it('跨场景原子事务不受普通十秒上限误杀，但仍受绝对上限约束', async () => {
+    vi.useFakeTimers()
+    const lifecycle = new HostCommandLifecycle(() => new Promise(() => {}))
+    const resultPromise = lifecycle.execute(createViewOpenCommand())
+
+    await vi.advanceTimersByTimeAsync(HOST_COMMAND_TIMEOUT_MS)
+    expect(lifecycle.getPendingCount()).toBe(1)
+
+    await vi.advanceTimersByTimeAsync(HOST_SCENE_TRANSACTION_TIMEOUT_MS - HOST_COMMAND_TIMEOUT_MS)
+    await expect(resultPromise).resolves.toEqual(expect.objectContaining({
+      status: 'result',
+      result: expect.objectContaining({
+        source: 'timeout',
+        payload: expect.objectContaining({ error: expect.objectContaining({ code: 'command.timeout' }) }),
+      }),
+    }))
     expect(lifecycle.getPendingCount()).toBe(0)
   })
 

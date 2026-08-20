@@ -155,6 +155,38 @@ namespace WebDLPro.Unity.SceneRuntime
         }
 
         /// <summary>
+        /// 在业务场景已经卸载、协调器也已清空控制器和场景引用后，释放资产包租约并等待 Unity
+        /// 回收不再被引用的网格、材质、纹理等原生资源。
+        ///
+        /// AssetBundle.Unload(false)（卸载资源包但保留已加载对象）只能释放包句柄和下载缓冲区，
+        /// 不会立即回收由旧场景实例化的资源。燃煤、燃气大场景连续往返时，这些对象会与下一场景
+        /// 的加载峰值叠加并耗尽 WebGL 线性内存。该全局回收只在真实跨场景事务边界执行一次，
+        /// 不进入 Update（每帧更新）或同场景流程切换，因此不会造成每帧扫描和重复卡顿。
+        /// </summary>
+        public IEnumerator ReleaseSceneBundleAndUnusedAssetsAsync(string sceneId)
+        {
+            ReleaseSceneBundle(sceneId);
+
+            // 编辑器直接从工程目录加载场景，不持有正式 AssetBundle（资源包）租约；跳过全局回收，
+            // 避免编辑器测试和场景编辑因一次业务切换触发与发布问题无关的资源扫描。
+            if (Application.isEditor || _disposed)
+            {
+                yield break;
+            }
+
+            AsyncOperation unloadUnusedAssetsOperation = Resources.UnloadUnusedAssets();
+            if (unloadUnusedAssetsOperation == null)
+            {
+                yield break;
+            }
+
+            while (!unloadUnusedAssetsOperation.isDone)
+            {
+                yield return null;
+            }
+        }
+
+        /// <summary>
         /// 运行壳释放时清空所有内存中的资产包句柄。方法幂等，不清空 Unity 的哈希缓存，
         /// 因此回切同一发布版本仍可命中缓存；版本切换由新目录中的哈希自然隔离。
         /// </summary>
@@ -254,6 +286,11 @@ namespace WebDLPro.Unity.SceneRuntime
                 yield return request.SendWebRequest();
                 if (request.result != UnityWebRequest.Result.Success || string.IsNullOrWhiteSpace(request.downloadHandler?.text))
                 {
+                    // 失败页只显示稳定的场景错误码；这里把目录请求的结果留在 Unity 控制台，便于本地联调区分
+                    // HTTP（超文本传输协议）失败、空响应和服务端路径错误，同时不把下载地址写入页面协议。
+                    LogRuntimeDiagnostic(
+                        "catalog-request-failed",
+                        $"result={request.result};responseCode={request.responseCode};error={request.error ?? string.Empty}");
                     completed?.Invoke(false);
                     yield break;
                 }
@@ -265,12 +302,21 @@ namespace WebDLPro.Unity.SceneRuntime
                 }
                 catch
                 {
+                    // JSON（JavaScript 对象表示法）解析异常不应把远端响应正文回传给宿主；只记录稳定阶段码，避免日志携带大文本。
+                    LogRuntimeDiagnostic("catalog-json-invalid", "downloaded catalog text could not be parsed");
                     completed?.Invoke(false);
                     yield break;
                 }
 
                 if (!TryBuildCatalogIndex(catalog, out Dictionary<string, SceneBundleDocument> bundleByName))
                 {
+                    // 目录索引会同时校验发布标识、版本、依赖引用和九个场景的完整性；输出摘要字段足以定位漂移，
+                    // 不需要把目录正文或资源路径暴露给父页面。
+                    LogRuntimeDiagnostic(
+                        "catalog-validation-failed",
+                        $"expectedRelease={Application.version};actualRelease={catalog?.releaseId ?? string.Empty};" +
+                        $"schema={catalog?.schemaVersion ?? 0};bundleCount={catalog?.bundles?.Length ?? 0};" +
+                        $"sceneCount={catalog?.scenes?.Length ?? 0}");
                     completed?.Invoke(false);
                     yield break;
                 }
@@ -320,11 +366,20 @@ namespace WebDLPro.Unity.SceneRuntime
                     yield break;
                 }
 
+                // 目录仍强制校验 Unity Hash128（128 位内容哈希）；crc 为 0 时关闭 Unity 2022.3
+                // ChunkBasedCompression（分块压缩）在 WebGL 下载端与构建端口径不一致的可选 CRC 校验。
+                // 资源包文件未经过服务端改写，哈希和场景路径校验继续作为版本与内容边界。
                 using (UnityWebRequest request = UnityWebRequestAssetBundle.GetAssetBundle(BuildRuntimeUrl($"{BundleDirectoryName}/{document.fileName}"), hash, document.crc))
                 {
                     yield return request.SendWebRequest();
                     if (request.result != UnityWebRequest.Result.Success)
                     {
+                        // AssetBundle（Unity 资源包）下载失败时记录资源包名、HTTP 状态和 Unity 网络错误，
+                        // 这样可直接判断是服务响应、哈希/循环冗余校验还是浏览器连接问题。
+                        LogRuntimeDiagnostic(
+                            "bundle-request-failed",
+                            $"bundle={bundleName};result={request.result};responseCode={request.responseCode};" +
+                            $"error={request.error ?? string.Empty}");
                         completed?.Invoke(false);
                         yield break;
                     }
@@ -332,6 +387,9 @@ namespace WebDLPro.Unity.SceneRuntime
                     AssetBundle bundle = DownloadHandlerAssetBundle.GetContent(request);
                     if (bundle == null)
                     {
+                        // 请求成功但内容无法解码通常表示资源包格式、压缩传输或校验信息不匹配；只记录资源包名，
+                        // 让浏览器端继续收到原有稳定错误码。
+                        LogRuntimeDiagnostic("bundle-content-invalid", $"bundle={bundleName}");
                         completed?.Invoke(false);
                         yield break;
                     }
@@ -492,6 +550,17 @@ namespace WebDLPro.Unity.SceneRuntime
             {
                 return false;
             }
+        }
+
+        /// <summary>
+        /// 只向 WebGL（网页图形）控制台输出内部诊断，不改变跨窗口协议和页面可见错误文案。
+        /// 诊断字段经过固定阶段码和摘要化处理，避免把完整响应正文或绝对资源地址传播给宿主平台。
+        /// </summary>
+        private static void LogRuntimeDiagnostic(string stageCode, string details)
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            Debug.LogWarning($"[SceneBundleRuntimeLoader] {stageCode};{details}");
+#endif
         }
 
         private static string BuildRuntimeUrl(string relativePath)

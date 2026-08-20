@@ -122,7 +122,7 @@ flowchart LR
 | 设备 | `unit.gas-turbine.1`、`unit.hrsg.1`、`unit.grid` | 一个或多个模型根节点 |
 | 管段 | `pipe.gas-inlet.01`、`pipe.steam.01`、`pipe.power-output.01` | 已映射管段的具体 Renderer 集合 |
 | 路由 | `route.gas-to-turbine`、`route.steam-to-generator`、`route.generator-to-grid` | 有序管段列表、工质、方向、流动参数 |
-| 机位 | `camera.overview`、`camera.gas-turbine` | 位置、朝向、FOV、过渡时间 |
+| 聚焦配置 | `_focusOnSelection`、`_focusPitch`、`_focusDistancePadding`、`_focusMinimumDistance`、`_focusDuration` | 拓扑和Unity鼠标选中共用的自动聚焦开关、轻微俯视角、取景留白、最小距离和补间时长 |
 
 ### 5.2 每个流程步骤至少应配置
 
@@ -130,7 +130,7 @@ flowchart LR
 - 默认机位、可选的最小/最大观察距离。
 - 保留显示、隐藏、半透明显示的节点集合。
 - 激活路由列表与每条路由的方向；无流动时明确声明，不沿用上一步状态。
-- 可点击热点和回传的 `assetId` / `assetName`。
+- Unity 场景绑定的稳定 `sceneNodeId`；点击回传只使用 `sceneId + sceneNodeId + sceneActivationId`，不使用对象名称、`assetId`、`assetName` 或屏幕坐标。
 - 进入、退出时是否显示设备标签、边界高亮或说明提示。
 
 建议先制作一个覆盖整条主流程的配置，再逐步补齐双机组差异。模型空间位置已形成一份初步映射，见第 12 节；其中中/低置信度管段仍需业务确认后再固化为最终材质路由。
@@ -162,11 +162,11 @@ flowchart LR
 | `type` | 核心 `payload` | Unity 行为 |
 | --- | --- | --- |
 | `init` | `sceneId`、可选初始 `processId` / `stepId` | 完成会话初始化，返回能力、场景版本与当前状态 |
-| `enterProcessStep` | `processId`、`stepId`、`isolate`、可选 `transitionMs` | 聚焦步骤、按配置保持地面/焦点并淡化周边、停旧流动、启新路由流动 |
+| `enterProcessStep` | `processId`、`stepId`、`unitId`、`isolate` | 更新流程显隐、上下文材质和流程描边；保持用户当前镜头，不负责启停已登记的持续管道流动 |
 | `setRouteFlow` | `routeId`、`enabled`、可选 `speed`、`direction` | 只控制已配置路由；适用于实时运行状态变化 |
 | `setNodeVisibility` | `nodeIds`、`visible` | 仅用于平台明确需要的受限覆盖；不得传 Unity 路径 |
-| `focusNode` | `nodeId`、可选 `cameraId` | 聚焦已登记设备，不改变未声明的流程状态 |
-| `resetScene` | 可选 `cameraId: "camera.overview"` | 恢复总览可见性、原始材质和全景机位 |
+| `focusNode` | `sceneNodeId`、`selectionId`、`isolate` | 更新已登记三维节点的交互描边；由场景控制器的 `_focusOnSelection` 统一开关决定是否平滑聚焦镜头 |
+| `resetScene` | 空载荷 | 恢复当前业务场景总览可见性和材质；保持用户当前镜头，不执行总览机位跳转 |
 | `resize` | `width`、`height` | 维持现有画布布局协作能力 |
 
 示例：低代码平台进入燃气轮机步骤。
@@ -195,8 +195,8 @@ flowchart LR
 | `ready` | WebGL 桥接监听器完成注册 | `capabilities`、`runtime` |
 | `commandResult` | 合法命令完成或幂等命中 | `requestId`、`success`、`sceneState` |
 | `sceneStateChanged` | 下钻、复位、显隐或流动状态改变 | `processId`、`stepId`、`activeRouteIds` |
-| `objectSelected` | 用户点击设备/管道热点 | `nodeId`、`assetId`、`assetName`、`screenPosition` |
-| `error` | 协议、ID、配置或运行错误 | `requestId`、`code`、`message` |
+| `objectSelected` | Unity 鼠标命中已登记三维节点 | 且仅允许 `sceneId`、`sceneNodeId`、`sceneActivationId`；不携带对象名称、层级、二维 `nodeId` 或屏幕坐标 |
+| `selectionCleared` | Unity 鼠标点击空白、地面或未映射对象，且存在交互选择 | 且仅允许 `sceneId`、`sceneActivationId`；前端清除二维节点和关联路径，不回发 `clearSelection` |
 
 父页面保持现有“精确 Origin、iframe window、通道、版本、实例 ID”五层校验，且 `postMessage` 的 `targetOrigin` 必须是具体 Origin，不使用通配符。
 
@@ -252,9 +252,10 @@ flowchart LR
 
 ### 9.2 已实现的相机交互约定
 
-- 低代码平台下发有效 `enterProcessStep` 或 `resetScene` 后，`PowerPlantProcessController` 在 **1.45 秒**内以平滑缓入缓出曲线，将主相机推进到当前流程可见对象（单机组时为目标设备，双机组时为两套已显示设备的聚合边界）。不会直接跳转镜头。
-- 下钻目标之外的对象降为半透明，`地面1`、`地面2` 继续保持不透明显示；流程动画期间再收到新的步骤或复位命令时，新的转场会从当前相机状态重新开始，保证最终状态可预测。
-- `Main Camera` 已挂载 `PowerPlantFreeCameraController`。画布取得焦点后，`W/A/S/D` 为前/左/后/右，`Q/E` 为下降/上升，按住 `Shift` 为 3 倍移动速度；按住鼠标右键并移动可旋转视角。任意手动移动或右键旋转会取消尚未结束的流程转场，避免输入与镜头动画互相覆盖。
+- `enterProcessStep`、总览和 `resetScene` 更新流程状态、显隐、材质和描边，但保持用户当前镜头位置。
+- 拓扑节点选择和 Unity 鼠标命中已登记节点都会更新交互描边，并共用 `PowerPlantProcessController._focusOnSelection`。开关开启时依据目标 Renderer（渲染器）包围盒平滑移动到轻微俯视镜位；关闭时仍保留描边和二维拓扑联动，但不移动镜头。
+- `Main Camera` 已挂载 `PowerPlantFreeCameraController`。`W/A/S/D` 为水平移动，`Q/E` 为升降，`Shift` 为加速，左键拖拽平移，右键拖动旋转，滚轮沿画面中心推拉。用户开始手动输入后会立即取消尚未完成的节点聚焦补间，并由用户接管镜头。
+- Unity 鼠标点击空白、地面或未映射对象时，仅在存在交互选择时清除交互描边并发送 `selectionCleared`；流程描边、告警描边、显隐和已到达的镜头位置不受影响。
 - 已在 iframe 诊断中确认流程指令回执与可见的中间推进帧、结束帧；键盘组合可发送至已获焦的 Unity 画布。最终 Brotli 发布包亦已完成进入流程与复位回归。
 
 ## 10. 测试与验收清单
@@ -265,7 +266,7 @@ flowchart LR
 - 从总览进入各已配置步骤时，目标设备、相应管段、相机机位、地面常显和周边半透明效果均与映射表一致。
 - 连续切换步骤、重复发送同一请求、在动画中发送复位，最终状态一致且不会叠加动画或材质。
 - 所有激活管段流向正确；停流、切换、复位均恢复原材质和原始显隐状态。
-- 点击设备或管道热点向平台回传稳定业务 ID；拖拽观察和点击可区分，不误触发选择。
+- 点击已登记设备或管道模型后更新三维交互描边，并按 `_focusOnSelection` 决定是否聚焦；通过 `objectSelected` 按静态映射同步二维拓扑节点。点击空白、地面或未映射对象时，在存在交互选择的情况下清除交互描边并通过 `selectionCleared` 清除二维选择；拖拽观察和点击可区分，不误触发选择。
 
 ### 安全与稳定性验收
 

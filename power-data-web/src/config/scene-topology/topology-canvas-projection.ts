@@ -41,6 +41,9 @@ export function projectTopologyForCanvas(topology: ManifestTopologyDefinition): 
       title: edge.title,
       // 协议和证据是只读二维展示字段；缺失时才使用中性“未分类”状态。
       protocolLabel: edge.protocolLabel,
+      // 资料明确给出时透传原图线色和线型；没有资料的旧拓扑继续由画布使用历史默认值。
+      lineColor: edge.lineColor,
+      lineStyle: edge.lineStyle,
       evidenceStatus: edge.evidenceStatus ?? 'unclassified',
       sceneRouteIds: [],
     })),

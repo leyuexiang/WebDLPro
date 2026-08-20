@@ -6,6 +6,7 @@ import {
   isWebglEnterProcessStepPayload,
   isWebglMessageEnvelope,
   isWebglObjectSelectedPayload,
+  isWebglSelectionClearedPayload,
   isWebglReadyPayload,
   isWebglRequestAcknowledgementPayload,
   isWebglSceneChangedPayload,
@@ -21,6 +22,7 @@ import {
   type WebglMessageEnvelope,
   type WebglObjectSelectedPayload,
   type WebglReadyPayload,
+  type WebglSelectionClearedPayload,
   type WebglSceneChangedPayload,
   type WebglSceneLoadProgressPayload,
 } from '@/services/webgl/protocol'
@@ -52,6 +54,7 @@ export interface WebglRuntimeConnectorCallbacks {
   onStatusChange?: (status: WebglConnectorStatus, reason?: string) => void
   onReady?: (ready: WebglReadyPayload) => void
   onObjectSelected?: (payload: WebglObjectSelectedPayload, messageId: string) => void
+  onSelectionCleared?: (payload: WebglSelectionClearedPayload, messageId: string) => void
   onSceneLoadProgress?: (payload: WebglSceneLoadProgressPayload, messageId: string) => void
   onSceneChanged?: (payload: WebglSceneChangedPayload, messageId: string) => void
   onCommandFailure?: (command: WebglCommandType, reason: string) => void
@@ -270,6 +273,9 @@ export class WebglRuntimeConnector {
       case 'objectSelected':
         this.handleObjectSelected(envelope)
         return
+      case 'selectionCleared':
+        this.handleSelectionCleared(envelope)
+        return
       case 'disposed':
         this.handleDisposed(envelope)
         return
@@ -296,7 +302,14 @@ export class WebglRuntimeConnector {
       ready.protocolVersion === this.runtime.protocolVersion &&
       ready.resourceDigest === this.runtime.resourceDigest
     const hasRegisteredCommands = this.runtime.capabilities.every((command) => ready.commandCapabilities.includes(command))
-    const hasRegisteredEvents = this.runtime.eventCapabilities.every((event) => ready.eventCapabilities.includes(event))
+    /*
+     * selectionCleared（选择清除）是新版本 Unity 的可选上行事件：旧的已发布网页图形仍能
+     * 提供对象选中、场景切换和拓扑聚焦，但不会在三维空白点击时回传清除事件。握手不能因为
+     * 这一项缺失而阻断整个三维运行时；真正收到该事件前仍由 negotiatedEventCapabilities（协商能力）
+     * 门禁拦截，拓扑侧主动发送 clearSelection（清除选择）命令的能力不受影响。
+     */
+    const requiredEvents = this.runtime.eventCapabilities.filter((event) => event !== 'selectionCleared')
+    const hasRegisteredEvents = requiredEvents.every((event) => ready.eventCapabilities.includes(event))
 
     if (!isMatchingRuntime || !hasRegisteredCommands || !hasRegisteredEvents) {
       this.fail('网页图形运行时构建、映射、资源摘要或能力声明与登记表不一致。')
@@ -401,6 +414,21 @@ export class WebglRuntimeConnector {
     }
 
     this.callbacks.onObjectSelected?.(envelope.payload, envelope.messageId)
+  }
+
+  /** 三维空白清除只影响二维选择，不进入命令发送链路，避免清除事件回发 Unity 形成循环。 */
+  private handleSelectionCleared(envelope: WebglMessageEnvelope<WebglEventType, unknown>): void {
+    if (this.status !== 'ready' || !this.negotiatedEventCapabilities.has('selectionCleared')) {
+      this.reject('未就绪运行时不能触发选择清除联动。')
+      return
+    }
+
+    if (!isWebglSelectionClearedPayload(envelope.payload)) {
+      this.reject('选择清除事件的场景或物理实例标识无效。')
+      return
+    }
+
+    this.callbacks.onSelectionCleared?.(envelope.payload, envelope.messageId)
   }
 
   /**

@@ -9,6 +9,7 @@ import type { WebglCommandType } from '@/services/webgl/protocol'
 import {
   visualizationRuntimeHostKey,
   type VisualizationObjectSelection,
+  type VisualizationSelectionCleared,
   type VisualizationSceneLoadProgressEvent,
   type VisualizationRuntimeHostController,
   type VisualizationRuntimeLifecycle,
@@ -21,6 +22,7 @@ const runtimeStatus = ref<VisualizationRuntimeLifecycle>('idle')
 const runtimeReason = ref<string | null>(null)
 const runtimeCapabilities = ref<readonly WebglCommandType[]>([])
 const selectedObjectListeners = new Set<(selection: VisualizationObjectSelection) => void>()
+const selectionClearedListeners = new Set<(selection: VisualizationSelectionCleared) => void>()
 /** 加载反馈监听器属于嵌入壳生命周期，不随单次 Unity 场景切换重建；壳层卸载时统一清空。 */
 const sceneLoadProgressListeners = new Set<(progress: VisualizationSceneLoadProgressEvent) => void>()
 /** 等待表与连接器待确认表使用同一 requestId，且其容量受连接器 64 条上限间接约束。 */
@@ -124,6 +126,12 @@ function subscribeObjectSelected(listener: (selection: VisualizationObjectSelect
   return () => selectedObjectListeners.delete(listener)
 }
 
+/** 订阅 Unity 三维空白清除事件；监听器只接收连接器已完成协议校验的稳定字段。 */
+function subscribeSelectionCleared(listener: (selection: VisualizationSelectionCleared) => void): () => void {
+  selectionClearedListeners.add(listener)
+  return () => selectionClearedListeners.delete(listener)
+}
+
 /**
  * 将连接器已经验证的有限加载反馈转交给唯一协调器。
  * 宿主仍不暴露 connector（连接器）、iframe 或窗口对象；订阅者只能读取稳定标识、阶段和归一化进度。
@@ -149,6 +157,7 @@ const runtimeHostController: VisualizationRuntimeHostController = Object.freeze(
   sendCommand,
   sendCommandAndWait,
   subscribeObjectSelected,
+  subscribeSelectionCleared,
   subscribeSceneLoadProgress,
 })
 provide(visualizationRuntimeHostKey, runtimeHostController)
@@ -196,6 +205,9 @@ function startPendingRuntime(): void {
     },
     onObjectSelected: (payload, messageId) => {
       selectedObjectListeners.forEach((listener) => listener({ payload, messageId }))
+    },
+    onSelectionCleared: (payload, messageId) => {
+      selectionClearedListeners.forEach((listener) => listener({ payload, messageId }))
     },
     // 进度先由连接器绑定原 switchScene 请求校验，再由壳层协调器复核当前事务；宿主不直接改领域状态。
     onSceneLoadProgress: (payload, messageId) => {
@@ -425,6 +437,8 @@ onBeforeUnmount(() => {
   resolvePendingCommandResults(false)
   resolvePendingReleaseWaiters()
   selectedObjectListeners.clear()
+  // 选择清除与对象选中属于同一 Unity 上行生命周期，卸载时必须同时释放，避免旧壳回调残留。
+  selectionClearedListeners.clear()
   sceneLoadProgressListeners.clear()
 })
 </script>

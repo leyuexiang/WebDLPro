@@ -31,11 +31,12 @@ const temporaryDirectories: string[] = []
  */
 function createValidMetadata(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     unityReleaseId: 'unity-release-test',
     channel: 'power3d-unity',
     protocolVersion: 1,
     commandCapabilities: ['init', 'resize', 'switchScene', 'enterProcessStep', 'resetScene', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
+    eventCapabilities: ['ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'selectionCleared', 'disposed'],
     sceneChangedSchemaVersion: 2,
     sceneChangedRequiredFields: ['requestId', 'sceneId', 'transitionId', 'sceneActivationId', 'success'],
     switchSceneRequiredFields: ['sceneId', 'transitionId', 'sceneMappingVersion', 'forceReload'],
@@ -116,6 +117,19 @@ describe('Unity 网页图形协议兼容性门禁', () => {
     temporaryDirectories.push(directory)
 
     await expect(ensureUnityBuildSupportsSceneActivation(directory, 'unity-release-test')).rejects.toThrow('clearSelection')
+  })
+
+  it('元数据缺少三维对象选中或选择清除事件时明确阻断发布', async () => {
+    const missingObjectSelectedDirectory = await createTemporaryUnityBuild(createValidMetadata({
+      eventCapabilities: ['ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'selectionCleared', 'disposed'],
+    }))
+    const missingSelectionClearedDirectory = await createTemporaryUnityBuild(createValidMetadata({
+      eventCapabilities: ['ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'disposed'],
+    }))
+    temporaryDirectories.push(missingObjectSelectedDirectory, missingSelectionClearedDirectory)
+
+    await expect(ensureUnityBuildSupportsSceneActivation(missingObjectSelectedDirectory, 'unity-release-test')).rejects.toThrow('objectSelected')
+    await expect(ensureUnityBuildSupportsSceneActivation(missingSelectionClearedDirectory, 'unity-release-test')).rejects.toThrow('selectionCleared')
   })
 
   it('元数据仍使用旧结构版本时明确阻断发布', async () => {

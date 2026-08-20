@@ -3,6 +3,7 @@ import {
   createWebglCommand,
   isWebglMessageEnvelope,
   isWebglObjectSelectedPayload,
+  isWebglSelectionClearedPayload,
   isWebglEnterProcessStepPayload,
   isWebglReadyPayload,
   isWebglRequestAcknowledgementPayload,
@@ -119,6 +120,14 @@ describe('网页图形协议', () => {
     expect(isWebglSetRouteFlowPayload({ routeId: '', enabled: true })).toBe(false)
     expect(isWebglSetNodeVisibilityPayload({ sceneNodeId: 'node.gas-turbine', enabled: false })).toBe(true)
     expect(isWebglSetNodeVisibilityPayload({ sceneNodeId: 'node.gas-turbine', enabled: 'false' })).toBe(false)
+  })
+
+  it('三维空白清除只接受场景和物理实例标识，不接受空节点或扩展字段', () => {
+    const selectionClearedPayload = { sceneId: 'gas-power', sceneActivationId: 'scene-activation.gas-1' }
+    expect(isWebglSelectionClearedPayload(selectionClearedPayload)).toBe(true)
+    expect(isWebglSelectionClearedPayload({ ...selectionClearedPayload, sceneActivationId: '' })).toBe(false)
+    expect(isWebglSelectionClearedPayload({ ...selectionClearedPayload, sceneNodeId: '' })).toBe(false)
+    expect(isWebglSelectionClearedPayload({ ...selectionClearedPayload, nodeId: 'node.gas-turbine' })).toBe(false)
   })
 
   it('对象选择只接受可映射的稳定三维节点标识，不接受对象名称、路径或超长字符串', () => {

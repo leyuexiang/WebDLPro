@@ -57,7 +57,7 @@ function createReleaseManifest() {
     },
     deployment: {
       listenHost: '0.0.0.0',
-      listenPort: 5555,
+      listenPort: 5575,
       publicOrigin: 'http://visual.example.com',
       platformParentOrigin: 'http://platform.example.com',
       unityParentOrigin: 'http://visual.example.com',
@@ -176,6 +176,22 @@ describe('发布产物输出标准', () => {
       await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
       expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
         expect.stringContaining('平台成为协议壳的直接父页面'),
+      ]))
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('合作方联调包发布摘要使用非5575端口时阻断交付', async () => {
+    const root = await createArtifact()
+    try {
+      const releaseManifest = createReleaseManifest()
+      releaseManifest.deployment.listenPort = 5592
+      writeFileSync(path.join(root, 'release-manifest.json'), `${JSON.stringify(releaseManifest, null, 2)}\n`, 'utf8')
+      await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
+
+      expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
+        expect.stringContaining('监听端口必须固定为 5575'),
       ]))
     } finally {
       rmSync(root, { recursive: true, force: true })

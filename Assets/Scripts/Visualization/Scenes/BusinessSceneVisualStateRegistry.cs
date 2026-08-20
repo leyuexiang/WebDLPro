@@ -84,9 +84,9 @@ namespace WebDLPro.Unity.SceneRuntime
     }
 
     /// <summary>
-    /// 为支持四态的业务场景提供可复用视觉更新适配器。
-    /// 注册阶段建立稳定标识索引并验证着色属性；更新阶段只遍历目标节点的渲染器，
-    /// 全生命周期复用同一个材质属性块，禁止调用 Renderer.material 或创建运行时材质副本。
+    /// 为支持四态的业务场景提供可复用视觉登记适配器。
+    /// 登记阶段缓存渲染器、基础颜色和材质属性；运行时状态不再把模型底色改成实心状态色，
+    /// 而是恢复基础材质并由业务控制器通过高亮插件叠加半透明颜色和同色描边。
     /// </summary>
     public sealed class BusinessSceneVisualStateRegistry
     {
@@ -233,6 +233,16 @@ namespace WebDLPro.Unity.SceneRuntime
                 return BusinessSceneCommandResult.Failed("invalid-node", $"未知三维节点：{sceneNodeId}");
             }
 
+            // Normal（正常态）和清除动态状态都恢复模型登记时的基础材质；Alarm、Fault、Offline
+            // 也保持基础材质不变，由控制器上的状态高亮组件提供半透明颜色覆盖与对应描边。
+            return ApplyBaselineColors(sceneNodeId, binding, visualState);
+        }
+
+        private BusinessSceneCommandResult ApplyBaselineColors(
+            string sceneNodeId,
+            RegisteredBinding binding,
+            BusinessSceneNodeVisualState visualState)
+        {
             // 先确认全部引用仍有效，再执行颜色写入，避免场景卸载竞态导致同一节点只更新一部分渲染器。
             for (int rendererIndex = 0; rendererIndex < binding.Renderers.Length; rendererIndex++)
             {
@@ -242,21 +252,23 @@ namespace WebDLPro.Unity.SceneRuntime
                 }
             }
 
-            Color targetColor = binding.Palette.Resolve(visualState);
             for (int rendererIndex = 0; rendererIndex < binding.Renderers.Length; rendererIndex++)
             {
                 Renderer renderer = binding.Renderers[rendererIndex];
-                int materialSlotCount = binding.BaselineColors[rendererIndex].Length;
-                for (int materialIndex = 0; materialIndex < materialSlotCount; materialIndex++)
+                Color[] rendererBaselineColors = binding.BaselineColors[rendererIndex];
+                for (int materialIndex = 0; materialIndex < rendererBaselineColors.Length; materialIndex++)
                 {
                     _reusablePropertyBlock.Clear();
                     renderer.GetPropertyBlock(_reusablePropertyBlock, materialIndex);
-                    _reusablePropertyBlock.SetColor(binding.ColorPropertyIds[rendererIndex][materialIndex], targetColor);
+                    _reusablePropertyBlock.SetColor(binding.ColorPropertyIds[rendererIndex][materialIndex], rendererBaselineColors[materialIndex]);
                     renderer.SetPropertyBlock(_reusablePropertyBlock, materialIndex);
                 }
             }
 
-            return BusinessSceneCommandResult.Completed($"三维节点 {sceneNodeId} 已更新为 {visualState} 状态。");
+            return BusinessSceneCommandResult.Completed(
+                visualState == BusinessSceneNodeVisualState.Normal
+                    ? $"三维节点 {sceneNodeId} 已恢复正常基础视觉。"
+                    : $"三维节点 {sceneNodeId} 已保留基础材质，等待状态高亮覆盖。");
         }
 
         /// <summary>

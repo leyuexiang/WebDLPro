@@ -130,6 +130,10 @@ export interface TopologyEdgeDefinition {
   title: string
   /** 协议或链路名称仅作二维标注，不能据此推断三维路径或消息协议。 */
   protocolLabel?: string
+  /** 原始拓扑图线色的二维展示字段；不参与三维路由或状态判断。 */
+  lineColor?: string
+  /** 原始拓扑图线型；未提供时由证据状态沿用历史默认规则。 */
+  lineStyle?: 'solid' | 'dashed'
   evidenceStatus: TopologyEvidenceStatus
   sceneRouteIds: readonly RouteId[]
 }

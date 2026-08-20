@@ -37,6 +37,7 @@ export const WEBGL_EVENT_TYPES = [
   'sceneLoadProgress',
   'sceneChanged',
   'objectSelected',
+  'selectionCleared',
   'disposed',
 ] as const
 
@@ -169,6 +170,12 @@ export interface WebglSceneChangedPayload {
 export interface WebglObjectSelectedPayload {
   sceneId: string
   sceneNodeId: string
+  sceneActivationId: string
+}
+
+/** 三维空白点击只回传场景与物理实例标识，禁止用空 sceneNodeId 伪造对象选择事件。 */
+export interface WebglSelectionClearedPayload {
+  sceneId: string
   sceneActivationId: string
 }
 
@@ -399,6 +406,17 @@ export function isWebglObjectSelectedPayload(value: unknown): value is WebglObje
   return isSceneId(candidate.sceneId) &&
     isBoundedIdentifier(candidate.sceneNodeId) &&
     validateStableIdentifier(candidate.sceneNodeId).length === 0 &&
+    isBoundedIdentifier(candidate.sceneActivationId) &&
+    validateStableIdentifier(candidate.sceneActivationId).length === 0 &&
+    Object.keys(candidate).every((key) => allowedKeys.has(key))
+}
+
+/** 验证三维空白清除事件，只允许场景和当前物理实例两个字段。 */
+export function isWebglSelectionClearedPayload(value: unknown): value is WebglSelectionClearedPayload {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  const allowedKeys = new Set(['sceneId', 'sceneActivationId'])
+  return isSceneId(candidate.sceneId) &&
     isBoundedIdentifier(candidate.sceneActivationId) &&
     validateStableIdentifier(candidate.sceneActivationId).length === 0 &&
     Object.keys(candidate).every((key) => allowedKeys.has(key))

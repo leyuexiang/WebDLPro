@@ -28,6 +28,8 @@ public static class PowerPlantWebGlBuild
         public int protocolVersion;
         // 完整命令能力用于发布前静态门禁，不能依赖启动浏览器后才发现旧构建缺少命令。
         public string[] commandCapabilities;
+        // 完整事件能力用于发布前确认三维反向选中与清除链路，避免旧包在浏览器握手阶段才失败。
+        public string[] eventCapabilities;
         public int sceneChangedSchemaVersion;
         public string[] sceneChangedRequiredFields;
         public string[] switchSceneRequiredFields;
@@ -56,12 +58,13 @@ public static class PowerPlantWebGlBuild
     // 这里只在构建产物中允许 HTTP，构建结束后会恢复编辑器原设置；HTTPS 部署仍然可以正常访问，不会被该选项限制。
     private const InsecureHttpOption InsecureHttpOptionForBuild = InsecureHttpOption.AlwaysAllowed;
     // 主播放器只承载 Bootstrap（启动壳），燃气模型等重资源由场景资源包在 switchScene（场景切换）后按需下载。
-    // 因此首启只申请 256MB 连续网页程序集内存，避免受限浏览器因预留过大而在实例创建前失败。
-    // 内存不足时仍沿用项目设置中的几何自动增长；最大值和单次几何增长封顶在此固定，
-    // 防止一次扩容或长期累计增长无上限地挤占浏览器与宿主应用可用内存。
+    // 因此首启仍只申请 256MB 连续网页程序集内存，避免受限浏览器因预留过大而在实例创建前失败。
+    // 但燃煤场景的顶点数据在跨场景加载时会临时超过 768MB：旧上限会在 Unity 仍可清理旧场景资源前拒绝增长，
+    // 导致 WebGL 报“内存不足”并中断燃气→燃煤的合法切换。将上限提高到 2GB、单次增长提高到 256MB 后，
+    // 只在确有需要时增长，且仍保留明确上界，不会把每个首次打开页面的基线内存提高到 2GB。
     private const int InitialWebGlMemorySizeInMegabytes = 256;
-    private const int MaximumWebGlMemorySizeInMegabytes = 768;
-    private const int WebGlGeometricMemoryGrowthCapInMegabytes = 64;
+    private const int MaximumWebGlMemorySizeInMegabytes = 2048;
+    private const int WebGlGeometricMemoryGrowthCapInMegabytes = 256;
 
     /// <summary>
     /// 兼容既有“高亮流程”命令行入口：该入口语义固定为开发构建，
@@ -249,6 +252,7 @@ public static class PowerPlantWebGlBuild
             channel = WebGlProtocolContract.Channel,
             protocolVersion = WebGlProtocolContract.ProtocolVersion,
             commandCapabilities = WebGlProtocolContract.CreateCommandCapabilities(),
+            eventCapabilities = WebGlProtocolContract.CreateEventCapabilities(),
             sceneChangedSchemaVersion = WebGlProtocolContract.SceneChangedSchemaVersion,
             sceneChangedRequiredFields = WebGlProtocolContract.CreateSceneChangedRequiredFields(),
             switchSceneRequiredFields = WebGlProtocolContract.CreateSwitchSceneRequiredFields(),

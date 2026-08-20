@@ -11,8 +11,8 @@ namespace WebDLPro.Unity.SceneRuntime
     {
         public const string Channel = "power3d-unity";
         public const int ProtocolVersion = 1;
-        // 第四版元数据新增独立动态状态清除能力；旧构建无法恢复完整快照中消失设备的模型基线，必须阻止发布。
-        public const int MetadataSchemaVersion = 4;
+        // 第五版元数据增加完整上行事件能力；缺少对象选中或选择清除事件的旧构建无法形成三维反向联动，必须阻止发布。
+        public const int MetadataSchemaVersion = 5;
         // 第二版场景完成结构新增物理 sceneActivationId；全局信封版本保持不变，避免无关命令被迫升级。
         public const int SceneChangedSchemaVersion = 2;
         // 第一版失败恢复声明要求 commandResult 在自动恢复成功时携带新的物理场景激活标识。
@@ -45,6 +45,26 @@ namespace WebDLPro.Unity.SceneRuntime
                 "setRouteFlow",
                 "setNodeVisibility",
                 "dispose"
+            };
+        }
+
+        /// <summary>
+        /// 返回构建实际支持的完整上行事件能力。
+        /// 对象选中和选择清除共同组成三维到拓扑的反向链路，发布门禁必须静态核对两者，
+        /// 不能只依赖网页模板运行时握手后才发现旧构建不兼容。
+        /// </summary>
+        public static string[] CreateEventCapabilities()
+        {
+            return new[]
+            {
+                "ready",
+                "ack",
+                "commandResult",
+                "sceneLoadProgress",
+                "sceneChanged",
+                "objectSelected",
+                "selectionCleared",
+                "disposed"
             };
         }
 

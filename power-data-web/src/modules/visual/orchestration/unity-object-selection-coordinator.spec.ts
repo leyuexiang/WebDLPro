@@ -153,6 +153,25 @@ describe('Unity 三维反向选择协调器', () => {
     expect(runtime.setSelection).toHaveBeenCalledWith([nodeId], [])
   })
 
+  it('三维空白点击在当前场景实例中清除二维节点与连线，不回发 Unity 命令', () => {
+    const facade = createFacade()
+    const runtime = createTopologyRuntime()
+    const coordinator = new UnityObjectSelectionCoordinator(createRegistry(), runtime, facade, { now: () => 0 })
+
+    expect(coordinator.resolveCleared({
+      messageId: 'unity-selection-cleared-01',
+      payload: { sceneId: String(sceneId), sceneActivationId: String(sceneActivationId) },
+    })).toBe(true)
+    expect(facade.submit).toHaveBeenCalledWith({
+      type: 'selection.replace',
+      nodeIds: [],
+      routeIds: [],
+      source: 'unity',
+      sceneNodeId: null,
+    })
+    expect(runtime.setSelection).toHaveBeenCalledWith([], [])
+  })
+
   it('三维节点不在当前清单映射时只记录受限诊断，不选择同名二维节点或上报外层事件', () => {
     const facade = createFacade()
     const runtime = createTopologyRuntime()
@@ -219,6 +238,22 @@ describe('Unity 三维反向选择协调器', () => {
     ))
     expect(selected).toMatchObject({ nodeId })
     expect(runtime.setSelection).toHaveBeenCalledWith([nodeId], [])
+  })
+
+  it('过期物理实例的三维空白点击只记录诊断，不清除当前二维选择', () => {
+    const facade = createFacade({ sceneActivationId: toSceneActivationId('scene-activation.gas-2') })
+    const runtime = createTopologyRuntime()
+    const coordinator = new UnityObjectSelectionCoordinator(createRegistry(), runtime, facade, { now: () => 0 })
+
+    expect(coordinator.resolveCleared({
+      messageId: 'unity-selection-cleared-stale',
+      payload: { sceneId: String(sceneId), sceneActivationId: String(sceneActivationId) },
+    })).toBe(false)
+    expect(runtime.setSelection).not.toHaveBeenCalled()
+    expect(facade.submit).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'diagnostic.record',
+      diagnostic: expect.objectContaining({ code: 'unity.selection-clear.activation.mismatch' }),
+    }))
   })
 
   it('同一 Unity 关联标识只同步一次，浏览器重放不会制造重复二维选择或外层事件', () => {

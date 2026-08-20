@@ -88,6 +88,10 @@
 2. 协调器按结构清单中的 `sceneNodeId → nodeId` 唯一反向索引定位逻辑节点；清单不得包含 `deviceId`。
 3. 更新二维选择、路径和可选外部事件。
 4. 来源为 Unity 的同一次选择不得再发送 `focusNode`。
+5. Unity 鼠标命中已登记场景节点时更新三维交互描边，并发送 `objectSelected`；前端按静态 `sceneNodeId → nodeId` 映射同步当前二维拓扑选择，不回发 `focusNode`。
+6. Unity 鼠标点击真正空白、地面或未映射对象时，仅在存在交互选择时清除交互描边并发送 `selectionCleared(sceneId, sceneActivationId)`。
+7. 前端收到当前场景实例的 `selectionCleared` 后清除二维节点和关联路径，不回发 `clearSelection`；流程描边、告警描边、场景显隐和已到达镜头位置不变。
+8. 旧场景实例、无激活标识或已释放实例产生的 `objectSelected` / `selectionCleared` 必须丢弃。
 
 ### 5.3 双击节点上报
 

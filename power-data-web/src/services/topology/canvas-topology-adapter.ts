@@ -31,6 +31,8 @@ interface RectangleBounds {
  * 图元、文字、选中框和碰撞算法共享这些值，避免视觉缩小后命中区或连线仍沿用旧尺寸。
  */
 interface ResponsiveTopologyMetrics {
+  /** 常规态为 1、全屏态为 2；所有图元与文字几何均共享该倍率。 */
+  presentationScale: 1 | 2
   scale: number
   nodeTitleFontSize: number
   nodeTitleMaxWidth: number
@@ -167,6 +169,11 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
   /** 平移以 CSS 像素记录，和缩放共同组成内容视图变换；背景始终保持固定。 */
   private viewOffsetX = 0
   private viewOffsetY = 0
+  /**
+   * 展示倍率独立于用户缩放：全屏切换只放大图元、文字和对应的碰撞几何，
+   * 不修改用户保存的缩放和平移快照，退出全屏后可无损恢复原有视图。
+   */
+  private presentationScale: 1 | 2 = 1
 
   private readonly minimumViewScale = 0.55
   private readonly maximumViewScale = 2.25
@@ -253,6 +260,19 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
 
     this.canvas.style.width = `${this.width}px`
     this.canvas.style.height = `${this.height}px`
+    this.scheduleDraw()
+  }
+
+  /**
+   * 切换常规与全屏展示倍率。倍率变化会改变节点边界、文字宽高和连线避让范围，
+   * 因此只标记布局/路由缓存失效并合并到下一动画帧；不会创建第二个画布、重置用户缩放或清空选择。
+   */
+  public setPresentationScale(nextPresentationScale: 1 | 2): void {
+    if (nextPresentationScale === this.presentationScale) return
+
+    this.presentationScale = nextPresentationScale
+    this.routesDirty = true
+    this.routeLayoutVersion = -1
     this.scheduleDraw()
   }
 
@@ -537,9 +557,10 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
     // 额外保留 1 像素处理百分比中心映射后的亚像素舍入，最小画布也不得让相邻安全区刚好相触。
     // 最小 600×600 外层视口实测只给拓扑画布约 108 像素；此时图元允许缩至 8 像素，
     // 用户可用既有缩放查看细节。160 至 239 像素画布使用 18 像素下限，240 像素以上保持 28 像素。
-    const minimumNodeSize = this.height < 160 ? 8 : this.height < 240 ? 18 : 28
+    const minimumNodeSize = (this.height < 160 ? 8 : this.height < 240 ? 18 : 28) * metrics.presentationScale
+    const maximumNodeSize = 40 * metrics.presentationScale
     const maximumNodeHeightByLayers = Math.max(minimumNodeSize, minimumLayerDistance - metrics.nodeTitleHeight - metrics.nodeTitleGap - metrics.selectionExpansion * 2 - 3)
-    const nodeWidth = Math.min(40, Math.max(minimumNodeSize, Math.floor(Math.min(legacyNodeWidth * metrics.scale, maximumNodeHeightByLayers))))
+    const nodeWidth = Math.min(maximumNodeSize, Math.max(minimumNodeSize, Math.floor(Math.min(legacyNodeWidth * metrics.scale, maximumNodeHeightByLayers))))
     const nodeHeight = nodeWidth
     const layerLabelGutter = this.getLayerLabelGutter()
     const rightPadding = Math.max(14, Math.round(this.width * 0.02))
@@ -575,18 +596,21 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
     const heightProgress = Math.min(1, Math.max(0, (this.height - 240) / (720 - 240)))
     const regularScale = 0.8 + Math.min(widthProgress, heightProgress) * 0.1
     const extremeHeightProgress = Math.min(1, Math.max(0, (this.height - 108) / (188 - 108)))
-    const scale = this.height < 188 ? 0.55 + extremeHeightProgress * 0.25 : regularScale
+    const baseScale = this.height < 188 ? 0.55 + extremeHeightProgress * 0.25 : regularScale
+    const presentationScale = this.presentationScale
+    const scale = baseScale * presentationScale
     const isExtremelyLow = this.height < 160
 
     return {
+      presentationScale,
       scale,
       nodeTitleFontSize: 8 * scale,
       nodeTitleMaxWidth: (this.width < 1000 || this.height < 320 ? 60 : 68) * scale,
-      nodeTitleGap: isExtremelyLow ? 1 : 2,
+      nodeTitleGap: (isExtremelyLow ? 1 : 2) * presentationScale,
       nodeTitleHeight: 9 * scale,
       layerTitleFontSize: 11 * scale,
       edgeLabelFontSize: 9 * scale,
-      selectionExpansion: isExtremelyLow ? 1 : 2,
+      selectionExpansion: (isExtremelyLow ? 1 : 2) * presentationScale,
       minimumHitSize: 40,
     }
   }
@@ -1097,7 +1121,8 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
 
     if (!fromLayout || !toLayout) return
     const isSelected = this.selectedRouteIds.has(edge.edgeId) || edge.sceneRouteIds.some((routeId) => this.selectedRouteIds.has(routeId))
-    const color = isSelected ? '#e0f2fe' : edgeColorByEvidence[edge.evidenceStatus]
+    // 资料线色只覆盖普通态；选中态仍使用统一高亮色，保证节点选择反馈清晰且不改变业务数据。
+    const color = isSelected ? '#e0f2fe' : edge.lineColor ?? edgeColorByEvidence[edge.evidenceStatus]
     const route = this.routeByEdgeId.get(edge.edgeId)
 
     if (!route || route.points.length < 2) return
@@ -1105,7 +1130,11 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
     context.save()
     context.strokeStyle = color
     context.lineWidth = isSelected ? 3 : 1.45
-    context.setLineDash(edge.evidenceStatus === 'verified' ? [] : [6, 5])
+    // 显式线型优先于证据状态；旧清单没有 lineStyle（线型）时保持历史“已确认实线、其他虚线”规则。
+    const isDashed = edge.lineStyle !== undefined
+      ? edge.lineStyle === 'dashed'
+      : edge.evidenceStatus !== 'verified'
+    context.setLineDash(isDashed ? [6, 5] : [])
     context.shadowColor = color
     context.shadowBlur = isSelected ? 12 : 5
     context.beginPath()

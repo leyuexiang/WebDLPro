@@ -39,7 +39,7 @@ function getCanvasController(): TopologyCanvasController | undefined {
 defineExpose({ getCanvasController })
 
 /** 展示模型只从当前拓扑计算，切换场景或拓扑时无需复制组件或维护燃气专用条件分支。 */
-const presentation = computed(() => createTopologyPanelPresentation(props.topology, props.nodeStatuses))
+const presentation = computed(() => createTopologyPanelPresentation(props.topology))
 
 /**
  * 全屏状态只以浏览器实际登记的全屏元素为准，不能在点击后直接反转本地布尔值。
@@ -103,8 +103,6 @@ onBeforeUnmount(() => document.removeEventListener('fullscreenchange', synchroni
         </button>
       </div>
     </header>
-    <!-- 状态摘要由当前拓扑节点的配置值计算，不把旧燃气离线提示套用到其他场景。 -->
-    <p class="topology-panel__status">{{ presentation.statusSummary }}</p>
     <TopologyCanvas
       ref="topologyCanvas"
       v-show="!presentation.isEmpty"
@@ -118,7 +116,7 @@ onBeforeUnmount(() => document.removeEventListener('fullscreenchange', synchroni
       @double-click-node="emit('doubleClickNode', $event)"
     />
     <!-- 空态提示与隐藏的唯一预备画布独立渲染：保留实例避免切换时重建资源，提示仍准确说明尚无已激活拓扑。 -->
-    <p v-if="presentation.isEmpty" class="topology-panel__empty">{{ presentation.statusSummary }}</p>
+    <p v-if="presentation.isEmpty" class="topology-panel__empty">{{ presentation.emptyMessage }}</p>
     <!-- 与参考原型一致，提供键盘退出提示；按钮本身始终保留为可见的关闭入口。 -->
     <p v-if="isFullscreen" class="topology-panel__fullscreen-hint" role="status">按 Esc 键退出全屏</p>
   </section>
@@ -128,7 +126,8 @@ onBeforeUnmount(() => document.removeEventListener('fullscreenchange', synchroni
 .topology-panel {
   display: grid;
   min-block-size: 0;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  /* 移除常规态状态摘要后，唯一画布直接接管标题之外的全部可用高度。 */
+  grid-template-rows: auto minmax(0, 1fr);
   gap: var(--space-3);
   overflow: hidden;
   padding: var(--space-4);
@@ -231,17 +230,6 @@ onBeforeUnmount(() => document.removeEventListener('fullscreenchange', synchroni
 .topology-panel__line--unclassified {
   border-block-start-style: dashed;
   border-color: #94a3b8;
-}
-
-.topology-panel__status {
-  margin: 0;
-  padding: 8px 10px;
-  border-inline-start: 2px solid #94a3b8;
-  background: rgba(15, 23, 42, 0.46);
-  color: #b7d9e8;
-  font-size: 0.75rem;
-  line-height: 1.5;
-  overflow-wrap: anywhere;
 }
 
 .topology-panel__empty {

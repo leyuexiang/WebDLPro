@@ -1,8 +1,15 @@
 import type { TransitionId } from '@/config/scene-topology/identifiers'
 import { HOST_PROTOCOL_LIMITS, type CommandResultPayload, type HostCommandMessage, type HostProtocolError, type HostProtocolErrorCode } from '@/host-bridge/host-protocol'
 
-/** 外层命令默认仅等待 10 秒；场景协调器可另行声明内部阶段超时，但不能突破此总上限。 */
+/** 普通外层命令最多等待 10 秒，避免查询、状态更新或释放请求长期占用有限待确认表。 */
 export const HOST_COMMAND_TIMEOUT_MS = 10_000
+
+/**
+ * 打开视图和触发流程可能包含大场景卸载、未使用资源回收及下一场景解码。
+ * 这里给完整原子事务 120 秒绝对上限；内层仍以进度事件刷新自己的 30 秒阶段窗口，
+ * 因此失联会先由内层失败，正常的大模型切换则不会被普通命令的 10 秒上限误杀。
+ */
+export const HOST_SCENE_TRANSACTION_TIMEOUT_MS = 120_000
 
 /** 执行器只能返回受控结果，不能把任意异常对象或外部消息直接写回父页面。 */
 export type HostCommandExecutionResult =
@@ -115,6 +122,7 @@ export class HostCommandLifecycle {
     private readonly maximumPending: number = HOST_PROTOCOL_LIMITS.pendingCommands,
     private readonly maximumRecentResults: number = HOST_PROTOCOL_LIMITS.recentMessageIds,
     private readonly onTimeout?: HostCommandTimeoutObserver,
+    private readonly sceneTransactionTimeoutMs: number = HOST_SCENE_TRANSACTION_TIMEOUT_MS,
   ) {}
 
   /**
@@ -158,7 +166,7 @@ export class HostCommandLifecycle {
           const timeoutResult = this.createFailure(command.messageId, 'timeout', 'command.timeout', '外层命令等待执行结果超时。')
           this.rememberMessageId(command.messageId)
           resolve(this.result(timeoutResult))
-        }, this.timeoutMs),
+        }, this.resolveTimeoutMs(command)),
       }
       this.pendingByMessageId.set(command.messageId, pending)
       if (command.type === 'device.states.update') this.pendingDeviceStatesUpdateMessageId = command.messageId
@@ -186,6 +194,16 @@ export class HostCommandLifecycle {
           resolve(this.result(failureResult))
         })
     })
+  }
+
+  /**
+   * 只有可能跨场景的两类原子事务使用长上限；其余命令继续沿用构造时注入的普通上限。
+   * 使用常数时间的类型判断，不读取清单或当前场景，避免生命周期层反向依赖领域状态。
+   */
+  private resolveTimeoutMs(command: HostCommandMessage): number {
+    return command.type === 'view.open' || command.type === 'workflow.trigger'
+      ? this.sceneTransactionTimeoutMs
+      : this.timeoutMs
   }
 
   /** 返回当前待确认数量，便于桥接诊断；不暴露内部命令对象或父页面 payload。 */

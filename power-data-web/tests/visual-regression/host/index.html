@@ -65,7 +65,11 @@
       此 iframe 使用与三层夹具相同的正式嵌入壳入口。视觉基准页不会直接向 Unity 模拟页发送消息，
       所有初始化仍经过嵌入壳的来源、实例、会话和清单校验，避免截图绕开实际双容器运行边界。
     -->
-    <iframe id="shell-frame" title="双容器视觉基准"></iframe>
+    <!--
+      拓扑面板会请求浏览器原生全屏；测试宿主也必须逐层授予 fullscreen（全屏）权限，
+      否则自动化点击只能验证权限拒绝，无法覆盖真实的全屏图元与文字展示倍率。
+    -->
+    <iframe id="shell-frame" title="双容器视觉基准" allow="fullscreen"></iframe>
   </main>
 
   <script>

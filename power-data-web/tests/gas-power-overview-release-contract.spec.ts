@@ -191,11 +191,17 @@ describe('燃气总览发布契约', () => {
     expect(() => readReleaseConfiguration(['--include-self-test', 'yes'])).toThrow('只能是 true 或 false')
   })
 
+  it('默认 Unity 基线与当前可发布协议基线保持一致', () => {
+    // 此断言只锁定发布器的默认标识，避免已归档目录变更后无参数构建仍指向不存在的旧基线。
+    // 目录可读性、标识一致性和命令能力由真实发布流程的 Unity 协议门禁负责校验，不在单元测试依赖构建产物。
+    expect(readReleaseConfiguration([]).unityReleaseId).toBe('power-scenes-unity-local-20260820-003')
+  })
+
   it('合作方联调包显式区分监听地址与三层公开来源', () => {
     const configuration = readReleaseConfiguration([
       '--package-type', 'partner-integration',
       '--listen-host', '0.0.0.0',
-      '--port', '5555',
+      '--port', '5575',
       '--public-origin', 'http://visual.example.com',
       '--platform-parent-origin', 'http://platform.example.com',
       '--unity-parent-origin', 'http://visual.example.com',
@@ -205,6 +211,7 @@ describe('燃气总览发布契约', () => {
     expect(configuration).toMatchObject({
       packageType: 'partner-integration',
       listenHost: '0.0.0.0',
+      port: 5575,
       publicOrigin: 'http://visual.example.com',
       platformParentOrigin: 'http://platform.example.com',
       unityParentOrigin: 'http://visual.example.com',
@@ -221,12 +228,16 @@ describe('燃气总览发布契约', () => {
     ])).toThrow('必须使用我方公开来源下的同源')
     const runtimeConfiguration = readReleaseConfiguration(['--package-type', 'partner-integration', '--listen-host', '0.0.0.0'])
     expect(runtimeConfiguration).toMatchObject({
+      port: 5575,
       addressMode: 'runtime-self-origin',
       publicOrigin: '__RUNTIME_SELF_ORIGIN__',
       platformParentOrigin: '__RUNTIME_PARENT_ORIGIN__',
       unityEntryUrl: '__RUNTIME_SELF_ORIGIN__/unity/index.html',
       manifestUrl: '__RUNTIME_SELF_ORIGIN__/scene-topology-manifest.json',
     })
+    expect(() => readReleaseConfiguration([
+      '--package-type', 'partner-integration', '--listen-host', '0.0.0.0', '--port', '5555',
+    ])).toThrow('端口固定为 5575')
     expect(() => readReleaseConfiguration([
       '--package-type', 'partner-integration', '--include-self-test', 'true',
       '--public-origin', 'http://visual.example.com', '--platform-parent-origin', 'http://platform.example.com',

@@ -13,6 +13,11 @@
 # 自动化截图、浏览器用户目录和测试报告可能包含历史记录、Cookie（网站会话数据）等本地敏感信息。
 # 这些内容仅用于本机排障，可重新生成，禁止进入版本控制；现有文件保留供用户自行决定是否清理。
 /artifacts/
+# 浏览器回归测试生成的用户目录、依赖缓存和诊断输出只用于本机排障，可能包含会话数据或大量可再生文件。
+/.tmp-edge-*/
+/node_modules/
+/coal-diag.json
+/local-manual-output.json
 
 # Rider、Visual Studio、Gradle 等工具生成的本地工程文件和缓存。
 .vs/

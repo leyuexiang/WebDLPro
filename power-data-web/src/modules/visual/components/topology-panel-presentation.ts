@@ -1,5 +1,4 @@
-import type { ProcessNodeId } from '@/config/process/identifiers'
-import type { TopologyDeviceStatus, TopologyEvidenceStatus, TopologyDefinition } from '@/config/process/types'
+import type { TopologyEvidenceStatus, TopologyDefinition } from '@/config/process/types'
 
 /** 连线证据状态的显示配置集中在面板视图模型，模板不再通过燃气专用条件分支决定图例。 */
 interface TopologyLegendDefinition {
@@ -8,16 +7,11 @@ interface TopologyLegendDefinition {
   modifier: 'verified' | 'pending' | 'conceptual' | 'unclassified'
 }
 
-/** 设备四态摘要的固定展示顺序，避免对象遍历顺序导致不同拓扑的状态说明来回跳动。 */
-interface TopologyDeviceStatusDefinition {
-  deviceStatus: TopologyDeviceStatus
-  label: string
-}
-
 export interface TopologyPanelPresentation {
   title: string
   legends: readonly TopologyLegendDefinition[]
-  statusSummary: string
+  /** 空拓扑才展示说明，常规态不再占用画布高度展示节点和状态统计。 */
+  emptyMessage: string
   isEmpty: boolean
 }
 
@@ -28,21 +22,12 @@ const legendDefinitions: readonly TopologyLegendDefinition[] = [
   { evidenceStatus: 'unclassified', label: '未分类关系', modifier: 'unclassified' },
 ]
 
-const deviceStatusDefinitions: readonly TopologyDeviceStatusDefinition[] = [
-  { deviceStatus: 'normal', label: '正常' },
-  { deviceStatus: 'alarm', label: '告警' },
-  { deviceStatus: 'fault', label: '故障' },
-  { deviceStatus: 'offline', label: '离线' },
-]
-
 /**
  * 根据当前拓扑配置创建只读面板展示模型。
- * 这里只统计已经进入配置的数据，不从标题、场景文件名或设备资源反推任何状态；复杂度为节点数与连线数之和。
+ * 常规态只提取标题和已声明连线图例，避免为了不展示的状态摘要遍历全部节点；
+ * 空拓扑说明固定由组件提供，不从页面名称、资源名称或坐标推断拓扑结构。
  */
-export function createTopologyPanelPresentation(
-  topology: TopologyDefinition,
-  nodeStatuses: ReadonlyMap<ProcessNodeId, TopologyDeviceStatus> | undefined = undefined,
-): TopologyPanelPresentation {
+export function createTopologyPanelPresentation(topology: TopologyDefinition): TopologyPanelPresentation {
   const evidenceStatuses = new Set(topology.edges.map((edge) => edge.evidenceStatus))
   const legends = legendDefinitions.filter((definition) => evidenceStatuses.has(definition.evidenceStatus))
 
@@ -50,27 +35,15 @@ export function createTopologyPanelPresentation(
     return {
       title: toDisplayTitle(topology.title),
       legends,
-      statusSummary: '当前拓扑尚未发布节点配置，不会根据页面名称、资源名称或坐标推断拓扑结构。',
+      emptyMessage: '当前拓扑尚未发布节点配置，不会根据页面名称、资源名称或坐标推断拓扑结构。',
       isEmpty: true,
     }
   }
 
-  const countByStatus = new Map<TopologyDeviceStatus, number>()
-  for (const node of topology.nodes) {
-    // 当前快照只覆盖已声明的节点；缺失值严格回退到配置基线，不从名称或外部字段推测状态。
-    const deviceStatus = nodeStatuses?.get(node.nodeId) ?? node.deviceStatus
-    countByStatus.set(deviceStatus, (countByStatus.get(deviceStatus) ?? 0) + 1)
-  }
-
-  const statusItems = deviceStatusDefinitions
-    .map((definition) => `${definition.label} ${countByStatus.get(definition.deviceStatus) ?? 0}`)
-    .join('，')
-
   return {
     title: toDisplayTitle(topology.title),
     legends,
-    // 同时展示节点和连线数量，便于回归测试确认流程过滤没有误删连线或仍停留在总图。
-    statusSummary: `当前拓扑已配置 ${topology.nodes.length} 个节点、${topology.edges.length} 条连线：${statusItems}。状态以当前拓扑配置为准。`,
+    emptyMessage: '',
     isEmpty: false,
   }
 }

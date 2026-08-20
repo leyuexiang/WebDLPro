@@ -56,7 +56,7 @@ public sealed class GasPowerBusinessSceneControllerAdapter : IBusinessSceneContr
 
     /// <summary>在场景载入前登记适配工厂；注册表只保存工厂，不跨场景缓存燃气控制器对象。</summary>
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
-    private static void RegisterFactory()
+    internal static void RegisterFactory()
     {
         BusinessSceneControllerRegistry.RegisterFactory(GasPowerSceneId, CreateForScene);
     }
@@ -97,8 +97,8 @@ public sealed class GasPowerBusinessSceneControllerAdapter : IBusinessSceneContr
     }
 
     /// <summary>
-    /// 将拓扑节点选择转交燃气控制器更新三维描边。
-    /// 接口命名沿用既有协议，但实现不移动镜头；isolate 仅控制模型显隐上下文。
+    /// 将拓扑节点选择转交燃气控制器更新三维描边与可选镜头聚焦。
+    /// 是否移动镜头由控制器统一选中开关决定；isolate 仅控制模型显隐上下文。
     /// </summary>
     public BusinessSceneCommandResult FocusNode(string sceneNodeId, bool isolate)
     {

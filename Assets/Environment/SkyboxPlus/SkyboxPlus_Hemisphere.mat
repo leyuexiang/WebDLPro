@@ -28,6 +28,6 @@ Material:
     - _Exposure: 1
     m_Colors:
     - _BottomColor: {r: 0, g: 0, b: 0, a: 1}
-    - _MiddleColor: {r: 0.2948113, g: 0.3858225, b: 0.5, a: 1}
-    - _TopColor: {r: 1, g: 1, b: 1, a: 1}
+    - _MiddleColor: {r: 0.0489498, g: 0.10958704, b: 0.18867922, a: 1}
+    - _TopColor: {r: 0, g: 0.20437363, b: 0.6037736, a: 1}
   m_BuildTextureStacks: []

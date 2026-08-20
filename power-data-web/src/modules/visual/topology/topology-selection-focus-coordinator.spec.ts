@@ -23,14 +23,33 @@ describe('TopologySelectionFocusCoordinator', () => {
     expect(port.focusNode).toHaveBeenCalledWith(toSceneNodeId('scene-node.gas-turbine'), toSelectionId('selection.topology.01'))
   })
 
-  it('Unity 来源、缺少映射或未协商能力均不向三维回写', async () => {
+  it('Unity 来源或未协商聚焦能力均不向三维写入聚焦命令', async () => {
     const port = createFocusPort(false)
     const coordinator = new TopologySelectionFocusCoordinator(port)
 
     await expect(coordinator.requestFocus({ source: 'unity', selectionId: toSelectionId('selection.unity.01'), sceneNodeId: toSceneNodeId('scene-node.gas-turbine') })).resolves.toBe(false)
-    await expect(coordinator.requestFocus({ source: 'topology', selectionId: toSelectionId('selection.topology.no-node') })).resolves.toBe(false)
     await expect(coordinator.requestFocus({ source: 'topology', selectionId: toSelectionId('selection.topology.no-capability'), sceneNodeId: toSceneNodeId('scene-node.gas-turbine') })).resolves.toBe(false)
     expect(port.focusNode).not.toHaveBeenCalled()
+    expect(port.clearSelection).not.toHaveBeenCalled()
+  })
+
+  it('拓扑切换到未绑定三维模型的节点时主动清除上一枚三维选中效果', async () => {
+    const port = createFocusPort()
+    const coordinator = new TopologySelectionFocusCoordinator(port)
+
+    // 已绑定节点先产生真实三维聚焦，复现用户随后改点未绑定图元时的残留高亮场景。
+    await coordinator.requestFocus({
+      source: 'topology',
+      selectionId: toSelectionId('selection.topology.bound-node'),
+      sceneNodeId: toSceneNodeId('scene-node.gas-turbine'),
+    })
+    await expect(coordinator.requestFocus({
+      source: 'topology',
+      selectionId: toSelectionId('selection.topology.unbound-node'),
+    })).resolves.toBe(true)
+
+    expect(port.focusNode).toHaveBeenCalledTimes(1)
+    expect(port.clearSelection).toHaveBeenCalledTimes(1)
   })
 
   it('三维聚焦失败不撤销已处理关联，重放同一关联不会重复发送命令', async () => {

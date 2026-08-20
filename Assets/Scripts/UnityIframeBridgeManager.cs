@@ -146,6 +146,26 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         public long timestamp;
     }
 
+    /// <summary>三维空白清除事件只携带场景和物理实例标识，不使用空 sceneNodeId 冒充对象选择。</summary>
+    [Serializable]
+    private sealed class SelectionClearedBridgePayload
+    {
+        public string sceneId;
+        public string sceneActivationId;
+    }
+
+    [Serializable]
+    private sealed class SelectionClearedBridgeMessage
+    {
+        public string channel;
+        public int version;
+        public string instanceId;
+        public string messageId;
+        public string type;
+        public SelectionClearedBridgePayload payload;
+        public long timestamp;
+    }
+
     /// <summary>
     /// 初始化确认和释放确认的最小上行负载。
     /// JsonUtility（Unity 内置 JSON 序列化工具）会把通用对象的未赋值字段写入 JSON；
@@ -296,6 +316,12 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
 
         Instance = this;
         DontDestroyOnLoad(gameObject);
+        // 发电适配器位于默认运行时程序集，不能由场景注册表程序集反向引用；
+        // 该桥接器是 Bootstrap 必然序列化的常驻组件，因此在此处直接登记两个
+        // 适配工厂可阻止 IL2CPP（中间语言到 C++ 的裁剪编译器）把燃煤适配器
+        // 当作“无场景引用”的代码裁掉。重复登记只覆盖同名工厂，不创建第二个实例。
+        GasPowerBusinessSceneControllerAdapter.RegisterFactory();
+        CoalPowerBusinessSceneControllerAdapter.RegisterFactory();
         _instanceId = ReadQueryParameter("instanceId", _instanceId);
         _sceneMappingVersion = ReadQueryParameter("sceneMappingVersion", _sceneMappingVersion);
 
@@ -528,6 +554,45 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         SendSerializedMessage(JsonUtility.ToJson(message));
     }
 
+    /// <summary>
+    /// 向父页面通知三维空白点击。前端收到后只清除二维选择，不回发 clearSelection，避免 Unity 与网页之间形成回环。
+    /// </summary>
+    public void ReportSelectionCleared()
+    {
+        if (_releaseRequested)
+        {
+            return;
+        }
+
+        TryBindSceneController();
+        if (_sceneController == null ||
+            _sceneCoordinator == null ||
+            !SceneSwitchProtocolValidator.IsBoundedIdentifier(_sceneController.SceneId) ||
+            !SceneSwitchProtocolValidator.IsBoundedIdentifier(_sceneCoordinator.ActiveSceneActivationId))
+        {
+            return;
+        }
+
+        StatusText = "已清除三维交互选择。";
+        LogStatusToBrowserConsole();
+        long timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        SelectionClearedBridgeMessage message = new SelectionClearedBridgeMessage
+        {
+            channel = WebGlProtocolContract.Channel,
+            version = WebGlProtocolContract.ProtocolVersion,
+            instanceId = _instanceId,
+            messageId = $"{timestamp}-{Guid.NewGuid():N}",
+            type = "selectionCleared",
+            payload = new SelectionClearedBridgePayload
+            {
+                sceneId = _sceneController.SceneId,
+                sceneActivationId = _sceneCoordinator.ActiveSceneActivationId
+            },
+            timestamp = timestamp
+        };
+        SendSerializedMessage(JsonUtility.ToJson(message));
+    }
+
     private void HandleInitialize(BridgeMessage message)
     {
         StatusText = "已完成父页面初始化。";
@@ -694,8 +759,8 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
     }
 
     /// <summary>
-    /// 处理拓扑节点选择的三维描边命令。
-    /// 节点标识只用于更新当前交互描边，实际控制器不得移动镜头；isolate 仍只控制显隐上下文。
+    /// 处理拓扑节点选择的三维描边与可选镜头聚焦命令。
+    /// 是否移动镜头由场景控制器统一选中开关决定；isolate 仍只控制显隐上下文。
     /// </summary>
     private void HandleFocusNode(BridgeMessage message)
     {
@@ -726,8 +791,8 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
 
     /// <summary>
     /// 处理拓扑空白点击的三维清除命令。
-    /// 该命令不读取或修改节点标识，也不调用 resetScene；实际控制器只关闭交互描边，
-    /// 因而不会改变当前场景、流程步骤、模型显隐和镜头状态。
+    /// 该命令不读取或修改节点标识，也不调用 resetScene；实际控制器只关闭交互描边并停止未完成的自动聚焦，
+    /// 因而不会改变当前场景、流程步骤、模型显隐或已经到达的镜头位置。
     /// </summary>
     private void HandleClearSelection(BridgeMessage message)
     {

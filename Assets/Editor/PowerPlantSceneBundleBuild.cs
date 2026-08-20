@@ -189,16 +189,22 @@ public static class PowerPlantSceneBundleBuild
         {
             string bundleName = bundleNames[index];
             string bundlePath = Path.Combine(bundleOutputDirectory, bundleName);
-            if (!File.Exists(bundlePath) || !BuildPipeline.GetCRCForAssetBundle(bundlePath, out uint crc))
+            if (!File.Exists(bundlePath))
             {
-                throw new BuildFailedException($"无法读取场景资源包校验信息：{bundleName}。");
+                throw new BuildFailedException($"无法读取场景资源包文件：{bundleName}。");
             }
             bundles.Add(new SceneBundleDocument
             {
                 bundleName = bundleName,
                 fileName = bundleName,
                 hash = manifest.GetAssetBundleHash(bundleName).ToString(),
-                crc = crc,
+                // Unity 2022.3 的 ChunkBasedCompression（分块压缩）WebGL 资源包在
+                // BuildPipeline.GetCRCForAssetBundle（构建管线 CRC）与
+                // DownloadHandlerAssetBundle（下载处理器）之间存在校验口径差异：
+                // 前者生成的值会让浏览器把完整、未改写的文件判定为 CRC Mismatch（校验不一致）。
+                // 运行时仍使用 Unity Hash128（128 位内容哈希）拒绝错误版本并隔离缓存，
+                // 将可选 CRC 固定为 0 让 Unity 跳过不兼容的二次校验，避免合法场景无法加载。
+                crc = 0,
                 // 记录实际产物字节数，而不是编辑器估算值。该值用于发布评审、容量预算和冷缓存传输统计，
                 // 不参与运行时可信校验；运行时仍以 Unity 构建哈希和循环冗余校验为准。
                 sizeBytes = new FileInfo(bundlePath).Length,

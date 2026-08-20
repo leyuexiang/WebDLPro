@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using WebDLPro.Unity.SceneRuntime;
 
 [DisallowMultipleComponent]
 public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
@@ -19,6 +20,34 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
         "hrsg",
         "steam-turbine",
         "generator"
+    };
+
+    private static readonly string[] VisualStateNodeIds =
+    {
+        "gas-turbine",
+        "hrsg",
+        "steam-turbine"
+    };
+
+    private readonly GUIContent[] _visualStateNodeLabels =
+    {
+        new GUIContent("燃气轮机"),
+        new GUIContent("余热锅炉"),
+        new GUIContent("汽轮机")
+    };
+
+    private static readonly BusinessSceneNodeVisualState[] VisualStates =
+    {
+        BusinessSceneNodeVisualState.Normal,
+        BusinessSceneNodeVisualState.Alarm,
+        BusinessSceneNodeVisualState.Fault
+    };
+
+    private static readonly GUIContent[] VisualStateLabels =
+    {
+        new GUIContent("正常"),
+        new GUIContent("告警"),
+        new GUIContent("故障")
     };
 
     [SerializeField] private PowerPlantProcessController _processController;
@@ -43,10 +72,17 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
 
     private bool _isolate = true;
     private string _unitId = "all";
-    private string _nodeId = "node.gas-turbine.1";
+    // 默认使用场景已登记的稳定节点标识，避免打开面板后节点测试立即落入无效节点错误路径。
+    private string _nodeId = "gas-turbine";
+    private int _visualStateNodeIndex;
+    // 保存最近一次桥接聚焦使用的选择标识，供“重复聚焦”按钮原样重发以验证幂等处理。
+    private string _lastFocusSelectionId;
+    private int _focusSelectionSequence;
+    private bool _bridgeSessionInitialized;
     private string _lastResult = "尚未执行测试。";
     private Vector2 _scrollPosition;
     private Coroutine _autoTestRoutine;
+    private Coroutine _visualStateTestRoutine;
     private GUIStyle _titleStyle;
     private GUIStyle _sectionStyle;
     private int _messageSequence;
@@ -89,6 +125,7 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
     private void OnDisable()
     {
         StopAutoTest();
+        StopVisualStateTest();
     }
 
     /// <summary>
@@ -138,11 +175,12 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
 
         DrawProcessControls();
         DrawNodeControls();
+        DrawVisualStateControls();
         DrawBridgeControls();
 
         GUILayout.Space(4f);
         GUILayout.Label("交互验证", _sectionStyle);
-        GUILayout.Label("隐藏面板后，左键点击设备应更新桥接状态为“已选择对象”；流程、总览和节点描边均应保持当前视角；WASD/QE、Shift、右键拖动可验证自由相机。 ");
+        GUILayout.Label("拓扑和 Unity 鼠标左键选中都会描边并回传二维拓扑；自动聚焦由节点测试区的统一开关控制。重复聚焦应被幂等忽略；清除选择只停止未完成的聚焦，不复位镜头。手动拖拽、右键旋转、滚轮和 WASD/QE 可验证相机接管。 ");
         GUILayout.EndScrollView();
         GUILayout.EndArea();
     }
@@ -198,6 +236,18 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
         _nodeId = GUILayout.TextField(_nodeId);
         GUILayout.EndHorizontal();
 
+        if (_processController != null)
+        {
+            bool focusOnSelection = GUILayout.Toggle(
+                _processController.FocusOnSelection,
+                "选中后自动聚焦（拓扑与Unity鼠标共用）");
+            if (focusOnSelection != _processController.FocusOnSelection)
+            {
+                _processController.SetFocusOnSelection(focusOnSelection);
+                Report(focusOnSelection ? "已开启统一选中聚焦。" : "已关闭统一选中聚焦，仍保留描边与拓扑联动。");
+            }
+        }
+
         GUILayout.BeginHorizontal();
         if (GUILayout.Button("描边"))
         {
@@ -233,6 +283,62 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
         GUILayout.EndHorizontal();
     }
 
+    /// <summary>
+    /// 只测试场景属性面板中明确登记的三个燃气设备四态，不允许输入任意层级名称。
+    /// 每次按钮点击都直接调用正式控制器接口，确保面板看到的结果与网页桥接收到的结果一致。
+    /// </summary>
+    private void DrawVisualStateControls()
+    {
+        GUILayout.Space(4f);
+        GUILayout.Label("关键设备四态视觉", _sectionStyle);
+        GUILayout.Label("选择已绑定模型后，分别测试正常、告警、故障效果。离线视觉由共享配置开关控制。", GUILayout.MinHeight(22f));
+
+        GUILayout.BeginHorizontal();
+        for (int nodeIndex = 0; nodeIndex < VisualStateNodeIds.Length; nodeIndex++)
+        {
+            bool selected = _visualStateNodeIndex == nodeIndex;
+            if (GUILayout.Toggle(selected, _visualStateNodeLabels[nodeIndex], "Button") && !selected)
+            {
+                _visualStateNodeIndex = nodeIndex;
+                // 同步通用节点测试输入，使描边、显隐和四态始终指向同一个稳定节点。
+                _nodeId = VisualStateNodeIds[nodeIndex];
+            }
+        }
+        GUILayout.EndHorizontal();
+
+        GUILayout.BeginHorizontal();
+        for (int stateIndex = 0; stateIndex < VisualStates.Length; stateIndex++)
+        {
+            BusinessSceneNodeVisualState visualState = VisualStates[stateIndex];
+            if (GUILayout.Button(VisualStateLabels[stateIndex]))
+            {
+                ApplyVisualState(visualState);
+            }
+        }
+        GUILayout.EndHorizontal();
+
+        GUILayout.BeginHorizontal();
+        if (GUILayout.Button("清除动态状态"))
+        {
+            ClearVisualState();
+        }
+
+        string cycleButtonLabel = _visualStateTestRoutine == null ? "轮巡当前模型三态" : "停止三态轮巡";
+        if (GUILayout.Button(cycleButtonLabel))
+        {
+            if (_visualStateTestRoutine == null)
+            {
+                _visualStateTestRoutine = StartCoroutine(RunVisualStateTest());
+            }
+            else
+            {
+                StopVisualStateTest();
+                Report("已停止当前模型四态轮巡。");
+            }
+        }
+        GUILayout.EndHorizontal();
+    }
+
     private void DrawBridgeControls()
     {
         GUILayout.Space(4f);
@@ -245,7 +351,7 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
         GUILayout.BeginHorizontal();
         if (GUILayout.Button("初始化"))
         {
-            SendBridgeCommand("init", new TestBridgePayload());
+            InitializeBridgeSession();
         }
 
         if (GUILayout.Button("当前步骤"))
@@ -265,17 +371,25 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
         }
         GUILayout.EndHorizontal();
 
+        GUILayout.Label($"当前聚焦选择：{(_lastFocusSelectionId ?? "无")}");
         GUILayout.BeginHorizontal();
         if (GUILayout.Button("聚焦节点"))
         {
-            SendBridgeCommand("focusNode", new TestBridgePayload
-            {
-                sceneNodeId = _nodeId,
-                selectionId = $"selection.runtime-test.{_messageSequence + 1}",
-                isolate = _isolate
-            });
+            SendFocusNode(false);
         }
 
+        if (GUILayout.Button("重复聚焦"))
+        {
+            SendFocusNode(true);
+        }
+
+        if (GUILayout.Button("清除选择"))
+        {
+            SendBridgeCommand("clearSelection", new TestBridgePayload());
+        }
+        GUILayout.EndHorizontal();
+
+        GUILayout.BeginHorizontal();
         if (GUILayout.Button("节点显示"))
         {
             SendBridgeCommand("setNodeVisibility", new TestBridgePayload { sceneNodeId = _nodeId, enabled = true });
@@ -352,6 +466,84 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
         Report(success ? $"重置通过：{message}" : $"重置失败：{message}");
     }
 
+    /// <summary>
+    /// 将选中的稳定节点切换到一个固定四态。Normal（正常态）也必须经过正式接口，
+    /// 这样才能同时验证状态登记器的基础材质恢复和其它三种状态高亮路径。
+    /// </summary>
+    private void ApplyVisualState(BusinessSceneNodeVisualState visualState)
+    {
+        if (!EnsureProcessController())
+        {
+            return;
+        }
+
+        string nodeId = VisualStateNodeIds[_visualStateNodeIndex];
+        BusinessSceneCommandResult result = _processController.UpdateNodeVisualState(nodeId, visualState);
+        Report(result.Success
+            ? $"{_visualStateNodeLabels[_visualStateNodeIndex].text}：{GetVisualStateLabel(visualState)}测试通过。"
+            : $"{_visualStateNodeLabels[_visualStateNodeIndex].text}：{GetVisualStateLabel(visualState)}测试失败：{result.Message}");
+    }
+
+    /// <summary>
+    /// 清除选中设备的动态状态。它与“正常”按钮有意区分：正常是平台下发的四态，
+    /// 清除是撤销覆盖，用来验证设备状态从快照中消失后的恢复路径。
+    /// </summary>
+    private void ClearVisualState()
+    {
+        if (!EnsureProcessController())
+        {
+            return;
+        }
+
+        string nodeId = VisualStateNodeIds[_visualStateNodeIndex];
+        BusinessSceneCommandResult result = _processController.ClearNodeVisualState(nodeId);
+        Report(result.Success
+            ? $"{_visualStateNodeLabels[_visualStateNodeIndex].text}：已清除动态状态。"
+            : $"{_visualStateNodeLabels[_visualStateNodeIndex].text}：清除失败：{result.Message}");
+    }
+
+    /// <summary>
+    /// 按正常、告警、故障顺序轮巡当前模型；离线视觉由控制器开关管理，不在默认测试流程中展示。
+    /// </summary>
+    /// <summary>
+    /// 按正常、告警、故障顺序轮巡当前模型；离线视觉由共享配置开关管理，不在默认测试流程中展示。
+    /// </summary>
+    private IEnumerator RunVisualStateTest()
+    {
+        for (int stateIndex = 0; stateIndex < VisualStates.Length; stateIndex++)
+        {
+            ApplyVisualState(VisualStates[stateIndex]);
+            yield return new WaitForSecondsRealtime(_autoTestInterval);
+        }
+
+        _visualStateTestRoutine = null;
+        Report($"{_visualStateNodeLabels[_visualStateNodeIndex].text}四态轮巡完成。");
+    }
+
+    private void StopVisualStateTest()
+    {
+        if (_visualStateTestRoutine == null)
+        {
+            return;
+        }
+
+        StopCoroutine(_visualStateTestRoutine);
+        _visualStateTestRoutine = null;
+    }
+
+    private static string GetVisualStateLabel(BusinessSceneNodeVisualState visualState)
+    {
+        switch (visualState)
+        {
+            case BusinessSceneNodeVisualState.Alarm:
+                return "告警（半透明覆盖 + 同色描边）";
+            case BusinessSceneNodeVisualState.Fault:
+                return "故障（半透明覆盖 + 同色描边）";
+            default:
+                return "正常（基础视觉）";
+        }
+    }
+
     private IEnumerator RunAutoTest()
     {
         _unitId = "all";
@@ -380,11 +572,37 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
         _autoTestRoutine = null;
     }
 
+    /// <summary>
+    /// 发送一次新的拓扑节点聚焦命令。每次新聚焦都会生成新的选择标识，
+    /// 这样连续选择同一个节点仍会触发一次新的镜头聚焦，而不是被幂等缓存拦截。
+    /// </summary>
+    private void SendFocusNode(bool reuseSelectionId)
+    {
+        if (!reuseSelectionId || string.IsNullOrWhiteSpace(_lastFocusSelectionId))
+        {
+            _lastFocusSelectionId = $"selection.runtime-test.{++_focusSelectionSequence}";
+        }
+
+        SendBridgeCommand("focusNode", new TestBridgePayload
+        {
+            sceneNodeId = _nodeId,
+            selectionId = _lastFocusSelectionId,
+            isolate = _isolate
+        });
+    }
+
     private void SendBridgeCommand(string type, TestBridgePayload payload)
     {
         if (!EnsureBridgeManager())
         {
             return;
+        }
+
+        // 编辑器测试面板不经过网页握手；业务命令首次发送前自动补发一次 init，
+        // 让 UnityIframeBridgeManager 先绑定当前场景控制器，避免测试必须依赖手动点击顺序。
+        if (type != "init" && !_bridgeSessionInitialized)
+        {
+            InitializeBridgeSession();
         }
 
         TestBridgeMessage message = new TestBridgeMessage
@@ -400,6 +618,17 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
 
         _bridgeManager.ReceiveFromParent(JsonUtility.ToJson(message));
         Report($"桥接 {type}：{_bridgeManager.StatusText}");
+    }
+
+    private void InitializeBridgeSession()
+    {
+        if (_bridgeSessionInitialized || !EnsureBridgeManager())
+        {
+            return;
+        }
+
+        _bridgeSessionInitialized = true;
+        SendBridgeCommand("init", new TestBridgePayload());
     }
 
     private void RunNodeAction(string actionName, Func<bool> action, out string result)

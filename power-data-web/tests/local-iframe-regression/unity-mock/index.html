@@ -64,7 +64,7 @@
     // 本地夹具与正式内层协议同步声明全部受控动作；模拟页只回传结构化结果，
     // 不伪造任何场景节点、材质或路径资源，从而不会把夹具误当成九场景业务实现。
     const commandCapabilities = ['init', 'resize', 'switchScene', 'enterProcessStep', 'resetScene', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'];
-    const eventCapabilities = ['ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'disposed'];
+    const eventCapabilities = ['ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'selectionCleared', 'disposed'];
     const message = document.querySelector('#message');
     let disposed = false;
     // 模拟 Unity 每次实际完成场景加载时的新物理实例；同场景普通命令不会改变该值。

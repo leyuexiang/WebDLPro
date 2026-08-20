@@ -359,6 +359,39 @@ describe('CanvasTopologyAdapter 响应式布局与直线优先路由', () => {
     adapter.dispose()
   })
 
+  it('进入全屏展示时将图元与文字几何放大为常规态两倍，退出后可恢复常规尺寸', () => {
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const adapter = new CanvasTopologyAdapter(createCanvas())
+    const topology = createTopology()
+    const normalInspection = prepareGeometry(adapter, topology, 1280, 720)
+    const normalLayout = normalInspection.layoutByNodeId.get('status-node-a')
+
+    expect(normalLayout).toBeDefined()
+    if (!normalLayout) return
+
+    // 全屏倍率必须使节点盒、标题宽度与标题高度同步翻倍，保证图元、文字和碰撞边界不发生脱节。
+    adapter.setPresentationScale(2)
+    normalInspection.layoutByNodeId.clear()
+    normalInspection.createNodeLayouts()
+    const fullscreenLayout = normalInspection.layoutByNodeId.get('status-node-a')
+
+    expect(fullscreenLayout).toBeDefined()
+    if (!fullscreenLayout) return
+    expect(fullscreenLayout.width).toBeGreaterThanOrEqual(normalLayout.width * 2 - 1)
+    expect(fullscreenLayout.width).toBeLessThanOrEqual(normalLayout.width * 2 + 1)
+    expect(fullscreenLayout.titleBounds.right - fullscreenLayout.titleBounds.left)
+      .toBeCloseTo((normalLayout.titleBounds.right - normalLayout.titleBounds.left) * 2)
+    expect(fullscreenLayout.titleBounds.bottom - fullscreenLayout.titleBounds.top)
+      .toBeCloseTo((normalLayout.titleBounds.bottom - normalLayout.titleBounds.top) * 2)
+
+    adapter.setPresentationScale(1)
+    normalInspection.layoutByNodeId.clear()
+    normalInspection.createNodeLayouts()
+    expect(normalInspection.layoutByNodeId.get('status-node-a')?.width).toBe(normalLayout.width)
+    adapter.dispose()
+  })
+
   it('无障碍斜向关系直接使用两点直线，并能在法线方向放置水平协议标签', () => {
     vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
     vi.stubGlobal('cancelAnimationFrame', vi.fn())

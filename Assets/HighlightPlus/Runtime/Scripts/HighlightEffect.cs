@@ -1612,7 +1612,11 @@ namespace HighlightPlus {
                 rr = new Renderer[0];
             }
             if (rms == null || rms.Length < rr.Length) {
-                rms = new ModelMaterials[rr.Length];
+                // 目标数量增长时必须保留旧槽位中的运行时材质数组。直接创建新数组会丢失
+                // Fork 生成的 Material 引用，OnDestroy 随后也无法销毁这些材质；燃煤流程反复
+                // 聚焦不同规模的模型后，WebGL 内存会持续增长。Resize 只在容量不足时执行，
+                // 既保留可复用材质，也避免每次切换都复制或重新创建整组高亮资源。
+                System.Array.Resize(ref rms, rr.Length);
             }
 
             rmsCount = 0;
@@ -2369,5 +2373,4 @@ namespace HighlightPlus {
 
     }
 }
-
 

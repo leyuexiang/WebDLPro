@@ -111,7 +111,7 @@ const domains: readonly ProcessDomainDefinition[] = domainTitles.map(([domainId,
   pageIds: pageIdsByDomain.get(domainId) ?? [],
 }))
 
-/** 非燃气总览页的页面定义；空模式是明确能力边界，不是未处理的异常状态。 */
+/** 非燃气、燃煤总览页的页面定义；空模式是明确能力边界，不是未处理的异常状态。 */
 function createEmptyPage(seed: PageSeed): ProcessPageDefinition {
   return {
     processPageId: toProcessPageId(seed.pageId),
@@ -160,6 +160,30 @@ function createEmptyArtifacts(page: ProcessPageDefinition): {
       metrics: [],
     },
   }
+}
+
+/**
+ * 燃煤总览只负责申请已经审计的 Unity 运行时。
+ *
+ * 27 节点总图、三个关键流程和二维—三维节点映射均由远程场景拓扑清单提供，不能在本地
+ * 工艺配置中复制第二份事实。这里因此只登记空的兼容原子配置，让旧工艺加载器完成版本、
+ * 权限和运行时完整性校验；嵌入壳不会把这些空图元交给正式拓扑画布。
+ */
+const coalOverviewPage: ProcessPageDefinition = {
+  processPageId: toProcessPageId('coal-overview'),
+  processId: toProcessId('coal-power-generation'),
+  domainId: toProcessDomainId('coal-power'),
+  title: '燃煤发电总览',
+  description: '燃煤火力发电总览；二维拓扑、关键流程和三维映射由正式场景清单统一提供。',
+  order: 1,
+  configVersion: LOCAL_PROCESS_CONFIG_VERSION,
+  permissionCode: processPagePermission,
+  runtimeMode: 'webgl',
+  runtimeFallbackMode: 'static-preview',
+  runtimeKey: toRuntimeKey('coal-plant-release'),
+  topologyKey: toTopologyKey('topology.coal-overview'),
+  guideKey: toGuideKey('guide.coal-overview'),
+  detailKey: toDetailKey('detail.coal-overview'),
 }
 
 /** 燃气总览保留物理流程导览，同时展示用户确认的燃气机组控制网络分层关系。 */
@@ -304,15 +328,30 @@ const gasSceneMapping: SceneMappingDefinition = {
   mappedRouteIds: [toRouteId('route.exhaust-to-hrsg.1'), toRouteId('route.exhaust-to-hrsg.2')],
 }
 
-/** 其余 33 页共享明确的空场景契约，页面可以访问但不会进行未经登记的外部资源加载。 */
-const emptyPages = pageSeeds.filter((seed) => seed.pageId !== 'gas-overview').map(createEmptyPage)
+/**
+ * 燃煤兼容原子配置只用于旧工艺加载器校验和运行时租约申请。
+ * 正式画布始终消费 scene-topology-manifest.json（场景拓扑清单），这里不复制 27 个节点、
+ * 三个映射或四个流程动作，避免一处更新后二维选择与 Unity 聚焦产生版本漂移。
+ */
+const coalOverviewArtifacts = createEmptyArtifacts(coalOverviewPage)
+const coalSceneMapping: SceneMappingDefinition = {
+  processId: coalOverviewPage.processId,
+  configVersion: LOCAL_PROCESS_CONFIG_VERSION,
+  mappedNodeIds: [],
+  mappedRouteIds: [],
+}
+
+/** 其余 32 页共享明确的空场景契约，页面可以访问但不会进行未经登记的外部资源加载。 */
+const emptyPages = pageSeeds
+  .filter((seed) => seed.pageId !== 'gas-overview' && seed.pageId !== 'coal-overview')
+  .map(createEmptyPage)
 const emptyArtifacts = emptyPages.map((page) => ({ page, ...createEmptyArtifacts(page) }))
 
 /** 每个流程仅保留一份空场景映射；映射为空时不会产生三维命令。 */
 const emptySceneMappingsByProcessId = new Map<string, SceneMappingDefinition>()
 for (const page of emptyPages) {
-  // 燃气子页与燃气总览复用同一流程标识，不能用空映射覆盖总览的已验证场景映射。
-  if (page.processId === gasOverviewPage.processId) {
+  // 燃气、燃煤子页与对应总览复用流程标识，不能用空映射覆盖已经登记的总览场景映射。
+  if (page.processId === gasOverviewPage.processId || page.processId === coalOverviewPage.processId) {
     continue
   }
 
@@ -329,11 +368,11 @@ for (const page of emptyPages) {
 /** 供路由守卫、工作台和单元测试共用的唯一本地配置数据集。 */
 export const localProcessConfigDataset: ProcessConfigDataset = {
   domains,
-  pages: [gasOverviewPage, ...emptyPages],
-  topologies: [gasTopology, ...emptyArtifacts.map((artifact) => artifact.topology)],
-  guides: [gasGuide, ...emptyArtifacts.map((artifact) => artifact.guide)],
-  details: [gasDetails, ...emptyArtifacts.map((artifact) => artifact.details)],
-  sceneMappings: [gasSceneMapping, ...emptySceneMappingsByProcessId.values()],
+  pages: [coalOverviewPage, gasOverviewPage, ...emptyPages],
+  topologies: [coalOverviewArtifacts.topology, gasTopology, ...emptyArtifacts.map((artifact) => artifact.topology)],
+  guides: [coalOverviewArtifacts.guide, gasGuide, ...emptyArtifacts.map((artifact) => artifact.guide)],
+  details: [coalOverviewArtifacts.details, gasDetails, ...emptyArtifacts.map((artifact) => artifact.details)],
+  sceneMappings: [coalSceneMapping, gasSceneMapping, ...emptySceneMappingsByProcessId.values()],
 }
 
 /**

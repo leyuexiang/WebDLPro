@@ -7,6 +7,8 @@ const integrityFileName = 'artifact-integrity.json'
 const textExtensions = new Set(['.css', '.html', '.js', '.json', '.md', '.mjs', '.svg'])
 const loopbackAddressPattern = /(?:127\.0\.0\.1|\blocalhost\b|https?:\/\/0\.0\.0\.0(?=[:/]))/i
 const internalTestMarkerPattern = /(?:self-test\.html|外部流程触发测试|data-action-id=|data-overview-command|test-status|synthetic-device-state|合成(?:设备|状态|数据)|测试状态)/i
+// 合作方入口长期固定为 5575；即使目录由旧脚本或手工方式生成，交付复核也必须阻止端口漂移。
+const partnerIntegrationPort = 5575
 const internalArtifactPathPattern = /(?:^|\/)(?:tests?|self[-_]?tests?|diagnostics?|fixtures?|mocks?)(?:\/|\.|-|_|$)/i
 const allowedDeliveryRootEntries = new Set([
   'index.html', 'server.mjs', 'README.md', 'release-manifest.json', 'scene-topology-manifest.json',
@@ -15,6 +17,10 @@ const allowedDeliveryRootEntries = new Set([
 const requiredUnityCommandCapabilities = Object.freeze([
   'init', 'resize', 'switchScene', 'enterProcessStep', 'resetScene', 'focusNode', 'clearSelection',
   'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose',
+])
+// 结构版本5开始把三维反向选择和空白清除能力写入版本化元数据；旧结构版本4仍允许作为历史回滚包读取。
+const requiredUnityEventCapabilities = Object.freeze([
+  'ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'selectionCleared', 'disposed',
 ])
 const deviceIdentifierSuffixes = new Set(['id', 'ids'])
 const deviceMappingSuffixes = new Set(['mapping', 'mappings'])
@@ -241,23 +247,32 @@ export async function validateReleaseArtifact(rootDirectory) {
     if (new Set(sourceNodeIds).size !== sourceNodeIds.length) issues.push('结构清单的来源节点标识必须在资源内全局唯一。')
     if (topologyManifest.manifestVersion !== releaseManifest.manifestVersion) issues.push('结构清单版本与发布摘要不一致。')
     if (topologyManifest.unityBuildId !== releaseManifest.unityReleaseId) issues.push('Unity 构建标识在结构清单与发布摘要中不一致。')
-    const gasTopology = Array.isArray(topologyManifest.topologies)
+    const sourceTopology = Array.isArray(topologyManifest.topologies)
       ? topologyManifest.topologies.find((topology) => topology?.topologyId === releaseManifest.nodeProtocolPolicy?.sourceTopologyId)
       : undefined
-    if (!gasTopology || !Array.isArray(gasTopology.nodes) || !Array.isArray(gasTopology.edges)) {
-      issues.push('发布摘要的燃气来源总拓扑未在结构清单中找到。')
-    } else if (releaseManifest.gasTopology?.nodeCount !== gasTopology.nodes.length ||
-      releaseManifest.gasTopology?.edgeCount !== gasTopology.edges.length ||
-      releaseManifest.nodeProtocolPolicy?.sourceNodeCount !== gasTopology.nodes.length) {
-      issues.push('燃气节点数、连线数或节点协议数量与结构清单不一致。')
+    if (!sourceTopology || !Array.isArray(sourceTopology.nodes) || !Array.isArray(sourceTopology.edges)) {
+      // 保留燃气包的历史诊断文本；燃煤包使用通用来源拓扑提示，避免把燃煤误报为燃气。
+      issues.push(releaseManifest.sceneId === 'coal-power' ? '发布摘要的燃煤来源总拓扑未在结构清单中找到。' : '发布摘要的燃气来源总拓扑未在结构清单中找到。')
+    } else {
+      const sourceSummary = releaseManifest.sourceTopology ?? releaseManifest.gasTopology
+      if (sourceSummary?.nodeCount !== sourceTopology.nodes.length ||
+        sourceSummary?.edgeCount !== sourceTopology.edges.length ||
+        releaseManifest.nodeProtocolPolicy?.sourceNodeCount !== sourceTopology.nodes.length) {
+        issues.push(releaseManifest.sceneId === 'coal-power' ? '燃煤节点数、连线数或节点协议数量与结构清单不一致。' : '燃气节点数、连线数或节点协议数量与结构清单不一致。')
+      }
     }
   }
 
   if (unityProtocolMetadata) {
     const capabilities = new Set(Array.isArray(unityProtocolMetadata.commandCapabilities) ? unityProtocolMetadata.commandCapabilities : [])
-    if (unityProtocolMetadata.schemaVersion !== 4 || unityProtocolMetadata.channel !== 'power3d-unity' ||
+    const eventCapabilities = new Set(Array.isArray(unityProtocolMetadata.eventCapabilities) ? unityProtocolMetadata.eventCapabilities : [])
+    const isSupportedSchema = unityProtocolMetadata.schemaVersion === 4 || unityProtocolMetadata.schemaVersion === 5
+    const missingEventsInCurrentSchema = unityProtocolMetadata.schemaVersion === 5 &&
+      requiredUnityEventCapabilities.some((capability) => !eventCapabilities.has(capability))
+    if (!isSupportedSchema || unityProtocolMetadata.channel !== 'power3d-unity' ||
       unityProtocolMetadata.protocolVersion !== 1 || unityProtocolMetadata.unityReleaseId !== releaseManifest.unityReleaseId ||
-      requiredUnityCommandCapabilities.some((capability) => !capabilities.has(capability))) {
+      requiredUnityCommandCapabilities.some((capability) => !capabilities.has(capability)) ||
+      missingEventsInCurrentSchema) {
       issues.push('Unity 协议能力文件的发布标识、结构版本或必需命令与发布摘要不一致。')
     }
   }
@@ -279,15 +294,21 @@ export async function validateReleaseArtifact(rootDirectory) {
       releaseManifest.excludedCapabilities?.includes('node-scene-mapping')) {
     issues.push('发布摘要不得声明我方设备映射能力，也不得排除节点事件、节点状态或节点到三维映射能力。')
   }
+  const declaredSourceNodeCount = releaseManifest.sourceTopology?.nodeCount ?? releaseManifest.gasTopology?.nodeCount
   if (releaseManifest.nodeProtocolPolicy?.mode !== 'node-id-owned-by-shell' ||
       releaseManifest.nodeProtocolPolicy?.associationKey !== 'nodeId' ||
       releaseManifest.nodeProtocolPolicy?.manifestKind !== 'immutable-structure' ||
-      releaseManifest.nodeProtocolPolicy?.sourceNodeCount !== 23 ||
+      (typeof declaredSourceNodeCount === 'number' && releaseManifest.nodeProtocolPolicy?.sourceNodeCount !== declaredSourceNodeCount) ||
       releaseManifest.nodeProtocolPolicy?.filteredViewsReuseSourceNodeIds !== true) {
-    issues.push('燃气发布摘要必须锁定nodeId关联键、不可变结构清单、23个总览来源节点和过滤视图复用规则。')
+    issues.push(releaseManifest.sceneId === 'coal-power'
+      ? '燃煤发布摘要必须锁定nodeId关联键、不可变结构清单、来源节点数量和过滤视图复用规则。'
+      : '燃气发布摘要必须锁定nodeId关联键、不可变结构清单、23个总览来源节点和过滤视图复用规则。')
   }
 
   const deployment = releaseManifest.deployment ?? {}
+  if (packageType === 'partner-integration' && deployment.listenPort !== partnerIntegrationPort) {
+    issues.push(`合作方联调包监听端口必须固定为 ${partnerIntegrationPort}。`)
+  }
   const isRuntimeSelfOrigin = deployment.addressMode === 'runtime-self-origin'
   if (isRuntimeSelfOrigin) {
     const runtimePolicy = deployment.runtimeSourcePolicy ?? {}

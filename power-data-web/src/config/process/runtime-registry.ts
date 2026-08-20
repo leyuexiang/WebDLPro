@@ -1,7 +1,11 @@
 import { toRuntimeKey } from '@/config/process/identifiers'
 import type { RuntimeKey } from '@/config/process/identifiers'
 import { LOCAL_PROCESS_CONFIG_VERSION } from '@/config/process/config-version'
-import { readDeploymentConfiguration, type DeploymentConfigurationLoadResult } from '@/config/deployment/deployment-config'
+import {
+  readDeploymentConfiguration,
+  type DeploymentConfiguration,
+  type DeploymentConfigurationLoadResult,
+} from '@/config/deployment/deployment-config'
 import type { ProcessConfigValidationIssue, WebglRuntimeRegistration } from '@/config/process/types'
 import { isWebglCommandType, isWebglEventType, parseExactOrigin, WEBGL_PROTOCOL_VERSION } from '@/services/webgl/protocol'
 
@@ -40,31 +44,47 @@ const deploymentConfigurationResult = readDeploymentConfiguration()
 export const deploymentConfigurationIssues = deploymentConfigurationResult.issues
 
 /**
- * 只有部署配置完整时才发布燃气基线登记；构造时不接受业务页面提供的 URL。
+ * 为一个业务入口生成只读 Unity 运行时登记。
+ *
+ * 燃气和燃煤共用同一份九场景 Unity 构建、资源摘要和单实例预算；runtimeKey（运行时键）
+ * 只用于区分网页入口归属，不能据此创建第二个播放器或复制资源。统一工厂还能保证两个入口
+ * 的命令能力完全一致，避免新增场景时漏掉空白清除、节点聚焦或场景切换能力。
+ */
+function createPowerPlantRuntimeRegistration(
+  runtimeKey: 'gas-plant-release' | 'coal-plant-release',
+  configuration: DeploymentConfiguration,
+): WebglRuntimeRegistration {
+  return {
+    runtimeKey: toRuntimeKey(runtimeKey),
+    buildId: 'local-webgl-topology-link',
+    configVersion: LOCAL_PROCESS_CONFIG_VERSION,
+    sceneMappingVersion: LOCAL_PROCESS_CONFIG_VERSION,
+    protocolVersion: WEBGL_PROTOCOL_VERSION,
+    resourceDigest: 'local-webgl-topology-link',
+    entryUrl: configuration.unityEntryUrl,
+    childOrigin: configuration.unityChildOrigin,
+    // Unity iframe 的直接父窗口是本嵌入壳；必须使用独立精确来源，不能错误沿用外层宿主页来源。
+    allowedParentOrigin: configuration.unityParentOrigin,
+    capabilities: ['init', 'resize', 'switchScene', 'enterProcessStep', 'resetScene', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
+    eventCapabilities: ['ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'selectionCleared', 'disposed'],
+    resourceBudget: {
+      initialMemoryMb: 256,
+      maxConcurrentInstances: 1,
+      cacheMode: 'none',
+    },
+  }
+}
+
+/**
+ * 只有部署配置完整时才同时发布燃气与燃煤入口登记；构造时不接受业务页面提供的 URL。
  * 测试可显式传入受控读取结果，生产代码只能使用当前构建环境的全局读取结果。
  */
 export function createRuntimeRegistry(configurationResult: DeploymentConfigurationLoadResult): ReadonlyWebglRuntimeRegistry {
-  const registrations: readonly WebglRuntimeRegistration[] = configurationResult.configuration
+  const configuration = configurationResult.configuration
+  const registrations: readonly WebglRuntimeRegistration[] = configuration
     ? [
-      {
-        runtimeKey: toRuntimeKey('gas-plant-release'),
-        buildId: 'local-webgl-topology-link',
-        configVersion: LOCAL_PROCESS_CONFIG_VERSION,
-        sceneMappingVersion: LOCAL_PROCESS_CONFIG_VERSION,
-        protocolVersion: WEBGL_PROTOCOL_VERSION,
-        resourceDigest: 'local-webgl-topology-link',
-        entryUrl: configurationResult.configuration.unityEntryUrl,
-        childOrigin: configurationResult.configuration.unityChildOrigin,
-        // Unity iframe 的直接父窗口是本嵌入壳；必须使用独立精确来源，不能错误沿用外层宿主页来源。
-        allowedParentOrigin: configurationResult.configuration.unityParentOrigin,
-        capabilities: ['init', 'resize', 'switchScene', 'enterProcessStep', 'resetScene', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
-        eventCapabilities: ['ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'disposed'],
-        resourceBudget: {
-          initialMemoryMb: 256,
-          maxConcurrentInstances: 1,
-          cacheMode: 'none',
-        },
-      },
+        createPowerPlantRuntimeRegistration('gas-plant-release', configuration),
+        createPowerPlantRuntimeRegistration('coal-plant-release', configuration),
       ]
     : []
 

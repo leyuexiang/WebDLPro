@@ -357,11 +357,19 @@ namespace WebDLPro.Unity.SceneRuntime
                     yield return null;
                 }
 
-                _sceneBundleLoader?.ReleaseSceneBundle(previousEntry.SceneId);
+                /*
+                 * 先断开协调器和桥接订阅持有的控制器引用，再执行资源包租约与未使用资源回收；
+                 * 否则全局未使用资源回收仍会把旧控制器可达的网格、
+                 * 材质和纹理判定为在用，燃煤→燃气→燃煤回切时内存峰值会持续叠加。
+                 */
                 _activeController = null;
                 _activeEntry = null;
                 _activeScene = default;
                 ActiveControllerChanged?.Invoke(null);
+                if (_sceneBundleLoader != null)
+                {
+                    yield return _sceneBundleLoader.ReleaseSceneBundleAndUnusedAssetsAsync(previousEntry.SceneId);
+                }
             }
 
             if (!_transactionGate.IsCurrent(request.Token))
@@ -612,10 +620,16 @@ namespace WebDLPro.Unity.SceneRuntime
                     yield return null;
                 }
             }
-            _sceneBundleLoader?.ReleaseSceneBundle(attempt.SceneId);
+
+            // 失败或被取代的尝试同样可能已经实例化大体量资源。先清空尝试对象的重引用，
+            // 再在恢复上一场景前完成同一事务边界回收，避免失败恢复路径重复触发内存不足。
             attempt.Scene = default;
             attempt.Controller = null;
             attempt.Success = false;
+            if (_sceneBundleLoader != null)
+            {
+                yield return _sceneBundleLoader.ReleaseSceneBundleAndUnusedAssetsAsync(attempt.SceneId);
+            }
         }
 
         private void CommitActiveScene(BusinessSceneCatalogEntry entry, Scene scene, IBusinessSceneController controller, string transitionId)

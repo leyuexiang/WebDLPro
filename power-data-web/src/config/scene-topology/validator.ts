@@ -366,6 +366,13 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
       if (edgeItem.protocolLabel !== undefined && (typeof edgeItem.protocolLabel !== 'string' || edgeItem.protocolLabel.length === 0)) {
         appendIssue(issues, 'topology.edge-protocol-label', '拓扑连线协议标签必须是非空字符串。')
       }
+      // 线色和线型只负责复现资料图片；显式校验格式，禁止把任意字符串当成样式注入画布。
+      if (edgeItem.lineColor !== undefined && (typeof edgeItem.lineColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(edgeItem.lineColor))) {
+        appendIssue(issues, 'topology.edge-line-color', '拓扑连线颜色必须是六位十六进制颜色值。')
+      }
+      if (edgeItem.lineStyle !== undefined && edgeItem.lineStyle !== 'solid' && edgeItem.lineStyle !== 'dashed') {
+        appendIssue(issues, 'topology.edge-line-style', '拓扑连线线型只能是 solid 或 dashed。')
+      }
       if (edgeItem.evidenceStatus !== undefined && !['verified', 'pending-confirmation', 'conceptual'].includes(String(edgeItem.evidenceStatus))) {
         appendIssue(issues, 'topology.edge-evidence-status', '拓扑连线证据状态无效。')
       }

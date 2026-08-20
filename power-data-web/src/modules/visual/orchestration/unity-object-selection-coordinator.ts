@@ -2,6 +2,7 @@ import { toSceneNodeId, validateStableIdentifier } from '@/config/scene-topology
 import type { NodeId, SceneId, SceneNodeId, TopologyId } from '@/config/scene-topology/identifiers'
 import type { TopologyRegistry } from '@/config/scene-topology/topology-registry'
 import type { SceneObjectSelectedPayload } from '@/host-bridge/host-protocol'
+import type { VisualizationSelectionCleared } from '@/modules/visual/runtime/visualization-runtime-host'
 import type { VisualizationCoordinatorFacade } from '@/modules/visual/orchestration/visualization-coordinator-facade'
 import type { VisualizationObjectSelection } from '@/modules/visual/runtime/visualization-runtime-host'
 import type { TopologyRuntime } from '@/modules/visual/topology/topology-runtime'
@@ -110,6 +111,56 @@ export class UnityObjectSelectionCoordinator {
       contextRevision: context.contextRevision,
       correlationId,
     }
+  }
+
+  /**
+   * 将 Unity 三维空白点击转换为当前拓扑的空选择。
+   * 该入口只更新二维状态，不下发 clearSelection，避免“Unity 清除 → 前端回发 → Unity 再清除”的回环。
+   */
+  public resolveCleared(selection: VisualizationSelectionCleared): boolean {
+    const incomingMessageId = selection.messageId
+    if (!isBoundedIncomingMessageId(incomingMessageId)) {
+      this.recordDiagnostic('unity.selection-clear.correlation.invalid', 'unity-selection-clear-invalid')
+      return false
+    }
+    if (this.handledIncomingMessageIds.has(incomingMessageId)) return false
+    this.rememberIncomingMessageId(incomingMessageId)
+    const correlationId = this.createCorrelationId()
+
+    const snapshot = this.facade.getSnapshot()
+    const context = snapshot.stableContext
+    const activeTopology = this.topologyRuntime.getActiveTopology()
+    if (!context || snapshot.runtimeStatus !== 'ready' || !activeTopology) {
+      this.recordDiagnostic('unity.selection-clear.context.unavailable', correlationId)
+      return false
+    }
+    if (activeTopology.sceneId !== context.sceneId || activeTopology.topologyId !== context.topologyId) {
+      this.recordDiagnostic('unity.selection-clear.topology.mismatch', correlationId)
+      return false
+    }
+    if (selection.payload.sceneId !== context.sceneId) {
+      this.recordDiagnostic('unity.selection-clear.scene.mismatch', correlationId)
+      return false
+    }
+    if (!snapshot.sceneActivationId || selection.payload.sceneActivationId !== snapshot.sceneActivationId) {
+      this.recordDiagnostic('unity.selection-clear.activation.mismatch', correlationId)
+      return false
+    }
+
+    const selectionResult = this.facade.submit({
+      type: 'selection.replace',
+      nodeIds: [],
+      routeIds: [],
+      source: 'unity',
+      sceneNodeId: null,
+    })
+    if (selectionResult.status !== 'accepted') {
+      this.recordDiagnostic('unity.selection-clear.commit.rejected', correlationId)
+      return false
+    }
+
+    this.topologyRuntime.setSelection([], [])
+    return true
   }
 
   /** 释放时清除有限去重表，避免被卸载的嵌入壳保留内层关联标识。 */

@@ -22,35 +22,22 @@ function createTopology(overrides: Partial<TopologyDefinition> = {}): TopologyDe
 }
 
 describe('拓扑面板展示模型', () => {
-  it('从当前拓扑配置读取标题、已声明图例和设备状态，不依赖燃气固定文本', () => {
+  it('从当前拓扑配置读取标题和已声明图例，不依赖燃气固定文本或状态摘要', () => {
     const presentation = createTopologyPanelPresentation(createTopology())
 
     expect(presentation.title).toBe('风电场控制拓扑')
     expect(presentation.legends.map((legend) => legend.label)).toEqual(['已确认', '待确认'])
-    expect(presentation.statusSummary).toContain('正常 1')
-    expect(presentation.statusSummary).toContain('告警 1')
-    expect(presentation.statusSummary).not.toContain('燃气')
+    expect(presentation.emptyMessage).toBe('')
   })
 
   it('空拓扑保留配置标题并显示不猜测结构的明确状态', () => {
     const presentation = createTopologyPanelPresentation(createTopology({ title: '配电网概览', nodes: [], edges: [] }))
 
     expect(presentation).toMatchObject({ title: '配电网概览', legends: [], isEmpty: true })
-    expect(presentation.statusSummary).toContain('不会根据页面名称')
+    expect(presentation.emptyMessage).toContain('不会根据页面名称')
   })
 
-  it('运行时节点状态快照只覆盖已声明节点，缺失快照值回退到拓扑配置基线', () => {
-    const topology = createTopology()
-    const presentation = createTopologyPanelPresentation(topology, new Map([
-      [toProcessNodeId('wind-controller'), 'fault' as const],
-    ]))
-
-    expect(presentation.statusSummary).toContain('正常 0')
-    expect(presentation.statusSummary).toContain('告警 1')
-    expect(presentation.statusSummary).toContain('故障 1')
-  })
-
-  it('任意拓扑均按固定顺序呈现四态和已声明的四类连线证据，不复制场景专用组件', () => {
+  it('任意拓扑均只呈现已声明的连线证据图例，不复制场景专用组件', () => {
     const presentation = createTopologyPanelPresentation(createTopology({
       title: '微电网自治控制拓扑',
       nodes: [
@@ -69,7 +56,7 @@ describe('拓扑面板展示模型', () => {
 
     expect(presentation.title).toBe('微电网自治控制拓扑')
     expect(presentation.legends.map((legend) => legend.label)).toEqual(['已确认', '待确认', '概念连接', '未分类关系'])
-    expect(presentation.statusSummary).toContain('正常 1，告警 1，故障 1，离线 1')
+    expect(presentation.emptyMessage).toBe('')
   })
 
   it('空白配置标题只降级为通用标题，不回退到任一业务场景名称', () => {

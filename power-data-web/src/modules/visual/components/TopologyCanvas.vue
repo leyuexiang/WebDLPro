@@ -91,6 +91,14 @@ function syncNodeStatuses(): void {
   updateCoordinator?.updateNodeStatuses(props.nodeStatuses ?? emptyNodeStatuses)
 }
 
+/**
+ * 浏览器全屏仅切换展示倍率，不能借用用户缩放实现：后者会改变已保存的视图状态，
+ * 使退出全屏后无法回到原位置。适配器会同步放大图元、节点标题、层级标题、连线文字和避让边界。
+ */
+function syncPresentationScale(): void {
+  adapter?.setPresentationScale(props.fullscreen ? 2 : 1)
+}
+
 /** 容器变化时只调整当前画布尺寸；适配器会合并多次回调为一帧重绘。 */
 function handleResize(entries: readonly ResizeObserverEntry[]): void {
   const entry = entries[0]
@@ -306,6 +314,8 @@ onMounted(() => {
   if (!container || !canvas) return
   adapter = new CanvasTopologyAdapter(canvas)
   updateCoordinator = new TopologyCanvasUpdateCoordinator(adapter)
+  // 首次直接以当前容器模式建图，避免从全屏打开时先绘制一帧常规尺寸图元。
+  syncPresentationScale()
   zoomLevel.value = 1
   resizeObserver = new ResizeObserver(handleResize)
   resizeObserver.observe(container)
@@ -322,6 +332,8 @@ onMounted(() => {
 watch(() => props.topology, syncTopologyDefinition)
 watch(() => [props.selectedNodeIds, props.selectedRouteIds] as const, syncSelection)
 watch(() => props.nodeStatuses, syncNodeStatuses)
+/** 全屏状态变化仅重建受影响的布局与路由缓存，既有画布、用户缩放、平移和选择状态保持不变。 */
+watch(() => props.fullscreen, syncPresentationScale)
 
 /** 断开观察器并释放动画帧，路由切换后不会残留旧页面的 Canvas 回调。 */
 onBeforeUnmount(() => {

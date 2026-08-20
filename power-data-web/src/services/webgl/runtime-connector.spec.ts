@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { toRuntimeKey } from '@/config/process/identifiers'
 import type { WebglRuntimeRegistration } from '@/config/process/types'
-import { WEBGL_PROTOCOL_CHANNEL, WEBGL_PROTOCOL_VERSION, type WebglMessageEnvelope, type WebglObjectSelectedPayload } from './protocol'
+import { WEBGL_PROTOCOL_CHANNEL, WEBGL_PROTOCOL_VERSION, type WebglMessageEnvelope, type WebglObjectSelectedPayload, type WebglSelectionClearedPayload } from './protocol'
 import { WebglRuntimeConnector } from './runtime-connector'
 
 /**
@@ -22,7 +22,7 @@ describe('网页图形受控连接器', () => {
     childOrigin,
     allowedParentOrigin: 'https://platform.example.com',
     capabilities: ['init', 'dispose', 'focusNode', 'clearSelection', 'resize', 'switchScene', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow'],
-    eventCapabilities: ['ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'disposed'],
+    eventCapabilities: ['ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'selectionCleared', 'disposed'],
     resourceBudget: { initialMemoryMb: 128, maxConcurrentInstances: 1, cacheMode: 'versioned' },
   } as const satisfies WebglRuntimeRegistration
 
@@ -74,6 +74,7 @@ describe('网页图形受控连接器', () => {
   function createReadyConnector(
     onCommandFailure = vi.fn(),
     onObjectSelected?: (payload: WebglObjectSelectedPayload, messageId: string) => void,
+    onSelectionCleared?: (payload: WebglSelectionClearedPayload, messageId: string) => void,
   ) {
     const statuses: string[] = []
     const connector = new WebglRuntimeConnector(runtime, 'instance-1', {
@@ -81,6 +82,7 @@ describe('网页图形受控连接器', () => {
       onCommandFailure,
       // 测试按正式回调签名注入，确保连接器不会自行把二维节点字段转换为三维节点字段。
       onObjectSelected,
+      onSelectionCleared,
     })
     connector.startListening()
     connector.attachChildWindow(childWindow as unknown as WindowProxy)
@@ -275,6 +277,38 @@ describe('网页图形受控连接器', () => {
     expect(onObjectSelected).toHaveBeenCalledWith(
       { sceneId: 'gas-power', sceneNodeId: 'scene-node.gas-turbine', sceneActivationId: 'scene-activation.gas-1' },
       'object-selected-canonical',
+    )
+    expect(connector.getRejections()).toHaveLength(1)
+    connector.forceDispose()
+  })
+
+  it('三维空白清除只接受当前场景与物理实例标识，不接受扩展字段', () => {
+    const onSelectionCleared = vi.fn()
+    const { connector } = createReadyConnector(vi.fn(), undefined, onSelectionCleared)
+
+    emit({
+      channel: WEBGL_PROTOCOL_CHANNEL,
+      version: WEBGL_PROTOCOL_VERSION,
+      instanceId: 'instance-1',
+      messageId: 'selection-cleared-canonical',
+      type: 'selectionCleared',
+      payload: { sceneId: 'gas-power', sceneActivationId: 'scene-activation.gas-1' },
+      timestamp: 5,
+    })
+    emit({
+      channel: WEBGL_PROTOCOL_CHANNEL,
+      version: WEBGL_PROTOCOL_VERSION,
+      instanceId: 'instance-1',
+      messageId: 'selection-cleared-invalid',
+      type: 'selectionCleared',
+      payload: { sceneId: 'gas-power', sceneActivationId: 'scene-activation.gas-1', sceneNodeId: '' },
+      timestamp: 6,
+    })
+
+    expect(onSelectionCleared).toHaveBeenCalledTimes(1)
+    expect(onSelectionCleared).toHaveBeenCalledWith(
+      { sceneId: 'gas-power', sceneActivationId: 'scene-activation.gas-1' },
+      'selection-cleared-canonical',
     )
     expect(connector.getRejections()).toHaveLength(1)
     connector.forceDispose()

@@ -38,11 +38,6 @@ import type { TopologyRuntime } from '@/modules/visual/topology/topology-runtime
 import type { TopologyNodeDoubleClickIntent } from '@/modules/visual/topology/topology-node-interaction'
 import AppStatePanel from '@/shared/components/AppStatePanel.vue'
 
-/**
- * 现有燃气配置只保留为已验证的 Unity 单实例启动登记。
- * 二维拓扑一律由下面完成双重校验的正式场景清单提供，不能再把燃气标题、节点或连线作为其他场景的默认值。
- */
-const gasBaseline = computed(() => localProcessConfigLoader.load('gas-overview'))
 const deploymentConfiguration = readDeploymentConfiguration()
 const shellElement = ref<HTMLElement | null>(null)
 const isContainerTooSmall = ref(false)
@@ -69,6 +64,20 @@ const hostBridgeStartup = deploymentConfiguration.configuration
  * 也会因 window.parent 不是当前窗口而跳过，继续等待平台发送 system.init。
  */
 const directAccessMode = new URLSearchParams(window.location.search).get('directAccess') === '1' && window.parent === window
+/** 独立服务入口把初始场景作为受控查询参数传入；只接受当前已发布的燃气、燃煤场景。 */
+const directAccessQuery = new URLSearchParams(window.location.search)
+const requestedInitialSceneId = directAccessQuery.get('sceneId')
+const directAccessSceneId = requestedInitialSceneId === 'coal-power' ? 'coal-power' : 'gas-power'
+/** 直接访问固定进入所选场景总览，禁止查询参数绕过正式清单动作白名单直接选择任意拓扑。 */
+const directAccessTopologyId = `topology.${directAccessSceneId}.overview`
+/**
+ * 本地工艺配置只负责为当前发布场景申请对应的 Unity 单实例运行时。
+ * 二维节点、连线、关键流程和二维—三维映射始终来自完成双重校验的正式场景清单，
+ * 不会把燃气标题或本地占位图元作为燃煤场景的回退内容。
+ */
+const sceneBaseline = computed(() => localProcessConfigLoader.load(
+  directAccessSceneId === 'coal-power' ? 'coal-overview' : 'gas-overview',
+))
 let removeDirectAccessBootstrapListener: (() => void) | undefined
 const hostBridge = hostBridgeStartup?.status === 'ready'
   ? new HostBridge(hostBridgeStartup.context, window.parent, undefined, {
@@ -101,6 +110,7 @@ const startupDeadline = hostBridge
 startupDeadline?.start()
 /** 三维反向选择订阅只在组合根存在期间保留；壳层释放时必须解除，不能让旧 Unity 回调存活。 */
 let unsubscribeUnityObjectSelected: (() => void) | undefined
+let unsubscribeUnitySelectionCleared: (() => void) | undefined
 /** 跨场景加载反馈只在壳层存在期间订阅；卸载时撤销，避免旧 Unity 事件更新新壳。 */
 let unsubscribeUnitySceneLoadProgress: (() => void) | undefined
 /** 反向选择协调器保留至壳层卸载，以便释放其固定容量去重表。 */
@@ -154,7 +164,7 @@ const visualizationMaskVisible = computed(() => {
 /**
  * 壳层只向用户显示有限、脱敏的中文状态；部署地址、错误码、关联标识、外部消息和 Unity 原始错误均不进入界面。
  * 完整诊断模型仍保留给控制台和父页面协议使用。配置错误优先级最高，其次是尺寸不足和原子清单校验，
- * 最后才处理本地燃气基线的拓扑校验失败。
+ * 最后才处理当前场景的本地运行时登记校验失败。
  */
 const shellDiagnostic = computed(() => {
   if (deploymentConfiguration.status === 'invalid') {
@@ -204,9 +214,9 @@ const shellDiagnostic = computed(() => {
     })
   }
 
-  if (!gasBaseline.value.bundle) {
+  if (!sceneBaseline.value.bundle) {
     return createEmbeddedShellDiagnostic('topology-error', {
-      reason: '当前燃气拓扑基线未通过完整性校验，已停止创建可视化运行时。',
+      reason: '当前场景运行时登记未通过完整性校验，已停止创建可视化运行时。',
       correlationId: shellCorrelationId,
     })
   }
@@ -361,8 +371,8 @@ function installDirectAccessBootstrap(): void {
       type: 'system.init',
       timestamp: Date.now(),
       payload: {
-        sceneId: 'gas-power',
-        topologyId: 'topology.gas-power.overview',
+        sceneId: directAccessSceneId,
+        topologyId: directAccessTopologyId,
       },
     }, context.parentOrigin)
     removeDirectAccessBootstrapListener?.()
@@ -452,6 +462,9 @@ function startHostRuntimeCompositionIfReady(): void {
     const selected = unityObjectSelectionCoordinator?.resolve(selection)
     if (selected) composition?.reportSceneObjectSelected(selected)
   })
+  unsubscribeUnitySelectionCleared = runtimeHost.subscribeSelectionCleared((selection) => {
+    unityObjectSelectionCoordinator?.resolveCleared(selection)
+  })
   /**
    * Unity 加载反馈已经由内层连接器按来源、原请求、场景、事务和数值范围校验。
    * 此处仍转换为稳定标识并只交给协调器；协调器会拒绝过期、错场景或非活动事务反馈，目标拓扑不会因此提前激活。
@@ -500,8 +513,10 @@ onBeforeUnmount(() => {
  startupDeadline?.dispose()
   removeDirectAccessBootstrapListener?.()
   removeDirectAccessBootstrapListener = undefined
- unsubscribeUnityObjectSelected?.()
+  unsubscribeUnityObjectSelected?.()
   unsubscribeUnityObjectSelected = undefined
+  unsubscribeUnitySelectionCleared?.()
+  unsubscribeUnitySelectionCleared = undefined
   unsubscribeUnitySceneLoadProgress?.()
   unsubscribeUnitySceneLoadProgress = undefined
   unityObjectSelectionCoordinator?.dispose()
@@ -532,18 +547,18 @@ onBeforeUnmount(() => {
 
     <!-- Unity 启动登记与正式注册表均通过后才创建两类运行时；二者任一缺失都不会把旧燃气拓扑传给画布。 -->
     <div
-      v-else-if="gasBaseline.bundle && manifestState.status === 'ready'"
+      v-else-if="sceneBaseline.bundle && manifestState.status === 'ready'"
       class="embedded-visualization-shell__content"
       :aria-busy="visualizationMaskVisible ? 'true' : 'false'"
     >
       <VisualizationRuntimeHost ref="visualizationRuntimeHost" v-slot="{ status }">
-        <!-- 上半区复用已验证的 Unity 单实例视口和蓝色视觉基线。 -->
+        <!-- 上半区固定取得可用高度的一半，并在其中复用已验证的 Unity 单实例视口和蓝色视觉基线。 -->
         <section
           class="embedded-visualization-shell__scene"
           aria-label="三维场景容器"
           :inert="visualizationMaskVisible"
         >
-          <ProcessScenePanel :result="gasBaseline" />
+          <ProcessScenePanel :result="sceneBaseline" />
           <!-- 运行时尚未就绪时遮罩三维区域，但底层面板仍会登记视口并完成唯一实例初始化。 -->
           <AppStatePanel
             v-if="status === 'idle' || status === 'creating' || status === 'handshaking' || status === 'switching' || status === 'releasing'"
@@ -569,7 +584,7 @@ onBeforeUnmount(() => {
           />
         </section>
 
-        <!-- 下半区始终复用一个画布；它只接受正式原子清单运行时的激活结果，不以燃气配置回退猜测当前拓扑。 -->
+        <!-- 下半区固定取得可用高度的一半，并始终复用一个画布；它只接受正式原子清单运行时的激活结果，不以燃气配置回退猜测当前拓扑。 -->
         <section
           class="embedded-visualization-shell__topology"
           aria-label="二维拓扑容器"
@@ -608,12 +623,12 @@ onBeforeUnmount(() => {
  */
 .embedded-visualization-shell {
   /*
-   * 两个可视化区共用同一工作宽度：先为拓扑保留随视口变化的最小可读高度，
-   * 再在剩余高度内计算满足 16:9 的三维高度和宽度。该值没有固定像素上限，
-   * 2K、4K、8K 与带鱼屏都会按父 iframe 的真实尺寸重新求值。
+   * 两个可视化区在高度方向均分可用空间。三维区域在自己的半区内保持 16:9，
+   * 工作宽度由半区高度反推；拓扑复用该宽度，因此上下容器边界始终对齐。
+   * 计算只读取动态视口尺寸，没有固定像素上限，2K、4K、8K 与带鱼屏都会重新求值。
    */
-  --topology-reserved-block-size: clamp(320px, 42dvh, 460px);
-  --scene-block-size: min(56.25cqw, calc(100dvh - var(--topology-reserved-block-size) - 1px));
+  --visualization-half-block-size: calc((100dvh - 1px) / 2);
+  --scene-block-size: min(56.25cqw, var(--visualization-half-block-size));
   --visualization-work-inline-size: min(100%, calc(var(--scene-block-size) * 16 / 9));
   display: grid;
   inline-size: 100%;
@@ -635,10 +650,10 @@ onBeforeUnmount(() => {
   min-inline-size: 0;
   min-block-size: 0;
   /*
-   * 上方三维视口严格维持 16:9，并从根容器预先计算的剩余高度中取值；下方拓扑先获得
-   * 最小可读高度，再占据其余空间。三维与拓扑内层共用同一工作宽度，避免超宽屏中两者边界错位。
+   * 上下两个容器使用相同的 1fr（剩余空间等分）轨道，因此各占可用高度的一半。
+   * 上方三维视口仍严格维持 16:9；三维与拓扑内层共用同一工作宽度，避免超宽屏中两者边界错位。
    */
-  grid-template-rows: minmax(0, var(--scene-block-size)) minmax(var(--topology-reserved-block-size), 1fr);
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
   gap: 1px;
   /* 两侧留白不是业务容器，统一使用三维区的纯黑基底，避免拓扑青色背景扩展到未占用区域。 */
   background: #020617;
@@ -720,7 +735,7 @@ onBeforeUnmount(() => {
 }
 
 /*
- * 拓扑外层保留全部剩余高度，内层面板却必须与实际 Unity 视口共用宽度并居中。
+ * 拓扑外层固定占据下半区，内层面板与实际 Unity 视口共用宽度并居中。
  * 因此宽屏两侧仅是壳层留白，标题、图例、画布和全屏按钮的左右边界始终与三维容器对齐。
  * 全屏面板已脱离运行壳，不能继承该约束，否则会造成视口越界。
  */
@@ -744,7 +759,8 @@ onBeforeUnmount(() => {
  */
 .embedded-visualization-shell__topology :deep(.topology-panel:not(.topology-panel--fullscreen)) {
   inline-size: var(--visualization-work-inline-size);
-  grid-template-rows: auto auto minmax(0, 1fr);
+  /* 覆盖面板默认网格，保证常规态画布在移除状态摘要后占满第二行。 */
+  grid-template-rows: auto minmax(0, 1fr);
   border: 0;
   border-radius: 0;
 }
@@ -761,15 +777,4 @@ onBeforeUnmount(() => {
   inline-size: min(560px, calc(100% - 32px));
 }
 
-@media (width < 720px) {
-  /* 小宽度优先保留拓扑的文字可读高度，三维仍保持 16:9，不降回旧工作台的多栏布局。 */
-  .embedded-visualization-shell {
-    --topology-reserved-block-size: clamp(300px, 48dvh, 420px);
-  }
-
-  /* 窄屏下三维与拓扑继续读取同一个工作宽度变量，确保视觉边界始终对齐。 */
-  .embedded-visualization-shell__scene :deep(.process-scene--reserved) {
-    inline-size: var(--visualization-work-inline-size);
-  }
-}
 </style>

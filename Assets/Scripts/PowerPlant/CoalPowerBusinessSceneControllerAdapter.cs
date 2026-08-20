@@ -55,7 +55,7 @@ public sealed class CoalPowerBusinessSceneControllerAdapter : IBusinessSceneCont
 
     /// <summary>在场景载入前登记燃煤工厂，注册表只保存工厂，不缓存跨场景控制器对象。</summary>
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
-    private static void RegisterFactory()
+    internal static void RegisterFactory()
     {
         BusinessSceneControllerRegistry.RegisterFactory(CoalPowerSceneId, CreateForScene);
     }
@@ -95,7 +95,7 @@ public sealed class CoalPowerBusinessSceneControllerAdapter : IBusinessSceneCont
             : BusinessSceneCommandResult.Failed("invalid-process-step", message);
     }
 
-    /// <summary>节点聚焦只更新显隐和描边，不移动燃煤场景当前镜头。</summary>
+    /// <summary>节点选择更新显隐和描边；是否自动聚焦由场景控制器的统一选中开关决定。</summary>
     public BusinessSceneCommandResult FocusNode(string sceneNodeId, bool isolate)
     {
         if (!TryUseController(out BusinessSceneCommandResult unavailable))

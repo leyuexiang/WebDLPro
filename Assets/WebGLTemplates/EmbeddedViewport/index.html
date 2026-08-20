@@ -33,11 +33,16 @@
       }
 
       const buildUrl = 'Build';
-      const loaderUrl = `${buildUrl}/{{{ LOADER_FILENAME }}}`;
+      // Unity 资源文件名在不同发布版本中保持不变，而联调服务会为压缩资源设置长期缓存。
+      // 把正式发布标识作为查询参数加入播放器资源 URL（统一资源定位符），确保新基线不会复用旧的 WebAssembly（网页程序集）、
+      // 运行时框架或数据缓存；服务端仍按路径提供文件，不会把查询参数当成磁盘路径。
+      const resourceVersion = encodeURIComponent('{{{ PRODUCT_VERSION }}}');
+      const versionedBuildAsset = (assetPath) => `${assetPath}?release=${resourceVersion}`;
+      const loaderUrl = versionedBuildAsset(`${buildUrl}/{{{ LOADER_FILENAME }}}`);
       const config = {
-        dataUrl: `${buildUrl}/{{{ DATA_FILENAME }}}`,
-        frameworkUrl: `${buildUrl}/{{{ FRAMEWORK_FILENAME }}}`,
-        codeUrl: `${buildUrl}/{{{ CODE_FILENAME }}}`,
+        dataUrl: versionedBuildAsset(`${buildUrl}/{{{ DATA_FILENAME }}}`),
+        frameworkUrl: versionedBuildAsset(`${buildUrl}/{{{ FRAMEWORK_FILENAME }}}`),
+        codeUrl: versionedBuildAsset(`${buildUrl}/{{{ CODE_FILENAME }}}`),
         streamingAssetsUrl: 'StreamingAssets',
         companyName: '{{{ COMPANY_NAME }}}',
         productName: '{{{ PRODUCT_NAME }}}',
@@ -91,7 +96,7 @@
           'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose',
         ];
         const eventCapabilities = [
-          'ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'disposed',
+          'ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'selectionCleared', 'disposed',
         ];
         const gameObjectName = 'BootstrapRuntime';
         const receiveFromParent = (event) => {

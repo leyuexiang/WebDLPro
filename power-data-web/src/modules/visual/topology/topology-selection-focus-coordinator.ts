@@ -30,11 +30,14 @@ export class TopologySelectionFocusCoordinator {
   ) {}
 
   /**
-   * 只有二维拓扑来源可以向三维聚焦；Unity 来源只同步二维选中，绝不向 Unity 回写，阻断选择回环。
-   * 缺少显式三维节点、能力未协商或同一关联标识重复时均无副作用，且不会影响已提交的二维选择。
+   * 只有二维拓扑来源可以影响三维选中；Unity 来源只同步二维选中，绝不向 Unity 回写，阻断选择回环。
+   * 未绑定三维节点的二维图元不能让上一枚三维高亮残留，因此改为发送最小 clearSelection（清除选择）命令；
+   * 能力未协商或同一关联标识重复时不发送聚焦，且始终不会影响已提交的二维选择。
    */
   public async requestFocus(request: TopologySelectionFocusRequest): Promise<boolean> {
-    if (this.disposed || request.source !== 'topology' || !request.sceneNodeId || !this.focusPort.supportsFocusNode()) return false
+    if (this.disposed || request.source !== 'topology') return false
+    if (!request.sceneNodeId) return this.requestClearSelection()
+    if (!this.focusPort.supportsFocusNode()) return false
     if (this.handledSelectionIds.has(request.selectionId)) return false
 
     this.rememberSelection(request.selectionId)

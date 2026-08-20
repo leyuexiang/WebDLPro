@@ -4,6 +4,12 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { assertReleaseArtifact, writeReleaseArtifactIntegrity } from './release-artifact-contract.mjs'
+import {
+  coalPowerProcessSteps,
+  coalPowerSceneNodeMappings,
+  createCoalPowerActions,
+  createCoalPowerTopologies,
+} from './coal-power-topology.mjs'
 
 /**
  * 燃气发电发布包构建器。
@@ -16,11 +22,12 @@ const workspaceRoot = process.cwd()
 const projectRoot = path.resolve(workspaceRoot, '..')
 const releasesRoot = path.join(projectRoot, 'Builds', 'Releases')
 /*
- * 默认复用已完成结构版本4复验的 Unity 正式基线。该目录实际包含十二项下行命令能力、
- * 场景激活标识和节点状态清除协议；构建前仍会通过版本化协议元数据逐项复核，
- * 因此无法用同名文件夹或旧 Unity 压缩产物绕过发布门禁。
+ * 默认复用当前工作区可读取的 Unity 正式基线。此标识必须与
+ * Builds/Releases/<标识>/unity/webgl-protocol-capabilities.json（WebGL 协议能力清单）中的
+ * unityReleaseId 完全一致；构建前会继续逐项复核结构版本和必需命令，避免同名目录或旧压缩产物绕过门禁。
+ * 正式归档或合作方联调若需切换基线，必须通过 --unity-release-id 显式指定并接受同一套门禁校验。
  */
-const defaultUnityReleaseId = 'task051-v4-reverify-20260814-1100'
+const defaultUnityReleaseId = 'power-scenes-unity-local-20260820-003'
 let unityReleaseId = defaultUnityReleaseId
 let host = '127.0.0.1'
 const defaultPort = 5523
@@ -31,13 +38,22 @@ let platformParentOrigin = hostOrigin
 let unityParentOrigin = hostOrigin
 let unityEntryUrl = `${hostOrigin}/unity/index.html`
 let topologyManifestUrl = `${hostOrigin}/scene-topology-manifest.json`
+// 发布脚本默认仍构建燃气回归包；场景参数只在显式选择燃煤时切换清单和入口初始视图。
+let releaseSceneId = 'gas-power'
 const unitySceneMappingVersion = '2026.08.01-local.2'
-const unityRuntimeKey = 'gas-plant-release'
 const unityBuildId = 'local-webgl-topology-link'
 const resourceDigest = 'local-webgl-topology-link'
 
+/**
+ * 网页壳按发布场景选择对应运行时键；两个键仍指向同一个九场景 Unity 构建和同一资源摘要。
+ * 这样燃煤包的握手元数据不再伪装成燃气入口，同时继续满足全页只创建一个 Unity 实例的约束。
+ */
+function getUnityRuntimeKey(sceneId) {
+  return sceneId === 'coal-power' ? 'coal-plant-release' : 'gas-plant-release'
+}
+
 const unityProtocolMetadataFileName = 'webgl-protocol-capabilities.json'
-const expectedUnityProtocolMetadataSchemaVersion = 4
+const expectedUnityProtocolMetadataSchemaVersion = 5
 const expectedUnityProtocolChannel = 'power3d-unity'
 const expectedUnityProtocolVersion = 1
 const expectedSceneChangedSchemaVersion = 2
@@ -66,6 +82,18 @@ const requiredUnityCommandCapabilities = Object.freeze([
   'setNodeVisibility',
   'dispose',
 ])
+// 双向选中依赖 objectSelected（对象选中）和 selectionCleared（选择清除）两类上行事件。
+// 发布前必须校验完整事件能力，不能等到浏览器握手后才发现旧 Unity 包无法形成反向链路。
+const requiredUnityEventCapabilities = Object.freeze([
+  'ready',
+  'ack',
+  'commandResult',
+  'sceneLoadProgress',
+  'sceneChanged',
+  'objectSelected',
+  'selectionCleared',
+  'disposed',
+])
 
 /**
  * 三类包拥有不同发布边界，不能继续用“是否含自测页”间接猜测用途。
@@ -74,9 +102,11 @@ const requiredUnityCommandCapabilities = Object.freeze([
 const releasePackageTypes = Object.freeze(['local-test', 'partner-integration', 'standalone-formal'])
 const loopbackHostNames = new Set(['127.0.0.1', 'localhost', '::1', '[::1]', '0.0.0.0'])
 const localOnlyListenHosts = new Set(['127.0.0.1', 'localhost', '::1', '[::1]'])
+// 合作方平台已固定使用 5575 访问联调服务；生成器和产物门禁共用该约束，避免说明文件、服务监听与平台配置漂移。
+const partnerIntegrationPort = 5575
 const supportedReleaseOptions = new Set([
   '--release-id', '--unity-release-id', '--package-type', '--listen-host', '--port', '--include-self-test',
-  '--public-origin', '--platform-parent-origin', '--unity-parent-origin', '--unity-entry-url', '--manifest-url',
+  '--public-origin', '--platform-parent-origin', '--unity-parent-origin', '--unity-entry-url', '--manifest-url', '--scene',
 ])
 
 /**
@@ -112,6 +142,8 @@ const verifiedGasProcessSteps = Object.freeze([
  * 未指定版本时使用本地时间生成唯一版本；目录已存在时立即失败而不覆盖已有测试包。
  */
 export function readReleaseConfiguration(argumentsList) {
+  // 记录调用方是否显式指定端口，使合作方包既能省略参数自动使用 5575，也能明确拒绝误传的其他端口。
+  let portWasExplicitlyConfigured = false
   const configuration = {
     releaseId: `gas-power-smoke-${formatTimestamp(new Date())}`,
     unityReleaseId: defaultUnityReleaseId,
@@ -128,6 +160,8 @@ export function readReleaseConfiguration(argumentsList) {
     includeSelfTest: false,
     // 合作方联调包和正式包在未提供实际来源时都使用运行时同源模式；固定来源仍可显式启用。
     addressMode: 'fixed-origin',
+    // 默认保持历史燃气回归包；燃煤发布必须通过 --scene coal-power 显式选择。
+    sceneId: 'gas-power',
   }
 
   for (let index = 0; index < argumentsList.length; index += 2) {
@@ -150,6 +184,13 @@ export function readReleaseConfiguration(argumentsList) {
       configuration.packageType = value
       continue
     }
+    if (option === '--scene') {
+      if (value !== 'gas-power' && value !== 'coal-power') {
+        throw new Error('发布场景只能是 gas-power 或 coal-power。')
+      }
+      configuration.sceneId = value
+      continue
+    }
     if (option === '--listen-host') {
       // 仅接收主机名或网络地址本体；协议、路径和空白会让生成的服务脚本产生歧义，因此直接拒绝。
       if (!/^[a-zA-Z0-9:[\].-]+$/.test(value) || value.length > 253) {
@@ -165,6 +206,7 @@ export function readReleaseConfiguration(argumentsList) {
         throw new Error('联调端口必须是 1024—65535 范围内的十进制整数。')
       }
       configuration.port = parsedPort
+      portWasExplicitlyConfigured = true
       continue
     }
     if (option === '--release-id' || option === '--unity-release-id') {
@@ -180,6 +222,14 @@ export function readReleaseConfiguration(argumentsList) {
     if (option === '--unity-parent-origin') configuration.unityParentOrigin = value
     if (option === '--unity-entry-url') configuration.unityEntryUrl = value
     if (option === '--manifest-url') configuration.manifestUrl = value
+  }
+
+  if (configuration.packageType === 'partner-integration') {
+    if (portWasExplicitlyConfigured && configuration.port !== partnerIntegrationPort) {
+      throw new Error(`合作方联调包端口固定为 ${partnerIntegrationPort}，不得使用其他端口。`)
+    }
+    // 未传 --port 时在写入公开说明、服务脚本和发布摘要前统一收敛为平台约定端口。
+    configuration.port = partnerIntegrationPort
   }
 
   return finalizeReleaseConfiguration(configuration)
@@ -386,12 +436,17 @@ export async function ensureUnityBuildSupportsSceneActivation(unitySourceDirecto
     metadata.commandCapabilities,
     requiredUnityCommandCapabilities,
   )
+  const missingEventCapabilities = findMissingRequiredFields(
+    metadata.eventCapabilities,
+    requiredUnityEventCapabilities,
+  )
   if (missingSceneChangedFields.length > 0 ||
       missingSwitchSceneFields.length > 0 ||
       missingSwitchSceneRecoveryFields.length > 0 ||
       missingSetNodeVisualStateFields.length > 0 ||
       missingClearNodeVisualStateFields.length > 0 ||
-      missingCommandCapabilities.length > 0) {
+      missingCommandCapabilities.length > 0 ||
+      missingEventCapabilities.length > 0) {
     throw new Error(
       `Unity 正式基线缺少当前场景协议必填字段：${[
         ...missingSceneChangedFields,
@@ -400,6 +455,7 @@ export async function ensureUnityBuildSupportsSceneActivation(unitySourceDirecto
         ...missingSetNodeVisualStateFields,
         ...missingClearNodeVisualStateFields,
         ...missingCommandCapabilities,
+        ...missingEventCapabilities,
       ].join('、')}。请重新构建 Unity 正式基线。`,
     )
   }
@@ -713,10 +769,120 @@ export async function createGasOnlyManifest(releaseId) {
     manifestVersion,
     // 构建标识保留为当前正式 Unity 发布基线，方便定位该测试包究竟使用哪个网页图形产物。
     unityBuildId: unityReleaseId,
-    unityRuntimeKey,
+    unityRuntimeKey: getUnityRuntimeKey('gas-power'),
     scenes,
     topologies,
     actions: gasActionDefinitions,
+    unitySceneMappings,
+  }
+}
+
+/**
+ * 生成燃煤独立结构清单。
+ *
+ * 燃气自测包继续由 createGasOnlyManifest（燃气独立清单生成器）生成，避免改变既有燃气
+ * 回归用例的 23 节点/22 连线基线；燃煤使用同一九场景闭集和相同协议边界，但只激活
+ * coal-power 的总图、三个过滤视图、四个动作以及 Unity 属性面板已确认的映射。
+ */
+export async function createCoalPowerManifest(releaseId) {
+  const fixturePath = path.join(workspaceRoot, 'tests', 'fixtures', 'scene-topology-contract-valid.json')
+  const fixture = JSON.parse(await readFile(fixturePath, 'utf8'))
+  const manifestVersion = `coal-power-smoke.${releaseId}`
+  const coalTopologies = createCoalPowerTopologies(manifestVersion)
+  const coalActionDefinitions = createCoalPowerActions(manifestVersion)
+
+  const scenes = fixture.scenes.map((scene) => ({
+    ...scene,
+    title: scene.sceneId === 'coal-power' ? '燃煤发电' : `待交付场景：${scene.sceneId}`,
+    // Unity 场景切换协议使用统一映射版本；煤电的三维节点清单另由 unitySceneMappings 显式登记。
+    sceneMappingVersion: unitySceneMappingVersion,
+    resourceVersion: scene.sceneId === 'coal-power' ? `resource.${unityReleaseId}.coal-power` : `placeholder.${scene.sceneId}`,
+    supportedActionIds: scene.sceneId === 'coal-power' ? coalActionDefinitions.map((action) => action.actionId) : [],
+    topologyIds: scene.sceneId === 'coal-power' ? coalTopologies.map((topology) => topology.topologyId) : scene.topologyIds,
+  }))
+
+  const topologies = fixture.topologies.map((topology) => (
+    topology.sceneId === 'coal-power'
+      ? coalTopologies
+      : {
+          ...topology,
+          title: `待交付拓扑：${topology.sceneId}`,
+          configVersion: manifestVersion,
+          nodes: [],
+          edges: [],
+        }
+  )).flat()
+
+  const coalSceneNodeIds = coalPowerSceneNodeMappings.map((mapping) => mapping.sceneNodeId)
+  const unitySceneMappings = fixture.unitySceneMappings.map((mapping) => ({
+    ...mapping,
+    mappingVersion: unitySceneMappingVersion,
+    // 只发布属性面板中真实登记的三个节点和四个流程步骤；煤电当前没有已确认的三维路径。
+    sceneNodeIds: mapping.sceneId === 'coal-power' ? [...coalSceneNodeIds] : [],
+    processSteps: mapping.sceneId === 'coal-power'
+      ? coalPowerProcessSteps.map((step) => ({ ...step }))
+      : [],
+    routeIds: [],
+  }))
+
+  return {
+    manifestVersion,
+    unityBuildId: unityReleaseId,
+    unityRuntimeKey: getUnityRuntimeKey('coal-power'),
+    scenes,
+    topologies,
+    actions: coalActionDefinitions,
+    unitySceneMappings,
+  }
+}
+
+/**
+ * 生成同时承载燃气、燃煤真实配置的原子结构清单。
+ *
+ * 两个独立清单生成器继续保留为场景专项回归夹具；正式发布改用本函数一次装配八张真实拓扑、
+ * 八个受控动作和六组三维映射。initialSceneId（初始场景标识）只决定当前入口使用的运行时别名，
+ * 不再裁剪另一场景内容，因此同一 Unity 实例可在燃气、燃煤之间往返并保持双向选中。
+ */
+export async function createConfiguredPowerScenesManifest(releaseId, initialSceneId = 'gas-power') {
+  if (initialSceneId !== 'gas-power' && initialSceneId !== 'coal-power') {
+    throw new Error('联合清单初始场景只能是 gas-power 或 coal-power。')
+  }
+
+  const [gasManifest, coalManifest] = await Promise.all([
+    createGasOnlyManifest(releaseId),
+    createCoalPowerManifest(releaseId),
+  ])
+  const manifestVersion = `power-scenes.${releaseId}`
+  const coalSceneById = new Map(coalManifest.scenes.map((scene) => [scene.sceneId, scene]))
+  const coalMappingBySceneId = new Map(coalManifest.unitySceneMappings.map((mapping) => [mapping.sceneId, mapping]))
+
+  const scenes = gasManifest.scenes.map((gasScene) => {
+    if (gasScene.sceneId !== 'coal-power') return { ...gasScene }
+    const coalScene = coalSceneById.get(gasScene.sceneId)
+    if (!coalScene) throw new Error('燃煤场景定义缺失，无法生成联合清单。')
+    return { ...coalScene }
+  })
+  const topologies = [
+    ...gasManifest.topologies.filter((topology) => topology.sceneId !== 'coal-power'),
+    ...coalManifest.topologies.filter((topology) => topology.sceneId === 'coal-power'),
+  ].map((topology) => ({ ...topology, configVersion: manifestVersion }))
+  const actions = [...gasManifest.actions, ...coalManifest.actions]
+    .map((action) => ({ ...action, configVersion: manifestVersion }))
+  const unitySceneMappings = gasManifest.unitySceneMappings.map((gasMapping) => {
+    if (gasMapping.sceneId !== 'coal-power') return { ...gasMapping }
+    const coalMapping = coalMappingBySceneId.get(gasMapping.sceneId)
+    if (!coalMapping) throw new Error('燃煤 Unity 映射缺失，无法生成联合清单。')
+    return { ...coalMapping }
+  })
+
+  return {
+    manifestVersion,
+    unityBuildId: unityReleaseId,
+    // 两个键当前指向同一九场景构建；该字段与入口初始场景保持一致，但不会限制后续 switchScene（切换场景）。
+    unityRuntimeKey: getUnityRuntimeKey(initialSceneId),
+    scenes,
+    topologies,
+    actions,
     unitySceneMappings,
   }
 }
@@ -727,7 +893,12 @@ export async function createGasOnlyManifest(releaseId) {
  * 该页面只用于开发和自动化回归，测试按钮与状态文字不会进入平台根入口。
  * 它绝不直接访问 Unity iframe；所有请求都经嵌入壳的清单校验和原子事务编排。
  */
-export function createSelfTestPage(manifestVersion) {
+export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power') {
+  if (initialSceneId !== 'gas-power' && initialSceneId !== 'coal-power') {
+    throw new Error('本地自测页初始场景只能是 gas-power 或 coal-power。')
+  }
+
+  const initialSceneTitle = initialSceneId === 'coal-power' ? '燃煤' : '燃气'
   return `<!doctype html>
 <html lang="zh-CN">
   <head>
@@ -739,8 +910,11 @@ export function createSelfTestPage(manifestVersion) {
     <style>
       html, body, #visualization-shell { inline-size: 100%; block-size: 100%; margin: 0; overflow: hidden; background: #061323; }
       #visualization-shell { display: block; border: 0; }
-      .test-controls { position: fixed; z-index: 2; inset-inline-start: 12px; inset-block-start: 12px; display: grid; gap: 6px; inline-size: min(15rem, calc(100% - 24px)); padding: 10px; border: 1px solid rgb(103 232 249 / 45%); border-radius: 8px; color: #cffafe; background: rgb(8 47 73 / 92%); font: 12px/1.4 system-ui, sans-serif; }
+      .test-controls { position: fixed; z-index: 2; inset-inline-start: 12px; inset-block-start: 12px; display: grid; gap: 8px; inline-size: min(19rem, calc(100% - 24px)); max-block-size: calc(100% - 24px); overflow: auto; padding: 10px; border: 1px solid rgb(103 232 249 / 45%); border-radius: 8px; color: #cffafe; background: rgb(8 47 73 / 92%); font: 12px/1.4 system-ui, sans-serif; }
       .test-controls__title { font-weight: 700; }
+      .test-controls__hint { margin: 0; color: #bae6fd; }
+      .test-controls__scene { display: grid; gap: 5px; padding-block-start: 6px; border-block-start: 1px solid rgb(103 232 249 / 25%); }
+      .test-controls__scene-title { color: #67e8f9; font-weight: 700; }
       .test-controls button { min-block-size: 32px; border: 1px solid rgb(103 232 249 / 45%); border-radius: 5px; color: #e0f2fe; background: #0c4a6e; cursor: pointer; }
       .test-controls button:hover:not(:disabled) { background: #075985; }
       .test-controls button:disabled { opacity: .55; cursor: wait; }
@@ -750,14 +924,25 @@ export function createSelfTestPage(manifestVersion) {
   <body>
     <!-- 仅承载嵌入壳；真实 Unity iframe 由壳内唯一宿主创建，外层测试页绝不直连 Unity。 -->
     <iframe id="visualization-shell" title="燃气发电场景与拓扑嵌入壳" allow="fullscreen"></iframe>
-    <section class="test-controls" aria-label="燃气关键环节测试操作">
-      <span class="test-controls__title">外部流程触发测试</span>
-      <button type="button" data-action-id="action.gas-power.gas-turbine" disabled>燃气轮机关键环节</button>
-      <button type="button" data-action-id="action.gas-power.hrsg" disabled>余热锅炉关键环节</button>
-      <button type="button" data-action-id="action.gas-power.steam-turbine" disabled>蒸汽轮机关键环节</button>
-      <button type="button" data-overview-command disabled>返回燃气总览</button>
+    <section class="test-controls" aria-label="双场景外部消息测试操作">
+      <span class="test-controls__title">双场景外部流程触发测试（手动）</span>
+      <p class="test-controls__hint">按钮会向嵌入壳发送 workflow.trigger（工作流触发）消息，验证场景、总览、关键流程和三维联动。</p>
+      <div class="test-controls__scene" aria-label="燃气发电场景操作">
+        <span class="test-controls__scene-title">燃气发电</span>
+        <button type="button" data-action-id="action.gas-power.overview" data-overview-command disabled>燃气总览</button>
+        <button type="button" data-action-id="action.gas-power.gas-turbine" disabled>燃气轮机关键流程</button>
+        <button type="button" data-action-id="action.gas-power.hrsg" disabled>余热锅炉关键流程</button>
+        <button type="button" data-action-id="action.gas-power.steam-turbine" disabled>蒸汽轮机关键流程</button>
+      </div>
+      <div class="test-controls__scene" aria-label="燃煤发电场景操作">
+        <span class="test-controls__scene-title">燃煤发电</span>
+        <button type="button" data-action-id="action.coal-power.overview" data-overview-command disabled>燃煤总览</button>
+        <button type="button" data-action-id="action.coal-power.combustion" disabled>燃烧系统关键流程</button>
+        <button type="button" data-action-id="action.coal-power.water-steam-cycle" disabled>汽水循环关键流程</button>
+        <button type="button" data-action-id="action.coal-power.power-output" disabled>发电输出关键流程</button>
+      </div>
     </section>
-    <output id="test-status" class="test-status" aria-live="polite">正在建立燃气发电联调链路。</output>
+     <output id="test-status" class="test-status" aria-live="polite">正在建立${initialSceneTitle}发电联调链路。</output>
     <script>
       (() => {
         // 协议常量与 Vue 壳严格一致；只保留本次初始化需要的有限状态，避免测试页累积完整消息或业务载荷。
@@ -767,14 +952,17 @@ export function createSelfTestPage(manifestVersion) {
         const shell = document.querySelector('#visualization-shell');
         const status = document.querySelector('#test-status');
         const actionButtons = Array.from(document.querySelectorAll('[data-action-id]'));
-        const overviewButton = document.querySelector('[data-overview-command]');
-        const commandButtons = [...actionButtons, overviewButton].filter(Boolean);
-        const allowedActionIds = new Set(['action.gas-power.overview', 'action.gas-power.gas-turbine', 'action.gas-power.hrsg', 'action.gas-power.steam-turbine']);
+        const commandButtons = actionButtons;
+        // 测试页只允许清单中已经登记的八个动作，禁止通过页面输入拼接任意场景、拓扑或 Unity 方法。
+        const allowedActionIds = new Set([
+          'action.gas-power.overview', 'action.gas-power.gas-turbine', 'action.gas-power.hrsg', 'action.gas-power.steam-turbine',
+          'action.coal-power.overview', 'action.coal-power.combustion', 'action.coal-power.water-steam-cycle', 'action.coal-power.power-output',
+        ]);
         const shellOrigin = window.location.origin;
         let sessionId = '';
         let messageSequence = 0;
         let contextRevision;
-        let overviewCommitCount = 0;
+        let activeSceneId = '';
 
         /** 所有测试命令共用一个在途门禁，避免人工连点制造与本次验证无关的并发事务。 */
         function setCommandButtonsDisabled(disabled) {
@@ -782,7 +970,7 @@ export function createSelfTestPage(manifestVersion) {
         }
 
         /** 仅用当前会话生成一次受控初始化信封，不接受页面输入或任意场景、拓扑、Unity 方法名。 */
-        function initializeGasPower() {
+        function initializeSelectedScene() {
           if (!sessionId) return;
           messageSequence += 1;
           shell.contentWindow?.postMessage({
@@ -794,8 +982,8 @@ export function createSelfTestPage(manifestVersion) {
             type: 'system.init',
             timestamp: Date.now(),
             payload: {
-              sceneId: 'gas-power',
-              topologyId: 'topology.gas-power.overview',
+              sceneId: '${initialSceneId}',
+              topologyId: 'topology.${initialSceneId}.overview',
               expectedManifestVersion: '${manifestVersion}',
             },
           }, shellOrigin);
@@ -826,16 +1014,10 @@ export function createSelfTestPage(manifestVersion) {
           button.addEventListener('click', () => triggerWorkflow(button.dataset.actionId ?? ''));
         });
 
-        /**
-         * 返回总览发送已登记的 workflow.trigger（工作流触发）动作，不直接清除画布过滤或访问 Unity。
-         * 壳会在同一原子事务中先等待 Unity“overview（总览）”步骤成功，再恢复23节点、22连线来源总图；
-         * 任一步失败都保留上一稳定上下文，避免二维已经总览而三维仍停留在关键流程。
-         */
+        // 保留一个显式总览入口函数，便于浏览器控制台手动执行同一条受控外部消息路径。
         function openGasOverview() {
           triggerWorkflow('action.gas-power.overview');
         }
-
-        overviewButton?.addEventListener('click', openGasOverview);
 
         /** 只接受来自当前嵌入壳、当前来源和当前实例的事件，防止同源旁路页面伪造初始化完成。 */
         window.addEventListener('message', (event) => {
@@ -845,29 +1027,22 @@ export function createSelfTestPage(manifestVersion) {
 
           if (message.type === 'system.ready' && typeof message.sessionId === 'string') {
             sessionId = message.sessionId;
-            status.textContent = '燃气运行时已就绪，正在加载现有燃气发电场景与拓扑。';
-            initializeGasPower();
+             status.textContent = '${initialSceneTitle}运行时已就绪，正在加载现有${initialSceneTitle}发电场景与拓扑。';
+            initializeSelectedScene();
             return;
           }
 
-          if (message.type === 'view.changed' && message.payload?.sceneId === 'gas-power' && Number.isSafeInteger(message.payload?.contextRevision)) {
+          if (message.type === 'view.changed' && (message.payload?.sceneId === 'gas-power' || message.payload?.sceneId === 'coal-power') && Number.isSafeInteger(message.payload?.contextRevision)) {
+            activeSceneId = message.payload.sceneId;
             contextRevision = message.payload.contextRevision;
             setCommandButtonsDisabled(false);
-            if (message.payload?.topologyId === 'topology.gas-power.overview') {
-              overviewCommitCount += 1;
-              if (overviewCommitCount === 1) {
-                status.textContent = '燃气总图与三维场景已完成初始化。';
-              } else if (message.payload?.actionId === 'action.gas-power.overview') {
-                /*
-                 * 只有稳定视图明确关联总览动作，才能说明事务已经等待 Unity 总览成功回执；
-                 * 单纯回到同名二维总图不得复用这条成功文案，端到端回归也会因此保持可判定。
-                 */
-                status.textContent = '燃气总拓扑与三维总览已完成复位。';
-              } else {
-                status.textContent = '燃气总拓扑已恢复，但未确认三维总览动作。';
-              }
+            const sceneTitle = activeSceneId === 'coal-power' ? '燃煤' : '燃气';
+            if (message.payload?.actionId === 'action.gas-power.overview' && message.payload?.topologyId === 'topology.gas-power.overview') {
+              status.textContent = '燃气总拓扑与三维总览已完成复位。';
+            } else if (message.payload?.topologyId === 'topology.' + activeSceneId + '.overview') {
+              status.textContent = sceneTitle + '总览与三维场景已完成切换。';
             } else {
-              status.textContent = '关键环节已切换为 ' + message.payload.topologyId + '，三维聚焦已按动作结果提交。';
+              status.textContent = sceneTitle + '关键流程已切换为 ' + message.payload.topologyId + '，三维动作已完成提交。';
             }
             return;
           }
@@ -884,7 +1059,7 @@ export function createSelfTestPage(manifestVersion) {
             const errorStage = typeof message.payload?.error?.stage === 'string' && /^[a-z0-9.-]{1,64}$/.test(message.payload.error.stage)
               ? message.payload.error.stage
               : 'unknown';
-            status.textContent = '燃气联调初始化未完成（错误码：' + errorCode + '；阶段：' + errorStage + '）。';
+             status.textContent = '${initialSceneTitle}联调初始化未完成（错误码：' + errorCode + '；阶段：' + errorStage + '）。';
             if (Number.isSafeInteger(contextRevision)) setCommandButtonsDisabled(false);
           }
         });
@@ -909,7 +1084,9 @@ export function createSelfTestPage(manifestVersion) {
  * 直接打开根地址且没有查询参数时，入口补齐当前服务来源和 directAccess（直接访问）标记；壳只在顶层窗口
  * 通过同一套 system.ready → system.init（系统就绪→系统初始化）握手显示燃气总览，不改变平台嵌入路径。
  */
-function createIndependentServiceEntryPage() {
+function createIndependentServiceEntryPage(sceneId = 'gas-power') {
+  const sceneTitle = sceneId === 'coal-power' ? '燃煤' : '燃气'
+  const directAccessInstanceId = `${sceneId}-direct-access`
   return `<!doctype html>
 <html lang="zh-CN">
   <head>
@@ -917,7 +1094,7 @@ function createIndependentServiceEntryPage() {
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="power-entry-mode" content="platform-direct-shell-redirect" />
     <link rel="icon" href="data:," />
-    <title>燃气发电场景与拓扑</title>
+    <title>${sceneTitle}发电场景与拓扑</title>
   </head>
   <body>
     <script>
@@ -928,10 +1105,13 @@ function createIndependentServiceEntryPage() {
           shellUrl.search = window.location.search;
         } else {
           shellUrl.searchParams.set('parentOrigin', window.location.origin);
-          shellUrl.searchParams.set('instanceId', 'gas-power-direct-access');
+          shellUrl.searchParams.set('instanceId', '${directAccessInstanceId}');
           shellUrl.searchParams.set('protocolVersion', '1');
           shellUrl.searchParams.set('directAccess', '1');
         }
+        // 场景与总览参数由发布包固定，即使平台附带自身桥接参数也不能把燃煤壳退回燃气运行时登记。
+        shellUrl.searchParams.set('sceneId', '${sceneId}');
+        shellUrl.searchParams.set('topologyId', 'topology.${sceneId}.overview');
         window.location.replace(shellUrl.toString());
       })();
     </script>
@@ -946,9 +1126,16 @@ function createIndependentServiceEntryPage() {
  * 本地测试包需要在没有合作方父页面时自动完成燃气初始化，因此保留同源宿主和唯一壳嵌入框架。
  * 合作方联调包和正式包则必须让平台成为协议壳的直接父页面，不能由我方根页面代替平台发送初始化命令。
  */
-export function createHostPage(manifestVersion, packageType = 'local-test') {
+export function createHostPage(manifestVersion, packageType = 'local-test', sceneId = 'gas-power') {
   if (!releasePackageTypes.includes(packageType)) throw new Error('无法为未知包类型生成发布入口。')
-  if (packageType !== 'local-test') return createIndependentServiceEntryPage()
+  if (sceneId !== 'gas-power' && sceneId !== 'coal-power') throw new Error('无法为未知发布场景生成入口。')
+  if (packageType !== 'local-test') return createIndependentServiceEntryPage(sceneId)
+
+  const sceneTitle = sceneId === 'coal-power' ? '燃煤' : '燃气'
+  const sceneInstanceId = `${sceneId}-platform-host`
+  const sceneTopologyId = `topology.${sceneId}.overview`
+  const sceneInitMessageId = `${sceneId}-platform-init-`
+  const initializeFunctionName = sceneId === 'coal-power' ? 'initializeCoalPower' : 'initializeGasPower'
 
   return `<!doctype html>
 <html lang="zh-CN">
@@ -958,7 +1145,7 @@ export function createHostPage(manifestVersion, packageType = 'local-test') {
     <meta name="power-entry-mode" content="local-bootstrap-host" />
     <!-- 使用空数据站点图标，避免平台测试包产生与业务无关的 favicon 404 请求。 -->
     <link rel="icon" href="data:," />
-    <title>燃气发电场景与拓扑</title>
+    <title>${sceneTitle}发电场景与拓扑</title>
     <style>
       html, body, #visualization-shell { inline-size: 100%; block-size: 100%; margin: 0; overflow: hidden; background: #061323; }
       #visualization-shell { display: block; border: 0; }
@@ -966,20 +1153,20 @@ export function createHostPage(manifestVersion, packageType = 'local-test') {
   </head>
   <body>
     <!-- 平台入口只承载嵌入壳；真实 Unity iframe 由壳内唯一宿主创建，外层不直连 Unity。 -->
-    <iframe id="visualization-shell" title="燃气发电场景与拓扑嵌入壳" allow="fullscreen"></iframe>
+    <iframe id="visualization-shell" title="${sceneTitle}发电场景与拓扑嵌入壳" allow="fullscreen"></iframe>
     <script>
       (() => {
         // 协议常量与 Vue 壳严格一致；平台入口只保留初始化所需的最小会话状态。
         const channel = 'power-scene-topology-shell';
         const version = 1;
-        const instanceId = 'gas-power-platform-host';
+        const instanceId = '${sceneInstanceId}';
         const shell = document.querySelector('#visualization-shell');
         const shellOrigin = window.location.origin;
         let sessionId = '';
         let messageSequence = 0;
 
         /** 仅用当前会话生成一次受控初始化信封，不接受页面输入或任意场景、拓扑和 Unity 方法名。 */
-        function initializeGasPower() {
+        function ${initializeFunctionName}() {
           if (!sessionId) return;
           messageSequence += 1;
           shell.contentWindow?.postMessage({
@@ -987,12 +1174,12 @@ export function createHostPage(manifestVersion, packageType = 'local-test') {
             version,
             instanceId,
             sessionId,
-            messageId: 'gas-power-platform-init-' + messageSequence,
+            messageId: '${sceneInitMessageId}' + messageSequence,
             type: 'system.init',
             timestamp: Date.now(),
             payload: {
-              sceneId: 'gas-power',
-              topologyId: 'topology.gas-power.overview',
+              sceneId: '${sceneId}',
+              topologyId: '${sceneTopologyId}',
               expectedManifestVersion: '${manifestVersion}',
             },
           }, shellOrigin);
@@ -1005,7 +1192,7 @@ export function createHostPage(manifestVersion, packageType = 'local-test') {
           if (!message || message.channel !== channel || message.version !== version || message.instanceId !== instanceId) return;
           if (message.type === 'system.ready' && typeof message.sessionId === 'string') {
             sessionId = message.sessionId;
-            initializeGasPower();
+            ${initializeFunctionName}();
           }
         });
 
@@ -1014,6 +1201,9 @@ export function createHostPage(manifestVersion, packageType = 'local-test') {
         shellUrl.searchParams.set('parentOrigin', shellOrigin);
         shellUrl.searchParams.set('instanceId', instanceId);
         shellUrl.searchParams.set('protocolVersion', String(version));
+        // 本地宿主虽然由父窗口发送初始化命令，壳仍需提前选择与发布场景一致的运行时登记。
+        shellUrl.searchParams.set('sceneId', '${sceneId}');
+        shellUrl.searchParams.set('topologyId', '${sceneTopologyId}');
         shell.src = shellUrl.toString();
       })();
     </script>
@@ -1033,6 +1223,7 @@ export function createStaticServer() {
   const unityOrigin = runtimeSelfOrigin ? undefined : new URL(unityEntryUrl).origin
   const manifestOrigin = runtimeSelfOrigin ? undefined : new URL(topologyManifestUrl).origin
   const publicOrigin = runtimeSelfOrigin ? undefined : hostOrigin
+  const serviceLabel = releaseSceneId === 'coal-power' ? '燃煤' : '燃气'
   return `import { createServer } from 'node:http'
 import { readFile, stat } from 'node:fs/promises'
 import { networkInterfaces } from 'node:os'
@@ -1272,7 +1463,7 @@ server.listen(port, host, () => {
   const accessUrls = addressMode === 'runtime-self-origin'
     ? readRuntimeAccessUrls()
     : [configuredPublicOrigin + '/']
-  console.log('燃气服务已启动。请使用下面列出的地址访问：')
+  console.log('${serviceLabel}服务已启动。请使用下面列出的地址访问：')
   for (const url of accessUrls) console.log('  ' + url)
   console.log('服务监听：' + host + ':' + port + '（仅用于监听，不要直接作为浏览器地址）')
 })
@@ -1290,10 +1481,10 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
  * 它们只读取同一份已通过契约校验的清单。若燃气映射或三个数组缺失，构建在复制资源前失败，
  * 防止“清单无映射、说明却声称已发布”的版本漂移。
  */
-function readGasUnityMappingSummary(manifest) {
-  const mapping = manifest.unitySceneMappings.find((candidate) => candidate.sceneId === 'gas-power')
+function readUnityMappingSummary(manifest, sceneId) {
+  const mapping = manifest.unitySceneMappings.find((candidate) => candidate.sceneId === sceneId)
   if (!mapping || !Array.isArray(mapping.sceneNodeIds) || !Array.isArray(mapping.processSteps) || !Array.isArray(mapping.routeIds)) {
-    throw new Error('燃气 Unity 映射摘要不完整，已停止生成可能与清单不一致的发布说明。')
+    throw new Error(`${sceneId === 'coal-power' ? '燃煤' : '燃气'} Unity 映射摘要不完整，已停止生成可能与清单不一致的发布说明。`)
   }
 
   return Object.freeze({
@@ -1304,12 +1495,20 @@ function readGasUnityMappingSummary(manifest) {
   })
 }
 
+/** 保留燃气摘要函数的稳定内部名称，旧测试和调用点仍可直接复用通用实现。 */
+function readGasUnityMappingSummary(manifest) {
+  return readUnityMappingSummary(manifest, 'gas-power')
+}
+
 /**
  * 平台随包说明只保留联调人员实际需要执行或确认的内容：版本识别、启动停止、平台内嵌、
  * 联调检查、交付边界和常见启动问题。构建过程、内部自测入口、测试证据及研发任务进度
  * 统一留在工程文档中，避免平台方把内部验证入口或研发状态误当成交付能力。
  */
-function createReadme(releaseConfiguration, gasNodeCount, gasEdgeCount) {
+function createReadme(releaseConfiguration, sourceNodeCount, sourceEdgeCount) {
+  const sceneId = releaseConfiguration.sceneId ?? 'gas-power'
+  const sceneTitle = sceneId === 'coal-power' ? '燃煤' : '燃气'
+  const sceneTopologyId = `topology.${sceneId}.overview`
   const isLocalTest = releaseConfiguration.packageType === 'local-test'
   const isRuntimeSelfOrigin = releaseConfiguration.addressMode === 'runtime-self-origin'
   const packagePurpose = isLocalTest ? '本地测试' : releaseConfiguration.packageType === 'partner-integration' ? '合作方联调' : '正式发布'
@@ -1317,20 +1516,30 @@ function createReadme(releaseConfiguration, gasNodeCount, gasEdgeCount) {
     ? `${releaseConfiguration.publicOrigin}/`
     : isRuntimeSelfOrigin
       ? './'
-    : `${releaseConfiguration.publicOrigin}/?parentOrigin=${encodeURIComponent(releaseConfiguration.platformParentOrigin)}&instanceId=gas-power-instance-01&protocolVersion=1`
+    : `${releaseConfiguration.publicOrigin}/?parentOrigin=${encodeURIComponent(releaseConfiguration.platformParentOrigin)}&instanceId=${sceneId}-instance-01&protocolVersion=1`
   const platformEntryUrl = isRuntimeSelfOrigin
-    ? './?parentOrigin=<平台页面来源>&instanceId=gas-power-instance-01&protocolVersion=1'
+    ? `./?parentOrigin=<平台页面来源>&instanceId=${sceneId}-instance-01&protocolVersion=1`
     : publicEntryUrl
   const manifestGuidance = isRuntimeSelfOrigin
     ? '- 场景拓扑结构清单：服务当前地址下的 `/scene-topology-manifest.json`。平台读取其中的 `nodeId`（节点标识）并自行维护真实设备映射，不向本包注入设备编号或改写清单。'
     : `- 场景拓扑结构清单：\`${releaseConfiguration.manifestUrl}\`。平台读取其中的 \`nodeId\`（节点标识）并自行维护真实设备映射，不向本包注入设备编号或改写清单。`
+  const localSelfTestGuidance = isLocalTest
+    ? `
+## 浏览器手动测试入口
+
+打开同目录的 \`self-test.html\`，不要只打开根入口。页面左上角会在握手完成后启用八个外部消息按钮：燃气/燃煤各自的总览和三个关键流程。
+每次点击都会通过 \`workflow.trigger\`（工作流触发）发送消息；页面状态只在场景与拓扑事务稳定提交后更新。
+
+建议手测顺序：燃气总览 → 燃气关键流程 → 燃煤总览 → 燃煤关键流程 → 返回燃气总览；然后点击拓扑节点验证三维聚焦，点击三维对象验证拓扑反向选中，点击空白验证清除选择。
+`
+    : ''
   const localBoundary = isLocalTest
     ? `\n本包只监听本机地址 \`${releaseConfiguration.listenHost}\`，只能用于本机测试，不得作为平台联调或正式交付物。\n`
     : isRuntimeSelfOrigin
       ? `\n服务监听 \`${releaseConfiguration.listenHost}:${releaseConfiguration.port}\`；启动后终端会逐行打印可访问地址：回环地址用于本机验证，非内部 IPv4 地址用于同一局域网的其他电脑。请复制终端列出的实际地址，不要把 \`0.0.0.0\` 当作浏览器地址；地址变化不需要重新构建。直接打开根地址可以独立查看页面；嵌入平台时再附加 \'parentOrigin\'、\'instanceId\' 和 \'protocolVersion\' 查询参数。\n`
     : `\n服务监听 \`${releaseConfiguration.listenHost}:${releaseConfiguration.port}\`；浏览器和平台必须使用公开地址 \`${releaseConfiguration.publicOrigin}/\`，不得使用监听通配地址代替公开地址。\n`
 
-  return `# 燃气发电场景与拓扑联调启动说明
+  return `# ${sceneTitle}发电场景与拓扑联调启动说明
 
 发布标识：${releaseConfiguration.releaseId}
 包类型：${packagePurpose}
@@ -1347,10 +1556,11 @@ node server.mjs
 
 浏览器访问：${publicEntryUrl}
 
-终端显示“燃气服务已启动”并列出至少一个访问地址，即表示静态服务已就绪；若没有局域网 IPv4 地址，请检查网卡状态、防火墙和端口放行规则。
+终端显示“${sceneTitle}服务已启动”并列出至少一个访问地址，即表示静态服务已就绪；若没有局域网 IPv4 地址，请检查网卡状态、防火墙和端口放行规则。
 ${localBoundary}
 
 停止服务：在运行服务的窗口按 \`Ctrl+C\`。
+${localSelfTestGuidance}
 
 ## 平台内嵌
 
@@ -1359,7 +1569,7 @@ ${localBoundary}
 \`\`\`html
 <iframe
   src="${platformEntryUrl}"
-  title="燃气发电场景与拓扑"
+  title="${sceneTitle}发电场景与拓扑"
   allow="fullscreen"
 ></iframe>
 \`\`\`
@@ -1375,20 +1585,20 @@ ${localBoundary}
 
 ## 联调检查
 
-- 页面显示燃气发电三维模型。
-- 页面显示燃气总拓扑图，共 ${gasNodeCount} 个节点、${gasEdgeCount} 条连线。
+- 页面显示${sceneTitle}发电三维模型。
+- 页面显示${sceneTitle}总拓扑图，共 ${sourceNodeCount} 个节点、${sourceEdgeCount} 条连线。
 - 页面只有一个三维实例和一个拓扑画布。
 - 单击已映射的拓扑节点，三维模型聚焦并显示描边。
 - 单击拓扑空白区域，取消二维选中和三维交互描边。
 - 支持三维全屏、拓扑全屏，以及拓扑缩放、平移和重置。
-- 23 个总览源节点都可上报稳定 \`nodeId\`；三个关键环节复用总览节点，不重复生成节点或三维映射。
+- ${sourceNodeCount} 个总览源节点都可上报稳定 \`nodeId\`；三个关键环节复用总览节点，不重复生成节点或三维映射。
 ${manifestGuidance}
 
 ## 联调范围
 
-- 本地测试包打开根地址后自动进入燃气总览；合作方联调包可脱离平台直接打开查看，嵌入平台后再由平台在握手后发送初始化命令。
+- 本地测试包打开根地址后自动进入${sceneTitle}总览（${sceneTopologyId}）；合作方联调包可脱离平台直接打开查看，嵌入平台后再由平台在握手后发送初始化命令。
 - 本包只携带不可变结构清单；平台读取 \`nodeId\` 后在平台内部维护真实设备映射，并按 \`nodeId\` 推送完整节点状态快照。
-- 23 个节点均可上报节点双击事件，但当前只有 3 个节点具备已核验三维映射；其余节点只更新二维状态。
+- ${sourceNodeCount} 个节点均可上报节点双击事件，但当前只有 3 个节点具备已核验三维映射；其余节点只更新二维状态。
 - 平台只使用根地址并传入父来源、实例标识和协议版本，不得修改包内摘要脚本和 Unity 压缩资源。
 
 ## 启动问题
@@ -1407,6 +1617,7 @@ async function main() {
   const releaseConfiguration = readReleaseConfiguration(process.argv.slice(2))
   const releaseId = releaseConfiguration.releaseId
   const includeSelfTest = releaseConfiguration.includeSelfTest
+  releaseSceneId = releaseConfiguration.sceneId
   unityReleaseId = releaseConfiguration.unityReleaseId
   addressMode = releaseConfiguration.addressMode
   /*
@@ -1423,7 +1634,7 @@ async function main() {
   const unitySourceDirectory = path.join(releasesRoot, unityReleaseId, 'unity')
   const finalDirectory = path.join(releasesRoot, releaseId)
   const stagingDirectory = path.join(releasesRoot, '.staging', releaseId)
-  const manifestArtifactDirectory = path.join(workspaceRoot, 'artifacts', 'gas-power-smoke', releaseId)
+  const manifestArtifactDirectory = path.join(workspaceRoot, 'artifacts', `${releaseSceneId}-smoke`, releaseId)
   const manifestPath = path.join(manifestArtifactDirectory, 'scene-topology-manifest.json')
   const reportPath = path.join(manifestArtifactDirectory, 'scene-topology-contract-report.json')
 
@@ -1434,11 +1645,13 @@ async function main() {
   await ensureUnityBuildSupportsSceneActivation(unitySourceDirectory, unityReleaseId)
   await mkdir(manifestArtifactDirectory, { recursive: true })
 
-  const manifest = await createGasOnlyManifest(releaseId)
-  const gasTopology = manifest.topologies.find((topology) => topology.sceneId === 'gas-power')
-  if (!gasTopology) throw new Error('未生成燃气拓扑，已停止打包。')
+  // 正式包始终携带燃气、燃煤两套真实配置；--scene 只决定根入口初始视图，不能再把另一场景降为空占位。
+  const manifest = await createConfiguredPowerScenesManifest(releaseId, releaseSceneId)
+  const selectedUnityRuntimeKey = getUnityRuntimeKey(releaseSceneId)
+  const sourceTopology = manifest.topologies.find((topology) => topology.topologyId === `topology.${releaseSceneId}.overview`)
+  if (!sourceTopology) throw new Error(`未生成${releaseSceneId === 'coal-power' ? '燃煤' : '燃气'}来源总拓扑，已停止打包。`)
   // 映射摘要和发布文件复用同一内存清单，避免发布说明、契约报告与运行时结构发生漂移。
-  const gasUnityMapping = readGasUnityMappingSummary(manifest)
+  const unityMapping = readUnityMappingSummary(manifest, releaseSceneId)
   /*
    * 三类包只发布同一份结构清单。平台不再注入真实设备编号，也不再生成第二份运行时清单；
    * 节点状态通过外部消息按 nodeId 关联，避免结构配置与平台私有设备关系形成双事实源。
@@ -1478,30 +1691,34 @@ async function main() {
   // 本地、联调和正式包均携带壳实际消费的同一份结构清单，平台无需也不得派生第二份设备清单。
   await cp(manifestPath, path.join(stagingDirectory, 'scene-topology-manifest.json'), { force: false, errorOnExist: true })
   // 根入口交付给平台，绝不混入内部测试按钮；自测页仅在内部验证构建显式启用时生成。
-  await writeFile(path.join(stagingDirectory, 'index.html'), createHostPage(manifest.manifestVersion, releaseConfiguration.packageType), 'utf8')
+  await writeFile(path.join(stagingDirectory, 'index.html'), createHostPage(manifest.manifestVersion, releaseConfiguration.packageType, releaseSceneId), 'utf8')
   if (includeSelfTest) {
-    await writeFile(path.join(stagingDirectory, 'self-test.html'), createSelfTestPage(manifest.manifestVersion), 'utf8')
+    // 本地自测页使用联合清单，因此无论入口初始场景为何，都能在同一个 Unity 实例内往返燃气与燃煤。
+    await writeFile(path.join(stagingDirectory, 'self-test.html'), createSelfTestPage(manifest.manifestVersion, releaseSceneId), 'utf8')
   }
   await writeFile(path.join(stagingDirectory, 'server.mjs'), createStaticServer(), 'utf8')
-  await writeFile(path.join(stagingDirectory, 'README.md'), createReadme(releaseConfiguration, gasTopology.nodes.length, gasTopology.edges.length), 'utf8')
+  await writeFile(path.join(stagingDirectory, 'README.md'), createReadme(releaseConfiguration, sourceTopology.nodes.length, sourceTopology.edges.length), 'utf8')
   await writeFile(path.join(stagingDirectory, 'release-manifest.json'), `${JSON.stringify({
     releaseId,
+    sceneId: releaseSceneId,
     packageType: releaseConfiguration.packageType,
     deploymentMode: releaseConfiguration.packageType === 'local-test' ? 'local-loopback' : 'independent-service-iframe',
     platformArtifactPatchingAllowed: false,
-    scope: 'gas-power-ccgt-overview-and-three-filtered-workflows',
+    scope: 'gas-and-coal-overview-and-filtered-workflows',
     unityReleaseId,
-    unityRuntimeKey,
+    unityRuntimeKey: selectedUnityRuntimeKey,
     manifestVersion: manifest.manifestVersion,
     // 平台包必须为 false；该字段让交付审阅无需扫描 HTML 即可确认内部自测页是否随包生成。
     selfTestIncluded: includeSelfTest,
-    gasTopology: { nodeCount: gasTopology.nodes.length, edgeCount: gasTopology.edges.length },
+    sourceTopology: { topologyId: sourceTopology.topologyId, nodeCount: sourceTopology.nodes.length, edgeCount: sourceTopology.edges.length },
+    // 兼容已有燃气发布审阅字段；燃煤包只使用通用 sourceTopology 摘要，避免伪造燃气数量。
+    ...(releaseSceneId === 'gas-power' ? { gasTopology: { nodeCount: sourceTopology.nodes.length, edgeCount: sourceTopology.edges.length } } : {}),
     nodeProtocolPolicy: {
       mode: 'node-id-owned-by-shell',
       associationKey: 'nodeId',
       manifestKind: 'immutable-structure',
-      sourceTopologyId: gasTopology.topologyId,
-      sourceNodeCount: gasTopology.nodes.length,
+      sourceTopologyId: sourceTopology.topologyId,
+      sourceNodeCount: sourceTopology.nodes.length,
       filteredViewsReuseSourceNodeIds: true,
     },
     deployment: {
@@ -1527,11 +1744,12 @@ async function main() {
       publicEntryUrl: releaseConfiguration.addressMode === 'runtime-self-origin' ? './' : `${releaseConfiguration.publicOrigin}/`,
     },
     // 此摘要完全由上方同一发布清单派生，供发布审阅快速确认真实三维能力边界。
-    gasUnityMapping,
+    unityMapping,
+    ...(releaseSceneId === 'gas-power' ? { gasUnityMapping: unityMapping } : {}),
     // 状态消息名称为兼容既有外层协议继续保留 device.states.update，但状态项主键和双击事件均只使用 nodeId。
     includedCapabilities: ['node-events', 'node-states', 'node-scene-mapping'],
     workflowActions: manifest.actions.map((action) => ({ actionId: action.actionId, targetTopologyId: action.targetTopologyId })),
-    excludedCapabilities: ['route-mapping', 'other-eight-scene-content'],
+    excludedCapabilities: ['route-mapping', 'other-seven-scene-content'],
   }, null, 2)}\n`, 'utf8')
 
   /*
@@ -1548,9 +1766,10 @@ async function main() {
     releaseId,
     releaseDirectory: finalDirectory,
     url: addressMode === 'runtime-self-origin' ? 'runtime-self-origin' : `${hostOrigin}/`,
-    gasTopologyNodes: gasTopology.nodes.length,
-    gasTopologyEdges: gasTopology.edges.length,
-    gasUnityMapping,
+    sceneId: releaseSceneId,
+    sourceTopologyNodes: sourceTopology.nodes.length,
+    sourceTopologyEdges: sourceTopology.edges.length,
+    unityMapping,
   }, null, 2)}\n`)
 }
 
