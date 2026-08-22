@@ -4,7 +4,7 @@ using UnityEngine.InputSystem;
 /// <summary>
 /// WebGL 运行时的自由相机控制。
 /// WASD：前后左右，Q/E：下降/上升，Shift：加速，按住鼠标左键拖拽：平移，按住鼠标右键：旋转视角，鼠标滚轮：沿画面中心方向推拉镜头。
-/// 流程和总览保持当前视角；拓扑节点选择会平滑移动到目标模型的轻微俯视取景，任意手动相机输入都会立即取消该取景。
+/// 流程步骤切换会恢复场景初始视角；拓扑节点选择会平滑移动到目标模型的轻微俯视取景，任意手动相机输入都会立即取消该取景。
 /// </summary>
 [DisallowMultipleComponent]
 [RequireComponent(typeof(Camera))]
@@ -40,7 +40,7 @@ public sealed class PowerPlantFreeCameraController : MonoBehaviour
     [SerializeField, Min(1f)] private float _focusDistancePadding = 1.25f;
     [Tooltip("小型模型聚焦时采用的最小镜头距离，避免镜头贴近模型表面。")]
     [SerializeField, Min(0.1f)] private float _focusMinimumDistance = 18f;
-    [Tooltip("拓扑节点选择后镜头移动至目标取景位置所用的非缩放时间。")]
+    [Tooltip("流程步骤切换或拓扑节点选择后镜头移动至目标取景位置所用的非缩放时间。")]
     [SerializeField, Min(0f)] private float _focusDuration = 0.45f;
 
     private float _yaw;
@@ -54,9 +54,17 @@ public sealed class PowerPlantFreeCameraController : MonoBehaviour
     private Vector3 _focusTargetPosition;
     private Quaternion _focusStartRotation;
     private Quaternion _focusTargetRotation;
+    // 初始变换来自当前场景资产中相机首次启用时的世界空间状态；流程切换时直接复用，
+    // 不重新查询场景对象或创建临时数据，保证燃气和燃煤场景各自保留自己的初始视角。
+    private Vector3 _initialPosition;
+    private Quaternion _initialRotation;
 
     private void Awake()
     {
+        // 在任何运行时输入和节点聚焦发生前缓存场景资产的初始世界变换；后续流程切换只读取这份缓存。
+        _initialPosition = transform.position;
+        _initialRotation = transform.rotation;
+
         Vector3 eulerAngles = transform.rotation.eulerAngles;
         _yaw = eulerAngles.y;
         _pitch = NormalizePitch(eulerAngles.x);
@@ -159,6 +167,26 @@ public sealed class PowerPlantFreeCameraController : MonoBehaviour
             }
 
             transform.position += worldMove * speed * Time.unscaledDeltaTime;
+        }
+    }
+
+    /// <summary>
+    /// 从当前镜头位置平滑恢复到场景首次加载时缓存的位置和旋转。
+    /// 流程步骤切换会复用现有的自动取景补间；若切换发生在上一次补间期间，则以当前已到达位置作为新的起点。
+    /// </summary>
+    public void ResetToInitialTransform()
+    {
+        _focusStartPosition = transform.position;
+        _focusStartRotation = transform.rotation;
+        _focusTargetPosition = _initialPosition;
+        _focusTargetRotation = _initialRotation;
+        _focusElapsed = 0f;
+        _isAutoFocusing = _focusDuration > 0f;
+
+        if (!_isAutoFocusing)
+        {
+            transform.SetPositionAndRotation(_initialPosition, _initialRotation);
+            SyncLookAngles();
         }
     }
 

@@ -93,6 +93,33 @@ describe('燃气总览发布契约', () => {
     }
   })
 
+  it('总览显式发布三组重点区域，关键环节不继承区域框', async () => {
+    const manifest = await createGasOnlyManifest('focus-region-contract-test')
+    const overview = manifest.topologies.find((candidate) => candidate.topologyId === 'topology.gas-power.overview')
+    expect(overview?.focusRegions).toEqual([
+      {
+        regionId: 'focus.gas-turbine-control',
+        anchorNodeId: 'inlet-duct',
+        nodeIds: ['inlet-duct', 'fuel-gas-pressure-valve', 'fuel-gas-electric-actuator'],
+        label: '燃机控制区域',
+      },
+      {
+        regionId: 'focus.hrsg-control',
+        anchorNodeId: 'hrsg',
+        nodeIds: ['hrsg', 'hrsg-drum-level-sensor'],
+        label: '余热锅炉控制区域',
+      },
+      {
+        regionId: 'focus.steam-turbine-control',
+        anchorNodeId: 'steam-turbine',
+        nodeIds: ['steam-turbine', 'steam-main-control-valve'],
+        label: '蒸汽轮机控制区域',
+      },
+    ])
+    expect(manifest.topologies.filter((topology) => topology.filter !== undefined).every((topology) => topology.focusRegions === undefined)).toBe(true)
+    expect(validateSceneTopologyManifest(manifest)).toEqual([])
+  })
+
   it('运行时同源服务打印实际访问地址而不是内部占位符', () => {
     const serverSource = createStaticServer()
     expect(serverSource).toContain("import { networkInterfaces } from 'node:os'")

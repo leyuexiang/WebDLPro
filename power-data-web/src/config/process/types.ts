@@ -120,6 +120,15 @@ export interface TopologyNodeDefinition {
   statusUpdatedAt?: string
   detailKey?: DetailKey
   metricKeys: readonly MetricKey[]
+  /**
+   * 仅供单画布旁的独立按钮发出本地下钻意图；内容解析由面板完成，
+   * 画布不会据此调用三维引擎、状态仓库或外层消息桥。
+   */
+  drilldown?: {
+    enabled: true
+    contentKey: string
+    trigger: 'button'
+  }
 }
 
 /** 仅 verified 连线可引用已确认三维路由；其他连线保留二维说明，不产生三维控制。 */
@@ -139,6 +148,17 @@ export interface TopologyEdgeDefinition {
 }
 
 /**
+ * 总览图中的重点区域。区域由显式节点集合定义，避免根据标题、坐标或连线猜测三维模型的子节点。
+ * anchorNodeId（锚点节点）必须是当前区域内已绑定三维模型的入口节点；nodeIds 包含锚点及其需要强调的子节点。
+ */
+export interface TopologyFocusRegionDefinition {
+  regionId: string
+  anchorNodeId: ProcessNodeId
+  nodeIds: readonly ProcessNodeId[]
+  label?: string
+}
+
+/**
  * 拓扑定义与页面严格同版本发布，图形适配器只消费这份纯数据模型。
  * title（标题）属于拓扑配置而非组件常量，使九个场景和同场景多图能够复用同一个面板。
  */
@@ -149,6 +169,8 @@ export interface TopologyDefinition {
   layers?: readonly TopologyLayerDefinition[]
   nodes: readonly TopologyNodeDefinition[]
   edges: readonly TopologyEdgeDefinition[]
+  /** 重点区域仅由总览拓扑声明；过滤/关键环节视图不得携带该字段。 */
+  focusRegions?: readonly TopologyFocusRegionDefinition[]
 }
 
 /** 数据绑定仅描述指标语义与可用性，当前未接实时契约时不填造指标数值。 */

@@ -1,10 +1,17 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import type { ProcessNodeId, RouteId } from '@/config/process/identifiers'
 import type { TopologyDefinition, TopologyDeviceStatus } from '@/config/process/types'
+import type { TopologyDrilldownContent } from '@/config/scene-topology/types'
+import type { TopologyDrilldownLookupResult } from '@/config/scene-topology/topology-drilldown-registry'
 import TopologyCanvas from '@/modules/visual/components/TopologyCanvas.vue'
 import { createTopologyPanelPresentation } from '@/modules/visual/components/topology-panel-presentation'
 import type { TopologyCanvasController } from '@/modules/visual/components/topology-canvas-controller'
+import {
+  TopologyDrilldownCanvasViewSession,
+  type TopologyDrilldownCloseReason,
+} from '@/modules/visual/components/topology-drilldown-canvas-view-session'
+import TopologyDrilldownOverlay from '@/modules/visual/drilldown/TopologyDrilldownOverlay.vue'
 
 const props = defineProps<{
   topology: TopologyDefinition
@@ -12,6 +19,10 @@ const props = defineProps<{
   selectedRouteIds: readonly RouteId[]
   /** 状态快照是独立运行时数据，不会改写当前拓扑定义或触发画布路径重建。 */
   nodeStatuses?: ReadonlyMap<ProcessNodeId, TopologyDeviceStatus>
+  /** 内容解析保持只读和常数时间；没有解析器时入口仍显示固定空态，不按标题生成内容。 */
+  resolveDrilldownContent?: (contentKey: string, version: string) => TopologyDrilldownLookupResult
+  /** 由壳层稳定上下文门禁控制；场景切换期间隐藏旧拓扑遗留的下钻入口。 */
+  drilldownEnabled?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -23,8 +34,23 @@ const emit = defineEmits<{
 }>()
 
 const panelElement = ref<HTMLElement | null>(null)
+const panelTitleElement = ref<HTMLHeadingElement | null>(null)
 const isFullscreen = ref(false)
 const topologyCanvas = ref<TopologyCanvasController | null>(null)
+const drilldownOverlay = ref<InstanceType<typeof TopologyDrilldownOverlay> | null>(null)
+/** 独立会话统一消费画布快照，确保同一旧快照不会被重复恢复或跨拓扑复用。 */
+const canvasViewSession = new TopologyDrilldownCanvasViewSession()
+const activeDrilldown = shallowRef<{
+  content?: TopologyDrilldownContent
+  errorMessage?: string
+  triggerElement: HTMLButtonElement
+} | null>(null)
+/** 浏览器可能先发 fullscreenchange（全屏变化）再把同一次 Escape（退出键）交给文档，需短时去重。 */
+let lastNativeFullscreenExitAt = Number.NEGATIVE_INFINITY
+/** 从覆盖层进入原生全屏后，下一次退出键只负责退出全屏，不得同时关闭说明层。 */
+let preserveOverlayForNextEscape = false
+
+const isDrilldownOpen = computed(() => activeDrilldown.value !== null)
 
 /**
  * 组合根只能取得当前已挂载画布的受控端口，不能越过面板创建第二个 Canvas（画布）。
@@ -48,7 +74,12 @@ const presentation = computed(() => createTopologyPanelPresentation(props.topolo
  * 或其他元素接管全屏时，按钮名称和画布尺寸都会跟随 fullscreenchange（全屏变化）恢复。
  */
 function synchronizeFullscreenState(): void {
+  const wasFullscreen = isFullscreen.value
   isFullscreen.value = document.fullscreenElement === panelElement.value
+  if (!wasFullscreen && isFullscreen.value && isDrilldownOpen.value) preserveOverlayForNextEscape = true
+  if (wasFullscreen && !isFullscreen.value && isDrilldownOpen.value) {
+    lastNativeFullscreenExitAt = globalThis.performance.now()
+  }
 }
 
 /**
@@ -61,6 +92,8 @@ async function toggleFullscreen(): Promise<void> {
 
   try {
     if (document.fullscreenElement === panel) {
+      // 用户点击覆盖层自身的退出全屏按钮不需要保留下一次 Escape（退出键）。
+      preserveOverlayForNextEscape = false
       await document.exitFullscreen()
       return
     }
@@ -72,17 +105,95 @@ async function toggleFullscreen(): Promise<void> {
   }
 }
 
+/**
+ * 打开前只保存一次正式画布视图快照；说明内容必须同时匹配当前节点、内容键和拓扑版本。
+ * 所有失败都停留在局部固定空态，不替换正式拓扑、发送三维命令或触发外层事务。
+ */
+async function handleOpenDrilldown(nodeId: ProcessNodeId, contentKey: string, triggerElement: HTMLButtonElement): Promise<void> {
+  const sourceNode = props.topology.nodes.find((node) => node.nodeId === nodeId)
+  canvasViewSession.capture(props.topology.topologyKey, topologyCanvas.value?.getViewState())
+
+  let content: TopologyDrilldownContent | undefined
+  let errorMessage: string | undefined
+  if (!sourceNode || sourceNode.drilldown?.contentKey !== contentKey) {
+    errorMessage = '当前拓扑中不存在匹配的下钻入口。'
+  } else if (!props.resolveDrilldownContent) {
+    errorMessage = '下钻说明资源尚未加载。'
+  } else {
+    const result = props.resolveDrilldownContent(contentKey, props.topology.configVersion)
+    if (result.status === 'missing') errorMessage = '下钻说明内容缺失。'
+    else if (result.status === 'version-mismatch') errorMessage = '下钻说明内容版本与当前拓扑不一致。'
+    else if (String(result.content.sourceNodeId) !== String(nodeId)) errorMessage = '下钻说明内容与当前入口不匹配。'
+    else if (result.content.nodes.length === 0 || result.content.edges.length === 0) errorMessage = '下钻说明内容为空。'
+    else content = result.content
+  }
+
+  activeDrilldown.value = { content, errorMessage, triggerElement }
+  await nextTick()
+  drilldownOverlay.value?.focusInitial()
+}
+
+/**
+ * 普通关闭恢复同一拓扑的画布数值快照；拓扑切换关闭只丢弃旧快照，不得覆盖新拓扑刚恢复的视图。
+ * 全程不调用 prepare/activate（准备/激活）且不重建 Canvas（画布）；触发按钮消失时焦点回退到面板标题。
+ */
+async function closeDrilldown(reason: TopologyDrilldownCloseReason = 'regular-close', returnFocus = true): Promise<void> {
+  const previous = activeDrilldown.value
+  if (!previous) return
+  activeDrilldown.value = null
+  preserveOverlayForNextEscape = false
+  // 在等待界面刷新前先消费快照；拓扑切换路径会在此处立即丢弃旧拓扑状态。
+  const snapshot = canvasViewSession.finish(reason)
+  await nextTick()
+  // 普通关闭等待期间也可能发生拓扑切换，因此恢复前必须再次核对快照归属。
+  if (snapshot?.topologyKey === props.topology.topologyKey) {
+    topologyCanvas.value?.restoreViewState(snapshot.viewState)
+  }
+  if (!returnFocus) return
+  if (previous.triggerElement.isConnected) previous.triggerElement.focus()
+  else panelTitleElement.value?.focus()
+}
+
+/** 原生全屏中的第一次退出键交给浏览器退出全屏；常规态退出键只关闭局部覆盖层。 */
+function handleDocumentKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'Escape' || !isDrilldownOpen.value) return
+  if (preserveOverlayForNextEscape) {
+    preserveOverlayForNextEscape = false
+    return
+  }
+  if (isFullscreen.value || document.fullscreenElement === panelElement.value) return
+  // 同一次物理退出键不得同时退出原生全屏和关闭覆盖层；稍后的第二次退出键仍按正常关闭处理。
+  if (globalThis.performance.now() - lastNativeFullscreenExitAt < 350) return
+  event.preventDefault()
+  void closeDrilldown()
+}
+
 /** 监听浏览器原生 Esc 与权限状态变化；组件卸载后立即移除，避免多拓扑切换累积监听器。 */
-onMounted(() => document.addEventListener('fullscreenchange', synchronizeFullscreenState))
-onBeforeUnmount(() => document.removeEventListener('fullscreenchange', synchronizeFullscreenState))
+onMounted(() => {
+  document.addEventListener('fullscreenchange', synchronizeFullscreenState)
+  document.addEventListener('keydown', handleDocumentKeydown)
+})
+
+/** 切换拓扑时立即释放旧说明层；新拓扑必须由自身可见入口重新打开，禁止迟到内容恢复。 */
+watch(() => props.topology.topologyKey, () => {
+  if (isDrilldownOpen.value) void closeDrilldown('topology-change', false)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('fullscreenchange', synchronizeFullscreenState)
+  document.removeEventListener('keydown', handleDocumentKeydown)
+  activeDrilldown.value = null
+  canvasViewSession.clear()
+})
 </script>
 
 <template>
   <section ref="panelElement" :class="['topology-panel', { 'topology-panel--fullscreen': isFullscreen }]" :aria-label="presentation.title">
+    <div class="topology-panel__content" :inert="isDrilldownOpen" :aria-hidden="isDrilldownOpen ? 'true' : undefined">
     <header class="topology-panel__header">
       <div>
         <p class="eyebrow">控制网络拓扑</p>
-        <h2>{{ presentation.title }}</h2>
+        <h2 ref="panelTitleElement" tabindex="-1">{{ presentation.title }}</h2>
       </div>
       <div class="topology-panel__actions">
         <div v-if="presentation.legends.length > 0" class="topology-panel__legend" aria-label="当前拓扑连线图例">
@@ -111,24 +222,33 @@ onBeforeUnmount(() => document.removeEventListener('fullscreenchange', synchroni
       :selected-route-ids="props.selectedRouteIds"
       :node-statuses="props.nodeStatuses"
       :fullscreen="isFullscreen"
+      :drilldown-enabled="props.drilldownEnabled"
       @select-node="emit('selectNode', $event)"
       @clear-selection="emit('clearSelection')"
       @double-click-node="emit('doubleClickNode', $event)"
+      @open-drilldown="handleOpenDrilldown"
     />
     <!-- 空态提示与隐藏的唯一预备画布独立渲染：保留实例避免切换时重建资源，提示仍准确说明尚无已激活拓扑。 -->
     <p v-if="presentation.isEmpty" class="topology-panel__empty">{{ presentation.emptyMessage }}</p>
     <!-- 与参考原型一致，提供键盘退出提示；按钮本身始终保留为可见的关闭入口。 -->
     <p v-if="isFullscreen" class="topology-panel__fullscreen-hint" role="status">按 Esc 键退出全屏</p>
+    </div>
+    <TopologyDrilldownOverlay
+      v-if="activeDrilldown"
+      ref="drilldownOverlay"
+      :content="activeDrilldown.content"
+      :error-message="activeDrilldown.errorMessage"
+      :fullscreen="isFullscreen"
+      @close="void closeDrilldown()"
+      @toggle-fullscreen="void toggleFullscreen()"
+    />
   </section>
 </template>
 
 <style scoped>
 .topology-panel {
-  display: grid;
+  position: relative;
   min-block-size: 0;
-  /* 移除常规态状态摘要后，唯一画布直接接管标题之外的全部可用高度。 */
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: var(--space-3);
   overflow: hidden;
   padding: var(--space-4);
   border: 1px solid #0e7490;
@@ -138,6 +258,15 @@ onBeforeUnmount(() => document.removeEventListener('fullscreenchange', synchroni
     #03111d;
   box-shadow: 0 12px 28px rgba(2, 8, 23, 0.2);
   color: #e2f7ff;
+}
+
+/* 原拓扑内容与覆盖层是同一相对定位面板内的兄弟节点；inert 只施加在本容器，覆盖层仍可聚焦。 */
+.topology-panel__content {
+  display: grid;
+  min-block-size: 0;
+  block-size: 100%;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: var(--space-3);
 }
 
 .topology-panel__header {

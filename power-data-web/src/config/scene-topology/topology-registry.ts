@@ -1,6 +1,7 @@
 import type { ActionId, NodeId, SceneId, SceneNodeId, TopologyId } from '@/config/scene-topology/identifiers'
 import type { ActionDefinition, SceneDefinition, SceneTopologyManifest, SceneTopologyManifestValidationIssue, TopologyDefinition, TopologyNodeDefinition } from '@/config/scene-topology/types'
 import { validateSceneTopologyManifest } from '@/config/scene-topology/validator'
+import { TopologyDrilldownRegistry, type TopologyDrilldownLookupResult } from '@/config/scene-topology/topology-drilldown-registry'
 
 /** 设备状态投影到单个二维节点所需的最小预计算信息。 */
 export interface RegisteredNodeTopologyTarget {
@@ -62,6 +63,8 @@ function resolveTopologyViews(topologies: readonly TopologyDefinition[]): readon
       layers: sourceTopology.layers,
       nodes: Object.freeze(nodes),
       edges: Object.freeze(edges),
+      // 关键环节是总图的过滤视图，不展示总览重点区域，避免区域框与子图语义错位。
+      focusRegions: undefined,
     })
   })
 }
@@ -81,12 +84,15 @@ export class TopologyRegistry {
   private readonly nodeIdBySceneNodeReference: ReadonlyMap<string, NodeId>
   /** 状态更新的节点查询使用复合稳定键建立一次索引，避免每条节点状态反复扫描整套拓扑。 */
   private readonly nodeByTopologyReference: ReadonlyMap<string, TopologyNodeDefinition>
+  /** 说明内容使用独立有限索引，不进入可切换拓扑、节点状态和三维映射集合。 */
+  private readonly drilldownRegistry: TopologyDrilldownRegistry
 
   private constructor(manifest: SceneTopologyManifest) {
     const resolvedTopologies = resolveTopologyViews(manifest.topologies)
     this.sceneById = new Map(manifest.scenes.map((scene) => [scene.sceneId, scene]))
     this.topologyById = new Map(resolvedTopologies.map((topology) => [topology.topologyId, topology]))
     this.actionById = new Map(manifest.actions.map((action) => [action.actionId, action]))
+    this.drilldownRegistry = new TopologyDrilldownRegistry(manifest.drilldowns ?? [])
     this.nodeByTopologyReference = new Map(
       resolvedTopologies.flatMap((topology) => topology.nodes.map((node) => [this.createTopologyNodeReference(topology.topologyId, node.nodeId), node] as const)),
     )
@@ -171,6 +177,11 @@ export class TopologyRegistry {
    */
   public getNodeStateProjection(nodeId: NodeId): RegisteredNodeStateProjection | undefined {
     return this.nodeStateProjectionByNodeId.get(nodeId)
+  }
+
+  /** 按入口引用和当前拓扑版本精确读取说明内容；缺失或旧版本不会静默回退。 */
+  public getDrilldownContent(contentKey: string, version: string): TopologyDrilldownLookupResult {
+    return this.drilldownRegistry.get(contentKey, version)
   }
 
   /**

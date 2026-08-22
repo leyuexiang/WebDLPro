@@ -3,25 +3,29 @@ import type { TopologyDeviceStatus, TopologyIconKey } from '@/config/process/typ
 /** 每套图元都必须显式登记四个状态，渲染器不会根据文件名或外部输入拼接资源地址。 */
 type TopologyIconAssetSet = Readonly<Record<TopologyDeviceStatus, string>>
 
-/** 将四态 SVG 归并为只读资源集，缺少任一状态会在类型检查阶段暴露。 */
+/** 将四态图像归并为只读资源集，缺少任一状态会在类型检查阶段暴露。 */
 function createIconAssetSet(normal: string, alarm: string, fault: string, offline: string): TopologyIconAssetSet {
   return { normal, alarm, fault, offline }
 }
 
 /**
- * 燃气控制网络允许使用的拟物化 Cisco 风格图元登记表。
+ * 拓扑网络允许使用的拟物化思科（Cisco）风格图元登记表。
  * 资源使用 Vite 的静态 URL 转换打包，运行时只按受控图元键和四态索引，
  * 既避免业务配置出现文件路径，也避免动态路径造成未审核资源被加载。
+ *
+ * 新图标按已确认语义分批接入：素材“正常”映射 normal，素材“告警”实际映射 fault，
+ * 素材“停止”映射 offline；当前 alarm 尚无对应新素材，因此继续保留既有告警图标。
+ * 只有中文对照名称在三套素材中一致的设备才整组替换，禁止按图层编号或外观猜测类型。
  */
-/** `generic` 仅是画布中性占位，不对应任何 SVG 资源，也不应进入正式图元资产登记。 */
+/** `generic` 仅是画布中性占位，不对应任何图像资源，也不应进入正式图元资产登记。 */
 type RegisteredTopologyIconKey = Exclude<TopologyIconKey, 'generic'>
 
 const topologyIconRegistry: Readonly<Record<RegisteredTopologyIconKey, TopologyIconAssetSet>> = {
   'core-switch': createIconAssetSet(
-    new URL('../../assets/topology-icons/net_通用网络/icon_net_switch_core_normal.svg', import.meta.url).href,
+    new URL('../../assets/topology-icons/net_通用网络/icon_net_switch_core_normal.png', import.meta.url).href,
     new URL('../../assets/topology-icons/net_通用网络/icon_net_switch_core_alarm.svg', import.meta.url).href,
-    new URL('../../assets/topology-icons/net_通用网络/icon_net_switch_core_fault.svg', import.meta.url).href,
-    new URL('../../assets/topology-icons/net_通用网络/icon_net_switch_core_offline.svg', import.meta.url).href,
+    new URL('../../assets/topology-icons/net_通用网络/icon_net_switch_core_fault.png', import.meta.url).href,
+    new URL('../../assets/topology-icons/net_通用网络/icon_net_switch_core_offline.png', import.meta.url).href,
   ),
   firewall: createIconAssetSet(
     new URL('../../assets/topology-icons/sec_网络安全/icon_sec_firewall_normal.svg', import.meta.url).href,
@@ -30,16 +34,16 @@ const topologyIconRegistry: Readonly<Record<RegisteredTopologyIconKey, TopologyI
     new URL('../../assets/topology-icons/sec_网络安全/icon_sec_firewall_offline.svg', import.meta.url).href,
   ),
   server: createIconAssetSet(
-    new URL('../../assets/topology-icons/aux_辅助设备/icon_aux_server_normal.svg', import.meta.url).href,
+    new URL('../../assets/topology-icons/aux_辅助设备/icon_aux_server_normal.png', import.meta.url).href,
     new URL('../../assets/topology-icons/aux_辅助设备/icon_aux_server_alarm.svg', import.meta.url).href,
-    new URL('../../assets/topology-icons/aux_辅助设备/icon_aux_server_fault.svg', import.meta.url).href,
-    new URL('../../assets/topology-icons/aux_辅助设备/icon_aux_server_offline.svg', import.meta.url).href,
+    new URL('../../assets/topology-icons/aux_辅助设备/icon_aux_server_fault.png', import.meta.url).href,
+    new URL('../../assets/topology-icons/aux_辅助设备/icon_aux_server_offline.png', import.meta.url).href,
   ),
   workstation: createIconAssetSet(
-    new URL('../../assets/topology-icons/aux_辅助设备/icon_aux_workstation_normal.svg', import.meta.url).href,
+    new URL('../../assets/topology-icons/aux_辅助设备/icon_aux_workstation_normal.png', import.meta.url).href,
     new URL('../../assets/topology-icons/aux_辅助设备/icon_aux_workstation_alarm.svg', import.meta.url).href,
-    new URL('../../assets/topology-icons/aux_辅助设备/icon_aux_workstation_fault.svg', import.meta.url).href,
-    new URL('../../assets/topology-icons/aux_辅助设备/icon_aux_workstation_offline.svg', import.meta.url).href,
+    new URL('../../assets/topology-icons/aux_辅助设备/icon_aux_workstation_fault.png', import.meta.url).href,
+    new URL('../../assets/topology-icons/aux_辅助设备/icon_aux_workstation_offline.png', import.meta.url).href,
   ),
   'data-gateway': createIconAssetSet(
     new URL('../../assets/topology-icons/disp_调度/icon_disp_data_gateway_normal.svg', import.meta.url).href,
@@ -102,16 +106,16 @@ const topologyIconRegistry: Readonly<Record<RegisteredTopologyIconKey, TopologyI
  * 将键集与缓存容量导出为只读常量，画布可据此证明图片缓存不会随外部配置无限增长。
  */
 export const REGISTERED_TOPOLOGY_ICON_KEYS: readonly RegisteredTopologyIconKey[] = Object.freeze(Object.keys(topologyIconRegistry) as RegisteredTopologyIconKey[])
-/** 每个受控图元固定对应四个状态 SVG，因此图片缓存的理论最大资源数可在编译期审计。 */
+/** 每个受控图元固定对应四个状态图像，因此图片缓存的理论最大资源数可在编译期审计。 */
 export const MAXIMUM_TOPOLOGY_ICON_ASSETS = REGISTERED_TOPOLOGY_ICON_KEYS.length * 4
 
-/** 供投影器与发布校验共同判断图元键是否属于已登记的受控 SVG 资源集合。 */
+/** 供投影器与发布校验共同判断图元键是否属于已登记的受控图像资源集合。 */
 export function hasTopologyIconKey(iconKey: string): iconKey is RegisteredTopologyIconKey {
   return Object.hasOwn(topologyIconRegistry, iconKey)
 }
 
 /**
- * 仅返回已经登记的四态 SVG 地址，调用方无需了解磁盘目录或文件命名。
+ * 仅返回已经登记的四态图像地址，调用方无需了解磁盘目录或文件命名。
  * 中性占位不返回地址，确保外部清单中未登记的图元键不会被拼接为动态资源请求。
  */
 export function getTopologyIconUrl(iconKey: TopologyIconKey, deviceStatus: TopologyDeviceStatus): string | undefined {

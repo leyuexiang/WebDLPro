@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { toProcessNodeId, toTopologyKey } from '@/config/process/identifiers'
 import type { TopologyDefinition, TopologyDeviceStatus, TopologyNodeDefinition } from '@/config/process/types'
-import { CanvasTopologyAdapter } from '@/services/topology/canvas-topology-adapter'
+import { CanvasTopologyAdapter, getFocusRegionColor } from '@/services/topology/canvas-topology-adapter'
 import { MAXIMUM_TOPOLOGY_ICON_ASSETS, REGISTERED_TOPOLOGY_ICON_KEYS } from '@/services/topology/topology-icon-registry'
 
 /** 仅暴露断言所需的内部缓存视图，用于证明状态更新不会使路径缓存重新进入脏状态。 */
@@ -23,6 +23,14 @@ interface BoundsInspection {
   bottom: number
 }
 
+/** 仅记录画布描边的可见属性，用于从公开选中接口验证独立节点是否获得高对比反馈。 */
+interface StrokeInspection {
+  strokeStyle: string
+  lineWidth: number
+  shadowColor: string
+  shadowBlur: number
+}
+
 /**
  * 布局与路由属于适配器内部缓存，测试通过结构化只读视图核对几何结果，不把调试接口暴露给业务代码。
  */
@@ -34,6 +42,7 @@ interface AdapterGeometryInspection extends AdapterCacheInspection {
     width: number
     height: number
     titleBounds: BoundsInspection
+    visualBounds: BoundsInspection
     hitBounds: BoundsInspection
     routeBounds: BoundsInspection
   }>
@@ -67,6 +76,56 @@ function createCanvas(): HTMLCanvasElement {
     width: 0,
     height: 0,
     style: { width: '', height: '' },
+  } as unknown as HTMLCanvasElement
+}
+
+/**
+ * 构造可执行完整绘制流程的轻量画布替身。测试只记录描边，不模拟像素栅格化，
+ * 因而既能验证用户可见反馈，也不会依赖浏览器、显卡或图片解码结果。
+ */
+function createRecordingCanvas(strokes: StrokeInspection[]): HTMLCanvasElement {
+  const context = {
+    fillStyle: '',
+    strokeStyle: '',
+    lineWidth: 1,
+    shadowColor: '',
+    shadowBlur: 0,
+    font: '',
+    textAlign: 'center',
+    textBaseline: 'middle',
+    beginPath: vi.fn(),
+    clearRect: vi.fn(),
+    closePath: vi.fn(),
+    drawImage: vi.fn(),
+    fill: vi.fn(),
+    fillRect: vi.fn(),
+    fillText: vi.fn(),
+    lineTo: vi.fn(),
+    moveTo: vi.fn(),
+    quadraticCurveTo: vi.fn(),
+    restore: vi.fn(),
+    save: vi.fn(),
+    scale: vi.fn(),
+    setLineDash: vi.fn(),
+    setTransform: vi.fn(),
+    translate: vi.fn(),
+    measureText: vi.fn((text: string) => ({ width: text.length * 6 })),
+    createRadialGradient: vi.fn(() => ({ addColorStop: vi.fn() })),
+    stroke: vi.fn(() => {
+      strokes.push({
+        strokeStyle: String(context.strokeStyle),
+        lineWidth: context.lineWidth,
+        shadowColor: String(context.shadowColor),
+        shadowBlur: context.shadowBlur,
+      })
+    }),
+  }
+
+  return {
+    width: 0,
+    height: 0,
+    style: { width: '', height: '' },
+    getContext: vi.fn(() => context),
   } as unknown as HTMLCanvasElement
 }
 
@@ -172,6 +231,12 @@ afterEach(() => {
 })
 
 describe('CanvasTopologyAdapter 节点状态增量', () => {
+  it('重点区域颜色按 regionId 稳定选择，不因刷新产生随机跳变', () => {
+    expect(getFocusRegionColor('focus.gas-turbine-control')).toEqual(getFocusRegionColor('focus.gas-turbine-control'))
+    expect(getFocusRegionColor('focus.gas-turbine-control').stroke).not.toBe('')
+    expect(getFocusRegionColor('focus.hrsg-control').fill).toMatch(/^rgba\(/)
+  })
+
   it('状态快照不重建路径缓存，并将同一帧内连续更新合并为一次绘制', () => {
     const requestAnimationFrame = vi.fn(() => 1)
     vi.stubGlobal('requestAnimationFrame', requestAnimationFrame)
@@ -356,6 +421,44 @@ describe('CanvasTopologyAdapter 响应式布局与直线优先路由', () => {
 
     expect(adapter.pickNodeAt(screenX, screenY)).toBe(toProcessNodeId('geometry-node-2'))
     expect(adapter.pickNodeAt(2, 2)).toBeUndefined()
+    adapter.dispose()
+  })
+
+  it('孤立节点选中后绘制高对比外圈，且不改变视觉、命中或路由边界', () => {
+    const strokes: StrokeInspection[] = []
+    const pendingFrames: FrameRequestCallback[] = []
+    vi.stubGlobal('Image', TestImage)
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      pendingFrames.push(callback)
+      return pendingFrames.length
+    }))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+
+    const adapter = new CanvasTopologyAdapter(createRecordingCanvas(strokes))
+    adapter.resize(600, 320)
+    adapter.setTopology(createTopology())
+    pendingFrames.shift()?.(0)
+
+    const inspection = adapter as unknown as AdapterGeometryInspection
+    const beforeSelection = inspection.layoutByNodeId.get('status-node-a')
+    expect(beforeSelection).toBeDefined()
+    expect(strokes.some((stroke) => stroke.strokeStyle === '#67e8f9')).toBe(false)
+    strokes.length = 0
+
+    adapter.setSelection([toProcessNodeId('status-node-a')], [])
+    pendingFrames.shift()?.(16)
+
+    const afterSelection = inspection.layoutByNodeId.get('status-node-a')
+    expect(strokes).toContainEqual(expect.objectContaining({
+      strokeStyle: '#67e8f9',
+      lineWidth: 2,
+      shadowColor: '#22d3ee',
+    }))
+    expect(strokes.some((stroke) => stroke.strokeStyle === '#67e8f9' && stroke.shadowBlur >= 8)).toBe(true)
+    expect(afterSelection?.visualBounds).toEqual(beforeSelection?.visualBounds)
+    expect(afterSelection?.hitBounds).toEqual(beforeSelection?.hitBounds)
+    expect(afterSelection?.routeBounds).toEqual(beforeSelection?.routeBounds)
+
     adapter.dispose()
   })
 

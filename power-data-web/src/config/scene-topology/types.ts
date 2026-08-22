@@ -20,6 +20,16 @@ export type SceneSwitchStrategy = 'unload-first' | 'preload-then-unload'
 /** 业务节点双击只上报我方稳定节点编号；说明类节点必须明确声明为不产生外部事件。 */
 export type DoubleClickBehavior = 'emit-node' | 'none'
 
+/**
+ * 正式拓扑节点只保存说明层内容引用，不内嵌说明节点或复用双击行为。
+ * 独立按钮是当前唯一允许的触发方式，避免下钻覆盖单击聚焦和双击上报语义。
+ */
+export interface TopologyNodeDrilldownReference {
+  readonly enabled: true
+  readonly contentKey: string
+  readonly trigger: 'button'
+}
+
 /** 已受控的 Unity 动作；外部父页面永远只能传动作标识，不能传 Unity 方法名称。 */
 export type UnityActionDefinition =
   | { type: 'none' }
@@ -76,6 +86,40 @@ export interface TopologyNodeDefinition {
   layerId?: string
   deviceStatus: DeviceVisualStatus
   doubleClickBehavior: DoubleClickBehavior
+  /** 可选说明层入口；没有明确业务资料的节点必须省略，渲染器不得按标题猜测。 */
+  drilldown?: TopologyNodeDrilldownReference
+}
+
+/** 说明节点只在单份内容内部唯一，不拥有正式节点标识、设备状态或三维映射。 */
+export interface TopologyDrilldownNode {
+  readonly id: string
+  readonly title: string
+  readonly kind: 'source' | 'logic' | 'boundary'
+  readonly x: number
+  readonly y: number
+  readonly description?: string
+}
+
+/** 说明连线只表达同一内容内的静态关联，不进入正式拓扑边和三维路径集合。 */
+export interface TopologyDrilldownEdge {
+  readonly id: string
+  readonly fromId: string
+  readonly toId: string
+  readonly label?: string
+}
+
+/**
+ * 下钻内容与正式拓扑同版本原子发布，但保持独立只读数据块。
+ * duplicateSingleBranch 只允许渲染层复制视觉实例，语义节点数组仍保持三个唯一节点。
+ */
+export interface TopologyDrilldownContent {
+  readonly contentKey: string
+  readonly version: string
+  readonly title: string
+  readonly sourceNodeId: NodeId
+  readonly duplicateSingleBranch?: boolean
+  readonly nodes: readonly TopologyDrilldownNode[]
+  readonly edges: readonly TopologyDrilldownEdge[]
 }
 
 /**
@@ -98,6 +142,16 @@ export interface TopologyEdgeDefinition {
   lineStyle?: 'solid' | 'dashed'
   /** 已核验、待确认或概念性关系只影响二维视觉表达，不创建额外业务副作用。 */
   evidenceStatus?: 'verified' | 'pending-confirmation' | 'conceptual'
+}
+
+/**
+ * 总览拓扑的三维重点区域声明。所有成员节点均来自同一张总图，渲染器只依据该集合绘制区域框。
+ */
+export interface TopologyFocusRegionDefinition {
+  regionId: string
+  anchorNodeId: NodeId
+  nodeIds: readonly NodeId[]
+  label?: string
 }
 
 /**
@@ -143,6 +197,8 @@ export interface TopologyDefinition {
   layers?: readonly TopologyPresentationLayerDefinition[]
   nodes: readonly TopologyNodeDefinition[]
   edges: readonly TopologyEdgeDefinition[]
+  /** 重点区域只允许出现在总览来源图；过滤拓扑必须省略该字段。 */
+  focusRegions?: readonly TopologyFocusRegionDefinition[]
   /**
    * 存在时表示当前拓扑是来源总图的只读流程视图。
    * 过滤视图的 nodes 与 edges 必须为空，所有实际图元由 sourceTopologyId 投影而来。
@@ -172,6 +228,8 @@ export interface SceneTopologyManifest {
   unityRuntimeKey: UnityRuntimeKey
   scenes: readonly SceneDefinition[]
   topologies: readonly TopologyDefinition[]
+  /** 说明内容不属于可切换拓扑集合，也不参与设备状态、动作或三维映射投影。 */
+  drilldowns?: readonly TopologyDrilldownContent[]
   actions: readonly ActionDefinition[]
   unitySceneMappings: readonly UnitySceneMappingDefinition[]
 }

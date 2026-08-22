@@ -666,6 +666,10 @@ namespace WebDLPro.Unity.Tests
             Assert.That(SceneManager.GetSceneByPath(CoalPowerScenePath).isLoaded, Is.True);
             Assert.That(CountLoadedBusinessScenes(), Is.EqualTo(1));
 
+            // 燃煤总览会按正式配置将非核心模型显示为半透明上下文，因此初始态本身允许持有有限运行时材质。
+            // 后续复位应回到这个稳定基线，而不是错误断言为零；这样仍能准确发现聚焦、显隐或四态操作泄漏的新材质。
+            int initialOverviewContextMaterialCount = CountRuntimeContextMaterials();
+
             // 四个步骤逐一经过正式桥接分派。每步使用独立请求标识，防止前一步成功日志掩盖后一步失败。
             string[] stepIds = { "overview", "combustion", "water-steam-cycle", "power-output" };
             for (int stepIndex = 0; stepIndex < stepIds.Length; stepIndex++)
@@ -680,6 +684,22 @@ namespace WebDLPro.Unity.Tests
                 Assert.That(HasBridgeLogFragmentForRequest(requestId, "\"success\":true"), Is.True, $"燃煤流程步骤 {stepId} 未成功执行。");
             }
             Assert.That(_coordinator.ActiveController.GetStateDescription(), Does.Contain("step=power-output"));
+
+            // 上述循环及断言必须保留 power-output 的执行覆盖；锅炉只属于 combustion 步骤的新白名单，
+            // 因此聚焦前需再次通过正式桥接切回 combustion，避免测试依赖旧版“跨步骤任意聚焦”的宽松行为。
+            const string combustionBeforeFocusRequestId = "request.bridge.coal-actions.step.combustion-before-focus";
+            const string combustionBeforeFocusPayload = "{\"processId\":\"coal-power-generation\",\"stepId\":\"combustion\",\"unitId\":\"all\",\"isolate\":true}";
+            InvokeBridgeMethod(
+                "ReceiveFromParent",
+                CreateBridgeCommandMessage("enterProcessStep", combustionBeforeFocusPayload, combustionBeforeFocusRequestId));
+            yield return WaitForCompletion(
+                () => HasNotice("commandResult", combustionBeforeFocusRequestId, string.Empty),
+                "燃煤锅炉聚焦前切回燃烧步骤未返回命令结果。");
+            Assert.That(
+                HasBridgeLogFragmentForRequest(combustionBeforeFocusRequestId, "\"success\":true"),
+                Is.True,
+                "燃煤锅炉聚焦前未成功切回允许该节点的燃烧步骤。");
+            Assert.That(_coordinator.ActiveController.GetStateDescription(), Does.Contain("step=combustion"));
 
             const string focusRequestId = "request.bridge.coal-actions.focus";
             InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage(
@@ -764,7 +784,10 @@ namespace WebDLPro.Unity.Tests
             Assert.That(HasBridgeLogFragmentForRequest(resetRequestId, "\"success\":true"), Is.True);
             Assert.That(_coordinator.ActiveController.GetStateDescription(), Does.Contain("process=coal-power-generation"));
             Assert.That(_coordinator.ActiveController.GetStateDescription(), Does.Contain("step=overview"));
-            Assert.That(CountRuntimeContextMaterials(), Is.EqualTo(0), "燃煤场景复位后仍残留运行时上下文材质。");
+            Assert.That(
+                CountRuntimeContextMaterials(),
+                Is.EqualTo(initialOverviewContextMaterialCount),
+                "燃煤场景复位后未恢复初始总览的上下文材质基线。");
         }
 
         /// <summary>

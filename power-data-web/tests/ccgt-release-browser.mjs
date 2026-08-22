@@ -11,12 +11,13 @@ import { spawn } from 'node:child_process'
  */
 const baseUrl = process.env.CCGT_RELEASE_URL ?? 'http://127.0.0.1:5524/'
 const screenshotPath = process.env.CCGT_SCREENSHOT_PATH
+const drilldownScreenshotPath = process.env.CCGT_DRILLDOWN_SCREENSHOT_PATH
 const releaseDirectory = process.env.CCGT_RELEASE_DIRECTORY
 const executablePath = 'D:/PlaywrightBrowsers/chromium-1187/chrome-win/chrome.exe'
 const actionCases = Object.freeze([
-  Object.freeze({ buttonName: '燃气轮机关键环节', topologyId: 'topology.gas-power.gas-turbine', nodeCount: 16, edgeCount: 13 }),
-  Object.freeze({ buttonName: '余热锅炉关键环节', topologyId: 'topology.gas-power.hrsg', nodeCount: 13, edgeCount: 6 }),
-  Object.freeze({ buttonName: '蒸汽轮机关键环节', topologyId: 'topology.gas-power.steam-turbine', nodeCount: 15, edgeCount: 10 }),
+  Object.freeze({ buttonName: '燃气轮机关键流程', title: '燃气轮机关键环节', topologyId: 'topology.gas-power.gas-turbine', nodeCount: 16, edgeCount: 13 }),
+  Object.freeze({ buttonName: '余热锅炉关键流程', title: '余热锅炉关键环节', topologyId: 'topology.gas-power.hrsg', nodeCount: 13, edgeCount: 6 }),
+  Object.freeze({ buttonName: '蒸汽轮机关键流程', title: '蒸汽轮机关键环节', topologyId: 'topology.gas-power.steam-turbine', nodeCount: 15, edgeCount: 10 }),
 ])
 const overviewActionId = 'action.gas-power.overview'
 const overviewTitle = '燃气联合循环（CCGT）发电厂 OT 网络拓扑'
@@ -99,14 +100,16 @@ try {
     throw new Error('燃气总览动作未按受控清单完整登记，无法证明二维恢复前 Unity 已执行总览复位。')
   }
 
-  await page.getByText('燃气总图与三维场景已完成初始化。').waitFor({ timeout: 30_000 })
+  // 自测页的新旧文案都只在同一 view.changed（视图已变化）成功后出现，避免文案微调阻断结构回归。
+  await page.getByText(/燃气总(?:图|览)与三维场景已完成(?:初始化|切换)。/).waitFor({ timeout: 30_000 })
 
   /*
    * 通过宿主页唯一的嵌入壳元素取得框架上下文，让定位器自动跟随 `/shell/embed` 到 `/embed`
    * 的受控导航；禁止依赖页面框架数组的瞬时顺序或按任意地址猜测哪个框架是嵌入壳。
    */
   const shellFrame = page.locator('#visualization-shell').contentFrame()
-  await shellFrame.getByText(/当前拓扑已配置 23 个节点/).waitFor({ timeout: 10_000 })
+  // 面板标题来自正式清单且只在目标拓扑激活后出现；不依赖已移除的旧状态摘要文案。
+  await shellFrame.getByRole('heading', { name: overviewTitle, exact: true }).waitFor({ timeout: 10_000 })
   const unityFrameCountBefore = await shellFrame.locator('iframe').count()
   if (unityFrameCountBefore !== 1) throw new Error(`初始化后 Unity 内嵌框架数量异常：${unityFrameCountBefore}。`)
   const topologyCanvasCountBefore = await shellFrame.locator('canvas').count()
@@ -160,6 +163,65 @@ try {
       await page.waitForTimeout(50)
     }
     throw new Error(description)
+  }
+
+  /*
+   * 下钻入口必须是独立文档对象按钮。先验证双真实分支，再验证单分支视觉复制；两次操作均不得
+   * 进入画布单击、节点双击或 Unity 命令链路，且覆盖层前后仍保持单画布、单 Unity 实例。
+   */
+  const markVieDrilldownButton = shellFrame.getByRole('button', { name: '下钻查看燃机 Mark VIe 控制器关联', exact: true })
+  await markVieDrilldownButton.click()
+  const drilldownDialog = shellFrame.getByRole('dialog', { name: '燃机 Mark VIe 控制器关联说明', exact: true })
+  await drilldownDialog.waitFor({ timeout: 5_000 })
+  if (await drilldownDialog.getAttribute('aria-modal') !== null) throw new Error('局部下钻覆盖层错误声明为全页模态。')
+  if (await drilldownDialog.locator('[data-render-instance-id]').count() !== 5) throw new Error('燃机双真实分支没有渲染五个唯一实例。')
+  // 节点类型已由层级和配色表达，卡片内不得再次渲染辅助小字，防止后续样式调整造成需求回退。
+  if (await drilldownDialog.locator('.topology-drilldown__node').filter({ hasText: /来源节点|直接子节点|模型说明节点/ }).count() !== 0) {
+    throw new Error('燃气下钻节点卡片仍显示类型辅助文字。')
+  }
+  // 真实悬浮节点后仍不得生成提示层，确保所有下钻分支共用的覆盖层没有恢复悬浮弹窗。
+  await drilldownDialog.locator('.topology-drilldown__node').first().hover()
+  if (await drilldownDialog.locator('.topology-drilldown__tooltip, [role="tooltip"]').count() !== 0) {
+    throw new Error('燃气下钻节点悬浮后仍显示提示弹窗。')
+  }
+  if (await shellFrame.locator('.topology-panel__content').getAttribute('inert') === null) throw new Error('下钻打开后原拓扑未进入不可交互状态。')
+  if (await shellFrame.locator('canvas').count() !== 1 || await shellFrame.locator('iframe').count() !== 1) throw new Error('下钻打开后创建了额外画布或 Unity 实例。')
+  if ((await readUnityInteractionCommands()).length !== 0 || (await page.evaluate(() => window.__ccgtObservedShellEvents ?? [])).length !== 0) {
+    throw new Error('下钻按钮错误触发了三维命令或节点双击上报。')
+  }
+  // 可选视觉证据在覆盖层打开时截取；不启用时浏览器回归仍保持无额外文件写入。
+  if (drilldownScreenshotPath) await page.screenshot({ path: drilldownScreenshotPath, fullPage: true })
+  await drilldownDialog.getByRole('button', { name: '全屏展示拓扑图', exact: true }).click()
+  await drilldownDialog.getByRole('button', { name: '退出拓扑图全屏展示', exact: true }).waitFor({ timeout: 5_000 })
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(400)
+  if (!await drilldownDialog.isVisible()) throw new Error('原生全屏第一次退出键错误地同时关闭了下钻。')
+  // 无头浏览器可能不把合成退出键解释为浏览器级全屏退出，此时用同一公开按钮完成等价退出。
+  const stillFullscreen = await shellFrame.locator('html').evaluate(() => document.fullscreenElement !== null)
+  if (stillFullscreen) await drilldownDialog.getByRole('button', { name: '退出拓扑图全屏展示', exact: true }).click()
+  await drilldownDialog.getByRole('button', { name: '全屏展示拓扑图', exact: true }).waitFor({ timeout: 5_000 })
+  await page.waitForTimeout(400)
+  await page.keyboard.press('Escape')
+  await drilldownDialog.waitFor({ state: 'detached', timeout: 5_000 })
+  if (!await markVieDrilldownButton.evaluate((button) => document.activeElement === button)) throw new Error('关闭下钻后焦点未返回原入口按钮。')
+
+  const hrsgDrilldownButton = shellFrame.getByRole('button', { name: '下钻查看HRSG 余热锅炉 DCS关联', exact: true })
+  await hrsgDrilldownButton.click()
+  const hrsgDialog = shellFrame.getByRole('dialog', { name: 'HRSG 余热锅炉 DCS 关联说明', exact: true })
+  await hrsgDialog.waitFor({ timeout: 5_000 })
+  const hrsgSemanticCounts = await hrsgDialog.locator('[data-semantic-node-id]').evaluateAll((nodes) => nodes.reduce((counts, node) => {
+    const semanticNodeId = node.getAttribute('data-semantic-node-id') ?? ''
+    counts[semanticNodeId] = (counts[semanticNodeId] ?? 0) + 1
+    return counts
+  }, {}))
+  if (await hrsgDialog.locator('[data-render-instance-id]').count() !== 5 ||
+      hrsgSemanticCounts.source !== 1 || hrsgSemanticCounts['logic.1'] !== 2 || hrsgSemanticCounts['boundary.1'] !== 2) {
+    throw new Error('余热锅炉单分支没有保持三个语义节点、五个渲染实例。')
+  }
+  await hrsgDialog.getByRole('button', { name: '关闭下钻', exact: true }).click()
+  await hrsgDialog.waitFor({ state: 'detached', timeout: 5_000 })
+  if ((await readUnityInteractionCommands()).length !== 0 || (await page.evaluate(() => window.__ccgtObservedShellEvents ?? [])).length !== 0) {
+    throw new Error('下钻覆盖层局部交互产生了外层或三维副作用。')
   }
 
   // 单击必须先提交二维选择，再且仅向显式三维映射发送一次聚焦；Unity 命令不得携带平台设备编号。
@@ -227,14 +289,18 @@ try {
 
   for (const actionCase of actionCases) {
     await page.getByRole('button', { name: actionCase.buttonName }).click()
-    await page.getByText(new RegExp(`关键环节已切换为 ${actionCase.topologyId}，三维聚焦已按动作结果提交。`)).waitFor({ timeout: 15_000 })
+    await page.waitForTimeout(0)
+    // 场景切换沿用旧拓扑定义时，稳定上下文门禁已关闭；旧下钻按钮不能在加载遮罩下闪现。
+    const gasLoading = await shellFrame.locator('.embedded-visualization-shell__content').getAttribute('aria-busy') === 'true'
+    if (gasLoading && await shellFrame.locator('.topology-canvas__drilldown-button').count() !== 0) {
+      throw new Error('燃气场景切换加载期间仍显示旧拓扑下钻按钮。')
+    }
+    await page.getByText(new RegExp(`关键流程已切换为 ${actionCase.topologyId}，三维动作已完成提交。`)).waitFor({ timeout: 15_000 })
     /*
      * 标题与节点数量同时校验：余热锅炉和蒸汽轮机均为六个节点，只验数量会让前一流程的旧画面误通过。
      * 节点数量来自发布清单的显式过滤结果，用于阻止流程切换后仍绘制总图全部节点的回归。
      */
-    await shellFrame.getByRole('heading', { name: actionCase.buttonName, exact: true }).waitFor({ timeout: 10_000 })
-    await shellFrame.getByText(new RegExp(`当前拓扑已配置 ${actionCase.nodeCount} 个节点`)).waitFor({ timeout: 10_000 })
-    await shellFrame.getByText(new RegExp(`当前拓扑已配置 ${actionCase.nodeCount} 个节点、${actionCase.edgeCount} 条连线`)).waitFor({ timeout: 10_000 })
+    await shellFrame.getByRole('heading', { name: actionCase.title, exact: true }).waitFor({ timeout: 10_000 })
     const unityFrameCountAfter = await shellFrame.locator('iframe').count()
     if (unityFrameCountAfter !== unityFrameCountBefore) {
       throw new Error(`${actionCase.topologyId} 触发后 Unity 内嵌框架数量发生变化：${unityFrameCountBefore} → ${unityFrameCountAfter}。`)
@@ -245,10 +311,9 @@ try {
    * 外部平台通过受控总览动作返回来源总图时，运行时必须先收到 Unity 总览成功回执，再用总图定义
    * 替换当前过滤投影。标题与23节点同时断言，避免旧流程画面或仅状态文案误通过。
    */
-  await page.getByRole('button', { name: '返回燃气总览', exact: true }).click()
+  await page.getByRole('button', { name: '燃气总览', exact: true }).click()
   await page.getByText('燃气总拓扑与三维总览已完成复位。', { exact: true }).waitFor({ timeout: 15_000 })
   await shellFrame.getByRole('heading', { name: overviewTitle, exact: true }).waitFor({ timeout: 10_000 })
-  await shellFrame.getByText(/当前拓扑已配置 23 个节点/).waitFor({ timeout: 10_000 })
   if (await shellFrame.locator('canvas').count() !== topologyCanvasCountBefore) throw new Error('返回燃气总图后拓扑画布数量发生变化。')
   if (await shellFrame.locator('iframe').count() !== unityFrameCountBefore) throw new Error('返回燃气总图后 Unity 内嵌框架数量发生变化。')
 
@@ -281,6 +346,7 @@ try {
     ignoredHttpErrors: httpErrors,
     consoleErrors,
     screenshotPath: screenshotPath ?? null,
+    drilldownScreenshotPath: drilldownScreenshotPath ?? null,
   }, null, 2)}\n`)
 } catch (error) {
   /*

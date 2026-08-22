@@ -60,6 +60,7 @@ function createManifest(): unknown {
 function createManifestWithFilteredTopology(): unknown {
   const manifest = createManifest() as {
     topologies: Array<Record<string, unknown>>
+    unitySceneMappings: Array<{ sceneId: string; sceneNodeIds: string[] }>
   }
   const overview = manifest.topologies.find((topology) => topology.topologyId === 'gas-power.overview')
   const detail = manifest.topologies.find((topology) => topology.topologyId === 'gas-power.detail')
@@ -67,7 +68,7 @@ function createManifestWithFilteredTopology(): unknown {
 
   overview.nodes = [
     // 注册表测试只验证过滤投影；源节点仍遵守新的全节点设备绑定发布契约。
-    { nodeId: 'dcs-core', title: '测试核心节点', iconKey: 'core-switch', x: 20, y: 40, deviceStatus: 'offline', doubleClickBehavior: 'emit-node' },
+    { nodeId: 'dcs-core', title: '测试核心节点', sceneNodeId: 'scene-node.dcs-core', iconKey: 'core-switch', x: 20, y: 40, deviceStatus: 'offline', doubleClickBehavior: 'emit-node' },
     { nodeId: 'gas-controller', title: '测试流程控制器', iconKey: 'plc', x: 50, y: 70, deviceStatus: 'offline', doubleClickBehavior: 'emit-node' },
     { nodeId: 'gas-field', title: '测试现场设备', iconKey: 'instrument', x: 80, y: 94, deviceStatus: 'offline', doubleClickBehavior: 'emit-node' },
   ]
@@ -75,6 +76,14 @@ function createManifestWithFilteredTopology(): unknown {
     { edgeId: 'route.dcs-to-controller', fromNodeId: 'dcs-core', toNodeId: 'gas-controller', title: '测试控制链路' },
     { edgeId: 'route.controller-to-field', fromNodeId: 'gas-controller', toNodeId: 'gas-field', title: '测试现场链路' },
   ]
+  overview.focusRegions = [{
+    regionId: 'focus.registry-test',
+    anchorNodeId: 'dcs-core',
+    nodeIds: ['dcs-core'],
+    label: '测试重点区域',
+  }]
+  const gasMapping = manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'gas-power')
+  if (gasMapping) gasMapping.sceneNodeIds = ['scene-node.dcs-core']
   detail.nodes = []
   detail.edges = []
   detail.filter = {
@@ -125,6 +134,8 @@ describe('多拓扑注册表', () => {
       y: 60,
     })
     expect(result.registry.getTopologyNode(toTopologyId('gas-power.detail'), toNodeId('gas-controller'))?.title).toBe('测试流程控制器')
+    expect(result.registry.getTopology(toTopologyId('gas-power.overview'))?.focusRegions).toHaveLength(1)
+    expect(result.registry.getTopology(toTopologyId('gas-power.detail'))?.focusRegions).toBeUndefined()
   })
 
   it('清单缺失固定场景时不创建任何注册表', () => {

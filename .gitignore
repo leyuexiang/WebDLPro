@@ -41,6 +41,10 @@ ExportedObj/
 *.VC.db
 *.DotSettings.user
 
+# Locus（本地代码分析工具）会按当前用户目录生成该文件，其中包含不可移植的分析器绝对路径。
+# Unity（统一引擎）编译不读取它；忽略后可防止其他开发机因本机路径失效而产生分析器加载警告。
+/Directory.Build.props
+
 # Unity 导入、崩溃处理和构建产生的临时文件。
 *.log
 *.tmp

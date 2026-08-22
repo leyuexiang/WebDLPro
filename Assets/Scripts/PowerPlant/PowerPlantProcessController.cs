@@ -4,6 +4,7 @@ using HighlightPlus;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
+using UnityEngine.UI;
 using WebDLPro.Unity.SceneRuntime;
 
 /// <summary>
@@ -25,7 +26,7 @@ public sealed class PowerPlantProcessController : MonoBehaviour
     private static readonly int VisualStateOpacityPropertyId = Shader.PropertyToID("_Opacity");
     // 左键拖拽与设备单击共用同一输入通道；超过该屏幕位移阈值后只视为相机平移，不再触发设备选择。
     private const float PointerSelectionDragThreshold = 6f;
-    // 闪烁曲线使用 0 到 1 的正弦波；相位差让故障首次切换即处于可见段，避免看似没有填充。
+    // 填充与描边共用 0 到 1 的正弦脉冲曲线；故障使用相位差，让首次显示就处于高可见段。
     private const float PulseAngularFrequencyMultiplier = Mathf.PI * 2f;
     private const float FaultFillPulsePhaseOffset = Mathf.PI * 0.5f;
     [Serializable]
@@ -258,7 +259,16 @@ public sealed class PowerPlantProcessController : MonoBehaviour
     // 扫描此初始化缓存，避免为大模型运行时创建高成本 MeshCollider（网格碰撞体）或逐帧遍历层级。
     private readonly Dictionary<GameObject, string> _selectionNodeByObject = new Dictionary<GameObject, string>();
     private readonly List<SceneNodeRendererPickTarget> _selectionRendererTargets = new List<SceneNodeRendererPickTarget>();
+    // 当前流程步骤允许鼠标命中的渲染器缓存。进入关键环节时只保留 visibleNodeIds（可见节点标识）对应目标，
+    // 避免每次点击重新遍历全场景；总览时恢复全部显式登记节点。
+    private readonly List<SceneNodeRendererPickTarget> _activeSelectionRendererTargets =
+        new List<SceneNodeRendererPickTarget>();
+    private readonly HashSet<string> _selectableSceneNodeIds = new HashSet<string>(StringComparer.Ordinal);
     private readonly Dictionary<Renderer, ActiveContextFadeMaterials> _activeContextFades = new Dictionary<Renderer, ActiveContextFadeMaterials>();
+    // 广告牌文字使用 TextMeshProUGUI（文本组件），底层由 CanvasRenderer（画布渲染器）绘制，
+    // 不属于 Renderer（模型渲染器）层级。这里缓存每个图形组件进入上下文透明前的颜色，
+    // 使文字能与父模型同进同退，并避免重复切换时在原始透明度上连续相乘。
+    private readonly Dictionary<Graphic, Color> _activeContextFadeGraphics = new Dictionary<Graphic, Color>();
     // 告警、故障材质位于上下文半透明之上；状态期间收到上下文请求时只登记延迟处理，
     // 等状态清除后再应用上下文半透明，避免两个运行时材质层互相覆盖。
     private readonly Dictionary<Renderer, ActiveVisualStateMaterials> _activeVisualStateMaterials =
@@ -267,6 +277,8 @@ public sealed class PowerPlantProcessController : MonoBehaviour
     private readonly HashSet<GameObject> _groundObjectSet = new HashSet<GameObject>();
     private readonly HashSet<GameObject> _persistentFlowObjectSet = new HashSet<GameObject>();
     private readonly HashSet<GameObject> _overviewOpaqueObjectSet = new HashSet<GameObject>();
+    // 当前交互聚焦的显式目标集合；聚焦时只保留这些模型实体，其余对象统一使用上下文半透明。
+    private readonly HashSet<GameObject> _selectionFocusObjects = new HashSet<GameObject>();
     // 由流动 Shader 身份缓存的对象集合，补足序列化管道列表遗漏的电线等流动模型，不按名称推断业务节点。
     private readonly HashSet<GameObject> _pipelineFlowObjectSet = new HashSet<GameObject>();
     // 所有流动材质槽只在初始化阶段登记；故障切换时按缓存索引写入属性块，避免重复扫描层级和材质。
@@ -376,6 +388,7 @@ public sealed class PowerPlantProcessController : MonoBehaviour
 
         HandlePointerSelection();
         UpdateVisualStateFillPulse();
+        UpdateHighlightOutlinePulse();
     }
 
     private void OnDestroy()
@@ -385,8 +398,8 @@ public sealed class PowerPlantProcessController : MonoBehaviour
     }
 
     /// <summary>
-    /// 每帧只更新告警、故障各一份共享状态材质的透明度，不扫描渲染器、不分配对象。
-    /// 告警慢闪、故障快闪；描边由独立高亮组件持续绘制，不随填充透明度变化。
+    /// 每帧只更新告警、故障各一份共享状态材质的透明度，以及五类运行时描边组件的强度；
+    /// 不扫描场景渲染器、不创建临时数组。填充与对应描边使用相同频率和相位，保持视觉同步。
     /// </summary>
     private void UpdateVisualStateFillPulse()
     {
@@ -406,6 +419,51 @@ public sealed class PowerPlantProcessController : MonoBehaviour
             _visualStateConfig.FaultFillPulseFrequency,
             time,
             FaultFillPulsePhaseOffset);
+    }
+
+    /// <summary>
+    /// 复用告警、故障填充的闪烁频率更新所有运行时描边强度。
+    /// Highlight Plus（高亮插件）的 outline（描边强度）字段会直接参与当前帧绘制，
+    /// 因此不需要反复刷新材质或重新设置目标，既能实现脉冲又避免运行时分配。
+    /// </summary>
+    private void UpdateHighlightOutlinePulse()
+    {
+        if (_visualStateConfig == null)
+        {
+            return;
+        }
+
+        float time = Time.unscaledTime;
+        float minimumIntensity = _visualStateConfig.FillPulseMinimumOpacity;
+        float alarmFrequency = _visualStateConfig.AlarmFillPulseFrequency;
+        float faultFrequency = _visualStateConfig.FaultFillPulseFrequency;
+
+        UpdateHighlightOutlineIntensity(_processHighlightEffect, alarmFrequency, time, 0f, minimumIntensity);
+        UpdateHighlightOutlineIntensity(_alarmHighlightEffect, alarmFrequency, time, 0f, minimumIntensity);
+        UpdateHighlightOutlineIntensity(_alarmStateHighlightEffect, alarmFrequency, time, 0f, minimumIntensity);
+        UpdateHighlightOutlineIntensity(
+            _faultStateHighlightEffect,
+            faultFrequency,
+            time,
+            FaultFillPulsePhaseOffset,
+            minimumIntensity);
+        UpdateHighlightOutlineIntensity(_offlineStateHighlightEffect, alarmFrequency, time, 0f, minimumIntensity);
+    }
+
+    private static void UpdateHighlightOutlineIntensity(
+        HighlightEffect effect,
+        float frequency,
+        float time,
+        float phaseOffset,
+        float minimumIntensity)
+    {
+        if (effect == null)
+        {
+            return;
+        }
+
+        float pulse = Mathf.Sin(time * frequency * PulseAngularFrequencyMultiplier + phaseOffset) * 0.5f + 0.5f;
+        effect.outline = Mathf.Lerp(minimumIntensity, 1f, pulse);
     }
 
     private void UpdateVisualStateMaterialOpacity(Material material, float frequency, float time, float phaseOffset)
@@ -433,6 +491,7 @@ public sealed class PowerPlantProcessController : MonoBehaviour
 
         _runtimeResourcesReleased = true;
         _activeInteractionNodeId = null;
+        _selectionFocusObjects.Clear();
         // 场景控制器卸载后不再保留由最后一次拓扑选择触发的镜头补间。
         if (_freeCameraController != null)
         {
@@ -459,6 +518,8 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         _pipelineFlowObjectSet.Clear();
         _pipelineFlowMaterials.Clear();
         _selectionNodeByObject.Clear();
+        _activeSelectionRendererTargets.Clear();
+        _selectableSceneNodeIds.Clear();
         _initialRootActiveStates.Clear();
         _overviewOnlyInitialActiveStates.Clear();
         _groundObjectSet.Clear();
@@ -497,10 +558,18 @@ public sealed class PowerPlantProcessController : MonoBehaviour
             return false;
         }
 
+        // 每次总览或关键环节切换都回到当前场景资产定义的初始视角，避免继承上一个环节的镜头位置和旋转。
+        // 先完成流程参数与节点校验，再执行相机恢复，确保非法命令不会改变当前交互状态。
+        if (_freeCameraController != null)
+        {
+            _freeCameraController.ResetToInitialTransform();
+        }
+
         // 流程步骤替换交互选择后的描边；后续三维空白点击不能再把该流程描边误认作交互选择。
         // 总览始终恢复全厂模型且明确不描边。
         bool isOverviewStep = string.Equals(stepId, OverviewStepId, StringComparison.Ordinal);
         _activeInteractionNodeId = null;
+        _selectionFocusObjects.Clear();
         ClearProcessHighlight();
         if (isOverviewStep)
         {
@@ -512,10 +581,12 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         else if (isolate)
         {
             SetIsolatedVisibility(visibleNodeIds);
+            SetActiveSelectionTargetsForProcess(visibleNodeIds);
         }
         else
         {
             RestoreInitialVisibility();
+            SetActiveSelectionTargetsForProcess(visibleNodeIds);
         }
 
         if (!isOverviewStep)
@@ -529,7 +600,7 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         _currentProcessId = processId;
         _currentStepId = stepId;
         _currentUnitId = normalizedUnitId;
-        message = $"已进入 {stepId}（机组：{normalizedUnitId}），已更新描边且保持当前视角。";
+        message = $"已进入 {stepId}（机组：{normalizedUnitId}），已更新描边并恢复初始视角。";
         return true;
     }
 
@@ -537,6 +608,7 @@ public sealed class PowerPlantProcessController : MonoBehaviour
     {
         // 重置场景会替换交互描边；清除标记后，后续空白点击不会向二维拓扑发送过期取消事件。
         _activeInteractionNodeId = null;
+        _selectionFocusObjects.Clear();
         ClearProcessHighlight();
         ClearAlarmHighlight();
         if (TryResolveStep(OverviewStepId, AllUnitsId, out List<string> overviewVisibleNodeIds, out _))
@@ -547,10 +619,15 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         {
             RestoreInitialVisibility();
         }
+        if (_freeCameraController != null)
+        {
+            // resetScene（场景重置）与流程切换使用同一初始视角，避免重置后仍停留在关键设备近景。
+            _freeCameraController.ResetToInitialTransform();
+        }
         _currentProcessId = _configuredProcessId;
         _currentStepId = OverviewStepId;
         _currentUnitId = AllUnitsId;
-        message = "已恢复总览场景：核心设备正常显示、其余模型半透明，地面始终显示并保持当前视角。";
+        message = "已恢复总览场景：核心设备正常显示、其余模型半透明，地面始终显示并恢复初始视角。";
         return true;
     }
 
@@ -562,17 +639,20 @@ public sealed class PowerPlantProcessController : MonoBehaviour
             return false;
         }
 
+        // 关键环节的组态图只展示 visibleNodeIds（可见节点标识）；三维聚焦也必须复用同一白名单，
+        // 防止外部迟到或错误命令选中当前流程之外的模型。
+        if (!IsSceneNodeSelectable(nodeId))
+        {
+            message = $"当前流程步骤不允许选择场景节点：{nodeId}";
+            return false;
+        }
+
         // 二维节点选中先替换旧描边，再基于同一批目标渲染器计算镜头取景；
         // 流程步骤仍不调用此入口，因此不会改变既有的“保持当前视角”行为。
         ClearProcessHighlight();
         _activeInteractionNodeId = nodeId;
-        if (isolate)
-        {
-            // 只有显式要求隔离时才重算模型显隐和上下文材质；非隔离聚焦必须保留当前关键环节的视觉状态。
-            SetIsolatedVisibility(new List<string> { nodeId });
-        }
-        // 非隔离聚焦只更新节点描边和镜头，不调用总览或初始显隐恢复逻辑。
-        // 这样二维拓扑选中节点时，当前关键环节的半透明模型不会被意外恢复为实体显示。
+        // isolate 参数继续保留协议兼容性；交互聚焦统一使用“选中模型实体、其余模型半透明”的上下文表现。
+        ApplySelectionFocusContext(nodeId);
 
         // 节点测试和网页 focusNode 指令统一经过该方法，运行时缺少组件时会自动补建，
         // 防止资源释放或延迟初始化后出现“选择已提交但没有描边”的不一致状态。
@@ -602,6 +682,7 @@ public sealed class PowerPlantProcessController : MonoBehaviour
 
         ClearProcessHighlight();
         _activeInteractionNodeId = null;
+        _selectionFocusObjects.Clear();
         // 取消选择不会复位镜头；只停止尚未完成的自动补间，让当前画面停留在用户已看到的位置。
         if (_freeCameraController != null)
         {
@@ -841,6 +922,15 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         effect.Refresh();
     }
 
+    /// <summary>
+    /// 判断渲染器是否属于广告牌子树。广告牌根节点挂有 HorizontalCameraBillboard（水平相机广告牌）组件，
+    /// 其下的文字和图形渲染器也一并排除，避免模型描边把说明牌边缘染亮。
+    /// </summary>
+    private static bool IsBillboardRenderer(Renderer renderer)
+    {
+        return renderer != null && renderer.GetComponentInParent<HorizontalCameraBillboard>() != null;
+    }
+
     private void CollectNodeRenderers(string nodeId, ISet<Renderer> destination)
     {
         if (!_nodesById.TryGetValue(nodeId, out SceneNodeBinding node))
@@ -860,7 +950,7 @@ public sealed class PowerPlantProcessController : MonoBehaviour
             Renderer[] renderers = target.GetComponentsInChildren<Renderer>(true);
             for (int rendererIndex = 0; rendererIndex < renderers.Length; rendererIndex++)
             {
-                if (renderers[rendererIndex] != null)
+                if (renderers[rendererIndex] != null && !IsBillboardRenderer(renderers[rendererIndex]))
                 {
                     destination.Add(renderers[rendererIndex]);
                 }
@@ -1002,7 +1092,7 @@ public sealed class PowerPlantProcessController : MonoBehaviour
 
             for (int rendererIndex = 0; rendererIndex < renderers.Length; rendererIndex++)
             {
-                if (renderers[rendererIndex] != null)
+                if (renderers[rendererIndex] != null && !IsBillboardRenderer(renderers[rendererIndex]))
                 {
                     destination.Add(renderers[rendererIndex]);
                 }
@@ -1178,6 +1268,8 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         _unitIdBindingsValid = true;
         _selectionNodeByObject.Clear();
         _selectionRendererTargets.Clear();
+        _activeSelectionRendererTargets.Clear();
+        _selectableSceneNodeIds.Clear();
         _initialRootActiveStates.Clear();
         _groundObjectSet.Clear();
         _persistentFlowObjectSet.Clear();
@@ -1308,6 +1400,63 @@ public sealed class PowerPlantProcessController : MonoBehaviour
 
         CacheProcessStepBindings();
         CacheUnitIdBindings();
+        // 初始场景状态对应总览，鼠标选择也必须从全量显式登记节点开始。
+        SetActiveSelectionTargetsForOverview();
+    }
+
+    /// <summary>
+    /// 总览允许选择所有已由场景绑定登记的节点；列表引用初始化缓存，不重新扫描场景层级。
+    /// </summary>
+    private void SetActiveSelectionTargetsForOverview()
+    {
+        _selectableSceneNodeIds.Clear();
+        _activeSelectionRendererTargets.Clear();
+        for (int targetIndex = 0; targetIndex < _selectionRendererTargets.Count; targetIndex++)
+        {
+            SceneNodeRendererPickTarget target = _selectionRendererTargets[targetIndex];
+            if (string.IsNullOrWhiteSpace(target.SceneNodeId) || target.RootObject == null || target.Renderer == null)
+            {
+                continue;
+            }
+
+            _selectableSceneNodeIds.Add(target.SceneNodeId);
+            _activeSelectionRendererTargets.Add(target);
+        }
+    }
+
+    /// <summary>
+    /// 关键环节只允许选择当前组态图可见节点对应的模型。
+    /// 渲染器目标已在场景初始化时缓存，此处只按节点标识过滤，避免切换步骤时重复遍历模型层级。
+    /// </summary>
+    private void SetActiveSelectionTargetsForProcess(IReadOnlyList<string> visibleNodeIds)
+    {
+        _selectableSceneNodeIds.Clear();
+        _activeSelectionRendererTargets.Clear();
+        for (int nodeIndex = 0; nodeIndex < visibleNodeIds.Count; nodeIndex++)
+        {
+            string sceneNodeId = visibleNodeIds[nodeIndex];
+            if (!string.IsNullOrWhiteSpace(sceneNodeId))
+            {
+                _selectableSceneNodeIds.Add(sceneNodeId);
+            }
+        }
+
+        for (int targetIndex = 0; targetIndex < _selectionRendererTargets.Count; targetIndex++)
+        {
+            SceneNodeRendererPickTarget target = _selectionRendererTargets[targetIndex];
+            if (target.RootObject == null || target.Renderer == null ||
+                !_selectableSceneNodeIds.Contains(target.SceneNodeId))
+            {
+                continue;
+            }
+
+            _activeSelectionRendererTargets.Add(target);
+        }
+    }
+
+    private bool IsSceneNodeSelectable(string sceneNodeId)
+    {
+        return !string.IsNullOrWhiteSpace(sceneNodeId) && _selectableSceneNodeIds.Contains(sceneNodeId);
     }
 
     /// <summary>
@@ -1536,6 +1685,116 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         EnsureGroundObjectsVisible(false);
     }
 
+    /// <summary>
+    /// 为交互聚焦建立全场上下文：所有模型保持激活，当前节点保持原材质，其余模型及其广告牌底板、广告牌文字统一半透明。
+    /// 该方法只在点击或拓扑聚焦时调用，不进入每帧更新路径；复用现有上下文材质和 Graphic（图形组件）透明度缓存。
+    /// </summary>
+    private void ApplySelectionFocusContext(string nodeId)
+    {
+        if (!_nodesById.TryGetValue(nodeId, out SceneNodeBinding node))
+        {
+            return;
+        }
+
+        _selectionFocusObjects.Clear();
+        GameObject[] selectedTargets = node.Targets;
+        for (int targetIndex = 0; targetIndex < selectedTargets.Length; targetIndex++)
+        {
+            GameObject selectedTarget = selectedTargets[targetIndex];
+            if (selectedTarget != null)
+            {
+                _selectionFocusObjects.Add(selectedTarget);
+            }
+        }
+
+        // 先恢复上一次聚焦的运行时材质，再按当前选中节点重建上下文，避免透明度叠加或残留。
+        RestoreAllContextFades();
+        RestoreOverviewOnlyObjectsForOverview();
+
+        foreach (KeyValuePair<GameObject, bool> entry in _initialRootActiveStates)
+        {
+            GameObject target = entry.Key;
+            if (target == null)
+            {
+                continue;
+            }
+
+            if (!entry.Value)
+            {
+                target.SetActive(false);
+                continue;
+            }
+
+            target.SetActive(true);
+            if (IsSelectionFocusObject(target))
+            {
+                RestoreContextFade(target);
+            }
+            else
+            {
+                ApplyContextFade(target);
+            }
+        }
+
+        // 燃煤场景的组件支撑等对象位于 Equipment 根节点之外，也必须参与聚焦上下文。
+        foreach (KeyValuePair<GameObject, bool> entry in _overviewOnlyInitialActiveStates)
+        {
+            GameObject target = entry.Key;
+            if (target == null)
+            {
+                continue;
+            }
+
+            target.SetActive(entry.Value);
+            if (entry.Value && !IsSelectionFocusObject(target))
+            {
+                ApplyContextFade(target);
+            }
+        }
+
+        // 建筑群、水池群和外壳遮罩等总览辅助模型不属于选中节点，保持激活并降为半透明。
+        for (int contextIndex = 0; contextIndex < _overviewContextObjects.Length; contextIndex++)
+        {
+            GameObject contextObject = _overviewContextObjects[contextIndex];
+            if (contextObject == null || IsSelectionFocusObject(contextObject))
+            {
+                continue;
+            }
+
+            contextObject.SetActive(true);
+            ApplyContextFade(contextObject);
+        }
+
+        EnsureGroundObjectsVisible(false);
+    }
+
+    private bool IsSelectionFocusObject(GameObject target)
+    {
+        if (target == null)
+        {
+            return false;
+        }
+
+        Transform targetTransform = target.transform;
+        foreach (GameObject selectedTarget in _selectionFocusObjects)
+        {
+            if (selectedTarget == null)
+            {
+                continue;
+            }
+
+            Transform selectedTransform = selectedTarget.transform;
+            if (targetTransform == selectedTransform ||
+                targetTransform.IsChildOf(selectedTransform) ||
+                selectedTransform.IsChildOf(targetTransform))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private void HideOverviewOnlyObjectsForProcess()
     {
         foreach (KeyValuePair<GameObject, bool> entry in _overviewOnlyInitialActiveStates)
@@ -1553,6 +1812,7 @@ public sealed class PowerPlantProcessController : MonoBehaviour
     /// </summary>
     private void ShowAllSceneModels(IReadOnlyList<string> visibleNodeIds)
     {
+        SetActiveSelectionTargetsForOverview();
         RestoreAllContextFades();
         // 从关键环节回到总览时，恢复位于流程根节点之外的总览专属对象，例如燃煤场景的组件支撑。
         // 这些对象不参与 Equipment 内部的遍历，必须在此处显式回到进入场景时的激活状态。
@@ -1719,8 +1979,9 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         Ray ray = _interactionCamera.ScreenPointToRay(mouse.position.ReadValue());
         if (TryResolvePointerSelection(ray, out string sceneNodeId, out GameObject rootObject))
         {
-            // Unity 鼠标选中与拓扑选中共用同一套交互描边和镜头开关；
-            // 这里不改变显隐，避免设备点击意外覆盖当前流程上下文。
+            // Unity 鼠标选中与拓扑选中共用同一套交互描边、镜头和全场半透明上下文。
+            // 当前节点保持实体显示，其余模型及附着的广告牌底板、文字统一由上下文层降权。
+            ApplySelectionFocusContext(sceneNodeId);
             ApplyProcessHighlightForNode(sceneNodeId);
             _activeInteractionNodeId = sceneNodeId;
             if (_focusOnSelection)
@@ -1750,6 +2011,7 @@ public sealed class PowerPlantProcessController : MonoBehaviour
 
         ClearProcessHighlight();
         _activeInteractionNodeId = null;
+        _selectionFocusObjects.Clear();
         if (_freeCameraController != null)
         {
             _freeCameraController.CancelFocus();
@@ -1770,19 +2032,28 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         if (Physics.Raycast(ray, out RaycastHit hit))
         {
             GameObject configuredTarget = FindConfiguredSelectionTarget(hit.collider.transform);
-            if (configuredTarget != null && _selectionNodeByObject.TryGetValue(configuredTarget, out sceneNodeId))
+            if (configuredTarget != null && _selectionNodeByObject.TryGetValue(configuredTarget, out string hitSceneNodeId))
             {
-                rootObject = configuredTarget;
-                return true;
-            }
+                if (IsSceneNodeSelectable(hitSceneNodeId))
+                {
+                    sceneNodeId = hitSceneNodeId;
+                    rootObject = configuredTarget;
+                    return true;
+                }
 
-            // 未映射碰撞体仍是真实遮挡物，后备包围盒不能穿过它选择后方设备。
-            rendererMaximumDistance = hit.distance;
+                // 当前步骤之外的已登记模型仍属于真实遮挡物，但不能作为可选目标。
+                rendererMaximumDistance = hit.distance;
+            }
+            else
+            {
+                // 未映射碰撞体仍是真实遮挡物，后备包围盒不能穿过它选择后方设备。
+                rendererMaximumDistance = hit.distance;
+            }
         }
 
         return SceneNodeRendererPicker.TryPick(
             ray,
-            _selectionRendererTargets,
+            _activeSelectionRendererTargets,
             rendererMaximumDistance,
             out sceneNodeId,
             out rootObject,
@@ -2055,10 +2326,19 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         {
             return;
         }
+
+        // 模型广告牌使用 MeshRenderer（网格渲染器），广告牌文字使用 TextMeshProUGUI（文本组件）。
+        // 两者都从父模型向下收集，保证父模型进入上下文半透明时广告牌底板和文字同步变化。
         Renderer[] renderers = target.GetComponentsInChildren<Renderer>(true);
         for (int rendererIndex = 0; rendererIndex < renderers.Length; rendererIndex++)
         {
             ApplyContextFadeToRenderer(renderers[rendererIndex]);
+        }
+
+        Graphic[] graphics = target.GetComponentsInChildren<Graphic>(true);
+        for (int graphicIndex = 0; graphicIndex < graphics.Length; graphicIndex++)
+        {
+            ApplyContextFadeToGraphic(graphics[graphicIndex]);
         }
     }
 
@@ -2209,6 +2489,12 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         {
             RestoreContextFade(renderers[rendererIndex]);
         }
+
+        Graphic[] graphics = target.GetComponentsInChildren<Graphic>(true);
+        for (int graphicIndex = 0; graphicIndex < graphics.Length; graphicIndex++)
+        {
+            RestoreContextFade(graphics[graphicIndex]);
+        }
     }
 
     private void RestoreContextFade(Renderer renderer)
@@ -2240,6 +2526,33 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         _activeContextFades.Remove(renderer);
     }
 
+    private void ApplyContextFadeToGraphic(Graphic graphic)
+    {
+        if (graphic == null || _activeContextFadeGraphics.ContainsKey(graphic))
+        {
+            return;
+        }
+
+        // 只缩放颜色的 alpha（透明度）通道，保留文字原本的颜色、渐变和其它 TMP 显示设置。
+        // 缓存当前颜色而非预设颜色，兼容运行时动态修改的广告牌文字颜色。
+        Color originalColor = graphic.color;
+        Color fadedColor = originalColor;
+        fadedColor.a *= _contextOpacity;
+        graphic.color = fadedColor;
+        _activeContextFadeGraphics.Add(graphic, originalColor);
+    }
+
+    private void RestoreContextFade(Graphic graphic)
+    {
+        if (graphic == null || !_activeContextFadeGraphics.TryGetValue(graphic, out Color originalColor))
+        {
+            return;
+        }
+
+        graphic.color = originalColor;
+        _activeContextFadeGraphics.Remove(graphic);
+    }
+
     private void RestoreAllContextFades()
     {
         // 释放阶段只遍历一次且不在遍历中修改字典，避免额外复制键列表；最后统一清空强引用。
@@ -2261,7 +2574,17 @@ public sealed class PowerPlantProcessController : MonoBehaviour
             }
         }
 
+        // CanvasRenderer（画布渲染器）不使用模型材质副本，恢复时直接还原文字进入半透明前的颜色。
+        foreach (KeyValuePair<Graphic, Color> pair in _activeContextFadeGraphics)
+        {
+            if (pair.Key != null)
+            {
+                pair.Key.color = pair.Value;
+            }
+        }
+
         _activeContextFades.Clear();
+        _activeContextFadeGraphics.Clear();
         _deferredContextFadeRenderers.Clear();
     }
 

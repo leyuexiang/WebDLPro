@@ -5,6 +5,7 @@
  * 来源节点、连线标识，不复制节点事实。该模块不保存平台设备编号，也不根据 Unity
  * 对象名称、坐标或中文标题推导三维映射。
  */
+import { createCoalPowerDrilldowns } from './topology-drilldowns.mjs'
 
 /**
  * 燃煤总图的五个展示层级。层级颜色和坐标只属于二维呈现，不代表设备权限或数据流向。
@@ -189,6 +190,8 @@ function createCoalPowerLayoutOverrides(visibleNodeIds) {
  */
 export function createCoalPowerTopologies(manifestVersion) {
   const sceneNodeIdByNodeId = new Map(coalPowerSceneNodeMappings.map((mapping) => [mapping.nodeId, mapping.sceneNodeId]))
+  // 入口引用只由同版本正式说明资源反向建立一次，禁止按中文标题或上下级连线猜测可下钻节点。
+  const drilldownBySourceNodeId = new Map(createCoalPowerDrilldowns(manifestVersion).map((content) => [content.sourceNodeId, content.contentKey]))
   const overview = {
     topologyId: 'topology.coal-power.overview',
     sceneId: 'coal-power',
@@ -198,6 +201,9 @@ export function createCoalPowerTopologies(manifestVersion) {
     nodes: coalPowerNodes.map((node) => ({
       ...node,
       ...(sceneNodeIdByNodeId.has(node.nodeId) ? { sceneNodeId: sceneNodeIdByNodeId.get(node.nodeId) } : {}),
+      ...(drilldownBySourceNodeId.has(node.nodeId) ? {
+        drilldown: { enabled: true, contentKey: drilldownBySourceNodeId.get(node.nodeId), trigger: 'button' },
+      } : {}),
       deviceStatus: 'offline',
       doubleClickBehavior: 'emit-node',
     })),

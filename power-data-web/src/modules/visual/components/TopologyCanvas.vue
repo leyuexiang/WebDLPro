@@ -14,6 +14,8 @@ const props = defineProps<{
   nodeStatuses?: ReadonlyMap<ProcessNodeId, TopologyDeviceStatus>
   /** 全屏容器接管高度后，画布改为填充剩余空间而非继续使用常规工作区尺寸。 */
   fullscreen?: boolean
+  /** 只有当前场景—拓扑事务已稳定提交时才显示下钻入口；切换期间旧拓扑可保留但按钮必须隐藏。 */
+  drilldownEnabled?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -22,6 +24,8 @@ const emit = defineEmits<{
   clearSelection: []
   /** 双击只上报命中的二维节点；设备与三维映射必须由正式拓扑运行时显式解析。 */
   doubleClickNode: [nodeId: ProcessNodeId]
+  /** 独立按钮只发出本地内容意图和焦点返回元素，不触发节点选择、双击或三维命令。 */
+  openDrilldown: [nodeId: ProcessNodeId, contentKey: string, triggerElement: HTMLButtonElement]
 }>()
 
 const containerElement = ref<HTMLElement | null>(null)
@@ -34,6 +38,13 @@ const keyboardNodeId = ref<ProcessNodeId | null>(null)
 const tooltipX = ref(16)
 const tooltipY = ref(16)
 const tooltipUsesKeyboardPosition = ref(false)
+const drilldownButtonAnchors = ref<readonly {
+  nodeId: ProcessNodeId
+  title: string
+  contentKey: string
+  x: number
+  y: number
+}[]>([])
 let adapter: CanvasTopologyAdapter | undefined
 let updateCoordinator: TopologyCanvasUpdateCoordinator | undefined
 let resizeObserver: ResizeObserver | undefined
@@ -182,6 +193,34 @@ function restoreViewState(state: CanvasTopologyViewState): void {
 }
 
 /**
+ * 画布完成几何或视图更新后，只为显式声明下钻能力的节点读取屏幕锚点。
+ * 该路径不扫描连线、不计算布局，也不会在设备状态和选中态重绘时重复触发。
+ */
+function syncDrilldownButtonAnchors(): void {
+  if (!adapter || props.drilldownEnabled === false) {
+    drilldownButtonAnchors.value = []
+    return
+  }
+  drilldownButtonAnchors.value = props.topology.nodes.flatMap((node) => {
+    if (!node.drilldown?.enabled || node.drilldown.trigger !== 'button') return []
+    const anchor = adapter?.getNodeScreenAnchor(node.nodeId)
+    return anchor ? [{
+      nodeId: node.nodeId,
+      title: node.title,
+      contentKey: node.drilldown.contentKey,
+      x: anchor.x,
+      y: anchor.y,
+    }] : []
+  })
+}
+
+/** 按钮事件在文档对象层终止，画布不会收到同一次 click（点击）或 dblclick（双击）。 */
+function handleOpenDrilldown(event: MouseEvent, nodeId: ProcessNodeId, contentKey: string): void {
+  const triggerElement = event.currentTarget
+  if (triggerElement instanceof HTMLButtonElement) emit('openDrilldown', nodeId, contentKey, triggerElement)
+}
+
+/**
  * 运行时只可通过受控协调器替换拓扑定义，不会创建第二个 Canvas 或修改 Vue 父组件的只读属性。
  * 后续父组件传入新配置时仍由既有观察器覆盖为最新声明值，保证配置是唯一事实来源。
  */
@@ -312,7 +351,7 @@ onMounted(() => {
   const canvas = canvasElement.value
 
   if (!container || !canvas) return
-  adapter = new CanvasTopologyAdapter(canvas)
+  adapter = new CanvasTopologyAdapter(canvas, syncDrilldownButtonAnchors)
   updateCoordinator = new TopologyCanvasUpdateCoordinator(adapter)
   // 首次直接以当前容器模式建图，避免从全屏打开时先绘制一帧常规尺寸图元。
   syncPresentationScale()
@@ -334,6 +373,8 @@ watch(() => [props.selectedNodeIds, props.selectedRouteIds] as const, syncSelect
 watch(() => props.nodeStatuses, syncNodeStatuses)
 /** 全屏状态变化仅重建受影响的布局与路由缓存，既有画布、用户缩放、平移和选择状态保持不变。 */
 watch(() => props.fullscreen, syncPresentationScale)
+/** 切换事务开始时立即清空旧拓扑的下钻按钮，提交新稳定上下文后再按新定义恢复锚点。 */
+watch(() => props.drilldownEnabled, syncDrilldownButtonAnchors)
 
 /** 断开观察器并释放动画帧，路由切换后不会残留旧页面的 Canvas 回调。 */
 onBeforeUnmount(() => {
@@ -372,6 +413,21 @@ defineExpose<TopologyCanvasController>({
       @pointerup="handlePointerEnd"
       @wheel.prevent="handleCanvasWheel"
     />
+    <button
+      v-for="anchor in drilldownButtonAnchors"
+      :key="anchor.nodeId"
+      v-if="props.drilldownEnabled !== false"
+      type="button"
+      class="topology-canvas__drilldown-button"
+      :style="{ left: `${anchor.x}px`, top: `${anchor.y}px` }"
+      :aria-label="`下钻查看${anchor.title}关联`"
+      :title="`下钻查看${anchor.title}关联`"
+      @click.stop="handleOpenDrilldown($event, anchor.nodeId, anchor.contentKey)"
+      @dblclick.stop
+      @pointerdown.stop
+    >
+      <span aria-hidden="true">↘</span>
+    </button>
     <div
       v-if="activeTooltipNode"
       id="topology-node-tooltip"
@@ -418,6 +474,36 @@ defineExpose<TopologyCanvasController>({
 .topology-canvas canvas:focus-visible {
   outline: 2px solid #67e8f9;
   outline-offset: -3px;
+}
+
+/* 独立下钻按钮以适配器的已绘制节点锚点定位，不覆盖节点主体命中区，也不改变单击和双击语义。 */
+.topology-canvas__drilldown-button {
+  position: absolute;
+  z-index: 5;
+  display: grid;
+  inline-size: 25px;
+  block-size: 25px;
+  min-inline-size: 25px;
+  min-block-size: 25px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid rgba(250, 204, 21, 0.9);
+  border-radius: 50%;
+  color: #fef9c3;
+  background: rgba(113, 63, 18, 0.96);
+  box-shadow: 0 0 9px rgba(250, 204, 21, 0.32);
+  font: 800 13px/1 Microsoft YaHei, sans-serif;
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.topology-canvas__drilldown-button:hover,
+.topology-canvas__drilldown-button:focus-visible {
+  border-color: #fef08a;
+  outline: 2px solid rgba(254, 240, 138, 0.72);
+  outline-offset: 2px;
+  background: rgba(161, 98, 7, 0.98);
 }
 
 /* 全部节点共用一个提示层，避免为24个燃气节点创建文档对象、监听器和响应式实例。 */

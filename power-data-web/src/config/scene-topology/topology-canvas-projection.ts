@@ -33,6 +33,8 @@ export function projectTopologyForCanvas(topology: ManifestTopologyDefinition): 
       iconKey: toCanvasIconKey(node.iconKey),
       deviceStatus: node.deviceStatus,
       metricKeys: [],
+      // 只透传已经通过清单门禁的内容引用；说明节点本身不会进入旧画布模型。
+      drilldown: node.drilldown ? { ...node.drilldown } : undefined,
     })),
     edges: topology.edges.map((edge) => ({
       edgeId: toRouteId(String(edge.edgeId)),
@@ -46,6 +48,13 @@ export function projectTopologyForCanvas(topology: ManifestTopologyDefinition): 
       lineStyle: edge.lineStyle,
       evidenceStatus: edge.evidenceStatus ?? 'unclassified',
       sceneRouteIds: [],
+    })),
+    // 重点区域只投影总览图中显式声明的节点集合；过滤视图在注册表投影阶段会主动清空。
+    focusRegions: topology.focusRegions?.map((region) => ({
+      regionId: region.regionId,
+      anchorNodeId: toProcessNodeId(String(region.anchorNodeId)),
+      nodeIds: region.nodeIds.map((nodeId) => toProcessNodeId(String(nodeId))),
+      label: region.label,
     })),
   }
 }

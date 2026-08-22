@@ -12,9 +12,11 @@ interface NodeLayout {
   height: number
   /** 标题虽绘制在图元边框外，仍属于节点的完整视觉边界，供命中、连线和标签避让统一使用。 */
   titleBounds: RectangleBounds
+  /** 图标与标题组成的真实视觉边界；重点区域只基于此边界，不放大节点命中区。 */
+  visualBounds: RectangleBounds
   /** 命中范围独立于视觉尺寸，保证图标缩小后鼠标和触屏仍有至少 40 像素的可操作区域。 */
   hitBounds: RectangleBounds
-  /** 路由边界包含图元、标题与选中框安全区，连线不得穿过该矩形。 */
+  /** 路由边界包含图元、标题与少量避让安全区，连线不得穿过该矩形。 */
   routeBounds: RectangleBounds
 }
 
@@ -28,7 +30,7 @@ interface RectangleBounds {
 
 /**
  * 同一画布尺寸只计算一次的响应式度量。
- * 图元、文字、选中框和碰撞算法共享这些值，避免视觉缩小后命中区或连线仍沿用旧尺寸。
+ * 图元、文字和碰撞算法共享这些值，避免视觉缩小后命中区或连线仍沿用旧尺寸。
  */
 interface ResponsiveTopologyMetrics {
   /** 常规态为 1、全屏态为 2；所有图元与文字几何均共享该倍率。 */
@@ -40,7 +42,8 @@ interface ResponsiveTopologyMetrics {
   nodeTitleHeight: number
   layerTitleFontSize: number
   edgeLabelFontSize: number
-  selectionExpansion: number
+  /** 节点路由避让余量；仅参与连线碰撞，不绘制任何节点外框。 */
+  nodeRoutePadding: number
   minimumHitSize: number
 }
 
@@ -60,6 +63,12 @@ export interface CanvasTopologyViewState {
   zoom: number
   offsetX: number
   offsetY: number
+}
+
+/** 节点按钮只读取当前画布的屏幕锚点，不暴露布局缓存或允许调用方修改正式节点坐标。 */
+export interface CanvasTopologyNodeScreenAnchor {
+  x: number
+  y: number
 }
 
 /** 任意角度线路中的单个端点或拐点；点序列同时支持直线、少量拐点和最终通道回退。 */
@@ -132,6 +141,23 @@ const edgeColorByEvidence = {
   unclassified: '#94a3b8',
 } as const
 
+/** 重点区域受控调色板；通过 regionId 哈希稳定选色，刷新后颜色不跳变且相邻区域通常不同色。 */
+const focusRegionPalette = [
+  { stroke: '#38bdf8', fill: 'rgba(56, 189, 248, 0.08)' },
+  { stroke: '#a78bfa', fill: 'rgba(167, 139, 250, 0.08)' },
+  { stroke: '#f59e0b', fill: 'rgba(245, 158, 11, 0.08)' },
+  { stroke: '#34d399', fill: 'rgba(52, 211, 153, 0.08)' },
+  { stroke: '#fb7185', fill: 'rgba(251, 113, 133, 0.08)' },
+  { stroke: '#60a5fa', fill: 'rgba(96, 165, 250, 0.08)' },
+] as const
+
+/** 将区域标识转换为稳定的非负哈希；不使用 Math.random，确保视觉回归和用户刷新结果一致。 */
+export function getFocusRegionColor(regionId: string): { stroke: string; fill: string } {
+  let hash = 0
+  for (const character of regionId) hash = (hash * 31 + character.charCodeAt(0)) >>> 0
+  return focusRegionPalette[hash % focusRegionPalette.length] ?? focusRegionPalette[0]
+}
+
 /**
  * 路由规则变更时递增该版本号，使开发热更新中的既有画布实例自动丢弃旧路径缓存。
  * 正式运行时版本恒定，仍只在尺寸或拓扑变化后重算，不增加实时重绘成本。
@@ -174,11 +200,16 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
    * 不修改用户保存的缩放和平移快照，退出全屏后可无损恢复原有视图。
    */
   private presentationScale: 1 | 2 = 1
+  /** 只有几何或视图变化才通知文档对象按钮更新位置，设备状态和选中重绘不会触发响应式列表更新。 */
+  private nodeAnchorsDirty = true
 
   private readonly minimumViewScale = 0.55
   private readonly maximumViewScale = 2.25
 
-  public constructor(private readonly canvas: HTMLCanvasElement) {}
+  public constructor(
+    private readonly canvas: HTMLCanvasElement,
+    private readonly onNodeAnchorsChanged?: () => void,
+  ) {}
 
   /** 缓存节点索引以实现边绘制和命中测试的常数时间查找。 */
   public setTopology(topology: TopologyDefinition): void {
@@ -188,6 +219,7 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
     this.routeByEdgeId.clear()
     this.routesDirty = true
     this.routeLayoutVersion = -1
+    this.nodeAnchorsDirty = true
 
     for (const node of topology.nodes) {
       this.nodeById.set(node.nodeId, node)
@@ -249,6 +281,7 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
     // 端口和通道使用画布坐标，任一尺寸改变都必须在下次绘制前重新分配。
     this.routesDirty = true
     this.routeLayoutVersion = -1
+    this.nodeAnchorsDirty = true
 
     const bufferWidth = Math.round(this.width * this.pixelRatio)
     const bufferHeight = Math.round(this.height * this.pixelRatio)
@@ -273,6 +306,7 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
     this.presentationScale = nextPresentationScale
     this.routesDirty = true
     this.routeLayoutVersion = -1
+    this.nodeAnchorsDirty = true
     this.scheduleDraw()
   }
 
@@ -285,6 +319,7 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
 
     if (nextScale === this.viewScale) return this.viewScale
     this.viewScale = nextScale
+    this.nodeAnchorsDirty = true
     this.scheduleDraw()
     return this.viewScale
   }
@@ -302,6 +337,7 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
     if (nextOffsetX === this.viewOffsetX && nextOffsetY === this.viewOffsetY) return
     this.viewOffsetX = nextOffsetX
     this.viewOffsetY = nextOffsetY
+    this.nodeAnchorsDirty = true
     this.scheduleDraw()
   }
 
@@ -311,6 +347,7 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
     this.viewScale = 1
     this.viewOffsetX = 0
     this.viewOffsetY = 0
+    this.nodeAnchorsDirty = true
     this.scheduleDraw()
     return this.viewScale
   }
@@ -345,7 +382,23 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
     this.viewScale = nextScale
     this.viewOffsetX = nextOffsetX
     this.viewOffsetY = nextOffsetY
+    this.nodeAnchorsDirty = true
     this.scheduleDraw()
+  }
+
+  /**
+   * 将已绘制节点右上侧锚点变换为当前 CSS（层叠样式表）像素坐标。
+   * 下钻按钮据此贴近图元；查询只读取布局缓存，不重新计算全图、路径或命中区域。
+   */
+  public getNodeScreenAnchor(nodeId: ProcessNodeId): CanvasTopologyNodeScreenAnchor | undefined {
+    const layout = this.layoutByNodeId.get(nodeId)
+    if (!layout) return undefined
+    const contentX = layout.x + layout.width + 4
+    const contentY = layout.y - 2
+    return {
+      x: this.width / 2 + this.viewOffsetX + (contentX - this.width / 2) * this.viewScale,
+      y: this.height / 2 + this.viewOffsetY + (contentY - this.height / 2) * this.viewScale,
+    }
   }
 
   /**
@@ -412,6 +465,7 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
     this.viewScale = 1
     this.viewOffsetX = 0
     this.viewOffsetY = 0
+    this.nodeAnchorsDirty = true
   }
 
   /** 任何连续状态变化最多触发一次下一帧绘制，压缩实时状态合并成本。 */
@@ -434,7 +488,10 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
     context.clearRect(0, 0, this.width, this.height)
     this.layoutByNodeId.clear()
 
-    if (!this.topology || this.topology.nodes.length === 0) return
+    if (!this.topology || this.topology.nodes.length === 0) {
+      this.notifyNodeAnchorsChanged()
+      return
+    }
 
     this.drawIndustrialBackground(context)
 
@@ -445,6 +502,8 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
     context.translate(-this.width / 2, -this.height / 2)
     this.drawLayerBands(context)
     this.createNodeLayouts()
+    // 重点区域位于连线下方、节点图元上方，既能形成视觉分组，又不会遮挡节点命中区或改变路由。
+    this.drawFocusRegions(context)
     this.rebuildEdgeRoutesIfNeeded()
     this.drawnEdgeLabelBounds.length = 0
 
@@ -457,6 +516,14 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
     }
 
     context.restore()
+    this.notifyNodeAnchorsChanged()
+  }
+
+  /** 几何无变化时不通知 Vue（渐进式网页框架），避免实时状态批次引起无意义文档对象更新。 */
+  private notifyNodeAnchorsChanged(): void {
+    if (!this.nodeAnchorsDirty) return
+    this.nodeAnchorsDirty = false
+    this.onNodeAnchorsChanged?.()
   }
 
   /** 绘制低对比网格和冷色渐变，使画布在无外部图片时仍具备工业控制视觉层次。 */
@@ -559,7 +626,7 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
     // 用户可用既有缩放查看细节。160 至 239 像素画布使用 18 像素下限，240 像素以上保持 28 像素。
     const minimumNodeSize = (this.height < 160 ? 8 : this.height < 240 ? 18 : 28) * metrics.presentationScale
     const maximumNodeSize = 40 * metrics.presentationScale
-    const maximumNodeHeightByLayers = Math.max(minimumNodeSize, minimumLayerDistance - metrics.nodeTitleHeight - metrics.nodeTitleGap - metrics.selectionExpansion * 2 - 3)
+    const maximumNodeHeightByLayers = Math.max(minimumNodeSize, minimumLayerDistance - metrics.nodeTitleHeight - metrics.nodeTitleGap - metrics.nodeRoutePadding * 2 - 3)
     const nodeWidth = Math.min(maximumNodeSize, Math.max(minimumNodeSize, Math.floor(Math.min(legacyNodeWidth * metrics.scale, maximumNodeHeightByLayers))))
     const nodeHeight = nodeWidth
     const layerLabelGutter = this.getLayerLabelGutter()
@@ -571,9 +638,9 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
     for (const node of this.topology.nodes) {
       const requestedX = Math.round(layerLabelGutter + (node.x / 100) * topologyContentWidth - nodeWidth / 2)
       const requestedY = Math.round((node.y / 100) * this.height - nodeHeight / 2)
-      // 顶层与现场层都采用中心坐标；限制卡片边界后可防止 y=8 和 y=94 的标签被 Canvas（画布）裁掉。
+      // 顶层与现场层都采用中心坐标；限制图元边界后可防止 y=8 和 y=94 的标签被 Canvas（画布）裁掉。
       const x = Math.min(this.width - rightPadding - nodeWidth, Math.max(layerLabelGutter, requestedX))
-      // 底部额外保留一行小字，文字虽在图元边框外，仍不能被画布裁切。
+      // 底部额外保留一行小字，文字虽在图元外部，仍不能被画布裁切。
       const titleSpace = metrics.nodeTitleGap + metrics.nodeTitleHeight
       const y = Math.min(this.height - nodeHeight - titleSpace - 1, Math.max(0, requestedY))
       const centerX = x + nodeWidth / 2
@@ -581,8 +648,52 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
       const titleBounds = this.createBoundsFromCenter(centerX, titleTop + metrics.nodeTitleHeight / 2, metrics.nodeTitleMaxWidth, metrics.nodeTitleHeight)
       const visualBounds = this.unionBounds({ left: x, top: y, right: x + nodeWidth, bottom: y + nodeHeight }, titleBounds)
       const hitBounds = this.expandBoundsToMinimumSize(visualBounds, centerX, y + nodeHeight / 2, metrics.minimumHitSize)
-      const routeBounds = this.expandBounds(visualBounds, metrics.selectionExpansion + 1)
-      this.layoutByNodeId.set(node.nodeId, { node, x, y, width: nodeWidth, height: nodeHeight, titleBounds, hitBounds, routeBounds })
+      const routeBounds = this.expandBounds(visualBounds, metrics.nodeRoutePadding + 1)
+      this.layoutByNodeId.set(node.nodeId, { node, x, y, width: nodeWidth, height: nodeHeight, titleBounds, visualBounds, hitBounds, routeBounds })
+    }
+  }
+
+  /**
+   * 根据已缓存的节点视觉边界绘制总览重点区域。区域只消费显式 focusRegions 配置，
+   * 不参与命中、连线避让或节点选择；区域只保留边框与底色，不绘制名称文字，减少对节点和连线的遮挡。
+   * 过滤拓扑没有该配置时自然不会绘制任何框。
+   */
+  private drawFocusRegions(context: CanvasRenderingContext2D): void {
+    const regions = this.topology?.focusRegions
+    if (!regions || regions.length === 0) return
+
+    const metrics = this.getResponsiveMetrics()
+    const padding = Math.max(7, Math.round(8 * metrics.scale))
+
+    for (const region of regions) {
+      let regionBounds: RectangleBounds | undefined
+      for (const nodeId of region.nodeIds) {
+        const layout = this.layoutByNodeId.get(nodeId)
+        if (!layout) continue
+        regionBounds = regionBounds ? this.unionBounds(regionBounds, layout.visualBounds) : { ...layout.visualBounds }
+      }
+      if (!regionBounds) continue
+
+      const colors = getFocusRegionColor(region.regionId)
+      const expandedFrame = this.expandBounds(regionBounds, padding)
+      // 区域框不能把虚线裁到画布外；节点本身已在布局阶段完成安全区限幅。
+      const frame: RectangleBounds = {
+        left: Math.max(0, expandedFrame.left),
+        top: Math.max(0, expandedFrame.top),
+        right: Math.min(this.width, expandedFrame.right),
+        bottom: Math.min(this.height, expandedFrame.bottom),
+      }
+      context.save()
+      context.fillStyle = colors.fill
+      this.roundRect(context, frame.left, frame.top, frame.right - frame.left, frame.bottom - frame.top, 8)
+      context.fill()
+      context.strokeStyle = colors.stroke
+      context.lineWidth = Math.max(1, 1.25 * metrics.presentationScale)
+      context.setLineDash([6 * metrics.presentationScale, 4 * metrics.presentationScale])
+      this.roundRect(context, frame.left, frame.top, frame.right - frame.left, frame.bottom - frame.top, 8)
+      context.stroke()
+      context.setLineDash([])
+      context.restore()
     }
   }
 
@@ -610,7 +721,8 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
       nodeTitleHeight: 9 * scale,
       layerTitleFontSize: 11 * scale,
       edgeLabelFontSize: 9 * scale,
-      selectionExpansion: (isExtremelyLow ? 1 : 2) * presentationScale,
+      // 只为连线路由保留最小避让余量；节点视觉不再绘制层级描边或选中外框。
+      nodeRoutePadding: (isExtremelyLow ? 1 : 2) * presentationScale,
       minimumHitSize: 40,
     }
   }
@@ -630,7 +742,7 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
     }
   }
 
-  /** 从四边等距扩展矩形，供选中框和连线安全区共用。 */
+  /** 从四边等距扩展矩形，仅供连线安全区使用，不对应可见节点边框。 */
   private expandBounds(bounds: RectangleBounds, amount: number): RectangleBounds {
     return { left: bounds.left - amount, top: bounds.top - amount, right: bounds.right + amount, bottom: bounds.bottom + amount }
   }
@@ -1256,32 +1368,21 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
   }
 
   /**
-   * 设备以状态 SVG 为主体，层级色仅用于卡片边界；选中时增加青色外框和光晕，
-   * 绝不替换设备图元或状态圆点，因此不会把离线节点伪装成正常节点。
+   * 节点主体只绘制受控状态图元和下方标题；选中节点额外绘制独立高对比外圈，
+   * 外圈不替换图元、不改写状态，也不写入视觉、命中或路由边界缓存。
+   * 这样新迁入的透明 PNG（便携式网络图形）与 SVG（可缩放矢量图形）都能按原始设计直接呈现，
+   * 设备状态仍由图元本身和提示层表达，选中反馈只表达用户交互状态。
    */
   private drawNode(context: CanvasRenderingContext2D, layout: NodeLayout): void {
-    const isSelected = this.selectedNodeIds.has(layout.node.nodeId)
-    const layerColor = this.getLayerColor(layout.node.layerId)
     const deviceStatus = this.nodeStatusOverrideById.get(layout.node.nodeId) ?? layout.node.deviceStatus
 
     context.save()
     const metrics = this.getResponsiveMetrics()
-    if (isSelected) {
-      context.strokeStyle = '#67e8f9'
-      context.lineWidth = 2
-      context.shadowColor = '#22d3ee'
-      context.shadowBlur = 10
-      const expansion = metrics.selectionExpansion
-      this.roundRect(context, layout.x - expansion, layout.y - expansion, layout.width + expansion * 2, layout.height + expansion * 2, 7)
-      context.stroke()
+    if (this.selectedNodeIds.has(layout.node.nodeId)) {
+      this.drawNodeSelectionIndicator(context, layout, metrics)
     }
 
-    // 普通节点不再绘制大于图元的卡片底板；层级描边覆盖在图元盒内侧，不额外扩大视觉边界。
-    context.fillStyle = 'transparent'
-    context.strokeStyle = `${layerColor}cc`
-    context.lineWidth = 1
-
-    // SVG 图元直接铺满 28 至 40 像素的响应式节点盒；内侧描边不会形成比图标大一圈的普通卡片。
+    // 图元直接铺满响应式节点盒；不绘制任何附加矩形、圆角、描边或阴影。
     const iconSize = Math.max(1, Math.min(layout.height, layout.width))
     const iconX = layout.x + (layout.width - iconSize) / 2
     const iconY = layout.y + (layout.height - iconSize) / 2
@@ -1289,21 +1390,37 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
 
     if (image) {
       context.drawImage(image, iconX, iconY, iconSize, iconSize)
-    } else {
-      // 图元加载前仅绘制中性占位框，不以字符或临时图标替代正式设备图元。
-      context.strokeStyle = 'rgba(148, 163, 184, 0.65)'
-      context.setLineDash([2, 2])
-      this.roundRect(context, iconX + 2, iconY + 2, iconSize - 4, iconSize - 4, 4)
-      context.stroke()
-      context.setLineDash([])
     }
 
-    // 重新建立边框路径后覆盖在图元边缘内侧；图片加载与占位路径不会污染该描边。
-    this.roundRect(context, layout.x + 0.5, layout.y + 0.5, layout.width - 1, layout.height - 1, 5)
-    context.stroke()
-
-    // 四态已经由受控 SVG 图元和完整提示共同表达，不再叠加右上角状态圆点，避免遮挡放大的设备图标。
+    // 图标加载期间保持空白，避免占位框被误认为正式拓扑图元；资源加载完成后由缓存回调触发重绘。
     this.drawNodeTitle(context, layout, metrics)
+    context.restore()
+  }
+
+  /**
+   * 在图元盒外侧绘制青色高对比外圈和光晕，使没有关联连线的孤立节点也有明确选中反馈。
+   * 该方法只提交画布绘制指令；外扩量不参与布局、命中测试或连线路由，避免一次选择触发几何重算。
+   */
+  private drawNodeSelectionIndicator(
+    context: CanvasRenderingContext2D,
+    layout: NodeLayout,
+    metrics: ResponsiveTopologyMetrics,
+  ): void {
+    const expansion = 3 * metrics.presentationScale
+    context.save()
+    context.strokeStyle = '#67e8f9'
+    context.lineWidth = 2 * metrics.presentationScale
+    context.shadowColor = '#22d3ee'
+    context.shadowBlur = 10 * metrics.presentationScale
+    this.roundRect(
+      context,
+      layout.x - expansion,
+      layout.y - expansion,
+      layout.width + expansion * 2,
+      layout.height + expansion * 2,
+      7 * metrics.presentationScale,
+    )
+    context.stroke()
     context.restore()
   }
 
@@ -1381,11 +1498,6 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
     image.src = iconUrl
     this.iconImageByUrl.set(iconUrl, entry)
     return undefined
-  }
-
-  /** 从可选层定义读取边界色；未分层的通用拓扑使用稳定的中性青色。 */
-  private getLayerColor(layerId: string | undefined): string {
-    return this.topology?.layers?.find((layer) => layer.layerId === layerId)?.color ?? '#38bdf8'
   }
 
   /** 兼容旧浏览器的圆角矩形路径，避免依赖 CanvasRenderingContext2D.roundRect 支持度。 */

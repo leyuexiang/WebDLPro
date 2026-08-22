@@ -9,6 +9,7 @@ import { chromium } from 'file:///C:/Users/admin/.cache/codex-runtimes/codex-pri
  */
 const baseUrl = process.env.COAL_RELEASE_URL ?? 'http://127.0.0.1:5523/'
 const screenshotPath = process.env.COAL_SCREENSHOT_PATH
+const drilldownScreenshotPath = process.env.COAL_DRILLDOWN_SCREENSHOT_PATH
 const executablePath = 'D:/PlaywrightBrowsers/chromium-1187/chrome-win/chrome.exe'
 const instanceId = 'coal-power-platform-host'
 const overviewTopologyId = 'topology.coal-power.overview'
@@ -124,7 +125,6 @@ try {
 
   const shellFrame = page.locator('#visualization-shell').contentFrame()
   await shellFrame.getByRole('heading', { name: overviewTitle, exact: true }).waitFor({ timeout: 20_000 })
-  await shellFrame.getByText(/当前拓扑已配置 27 个节点、27 条连线/).waitFor({ timeout: 20_000 })
 
   const unityFrameCount = await shellFrame.locator('iframe').count()
   const topologyCanvasCount = await shellFrame.locator('canvas').count()
@@ -157,6 +157,58 @@ try {
 
   const focusNode = overview.nodes.find((node) => node.nodeId === 'system.boiler-dcs')
   if (focusNode?.sceneNodeId !== 'node.coal-boiler') throw new Error('锅炉 DCS 节点缺少已确认的三维映射。')
+
+  /*
+   * 燃煤三真实分支应产生七个渲染实例；单真实分支仍只有三个语义节点、五个实例。
+   * 两次覆盖层交互都必须保持单画布、单 Unity，且不得产生焦点或双击协议副作用。
+   */
+  const hostSideEffectCountBefore = (await page.evaluate(() => window.__coalObservedHostEvents ?? []))
+    .filter((event) => event.type === 'topology.node.dblclick' || event.type === 'view.changed').length
+  const boilerDrilldownButton = shellFrame.getByRole('button', { name: '下钻查看锅炉 DCS 控制器关联', exact: true })
+  await boilerDrilldownButton.click()
+  const boilerDialog = shellFrame.getByRole('dialog', { name: '锅炉 DCS 控制器关联说明', exact: true })
+  await boilerDialog.waitFor({ timeout: 5_000 })
+  if (await boilerDialog.locator('[data-render-instance-id]').count() !== 7) throw new Error('锅炉三真实分支没有渲染七个唯一实例。')
+  // 节点类型已由层级和配色表达，卡片内不得再次渲染辅助小字，防止后续样式调整造成需求回退。
+  if (await boilerDialog.locator('.topology-drilldown__node').filter({ hasText: /来源节点|直接子节点|模型说明节点/ }).count() !== 0) {
+    throw new Error('燃煤下钻节点卡片仍显示类型辅助文字。')
+  }
+  // 真实悬浮节点后仍不得生成提示层，确保所有下钻分支共用的覆盖层没有恢复悬浮弹窗。
+  await boilerDialog.locator('.topology-drilldown__node').first().hover()
+  if (await boilerDialog.locator('.topology-drilldown__tooltip, [role="tooltip"]').count() !== 0) {
+    throw new Error('燃煤下钻节点悬浮后仍显示提示弹窗。')
+  }
+  if (await boilerDialog.getAttribute('aria-modal') !== null || await shellFrame.locator('.topology-panel__content').getAttribute('inert') === null) {
+    throw new Error('燃煤下钻覆盖层的局部对话框或不可交互边界错误。')
+  }
+  if (await shellFrame.locator('iframe').count() !== 1 || await shellFrame.locator('canvas').count() !== 1) throw new Error('燃煤下钻创建了额外实例。')
+  if (drilldownScreenshotPath) await page.screenshot({ path: drilldownScreenshotPath, fullPage: true })
+  await boilerDialog.getByRole('button', { name: '关闭下钻', exact: true }).click()
+  await boilerDialog.waitFor({ state: 'detached', timeout: 5_000 })
+  if (!await boilerDrilldownButton.evaluate((button) => document.activeElement === button)) throw new Error('燃煤下钻关闭后焦点未返回入口。')
+
+  const steamDrilldownButton = shellFrame.getByRole('button', { name: '下钻查看汽机 DCS 控制器关联', exact: true })
+  await steamDrilldownButton.click()
+  const steamDialog = shellFrame.getByRole('dialog', { name: '汽机 DCS 控制器关联说明', exact: true })
+  await steamDialog.waitFor({ timeout: 5_000 })
+  const steamSemanticCounts = await steamDialog.locator('[data-semantic-node-id]').evaluateAll((nodes) => nodes.reduce((counts, node) => {
+    const semanticNodeId = node.getAttribute('data-semantic-node-id') ?? ''
+    counts[semanticNodeId] = (counts[semanticNodeId] ?? 0) + 1
+    return counts
+  }, {}))
+  if (await steamDialog.locator('[data-render-instance-id]').count() !== 5 ||
+      steamSemanticCounts.source !== 1 || steamSemanticCounts['logic.1'] !== 2 || steamSemanticCounts['boundary.1'] !== 2) {
+    throw new Error('汽机单分支没有保持三个语义节点、五个渲染实例。')
+  }
+  await page.keyboard.press('Escape')
+  await steamDialog.waitFor({ state: 'detached', timeout: 5_000 })
+  const hostSideEffectCountAfter = (await page.evaluate(() => window.__coalObservedHostEvents ?? []))
+    .filter((event) => event.type === 'topology.node.dblclick' || event.type === 'view.changed').length
+  const drilldownUnityCommands = await unityFrame.locator('html').evaluate(() => window.__coalObservedUnityCommands ?? [])
+  if (hostSideEffectCountAfter !== hostSideEffectCountBefore || drilldownUnityCommands.length !== 0) {
+    throw new Error('燃煤下钻局部交互产生了外层或三维副作用。')
+  }
+
   const topologyCanvas = shellFrame.locator('canvas')
   const canvasSize = await topologyCanvas.evaluate((canvas) => {
     const bounds = canvas.getBoundingClientRect()
@@ -212,9 +264,14 @@ try {
       actionId: workflow.actionId,
       expectedContextRevision: currentView.payload.contextRevision,
     }, workflow.actionId.split('.').at(-1))
+    await page.waitForTimeout(0)
+    // 场景切换沿用旧拓扑定义时，稳定上下文门禁已关闭；旧下钻按钮不能在加载遮罩下闪现。
+    const coalLoading = await shellFrame.locator('.embedded-visualization-shell__content').getAttribute('aria-busy') === 'true'
+    if (coalLoading && await shellFrame.locator('.topology-canvas__drilldown-button').count() !== 0) {
+      throw new Error('燃煤场景切换加载期间仍显示旧拓扑下钻按钮。')
+    }
     await waitForViewChanged(messageId, 'coal-power', workflow.topologyId, workflow.actionId)
     await shellFrame.getByRole('heading', { name: workflow.title, exact: true }).waitFor({ timeout: 20_000 })
-    await shellFrame.getByText(new RegExp(`当前拓扑已配置 ${workflow.nodeCount} 个节点、${workflow.edgeCount} 条连线`)).waitFor({ timeout: 20_000 })
     if (await shellFrame.locator('iframe').count() !== unityFrameCount || await shellFrame.locator('canvas').count() !== topologyCanvasCount) {
       throw new Error(`${workflow.topologyId} 切换后出现重复 Unity 或拓扑实例。`)
     }
@@ -227,6 +284,12 @@ try {
     topologyId: 'topology.gas-power.overview',
     expectedContextRevision: currentView.payload.contextRevision,
   }, 'open-gas')
+  await page.waitForTimeout(0)
+  // 跨场景加载沿用旧拓扑定义时同样必须隐藏旧入口，不能因三维切换路径不同而短暂显示下钻按钮。
+  const coalToGasLoading = await shellFrame.locator('.embedded-visualization-shell__content').getAttribute('aria-busy') === 'true'
+  if (coalToGasLoading && await shellFrame.locator('.topology-canvas__drilldown-button').count() !== 0) {
+    throw new Error('燃煤切换燃气加载期间仍显示旧拓扑下钻按钮。')
+  }
   await waitForViewChanged(messageId, 'gas-power', 'topology.gas-power.overview', null, 120_000)
   if (await shellFrame.locator('iframe').count() !== unityFrameCount) throw new Error('切换燃气场景时创建了第二个 Unity 实例。')
 
@@ -236,9 +299,14 @@ try {
     topologyId: overviewTopologyId,
     expectedContextRevision: currentView.payload.contextRevision,
   }, 'return-coal')
+  await page.waitForTimeout(0)
+  // 返回燃煤时也必须等待新稳定视图提交，不能在加载阶段显示燃气旧入口。
+  const gasToCoalLoading = await shellFrame.locator('.embedded-visualization-shell__content').getAttribute('aria-busy') === 'true'
+  if (gasToCoalLoading && await shellFrame.locator('.topology-canvas__drilldown-button').count() !== 0) {
+    throw new Error('燃气切换燃煤加载期间仍显示旧拓扑下钻按钮。')
+  }
   await waitForViewChanged(messageId, 'coal-power', overviewTopologyId, null, 120_000)
   await shellFrame.getByRole('heading', { name: overviewTitle, exact: true }).waitFor({ timeout: 20_000 })
-  await shellFrame.getByText(/当前拓扑已配置 27 个节点、27 条连线/).waitFor({ timeout: 20_000 })
   if (await shellFrame.locator('iframe').count() !== unityFrameCount || await shellFrame.locator('canvas').count() !== topologyCanvasCount) {
     throw new Error('燃气回切燃煤后出现重复运行时实例。')
   }
@@ -269,6 +337,7 @@ try {
     consoleErrors,
     httpErrors,
     screenshotPath: screenshotPath ?? null,
+    drilldownScreenshotPath: drilldownScreenshotPath ?? null,
   }, null, 2)}\n`)
 } catch (error) {
   const diagnostics = {

@@ -10,6 +10,7 @@ import {
   createCoalPowerActions,
   createCoalPowerTopologies,
 } from './coal-power-topology.mjs'
+import { createCoalPowerDrilldowns, createGasPowerDrilldowns } from './topology-drilldowns.mjs'
 
 /**
  * 燃气发电发布包构建器。
@@ -524,6 +525,30 @@ const ccgtOtTopology = Object.freeze({
     Object.freeze({ nodeId: 'condensate-pump-vfd', title: '循环水泵变频器', iconKey: 'plc', x: 74, y: 88, layerId: 'field-device' }),
     Object.freeze({ nodeId: 'fuel-gas-leak-detector', title: '燃气泄漏检测探头', iconKey: 'instrument', x: 89, y: 88, layerId: 'field-device' }),
   ]),
+  /**
+   * 总览图中与已核验三维入口对应的重点区域。成员集合显式登记，发布构建不会按标题、坐标或连线猜测子节点。
+   * 过滤拓扑只保存筛选规则，注册表投影时会清空 focusRegions，确保重点框不出现在关键环节。
+   */
+  focusRegions: Object.freeze([
+    Object.freeze({
+      regionId: 'focus.gas-turbine-control',
+      anchorNodeId: 'inlet-duct',
+      nodeIds: Object.freeze(['inlet-duct', 'fuel-gas-pressure-valve', 'fuel-gas-electric-actuator']),
+      label: '燃机控制区域',
+    }),
+    Object.freeze({
+      regionId: 'focus.hrsg-control',
+      anchorNodeId: 'hrsg',
+      nodeIds: Object.freeze(['hrsg', 'hrsg-drum-level-sensor']),
+      label: '余热锅炉控制区域',
+    }),
+    Object.freeze({
+      regionId: 'focus.steam-turbine-control',
+      anchorNodeId: 'steam-turbine',
+      nodeIds: Object.freeze(['steam-turbine', 'steam-main-control-valve']),
+      label: '蒸汽轮机控制区域',
+    }),
+  ]),
   edges: Object.freeze([
     Object.freeze({ edgeId: 'route.enterprise-core-to-ems', fromNodeId: 'enterprise-core-switch', toNodeId: 'ems-system', title: '企业管理网通信' }),
     Object.freeze({ edgeId: 'route.enterprise-core-to-firewall', fromNodeId: 'enterprise-core-switch', toNodeId: 'enterprise-firewall', title: '企业网安全边界' }),
@@ -631,6 +656,8 @@ function createOverviewLayoutOverrides(visibleNodeIds) {
 
 /** 将唯一总图和只读流程过滤规则转换为当前发布清单格式。 */
 function createCcgtTopologies(manifestVersion) {
+  // 可下钻入口由同版本正式说明内容建立一次索引；节点标题和现场连线不参与能力推断。
+  const drilldownBySourceNodeId = new Map(createGasPowerDrilldowns(manifestVersion).map((content) => [content.sourceNodeId, content.contentKey]))
   const overview = {
     topologyId: 'topology.gas-power.overview',
     sceneId: 'gas-power',
@@ -642,6 +669,9 @@ function createCcgtTopologies(manifestVersion) {
       return {
         ...node,
         ...(sceneNodeId ? { sceneNodeId } : {}),
+        ...(drilldownBySourceNodeId.has(node.nodeId) ? {
+          drilldown: { enabled: true, contentKey: drilldownBySourceNodeId.get(node.nodeId), trigger: 'button' },
+        } : {}),
         deviceStatus: 'offline',
         /*
          * 所有来源节点都用稳定 nodeId（节点标识）参与外部协议。平台读取该标识并在自身系统内
@@ -651,6 +681,10 @@ function createCcgtTopologies(manifestVersion) {
       }
     }),
     edges: ccgtOtTopology.edges.map((edge) => ({ ...edge, evidenceStatus: 'verified' })),
+    focusRegions: ccgtOtTopology.focusRegions.map((region) => ({
+      ...region,
+      nodeIds: [...region.nodeIds],
+    })),
   }
 
   const flowTopologies = ccgtFlowViews.map((view) => ({
@@ -772,6 +806,8 @@ export async function createGasOnlyManifest(releaseId) {
     unityRuntimeKey: getUnityRuntimeKey('gas-power'),
     scenes,
     topologies,
+    // 说明内容与清单同版本原子发布，但不加入场景 topologyIds（可切换拓扑标识集合）。
+    drilldowns: createGasPowerDrilldowns(manifestVersion),
     actions: gasActionDefinitions,
     unitySceneMappings,
   }
@@ -831,6 +867,7 @@ export async function createCoalPowerManifest(releaseId) {
     unityRuntimeKey: getUnityRuntimeKey('coal-power'),
     scenes,
     topologies,
+    drilldowns: createCoalPowerDrilldowns(manifestVersion),
     actions: coalActionDefinitions,
     unitySceneMappings,
   }
@@ -868,6 +905,9 @@ export async function createConfiguredPowerScenesManifest(releaseId, initialScen
   ].map((topology) => ({ ...topology, configVersion: manifestVersion }))
   const actions = [...gasManifest.actions, ...coalManifest.actions]
     .map((action) => ({ ...action, configVersion: manifestVersion }))
+  // 联合包统一改写说明资源版本，保证入口、内容和拓扑始终属于同一原子发布。
+  const drilldowns = [...(gasManifest.drilldowns ?? []), ...(coalManifest.drilldowns ?? [])]
+    .map((content) => ({ ...content, version: manifestVersion }))
   const unitySceneMappings = gasManifest.unitySceneMappings.map((gasMapping) => {
     if (gasMapping.sceneId !== 'coal-power') return { ...gasMapping }
     const coalMapping = coalMappingBySceneId.get(gasMapping.sceneId)
@@ -882,6 +922,7 @@ export async function createConfiguredPowerScenesManifest(releaseId, initialScen
     unityRuntimeKey: getUnityRuntimeKey(initialSceneId),
     scenes,
     topologies,
+    drilldowns,
     actions,
     unitySceneMappings,
   }

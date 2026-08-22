@@ -249,6 +249,34 @@ const gasTopology: TopologyDefinition = {
     { nodeId: toProcessNodeId('condensate-pump-vfd'), title: '循环水泵变频器', x: 79, y: 94, layerId: 'field-device', iconKey: 'instrument', deviceStatus: 'offline', metricKeys: [] },
     { nodeId: toProcessNodeId('fuel-gas-leak-detector'), title: '燃气泄漏检测探头', x: 93, y: 94, layerId: 'field-device', iconKey: 'instrument', deviceStatus: 'offline', metricKeys: [] },
   ],
+  /**
+   * 本地兼容配置同步正式燃气总览的三组重点区域；关键环节由过滤拓扑投影生成且不会继承这些区域。
+   * 区域成员关系来自已确认的三维入口与其子节点，不依据标题或坐标动态推断。
+   */
+  focusRegions: [
+    {
+      regionId: 'focus.gas-turbine-control',
+      anchorNodeId: toProcessNodeId('inlet-duct'),
+      nodeIds: [
+        toProcessNodeId('inlet-duct'),
+        toProcessNodeId('fuel-gas-pressure-valve'),
+        toProcessNodeId('fuel-gas-electric-actuator'),
+      ],
+      label: '燃机控制区域',
+    },
+    {
+      regionId: 'focus.hrsg-control',
+      anchorNodeId: toProcessNodeId('hrsg'),
+      nodeIds: [toProcessNodeId('hrsg'), toProcessNodeId('hrsg-drum-level-sensor')],
+      label: '余热锅炉控制区域',
+    },
+    {
+      regionId: 'focus.steam-turbine-control',
+      anchorNodeId: toProcessNodeId('steam-turbine'),
+      nodeIds: [toProcessNodeId('steam-turbine'), toProcessNodeId('steam-main-control-valve')],
+      label: '蒸汽轮机控制区域',
+    },
+  ],
   edges: [
     { edgeId: toRouteId('route.enterprise-core-to-ems'), fromNodeId: toProcessNodeId('enterprise-core-switch'), toNodeId: toProcessNodeId('ems-system'), title: '企业管理网通信', evidenceStatus: 'verified', sceneRouteIds: [] },
     { edgeId: toRouteId('route.enterprise-core-to-firewall'), fromNodeId: toProcessNodeId('enterprise-core-switch'), toNodeId: toProcessNodeId('enterprise-firewall'), title: '企业网安全边界', evidenceStatus: 'verified', sceneRouteIds: [] },

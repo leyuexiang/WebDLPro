@@ -1,5 +1,6 @@
 import { SCENE_IDS, isSceneId, validateStableIdentifier } from '@/config/scene-topology/identifiers'
 import type { SceneTopologyManifest, SceneTopologyManifestValidationIssue } from '@/config/scene-topology/types'
+import { MAX_TOPOLOGY_DRILLDOWN_CONTENT_COUNT } from '@/config/scene-topology/topology-drilldown-registry'
 
 /** 与 Unity 节点快照水位表一致；结构清单超过该值会使清除补偿无法保证完整交付。 */
 export const MAX_DEVICE_STATE_SCENE_NODE_TARGETS_PER_SCENE = 500
@@ -199,6 +200,13 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
 
   const sceneItems = readArray(manifest, 'scenes', issues, 'manifest.scenes')
   const topologyItems = readArray(manifest, 'topologies', issues, 'manifest.topologies')
+  // 旧场景清单允许完全没有说明层；一旦节点声明引用，后续交叉校验会要求同版本正式内容存在。
+  const drilldownItems = manifest.drilldowns === undefined
+    ? []
+    : readArray(manifest, 'drilldowns', issues, 'manifest.drilldowns')
+  if (drilldownItems.length > MAX_TOPOLOGY_DRILLDOWN_CONTENT_COUNT) {
+    appendIssue(issues, 'drilldown.capacity', '下钻说明内容数量超过固定容量。')
+  }
   const actionItems = readArray(manifest, 'actions', issues, 'manifest.actions')
   const unityMappingItems = readArray(manifest, 'unitySceneMappings', issues, 'manifest.unity-scene-mappings')
   const manifestVersion = typeof manifest.manifestVersion === 'string' ? manifest.manifestVersion : ''
@@ -249,6 +257,8 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
   const sceneNodeReferencesBySceneId = new Map<string, Set<string>>()
   /** 节点归属场景在解析拓扑时固定记录，后续校验三维节点时不从标题、文件名或当前 UI 回推场景。 */
   const sceneIdByTopologyNodeReference = new Map<string, string>()
+  /** 下钻引用只在来源节点上登记一次，过滤视图复用节点对象而不复制或裁剪内容。 */
+  const drilldownReferenceBySourceNodeId = new Map<string, string>()
   for (const item of topologyItems) {
     if (!isRecord(item)) {
       appendIssue(issues, 'topology.shape', '拓扑定义必须是对象。')
@@ -295,6 +305,7 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
     }
 
     const nodeIds = new Set<string>()
+    const nodeById = new Map<string, UnknownRecord>()
     const nodeItems = readArray(item, 'nodes', issues, 'topology.nodes')
     // 业务源拓扑的全部节点都必须允许上报 nodeId；每张图只记录一次问题，避免大清单产生重复报告。
     let sourceTopologyContainsNonReportableNode = false
@@ -308,6 +319,7 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
       const nodeId = nodeItem.nodeId as string
       if (nodeIds.has(nodeId)) appendIssue(issues, 'topology.duplicate-node', '同一拓扑内节点标识重复。')
       nodeIds.add(nodeId)
+      nodeById.set(nodeId, nodeItem)
       if (item.filter === undefined) {
         if (sourceNodeIds.has(nodeId)) appendIssue(issues, 'topology.duplicate-source-node', '同一联动资源内来源节点标识必须全局唯一。')
         sourceNodeIds.add(nodeId)
@@ -339,6 +351,19 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
       }
       if (nodeItem.doubleClickBehavior !== 'emit-node' && nodeItem.doubleClickBehavior !== 'none') appendIssue(issues, 'topology.double-click', '节点双击行为无效。')
       if (nodeItem.doubleClickBehavior !== 'emit-node') sourceTopologyContainsNonReportableNode = true
+      if (nodeItem.drilldown !== undefined) {
+        if (!isRecord(nodeItem.drilldown) || nodeItem.drilldown.enabled !== true || nodeItem.drilldown.trigger !== 'button' ||
+            !validateIdentifier(nodeItem.drilldown.contentKey, '下钻内容键', issues)) {
+          appendIssue(issues, 'topology.drilldown-reference', '节点下钻引用必须启用独立按钮并包含有效内容键。')
+        } else if (item.filter !== undefined) {
+          appendIssue(issues, 'topology.filter-drilldown-reference', '过滤拓扑不得重新定义或改写来源节点的下钻引用。')
+        } else {
+          if (nodeItem.layerId !== 'unit-control') {
+            appendIssue(issues, 'topology.drilldown-source-layer', '只有单元控制层正式节点可以声明下钻入口。')
+          }
+          drilldownReferenceBySourceNodeId.set(nodeId, String(nodeItem.drilldown.contentKey))
+        }
+      }
     }
     /*
      * 只有保存真实节点的来源总图参加门禁。流程过滤视图必须保持 nodes 为空并从来源图投影，
@@ -375,6 +400,57 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
       }
       if (edgeItem.evidenceStatus !== undefined && !['verified', 'pending-confirmation', 'conceptual'].includes(String(edgeItem.evidenceStatus))) {
         appendIssue(issues, 'topology.edge-evidence-status', '拓扑连线证据状态无效。')
+      }
+    }
+
+    /*
+     * 重点区域是总览图专属的显式视觉声明。校验阶段同时检查入口三维绑定、成员闭环和唯一性，
+     * 这样画布无需在运行时扫描标题或坐标，也不会因配置遗漏而绘制出虚假的模型范围。
+     */
+    if (item.filter !== undefined && item.focusRegions !== undefined) {
+      appendIssue(issues, 'topology.filter-focus-regions', '关键环节过滤拓扑不得声明重点区域。')
+    }
+    if (item.focusRegions !== undefined) {
+      const focusRegionItems = readArray(item, 'focusRegions', issues, 'topology.focus-regions')
+      const regionIds = new Set<string>()
+      for (const regionItem of focusRegionItems) {
+        if (!isRecord(regionItem)) {
+          appendIssue(issues, 'topology.focus-region-shape', '重点区域定义必须是对象。')
+          continue
+        }
+        if (!validateIdentifier(regionItem.regionId, '重点区域标识', issues)) continue
+        const regionId = String(regionItem.regionId)
+        if (regionIds.has(regionId)) appendIssue(issues, 'topology.focus-region-duplicate', '同一拓扑内重点区域标识重复。')
+        regionIds.add(regionId)
+
+        const anchorNodeId = regionItem.anchorNodeId
+        const anchorValid = validateIdentifier(anchorNodeId, '重点区域锚点节点标识', issues)
+        const anchorNode = anchorValid ? nodeById.get(String(anchorNodeId)) : undefined
+        if (!anchorNode) {
+          appendIssue(issues, 'topology.focus-region-anchor', '重点区域锚点节点必须存在于当前总览拓扑。')
+        } else if (typeof anchorNode.sceneNodeId !== 'string' || anchorNode.sceneNodeId.length === 0) {
+          appendIssue(issues, 'topology.focus-region-anchor-binding', '重点区域锚点节点必须显式绑定三维节点。')
+        }
+
+        const memberIds = new Set<string>()
+        const memberItems = readArray(regionItem, 'nodeIds', issues, 'topology.focus-region-nodes')
+        for (const memberId of memberItems) {
+          if (!validateIdentifier(memberId, '重点区域成员节点标识', issues)) continue
+          const normalizedMemberId = String(memberId)
+          if (memberIds.has(normalizedMemberId)) {
+            appendIssue(issues, 'topology.focus-region-duplicate-node', '重点区域不得重复声明成员节点。')
+            continue
+          }
+          memberIds.add(normalizedMemberId)
+          if (!nodeIds.has(normalizedMemberId)) appendIssue(issues, 'topology.focus-region-node', '重点区域成员节点必须存在于当前总览拓扑。')
+        }
+        if (memberIds.size === 0) appendIssue(issues, 'topology.focus-region-empty', '重点区域至少需要一个成员节点。')
+        if (anchorValid && !memberIds.has(String(anchorNodeId))) {
+          appendIssue(issues, 'topology.focus-region-anchor-member', '重点区域成员集合必须包含锚点节点。')
+        }
+        if (regionItem.label !== undefined && (typeof regionItem.label !== 'string' || regionItem.label.length === 0)) {
+          appendIssue(issues, 'topology.focus-region-label', '重点区域名称必须是非空字符串。')
+        }
       }
     }
   }
@@ -612,6 +688,119 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
     }
     for (const actionId of readArray(scene, 'supportedActionIds', issues, 'scene.action-ids').map(String)) {
       if (actionsById.get(actionId)?.targetSceneId !== sceneId) appendIssue(issues, 'scene.action-scene', `场景${sceneId}引用了不存在或目标不一致的动作。`)
+    }
+  }
+
+  /*
+   * 说明内容在正式拓扑节点完成索引后统一校验。所有查询都使用 Set/Map（集合/映射），
+   * 每个节点和连线只访问一次，避免“内容数 × 总拓扑节点数”的嵌套扫描。
+   */
+  const drilldownContentByKey = new Map<string, UnknownRecord>()
+  const sourceNodeIdByContentKey = new Map<string, string>()
+  for (const contentItem of drilldownItems) {
+    if (!isRecord(contentItem) || !validateIdentifier(contentItem.contentKey, '下钻内容键', issues)) {
+      appendIssue(issues, 'drilldown.shape', '下钻内容必须是包含有效内容键的对象。')
+      continue
+    }
+    const contentKey = String(contentItem.contentKey)
+    if (drilldownContentByKey.has(contentKey)) appendIssue(issues, 'drilldown.duplicate', '下钻内容键重复。')
+    drilldownContentByKey.set(contentKey, contentItem)
+    if (contentItem.version !== manifestVersion) appendIssue(issues, 'drilldown.version', '下钻内容版本与清单版本不一致。')
+    hasNonEmptyString(contentItem, 'title', issues, 'drilldown.title')
+    if (validateIdentifier(contentItem.sourceNodeId, '下钻来源节点标识', issues)) {
+      sourceNodeIdByContentKey.set(contentKey, String(contentItem.sourceNodeId))
+    }
+    if (contentItem.duplicateSingleBranch !== undefined && typeof contentItem.duplicateSingleBranch !== 'boolean') {
+      appendIssue(issues, 'drilldown.duplicate-layout', '单分支复制布局声明必须是布尔值。')
+    }
+
+    const localNodeIds = new Set<string>()
+    const localNodeKinds = new Map<string, string>()
+    let sourceCount = 0
+    let sourceY = Number.POSITIVE_INFINITY
+    const localNodeItems = readArray(contentItem, 'nodes', issues, 'drilldown.nodes')
+    for (const localNode of localNodeItems) {
+      if (!isRecord(localNode) || !validateIdentifier(localNode.id, '下钻局部节点标识', issues)) {
+        appendIssue(issues, 'drilldown.node-shape', '下钻局部节点缺少有效标识。')
+        continue
+      }
+      const localNodeId = String(localNode.id)
+      if (localNodeIds.has(localNodeId)) appendIssue(issues, 'drilldown.duplicate-node', '同一下钻内容内局部节点标识重复。')
+      localNodeIds.add(localNodeId)
+      if (sourceNodeIds.has(localNodeId)) {
+        appendIssue(issues, 'drilldown.node-id-collision', '下钻局部节点标识不得复用正式拓扑节点标识。')
+      }
+      hasNonEmptyString(localNode, 'title', issues, 'drilldown.node-title')
+      if (localNode.kind !== 'source' && localNode.kind !== 'logic' && localNode.kind !== 'boundary') {
+        appendIssue(issues, 'drilldown.node-kind', '下钻局部节点类型无效。')
+      } else {
+        localNodeKinds.set(localNodeId, localNode.kind)
+        if (localNode.kind === 'source') {
+          sourceCount += 1
+          if (typeof localNode.y === 'number') sourceY = localNode.y
+        }
+      }
+      if (typeof localNode.x !== 'number' || !Number.isFinite(localNode.x) || localNode.x < 0 || localNode.x > 100 ||
+          typeof localNode.y !== 'number' || !Number.isFinite(localNode.y) || localNode.y < 0 || localNode.y > 100) {
+        appendIssue(issues, 'drilldown.node-position', '下钻局部节点坐标必须是 0 到 100 的有限数字。')
+      }
+      if (localNode.description !== undefined && (typeof localNode.description !== 'string' || localNode.description.length === 0)) {
+        appendIssue(issues, 'drilldown.node-description', '下钻局部节点说明必须是非空字符串。')
+      }
+      // 说明节点字段采用白名单边界，明确阻断设备状态、正式节点和三维映射混入短生命周期内容。
+      for (const forbiddenField of ['nodeId', 'sceneNodeId', 'deviceStatus', 'doubleClickBehavior', 'drilldown']) {
+        if (forbiddenField in localNode) appendIssue(issues, 'drilldown.node-business-field', '下钻局部节点不得包含正式拓扑、设备状态或三维交互字段。')
+      }
+    }
+    if (localNodeItems.length === 0) appendIssue(issues, 'drilldown.empty', '下钻内容不得为空。')
+    if (sourceCount !== 1) appendIssue(issues, 'drilldown.source-count', '每份下钻内容必须且只能包含一个来源节点。')
+    for (const localNode of localNodeItems) {
+      if (isRecord(localNode) && localNode.kind !== 'source' && typeof localNode.y === 'number' && localNode.y <= sourceY) {
+        appendIssue(issues, 'drilldown.source-position', '下钻来源节点必须独自位于说明图最顶层。')
+      }
+    }
+
+    const localEdgeIds = new Set<string>()
+    const localEdgeItems = readArray(contentItem, 'edges', issues, 'drilldown.edges')
+    for (const localEdge of localEdgeItems) {
+      if (!isRecord(localEdge) || !validateIdentifier(localEdge.id, '下钻局部连线标识', issues)) {
+        appendIssue(issues, 'drilldown.edge-shape', '下钻局部连线缺少有效标识。')
+        continue
+      }
+      const localEdgeId = String(localEdge.id)
+      if (localEdgeIds.has(localEdgeId)) appendIssue(issues, 'drilldown.duplicate-edge', '同一下钻内容内局部连线标识重复。')
+      localEdgeIds.add(localEdgeId)
+      if (!localNodeIds.has(String(localEdge.fromId)) || !localNodeIds.has(String(localEdge.toId))) {
+        appendIssue(issues, 'drilldown.edge-node-reference', '下钻局部连线只能连接当前内容中的节点。')
+      }
+      if (localEdge.label !== undefined && (typeof localEdge.label !== 'string' || localEdge.label.length === 0)) {
+        appendIssue(issues, 'drilldown.edge-label', '下钻局部连线标签必须是非空字符串。')
+      }
+    }
+    if (localEdgeItems.length === 0) appendIssue(issues, 'drilldown.empty-edges', '下钻内容至少需要一条明确连线。')
+
+    if (contentItem.duplicateSingleBranch === true) {
+      const logicCount = [...localNodeKinds.values()].filter((kind) => kind === 'logic').length
+      const boundaryCount = [...localNodeKinds.values()].filter((kind) => kind === 'boundary').length
+      if (localNodeIds.size !== 3 || localEdgeIds.size !== 2 || logicCount !== 1 || boundaryCount !== 1) {
+        appendIssue(issues, 'drilldown.duplicate-layout-shape', '单分支复制布局必须保持三个语义节点和两条真实连线。')
+      }
+    }
+  }
+
+  for (const [sourceNodeId, contentKey] of drilldownReferenceBySourceNodeId) {
+    const content = drilldownContentByKey.get(contentKey)
+    if (!content) {
+      appendIssue(issues, 'drilldown.content-missing', '节点下钻引用的同版本说明内容不存在。')
+      continue
+    }
+    if (String(content.sourceNodeId) !== sourceNodeId) {
+      appendIssue(issues, 'drilldown.source-reference', '下钻内容来源节点与入口引用不一致。')
+    }
+  }
+  for (const [contentKey, sourceNodeId] of sourceNodeIdByContentKey) {
+    if (drilldownReferenceBySourceNodeId.get(sourceNodeId) !== contentKey) {
+      appendIssue(issues, 'drilldown.unreferenced', '下钻内容必须由其正式来源节点唯一引用。')
     }
   }
 

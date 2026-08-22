@@ -27,10 +27,10 @@ public sealed class PowerPlantVisualStateConfig : ScriptableObject
     [SerializeField, Min(0f)] private float _outlineWidth = 0.3f;
 
     [Header("告警故障填充闪烁")]
-    [Tooltip("告警纯色半透明填充的闪烁频率（次/秒）。告警采用较慢节奏，描边保持稳定。")]
+    [Tooltip("告警纯色半透明填充的闪烁频率（次/秒）。告警采用较慢节奏，告警描边与填充同步闪烁。")]
     [SerializeField, Range(0.1f, 5f)] private float _alarmFillPulseFrequency = 0.8f;
 
-    [Tooltip("故障纯色半透明填充的闪烁频率（次/秒）。故障采用快于告警的节奏，描边保持稳定。")]
+    [Tooltip("故障纯色半透明填充的闪烁频率（次/秒）。故障采用快于告警的节奏，故障描边与填充同步闪烁。")]
     [SerializeField, Range(0.1f, 8f)] private float _faultFillPulseFrequency = 2.2f;
 
     [Tooltip("告警、故障填充闪烁时的最低透明度。最大透明度使用状态显示中的透明强度。")]

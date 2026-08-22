@@ -279,13 +279,17 @@ namespace WebDLPro.Unity.Tests
                 renderer.SetPropertyBlock(originalPropertyBlock, 0);
 
                 // 通过反射（reflection）调用私有工具方法，测试实际运行时逻辑且不向生产控制器暴露测试专用接口。
-                Type activeMaterialsType = typeof(PowerPlantProcessController).GetNestedType(
+                // 测试程序集不能直接引用默认程序集 Assembly-CSharp，因此使用程序集限定名解析控制器类型，避免破坏现有程序集边界。
+                System.Type controllerType = System.Type.GetType(
+                    "PowerPlantProcessController, Assembly-CSharp",
+                    true);
+                System.Type activeMaterialsType = controllerType.GetNestedType(
                     "ActiveVisualStateMaterials",
                     BindingFlags.NonPublic);
-                MethodInfo captureMethod = typeof(PowerPlantProcessController).GetMethod(
+                MethodInfo captureMethod = controllerType.GetMethod(
                     "CaptureMaterialPropertyBlocks",
                     BindingFlags.NonPublic | BindingFlags.Static);
-                MethodInfo restoreMethod = typeof(PowerPlantProcessController).GetMethod(
+                MethodInfo restoreMethod = controllerType.GetMethod(
                     "RestoreRendererVisualStateMaterials",
                     BindingFlags.NonPublic | BindingFlags.Static);
                 Assert.That(activeMaterialsType, Is.Not.Null);
@@ -304,7 +308,7 @@ namespace WebDLPro.Unity.Tests
                 statePropertyBlock.SetFloat(preservedFloatPropertyId, 0f);
                 renderer.SetPropertyBlock(statePropertyBlock, 0);
 
-                object activeMaterials = Activator.CreateInstance(activeMaterialsType, true);
+                object activeMaterials = System.Activator.CreateInstance(activeMaterialsType, true);
                 activeMaterialsType.GetField("OriginalMaterials").SetValue(activeMaterials, originalMaterials);
                 activeMaterialsType.GetField("OriginalPropertyBlocks").SetValue(activeMaterials, capturedPropertyBlocks);
                 restoreMethod.Invoke(null, new[] { (object)renderer, activeMaterials });

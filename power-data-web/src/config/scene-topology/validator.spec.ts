@@ -107,6 +107,68 @@ describe('场景拓扑节点协议清单校验', () => {
     expect(validateSceneTopologyManifest(createValidManifest())).toEqual([])
   })
 
+  it('接受总览重点区域，并拒绝未绑定锚点或关键环节区域声明', () => {
+    const baseManifest = createValidManifest()
+    const gasTopology = baseManifest.topologies.find((topology) => topology.sceneId === 'gas-power')!
+    const flowTopologyId = toTopologyId('topology.gas-power.focus-flow')
+    const manifest = {
+      ...baseManifest,
+      scenes: baseManifest.scenes.map((scene) => scene.sceneId === 'gas-power'
+        ? { ...scene, topologyIds: [...scene.topologyIds, flowTopologyId] }
+        : scene),
+      topologies: [
+        ...baseManifest.topologies.map((topology) => topology === gasTopology
+          ? {
+              ...topology,
+              focusRegions: [{
+                regionId: 'focus.gas-control',
+                anchorNodeId: gasTopology.nodes[0]!.nodeId,
+                nodeIds: [gasTopology.nodes[0]!.nodeId, gasTopology.nodes[1]!.nodeId],
+                label: '燃机控制区域',
+              }],
+            }
+          : topology),
+        {
+          topologyId: flowTopologyId,
+          sceneId: toSceneId('gas-power'),
+          title: '重点区域过滤视图',
+          configVersion: manifestVersion,
+          nodes: [],
+          edges: [],
+          filter: {
+            sourceTopologyId: gasTopology.topologyId,
+            visibleNodeIds: [gasTopology.nodes[0]!.nodeId, gasTopology.nodes[1]!.nodeId],
+            visibleEdgeIds: [gasTopology.edges[0]!.edgeId],
+            nodeLayoutOverrides: [
+              { nodeId: gasTopology.nodes[0]!.nodeId, x: 30, y: 50 },
+              { nodeId: gasTopology.nodes[1]!.nodeId, x: 70, y: 50 },
+            ],
+          },
+        },
+      ],
+    }
+    expect(validateSceneTopologyManifest(manifest)).toEqual([])
+
+    const invalid = structuredClone(manifest) as unknown as Record<string, unknown>
+    const invalidOverview = (invalid.topologies as Array<Record<string, unknown>>).find((topology) => topology.topologyId === gasTopology.topologyId)!
+    const invalidFlow = (invalid.topologies as Array<Record<string, unknown>>).find((topology) => topology.topologyId === flowTopologyId)!
+    invalidFlow.focusRegions = [{
+      regionId: 'focus.invalid-on-flow',
+      anchorNodeId: gasTopology.nodes[0]!.nodeId,
+      nodeIds: [gasTopology.nodes[0]!.nodeId],
+    }]
+    const invalidOverviewNodes = invalidOverview.nodes as Array<Record<string, unknown>>
+    delete invalidOverviewNodes[0]!.sceneNodeId
+    invalidOverview.focusRegions = [{
+      regionId: 'focus.invalid-anchor',
+      anchorNodeId: gasTopology.nodes[0]!.nodeId,
+      nodeIds: [gasTopology.nodes[0]!.nodeId],
+    }]
+    const invalidCodes = issueCodes(invalid)
+    expect(invalidCodes).toContain('topology.focus-region-anchor-binding')
+    expect(invalidCodes).toContain('topology.filter-focus-regions')
+  })
+
   it('接受资料声明的连线颜色与线型，并拒绝非法样式值', () => {
     const manifest = createValidManifest()
     const gasTopology = manifest.topologies.find((topology) => topology.sceneId === 'gas-power')!

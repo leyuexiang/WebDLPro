@@ -160,6 +160,15 @@ const visualizationMaskVisible = computed(() => {
 
   return status !== 'ready' || !visualizationStore.hasStableContext || transitionOverlay.value.visible
 })
+/**
+ * 下钻按钮必须与稳定上下文共用同一显示门禁；切换期间即使旧拓扑暂留在画布上，也不允许展示旧入口。
+ * 这样按钮不会在加载遮罩下闪现，且新拓扑只有完成原子提交后才会暴露可操作入口。
+ */
+const drilldownEnabled = computed(() => (
+  runtimeHostStatus.value === 'ready'
+  && visualizationStore.hasStableContext
+  && !transitionOverlay.value.visible
+))
 
 /**
  * 壳层只向用户显示有限、脱敏的中文状态；部署地址、错误码、关联标识、外部消息和 Unity 原始错误均不进入界面。
@@ -592,6 +601,7 @@ onBeforeUnmount(() => {
         >
           <ManifestTopologyRuntimePanel
             :registry="manifestState.registry"
+            :drilldown-enabled="drilldownEnabled"
             @ready="handleTopologyRuntimeReady"
             @node-double-click="handleTopologyNodeDoubleClick"
           />

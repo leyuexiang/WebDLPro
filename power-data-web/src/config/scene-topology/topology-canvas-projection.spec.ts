@@ -41,6 +41,12 @@ function createManifestTopology(): TopologyDefinition {
         evidenceStatus: 'verified',
       },
     ],
+    focusRegions: [{
+      regionId: 'focus.wind-controller',
+      anchorNodeId: toNodeId('wind.controller'),
+      nodeIds: [toNodeId('wind.controller'), toNodeId('wind.unknown')],
+      label: '风机控制区域',
+    }],
   }
 }
 
@@ -61,6 +67,12 @@ describe('新清单到单画布投影', () => {
         sceneRouteIds: [],
       }),
     ])
+    expect(projected.focusRegions).toEqual([{
+      regionId: 'focus.wind-controller',
+      anchorNodeId: 'wind.controller',
+      nodeIds: ['wind.controller', 'wind.unknown'],
+      label: '风机控制区域',
+    }])
   })
 
   it('清单明确提供分层时完整投影，未声明的连线展示字段仍保持中性回退', () => {
