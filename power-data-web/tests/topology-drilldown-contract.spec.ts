@@ -52,6 +52,8 @@ describe('燃气与燃煤拓扑下钻发布契约', () => {
         expect(content?.nodes.filter((node) => node.kind === 'logic')).toHaveLength(branchCount)
         expect(content?.nodes.filter((node) => node.kind === 'boundary')).toHaveLength(branchCount)
         expect(content?.edges).toHaveLength(branchCount * 2)
+        // 每个说明节点都必须携带正式图标登记键，避免回退为纯文字节点或动态图片路径。
+        expect(content?.nodes.every((node) => typeof node.iconKey === 'string' && node.iconKey.length > 0)).toBe(true)
         expect(referenceByNodeId.get(sourceNodeId)).toBe(contentKey)
         if (branchCount === 1) {
           expect(content?.nodes).toHaveLength(3)
@@ -122,6 +124,14 @@ describe('燃气与燃煤拓扑下钻发布契约', () => {
     const leakedBusinessField = structuredClone(manifest)
     ;(leakedBusinessField.drilldowns[0].nodes[1] as Record<string, unknown>).deviceStatus = 'normal'
     expect(validateSceneTopologyManifest(leakedBusinessField).map((issue) => issue.code)).toContain('drilldown.node-business-field')
+
+    const missingIconKey = structuredClone(manifest)
+    delete (missingIconKey.drilldowns[0].nodes[1] as Record<string, unknown>).iconKey
+    expect(validateSceneTopologyManifest(missingIconKey).map((issue) => issue.code)).toContain('drilldown.node-icon-key')
+
+    const unregisteredIconKey = structuredClone(manifest)
+    ;(unregisteredIconKey.drilldowns[0].nodes[1] as Record<string, unknown>).iconKey = 'unregistered-icon'
+    expect(validateSceneTopologyManifest(unregisteredIconKey).map((issue) => issue.code)).toContain('drilldown.node-icon-key')
 
     const missingContent = structuredClone(manifest)
     missingContent.drilldowns.splice(0, 1)

@@ -99,6 +99,40 @@ describe('燃煤发电拓扑发布契约', () => {
     expect(new Set(overview?.nodes.map((node) => node.nodeId))).toHaveLength(27)
   })
 
+  it('总览显式发布三组燃煤重点区域，过滤拓扑不继承区域框', async () => {
+    const manifest = await createCoalPowerManifest('focus-region-contract-test')
+    const overview = manifest.topologies.find((topology) => topology.topologyId === 'topology.coal-power.overview')
+
+    expect(overview?.focusRegions).toEqual([
+      {
+        regionId: 'focus.coal-boiler-control',
+        anchorNodeId: 'system.boiler-dcs',
+        nodeIds: [
+          'system.boiler-dcs',
+          'asset.coal-mill-actuator',
+          'asset.induced-draft-fan-vfd',
+          'asset.furnace-pressure-transmitter',
+        ],
+        label: '锅炉控制区域',
+      },
+      {
+        regionId: 'focus.coal-steam-turbine-control',
+        anchorNodeId: 'system.steam-turbine-dcs',
+        nodeIds: ['system.steam-turbine-dcs', 'asset.steam-turbine-valve-actuator'],
+        label: '汽轮机控制区域',
+      },
+      {
+        regionId: 'focus.coal-generator-control',
+        anchorNodeId: 'system.generator-excitation-controller',
+        nodeIds: ['system.generator-excitation-controller', 'asset.generator-protection-device'],
+        label: '发电机控制区域',
+      },
+    ])
+    expect(manifest.topologies.filter((topology) => topology.filter !== undefined)
+      .every((topology) => topology.focusRegions === undefined)).toBe(true)
+    expect(validateSceneTopologyManifest(manifest)).toEqual([])
+  })
+
   it('保留资料第二节的连线颜色、实虚线和协议标签', async () => {
     const manifest = await createCoalPowerManifest('edge-style-contract-test')
     const overview = manifest.topologies.find((topology) => topology.topologyId === 'topology.coal-power.overview')
@@ -128,6 +162,33 @@ describe('燃煤发电拓扑发布契约', () => {
       lineColor: coalPowerEdgeColors.orange,
       lineStyle: 'solid',
     }))
+  })
+
+  it('燃煤单元层与现场层采用避让重点区域的对齐坐标', async () => {
+    const manifest = await createCoalPowerManifest('coal-layout-contract-test')
+    const overview = manifest.topologies.find((topology) => topology.topologyId === 'topology.coal-power.overview')
+    const nodesById = new Map(overview?.nodes.map((node) => [node.nodeId, node]))
+
+    // 锅炉三分支集中在左侧并保持足够间隔，汽机及后续一对一控制链路继续拉开，重点区域不会互相包围。
+    expect(['asset.coal-mill-actuator', 'asset.induced-draft-fan-vfd', 'asset.furnace-pressure-transmitter']
+      .map((nodeId) => nodesById.get(nodeId)?.x)).toEqual([2, 11, 20])
+    expect(nodesById.get('system.boiler-dcs')?.x).toBe(11)
+    expect(['system.steam-turbine-dcs', 'system.generator-excitation-controller', 'system.desulfurization-plc',
+      'system.denitrification-plc', 'system.coal-handling-ash-plc', 'system.sis-safety-controller']
+      .map((nodeId) => nodesById.get(nodeId)?.x)).toEqual([33, 47, 61, 75, 87, 96])
+
+    // 一对一现场边两端横坐标一致，路由器因此可以直接绘制竖直边，不需要斜向避让。
+    const alignedPairs = [
+      ['system.steam-turbine-dcs', 'asset.steam-turbine-valve-actuator'],
+      ['system.generator-excitation-controller', 'asset.generator-protection-device'],
+      ['system.desulfurization-plc', 'asset.desulfurization-circulation-pump'],
+      ['system.denitrification-plc', 'asset.denitrification-ammonia-valve'],
+      ['system.coal-handling-ash-plc', 'asset.coal-belt-controller'],
+      ['system.sis-safety-controller', 'asset.esd-emergency-actuator'],
+    ] as const
+    for (const [controllerId, fieldNodeId] of alignedPairs) {
+      expect(nodesById.get(controllerId)?.x).toBe(nodesById.get(fieldNodeId)?.x)
+    }
   })
 
   it('三个关键流程只引用总图，并严格复用资料的节点和连线集合', async () => {

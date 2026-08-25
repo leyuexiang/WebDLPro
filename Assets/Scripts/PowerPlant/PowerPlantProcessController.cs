@@ -654,8 +654,8 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         // isolate 参数继续保留协议兼容性；交互聚焦统一使用“选中模型实体、其余模型半透明”的上下文表现。
         ApplySelectionFocusContext(nodeId);
 
-        // 节点测试和网页 focusNode 指令统一经过该方法，运行时缺少组件时会自动补建，
-        // 防止资源释放或延迟初始化后出现“选择已提交但没有描边”的不一致状态。
+        // 节点测试和网页 focusNode 指令统一经过该方法，运行时缺少组件时会自动补建。
+        // 交互描边优先读取节点当前设备状态：告警、故障使用配置资产中的状态色，其他状态使用默认青色。
         ApplyProcessHighlightForNode(nodeId);
         if (_focusOnSelection)
         {
@@ -724,6 +724,7 @@ public sealed class PowerPlantProcessController : MonoBehaviour
 
         ApplyVisualStateMaterials(sceneNodeId, visualState);
         RefreshVisualStateHighlights();
+        RefreshActiveInteractionOutlineColor(sceneNodeId);
         // 正常态会恢复该节点原属性块；若其它节点仍故障，需强制重写管道速度，防止恢复时误解除全局冻结。
         SetPipelineFlowStopped(HasActiveFaultState(), visualState == BusinessSceneNodeVisualState.Normal);
         return BusinessSceneCommandResult.Completed(
@@ -757,6 +758,7 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         _activeVisualStatesByNodeId.Remove(sceneNodeId);
         RestoreVisualStateMaterials(sceneNodeId);
         RefreshVisualStateHighlights();
+        RefreshActiveInteractionOutlineColor(sceneNodeId);
         // 清除属性块后必须重新应用当前冻结结果，即使其它故障使目标状态仍为 stopped（已停止）。
         SetPipelineFlowStopped(HasActiveFaultState(), true);
         return result;
@@ -978,15 +980,55 @@ public sealed class PowerPlantProcessController : MonoBehaviour
     }
 
     /// <summary>
-    /// 为当前流程或节点的唯一描边模型刷新视觉效果。
-    /// 该方法集中处理运行时组件创建、渲染器收集和目标替换，避免不同调用入口遗漏高亮步骤。
+    /// 为当前流程或交互节点刷新描边。普通节点使用默认青色；节点处于告警或故障状态时，
+    /// 交互描边改用 PowerPlantVisualStateConfig（发电场景状态视觉配置）中的对应状态色，避免青色覆盖状态语义。
     /// </summary>
     private void ApplyProcessHighlightForNode(string nodeId)
     {
         EnsureHighlightEffects();
+        UpdateProcessHighlightColor(nodeId);
         _highlightRendererSet.Clear();
         CollectNodeRenderers(nodeId, _highlightRendererSet);
         ApplyHighlight(_processHighlightEffect, _highlightRendererSet);
+    }
+
+    /// <summary>
+    /// 节点状态在已选中期间发生变化时，立即同步交互描边颜色，无需重新聚焦或重建插件目标。
+    /// </summary>
+    private void RefreshActiveInteractionOutlineColor(string changedNodeId)
+    {
+        if (_processHighlightEffect == null ||
+            string.IsNullOrEmpty(_activeInteractionNodeId) ||
+            !string.Equals(_activeInteractionNodeId, changedNodeId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        UpdateProcessHighlightColor(changedNodeId);
+    }
+
+    private void UpdateProcessHighlightColor(string nodeId)
+    {
+        if (_processHighlightEffect == null)
+        {
+            return;
+        }
+
+        Color outlineColor = _processOutlineColor;
+        if (_visualStateConfig != null &&
+            _activeVisualStatesByNodeId.TryGetValue(nodeId, out BusinessSceneNodeVisualState visualState))
+        {
+            if (visualState == BusinessSceneNodeVisualState.Alarm)
+            {
+                outlineColor = _visualStateConfig.AlarmColor;
+            }
+            else if (visualState == BusinessSceneNodeVisualState.Fault)
+            {
+                outlineColor = _visualStateConfig.FaultColor;
+            }
+        }
+
+        _processHighlightEffect.outlineColor = outlineColor;
     }
 
     private void ClearProcessHighlight()

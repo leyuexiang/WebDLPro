@@ -1,15 +1,19 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, useId } from 'vue'
+import type { TopologyDeviceStatus } from '@/config/process/types'
 import type { TopologyDrilldownContent } from '@/config/scene-topology/types'
 import {
   createTopologyDrilldownRenderModel,
   TopologyDrilldownViewState,
   type TopologyDrilldownViewSnapshot,
 } from '@/modules/visual/drilldown/topology-drilldown-view-state'
+import { getTopologyIconUrl } from '@/services/topology/topology-icon-registry'
 
 const props = defineProps<{
   content?: TopologyDrilldownContent
   errorMessage?: string
+  /** 下钻不创建说明节点状态；所有提示沿用触发入口当前正式状态。 */
+  status?: TopologyDeviceStatus
   fullscreen: boolean
 }>()
 
@@ -20,8 +24,10 @@ const emit = defineEmits<{
 
 /** Vue（渐进式网页框架）提供的实例标识稳定关联标题与对话框，不引入随机值影响视觉回归。 */
 const titleId = `topology-drilldown-title-${useId()}`
+const drilldownTooltipId = `topology-drilldown-tooltip-${useId()}`
 const closeButton = ref<HTMLButtonElement | null>(null)
 const svgElement = ref<SVGSVGElement | null>(null)
+const workspaceElement = ref<HTMLElement | null>(null)
 const viewStateController = new TopologyDrilldownViewState()
 const viewSnapshot = ref<TopologyDrilldownViewSnapshot>(viewStateController.getSnapshot())
 const renderModel = computed(() => props.content ? createTopologyDrilldownRenderModel(props.content) : undefined)
@@ -30,6 +36,25 @@ const graphTransform = computed(() => {
   const { zoom, offsetX, offsetY } = viewSnapshot.value
   return `translate(${offsetX} ${offsetY}) translate(500 250) scale(${zoom}) translate(-500 -250)`
 })
+
+/** 下钻只保留一个提示实例，避免每个视觉副本都创建文档对象和监听器。 */
+const hoveredInstanceId = ref<string | null>(null)
+const tooltipX = ref(16)
+const tooltipY = ref(68)
+const tooltipUsesKeyboardPosition = ref(false)
+const activeTooltipInstance = computed(() => {
+  const instanceId = hoveredInstanceId.value
+  return instanceId ? instanceById.value.get(instanceId) : undefined
+})
+const activeTooltipStatus = computed(() => ({
+  normal: '正常',
+  alarm: '告警',
+  fault: '故障',
+  offline: '离线',
+} as const)[props.status ?? 'offline'])
+const tooltipStyle = computed(() => tooltipUsesKeyboardPosition.value
+  ? undefined
+  : { left: `${tooltipX.value}px`, top: `${tooltipY.value}px` })
 
 let panningPointerId: number | undefined
 let lastPointerX = 0
@@ -49,6 +74,32 @@ function resetView(): void {
   viewSnapshot.value = viewStateController.reset()
 }
 
+/** 将悬浮提示锚点限制在覆盖层工作区内，避免边缘节点的完整名称被裁切。 */
+function updateTooltipAnchor(clientX: number, clientY: number): void {
+  const bounds = workspaceElement.value?.getBoundingClientRect()
+  if (!bounds) return
+  tooltipX.value = Math.min(Math.max(clientX - bounds.left, 12), Math.max(12, bounds.width - 24))
+  tooltipY.value = Math.min(Math.max(clientY - bounds.top, 68), Math.max(68, bounds.height - 12))
+}
+
+/** 鼠标悬浮和键盘聚焦共用同一提示内容；说明层不伪造实时设备状态。 */
+function showNodeTooltip(instanceId: string, event?: PointerEvent): void {
+  hoveredInstanceId.value = instanceId
+  tooltipUsesKeyboardPosition.value = !event
+  if (event) updateTooltipAnchor(event.clientX, event.clientY)
+}
+
+/** 节点内移动时同步提示锚点，和总览画布的连续鼠标命中定位保持一致。 */
+function handleNodePointerMove(instanceId: string, event: PointerEvent): void {
+  if (panningPointerId !== undefined) return
+  showNodeTooltip(instanceId, event)
+}
+
+function clearNodeTooltip(): void {
+  hoveredInstanceId.value = null
+  tooltipUsesKeyboardPosition.value = false
+}
+
 function handleWheel(event: WheelEvent): void {
   changeZoom(event.deltaY > 0 ? -0.15 : 0.15)
 }
@@ -56,6 +107,8 @@ function handleWheel(event: WheelEvent): void {
 /** 说明图平移使用自身指针捕获；事件在覆盖层终止，不会落入原画布选择或三维聚焦链路。 */
 function handlePointerDown(event: PointerEvent): void {
   if (event.button !== 0 || !svgElement.value) return
+  // 拖拽开始后隐藏提示，避免提示跟随起点停留并遮挡正在查看的关联线。
+  clearNodeTooltip()
   panningPointerId = event.pointerId
   lastPointerX = event.clientX
   lastPointerY = event.clientY
@@ -78,9 +131,10 @@ function handlePointerEnd(event: PointerEvent): void {
   panningPointerId = undefined
 }
 
-/** 组件释放时丢弃局部指针标识；没有悬浮提示、全局监听器、动画帧或第二个 Canvas 需要保留。 */
+/** 组件释放时丢弃局部指针标识和提示节点引用；没有全局监听器、动画帧或第二个 Canvas 需要保留。 */
 onBeforeUnmount(() => {
   panningPointerId = undefined
+  clearNodeTooltip()
 })
 
 defineExpose({ focusInitial })
@@ -116,7 +170,7 @@ defineExpose({ focusInitial })
       </div>
     </header>
 
-    <div v-if="renderModel" class="topology-drilldown__workspace">
+    <div v-if="renderModel" ref="workspaceElement" class="topology-drilldown__workspace">
       <svg
         ref="svgElement"
         viewBox="0 0 1000 500"
@@ -151,9 +205,9 @@ defineExpose({ focusInitial })
               v-for="edge in renderModel.edges"
               :key="edge.instanceId"
               :x1="(instanceById.get(edge.fromInstanceId)?.x ?? 0) * 10"
-              :y1="(instanceById.get(edge.fromInstanceId)?.y ?? 0) * 5 + 28"
+              :y1="(instanceById.get(edge.fromInstanceId)?.y ?? 0) * 5 + 38"
               :x2="(instanceById.get(edge.toInstanceId)?.x ?? 0) * 10"
-              :y2="(instanceById.get(edge.toInstanceId)?.y ?? 0) * 5 - 28"
+              :y2="(instanceById.get(edge.toInstanceId)?.y ?? 0) * 5 - 38"
               marker-end="url(#drilldown-arrow)"
             />
           </g>
@@ -162,9 +216,9 @@ defineExpose({ focusInitial })
             v-for="instance in renderModel.instances"
             :key="instance.instanceId"
             :x="instance.x * 10 - 92"
-            :y="instance.y * 5 - 30"
+            :y="instance.y * 5 - 40"
             width="184"
-            height="66"
+            height="84"
           >
             <div
               xmlns="http://www.w3.org/1999/xhtml"
@@ -173,15 +227,43 @@ defineExpose({ focusInitial })
                 `topology-drilldown__node--${instance.kind}`,
                 { 'topology-drilldown__node--duplicate': instance.duplicate },
               ]"
+              role="group"
+              tabindex="0"
+              :aria-label="`${instance.title}，状态：${activeTooltipStatus}`"
+              :aria-describedby="activeTooltipInstance?.instanceId === instance.instanceId ? drilldownTooltipId : undefined"
               :data-semantic-node-id="instance.semanticNodeId"
               :data-render-instance-id="instance.instanceId"
+              @pointerenter="showNodeTooltip(instance.instanceId, $event)"
+              @pointermove="handleNodePointerMove(instance.instanceId, $event)"
+              @pointerleave="clearNodeTooltip"
+              @focus="showNodeTooltip(instance.instanceId)"
+              @blur="clearNodeTooltip"
             >
-              <!-- 节点卡片只展示正式业务标题；不绑定悬浮提示事件，避免鼠标经过时遮挡关联关系。 -->
+              <!-- 下钻节点与总览保持同一视觉语言：正式受控图标位于上方，名称位于图标下方。 -->
+              <img
+                class="topology-drilldown__node-icon"
+                :src="getTopologyIconUrl(instance.iconKey, 'normal')"
+                :alt="`${instance.title}图标`"
+                draggable="false"
+              />
               <strong>{{ instance.title }}</strong>
             </div>
           </foreignObject>
         </g>
       </svg>
+
+      <!-- 与总览拓扑共用单实例提示格式：只显示节点标题和当前状态，不展示关联类型等说明文本。 -->
+      <div
+        v-if="activeTooltipInstance"
+        :id="drilldownTooltipId"
+        :class="['topology-drilldown__tooltip', { 'topology-drilldown__tooltip--keyboard': tooltipUsesKeyboardPosition }]"
+        :style="tooltipStyle"
+        role="tooltip"
+        aria-live="polite"
+      >
+        <strong>{{ activeTooltipInstance.title }}</strong>
+        <span>状态：{{ activeTooltipStatus }}</span>
+      </div>
 
       <div class="topology-drilldown__toolbar" aria-label="下钻说明图缩放控制">
         <button type="button" aria-label="缩小下钻说明图" :disabled="viewSnapshot.zoom <= 0.7" @click="changeZoom(-0.15)">−</button>
@@ -281,6 +363,38 @@ defineExpose({ focusInitial })
   background: #03111d;
 }
 
+/* 下钻提示沿用总览的深色单实例提示层，避免为每个说明节点创建独立浮层。 */
+.topology-drilldown__tooltip {
+  position: absolute;
+  z-index: 5;
+  display: grid;
+  max-inline-size: min(260px, calc(100% - 24px));
+  gap: 3px;
+  padding: 7px 9px;
+  border: 1px solid rgba(103, 232, 249, 0.72);
+  border-radius: 6px;
+  color: #e2f7ff;
+  font: 500 11px/1.35 Microsoft YaHei, sans-serif;
+  background: rgba(3, 17, 29, 0.96);
+  box-shadow: 0 5px 18px rgba(0, 0, 0, 0.42);
+  pointer-events: none;
+  transform: translate(10px, calc(-100% - 10px));
+}
+
+.topology-drilldown__tooltip strong {
+  font-size: 12px;
+}
+
+.topology-drilldown__tooltip span {
+  color: #9dd8e5;
+}
+
+.topology-drilldown__tooltip--keyboard {
+  inset-block-start: 10px;
+  inset-inline-start: 50%;
+  transform: translateX(-50%);
+}
+
 .topology-drilldown__workspace svg {
   display: block;
   inline-size: 100%;
@@ -315,13 +429,31 @@ defineExpose({ focusInitial })
   block-size: 100%;
   box-sizing: border-box;
   place-content: center;
-  padding: 7px 10px;
-  border: 1px solid rgba(148, 163, 184, 0.8);
-  border-radius: 8px;
+  grid-template-rows: 48px auto;
+  gap: 3px;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 0;
   color: #e2e8f0;
-  background: rgba(15, 23, 42, 0.96);
+  background: transparent;
   text-align: center;
   pointer-events: auto;
+  outline: none;
+}
+
+.topology-drilldown__node:focus-visible {
+  outline: 2px solid #67e8f9;
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+.topology-drilldown__node-icon {
+  inline-size: 48px;
+  block-size: 48px;
+  justify-self: center;
+  object-fit: contain;
+  user-select: none;
+  pointer-events: none;
 }
 
 .topology-drilldown__node strong {
@@ -332,19 +464,16 @@ defineExpose({ focusInitial })
 }
 
 .topology-drilldown__node--source {
-  border-color: #4ade80;
   color: #ecfdf5;
-  background: rgba(20, 83, 45, 0.9);
-  box-shadow: 0 0 18px rgba(34, 197, 94, 0.18);
+  filter: drop-shadow(0 0 8px rgba(34, 197, 94, 0.32));
 }
 
 .topology-drilldown__node--logic {
-  border-color: #67e8f9;
+  color: #e0f2fe;
 }
 
 .topology-drilldown__node--boundary {
-  border-color: #fb923c;
-  background: rgba(67, 38, 20, 0.94);
+  color: #ffedd5;
 }
 
 .topology-drilldown__node--duplicate {

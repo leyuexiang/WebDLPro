@@ -3,6 +3,7 @@ import { toSceneId, toSceneNodeId } from '../src/config/scene-topology/identifie
 import { TopologyRegistry } from '../src/config/scene-topology/topology-registry'
 import { validateSceneTopologyManifest } from '../src/config/scene-topology/validator'
 import { createConfiguredPowerScenesManifest } from '../scripts/build-gas-power-smoke-release.mjs'
+import { coalPowerEdgeColors } from '../scripts/coal-power-topology.mjs'
 
 /** 两个场景只允许使用资料和 Unity 属性面板已经核验的六对映射，测试不得按名称自动扩充。 */
 const verifiedMappings = Object.freeze([
@@ -29,6 +30,31 @@ describe('燃气与燃煤联合场景清单', () => {
     const coalOverview = manifest.topologies.find((topology) => topology.topologyId === 'topology.coal-power.overview')
     expect([gasOverview?.nodes.length, gasOverview?.edges.length]).toEqual([23, 22])
     expect([coalOverview?.nodes.length, coalOverview?.edges.length]).toEqual([27, 27])
+  })
+
+  it('燃气总览逐条复用燃煤的灰蓝绿橙连线分类和虚线规则', async () => {
+    const manifest = await createConfiguredPowerScenesManifest('gas-edge-style-contract')
+    const gasOverview = manifest.topologies.find((topology) => topology.topologyId === 'topology.gas-power.overview')
+    const edgesById = new Map(gasOverview?.edges.map((edge) => [edge.edgeId, edge]))
+    const expectedColors = [
+      ...Array.from({ length: 2 }, () => coalPowerEdgeColors.gray),
+      ...Array.from({ length: 7 }, () => coalPowerEdgeColors.blue),
+      ...Array.from({ length: 6 }, () => coalPowerEdgeColors.green),
+      ...Array.from({ length: 7 }, () => coalPowerEdgeColors.orange),
+    ]
+    const expectedStyles = [
+      ...Array.from({ length: 14 }, () => 'solid'),
+      'dashed',
+      ...Array.from({ length: 7 }, () => 'solid'),
+    ]
+
+    expect(gasOverview?.edges).toHaveLength(22)
+    expect(gasOverview?.edges.map((edge) => edge.lineColor)).toEqual(expectedColors)
+    expect(gasOverview?.edges.map((edge) => edge.lineStyle)).toEqual(expectedStyles)
+    expect(edgesById.get('route.dcs-core-to-sil')).toEqual(expect.objectContaining({
+      lineColor: coalPowerEdgeColors.green,
+      lineStyle: 'dashed',
+    }))
   })
 
   it('六对显式映射均可常数时间反查且不会产生额外猜测映射', async () => {

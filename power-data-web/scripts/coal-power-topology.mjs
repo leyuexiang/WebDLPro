@@ -48,23 +48,26 @@ const coalPowerNodes = Object.freeze([
   Object.freeze({ nodeId: 'system.auxiliary-operator-station', title: '辅控操作员站', iconKey: 'workstation', x: 70, y: 50, layerId: 'plant-control' }),
   Object.freeze({ nodeId: 'system.sis-performance-station', title: 'SIS 性能计算站', iconKey: 'workstation', x: 90, y: 50, layerId: 'plant-control' }),
 
-  Object.freeze({ nodeId: 'system.boiler-dcs', title: '锅炉 DCS 控制器', iconKey: 'dcs', x: 5, y: 69, layerId: 'unit-control' }),
-  Object.freeze({ nodeId: 'system.steam-turbine-dcs', title: '汽机 DCS 控制器', iconKey: 'steam-turbine', x: 20, y: 69, layerId: 'unit-control' }),
-  Object.freeze({ nodeId: 'system.generator-excitation-controller', title: '发电机励磁控制器', iconKey: 'excitation-system', x: 35, y: 69, layerId: 'unit-control' }),
-  Object.freeze({ nodeId: 'system.desulfurization-plc', title: '脱硫系统 PLC', iconKey: 'plc', x: 50, y: 69, layerId: 'unit-control' }),
-  Object.freeze({ nodeId: 'system.denitrification-plc', title: '脱硝系统 PLC', iconKey: 'plc', x: 65, y: 69, layerId: 'unit-control' }),
-  Object.freeze({ nodeId: 'system.coal-handling-ash-plc', title: '输煤除灰 PLC', iconKey: 'plc', x: 80, y: 69, layerId: 'unit-control' }),
-  Object.freeze({ nodeId: 'system.sis-safety-controller', title: 'SIS 安全仪表控制器', iconKey: 'sis-system', x: 95, y: 69, layerId: 'unit-control' }),
+  // 锅炉控制组整体左移并拉宽三条分支；控制器位于 x=11 中轴，避免同层标题在窄容器中相互覆盖。
+  Object.freeze({ nodeId: 'system.boiler-dcs', title: '锅炉 DCS 控制器', iconKey: 'dcs', x: 11, y: 69, layerId: 'unit-control' }),
+  // 其余单元控制节点与各自现场节点复用同一横坐标，直连边可保持竖直，避免为避让区域产生斜线。
+  Object.freeze({ nodeId: 'system.steam-turbine-dcs', title: '汽机 DCS 控制器', iconKey: 'steam-turbine', x: 33, y: 69, layerId: 'unit-control' }),
+  Object.freeze({ nodeId: 'system.generator-excitation-controller', title: '发电机励磁控制器', iconKey: 'excitation-system', x: 47, y: 69, layerId: 'unit-control' }),
+  Object.freeze({ nodeId: 'system.desulfurization-plc', title: '脱硫系统 PLC', iconKey: 'plc', x: 61, y: 69, layerId: 'unit-control' }),
+  Object.freeze({ nodeId: 'system.denitrification-plc', title: '脱硝系统 PLC', iconKey: 'plc', x: 75, y: 69, layerId: 'unit-control' }),
+  Object.freeze({ nodeId: 'system.coal-handling-ash-plc', title: '输煤除灰 PLC', iconKey: 'plc', x: 87, y: 69, layerId: 'unit-control' }),
+  Object.freeze({ nodeId: 'system.sis-safety-controller', title: 'SIS 安全仪表控制器', iconKey: 'sis-system', x: 96, y: 69, layerId: 'unit-control' }),
 
-  Object.freeze({ nodeId: 'asset.coal-mill-actuator', title: '磨煤机执行机构', iconKey: 'instrument', x: 5, y: 88, layerId: 'field-device' }),
-  Object.freeze({ nodeId: 'asset.induced-draft-fan-vfd', title: '引送风机变频器', iconKey: 'plc', x: 16.25, y: 88, layerId: 'field-device' }),
-  Object.freeze({ nodeId: 'asset.furnace-pressure-transmitter', title: '炉膛压力变送器', iconKey: 'instrument', x: 27.5, y: 88, layerId: 'field-device' }),
-  Object.freeze({ nodeId: 'asset.steam-turbine-valve-actuator', title: '汽机调门执行器', iconKey: 'instrument', x: 38.75, y: 88, layerId: 'field-device' }),
-  Object.freeze({ nodeId: 'asset.generator-protection-device', title: '发电机保护装置', iconKey: 'circuit-breaker', x: 50, y: 88, layerId: 'field-device' }),
-  Object.freeze({ nodeId: 'asset.desulfurization-circulation-pump', title: '脱硫浆液循环泵', iconKey: 'instrument', x: 61.25, y: 88, layerId: 'field-device' }),
-  Object.freeze({ nodeId: 'asset.denitrification-ammonia-valve', title: '脱硝喷氨调节阀', iconKey: 'instrument', x: 72.5, y: 88, layerId: 'field-device' }),
-  Object.freeze({ nodeId: 'asset.coal-belt-controller', title: '输煤皮带控制器', iconKey: 'plc', x: 83.75, y: 88, layerId: 'field-device' }),
-  Object.freeze({ nodeId: 'asset.esd-emergency-actuator', title: 'ESD 紧急停车执行器', iconKey: 'instrument', x: 95, y: 88, layerId: 'field-device' }),
+  // 锅炉三个现场节点按 2/11/20 拉开间隔；后续一对一链路逐项复用控制层横坐标，维持竖直连接。
+  Object.freeze({ nodeId: 'asset.coal-mill-actuator', title: '磨煤机执行机构', iconKey: 'instrument', x: 2, y: 88, layerId: 'field-device' }),
+  Object.freeze({ nodeId: 'asset.induced-draft-fan-vfd', title: '引送风机变频器', iconKey: 'plc', x: 11, y: 88, layerId: 'field-device' }),
+  Object.freeze({ nodeId: 'asset.furnace-pressure-transmitter', title: '炉膛压力变送器', iconKey: 'instrument', x: 20, y: 88, layerId: 'field-device' }),
+  Object.freeze({ nodeId: 'asset.steam-turbine-valve-actuator', title: '汽机调门执行器', iconKey: 'instrument', x: 33, y: 88, layerId: 'field-device' }),
+  Object.freeze({ nodeId: 'asset.generator-protection-device', title: '发电机保护装置', iconKey: 'circuit-breaker', x: 47, y: 88, layerId: 'field-device' }),
+  Object.freeze({ nodeId: 'asset.desulfurization-circulation-pump', title: '脱硫浆液循环泵', iconKey: 'instrument', x: 61, y: 88, layerId: 'field-device' }),
+  Object.freeze({ nodeId: 'asset.denitrification-ammonia-valve', title: '脱硝喷氨调节阀', iconKey: 'instrument', x: 75, y: 88, layerId: 'field-device' }),
+  Object.freeze({ nodeId: 'asset.coal-belt-controller', title: '输煤皮带控制器', iconKey: 'plc', x: 87, y: 88, layerId: 'field-device' }),
+  Object.freeze({ nodeId: 'asset.esd-emergency-actuator', title: 'ESD 紧急停车执行器', iconKey: 'instrument', x: 96, y: 88, layerId: 'field-device' }),
 ])
 
 /**
@@ -106,6 +109,46 @@ const coalPowerSceneNodeMappings = Object.freeze([
   Object.freeze({ nodeId: 'system.boiler-dcs', sceneNodeId: 'node.coal-boiler' }),
   Object.freeze({ nodeId: 'system.steam-turbine-dcs', sceneNodeId: 'node.coal-steam-turbine' }),
   Object.freeze({ nodeId: 'system.generator-excitation-controller', sceneNodeId: 'node.coal-generator' }),
+])
+
+/**
+ * 燃煤总览的重点区域声明。
+ *
+ * 重点区域只表达“一个已绑定三维入口及其显式子节点”的二维视觉分组，不能
+ * 从连线、坐标或中文标题推导。当前燃煤场景已确认的三维入口只有锅炉、汽轮机
+ * 和发电机三组，因此这里只登记这三组及其资料中明确对应的现场节点。过滤视图
+ * 会由注册表投影时主动清空该字段，避免区域框错误出现在关键环节拓扑中。
+ */
+const coalPowerFocusRegions = Object.freeze([
+  Object.freeze({
+    regionId: 'focus.coal-boiler-control',
+    anchorNodeId: 'system.boiler-dcs',
+    nodeIds: Object.freeze([
+      'system.boiler-dcs',
+      'asset.coal-mill-actuator',
+      'asset.induced-draft-fan-vfd',
+      'asset.furnace-pressure-transmitter',
+    ]),
+    label: '锅炉控制区域',
+  }),
+  Object.freeze({
+    regionId: 'focus.coal-steam-turbine-control',
+    anchorNodeId: 'system.steam-turbine-dcs',
+    nodeIds: Object.freeze([
+      'system.steam-turbine-dcs',
+      'asset.steam-turbine-valve-actuator',
+    ]),
+    label: '汽轮机控制区域',
+  }),
+  Object.freeze({
+    regionId: 'focus.coal-generator-control',
+    anchorNodeId: 'system.generator-excitation-controller',
+    nodeIds: Object.freeze([
+      'system.generator-excitation-controller',
+      'asset.generator-protection-device',
+    ]),
+    label: '发电机控制区域',
+  }),
 ])
 
 /** Unity 属性面板中已经保存并通过场景测试的流程步骤。 */
@@ -208,6 +251,11 @@ export function createCoalPowerTopologies(manifestVersion) {
       doubleClickBehavior: 'emit-node',
     })),
     edges: coalPowerEdges.map((edge) => ({ ...edge, evidenceStatus: 'verified' })),
+    // 重点区域属于燃煤总览自身的显式声明；不复制到过滤视图，且不参与节点命中、路由或联动。
+    focusRegions: coalPowerFocusRegions.map((region) => ({
+      ...region,
+      nodeIds: [...region.nodeIds],
+    })),
   }
 
   const flowTopologies = coalPowerFlowViews.map((view) => ({
@@ -249,4 +297,13 @@ export function createCoalPowerActions(manifestVersion) {
   }))
 }
 
-export { coalPowerEdgeColors, coalPowerEdges, coalPowerFlowViews, coalPowerLayers, coalPowerNodes, coalPowerProcessSteps, coalPowerSceneNodeMappings }
+export {
+  coalPowerEdgeColors,
+  coalPowerEdges,
+  coalPowerFlowViews,
+  coalPowerFocusRegions,
+  coalPowerLayers,
+  coalPowerNodes,
+  coalPowerProcessSteps,
+  coalPowerSceneNodeMappings,
+}

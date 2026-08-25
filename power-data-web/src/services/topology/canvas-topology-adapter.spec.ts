@@ -31,6 +31,12 @@ interface StrokeInspection {
   shadowBlur: number
 }
 
+/** 记录协议标签文字及可选最大宽度，验证绘制不会通过 Canvas 参数横向压缩字形。 */
+interface TextDrawingInspection {
+  text: string
+  maxWidth?: number
+}
+
 /**
  * 布局与路由属于适配器内部缓存，测试通过结构化只读视图核对几何结果，不把调试接口暴露给业务代码。
  */
@@ -41,6 +47,7 @@ interface AdapterGeometryInspection extends AdapterCacheInspection {
     y: number
     width: number
     height: number
+    titleMaxWidth: number
     titleBounds: BoundsInspection
     visualBounds: BoundsInspection
     hitBounds: BoundsInspection
@@ -54,6 +61,13 @@ interface AdapterGeometryInspection extends AdapterCacheInspection {
     labelWidth: number,
     labelHeight: number,
   ): { x: number; y: number; width: number; height: number } | undefined
+  drawEdgeLabel(
+    context: CanvasRenderingContext2D,
+    label: string,
+    route: { points: readonly { x: number; y: number }[] },
+    color: string,
+  ): void
+  draw(): void
 }
 
 /**
@@ -83,7 +97,7 @@ function createCanvas(): HTMLCanvasElement {
  * 构造可执行完整绘制流程的轻量画布替身。测试只记录描边，不模拟像素栅格化，
  * 因而既能验证用户可见反馈，也不会依赖浏览器、显卡或图片解码结果。
  */
-function createRecordingCanvas(strokes: StrokeInspection[]): HTMLCanvasElement {
+function createRecordingCanvas(strokes: StrokeInspection[], textDrawings: TextDrawingInspection[] = []): HTMLCanvasElement {
   const context = {
     fillStyle: '',
     strokeStyle: '',
@@ -99,7 +113,9 @@ function createRecordingCanvas(strokes: StrokeInspection[]): HTMLCanvasElement {
     drawImage: vi.fn(),
     fill: vi.fn(),
     fillRect: vi.fn(),
-    fillText: vi.fn(),
+    fillText: vi.fn((text: string, _x: number, _y: number, maxWidth?: number) => {
+      textDrawings.push({ text, maxWidth })
+    }),
     lineTo: vi.fn(),
     moveTo: vi.fn(),
     quadraticCurveTo: vi.fn(),
@@ -168,6 +184,22 @@ function createFiveLayerTopology(): TopologyDefinition {
       deviceStatus: 'offline' as const,
       metricKeys: [],
     })),
+    edges: [],
+  }
+}
+
+/** 同层密集节点夹具，复现燃煤锅炉三分支在窄拓扑容器中的标题碰撞。 */
+function createDenseUnitLayerTopology(): TopologyDefinition {
+  return {
+    topologyKey: toTopologyKey('topology.dense-title-regression'),
+    title: '同层标题防碰撞拓扑',
+    configVersion: '2026.08.24.1' as never,
+    nodes: [
+      { nodeId: toProcessNodeId('dense-boiler-left'), title: '磨煤机执行机构', x: 2, y: 88, layerId: 'field-device', iconKey: 'instrument', deviceStatus: 'offline', metricKeys: [] },
+      { nodeId: toProcessNodeId('dense-boiler-center'), title: '引送风机变频器', x: 11, y: 88, layerId: 'field-device', iconKey: 'plc', deviceStatus: 'offline', metricKeys: [] },
+      { nodeId: toProcessNodeId('dense-boiler-right'), title: '炉膛压力变送器', x: 20, y: 88, layerId: 'field-device', iconKey: 'instrument', deviceStatus: 'offline', metricKeys: [] },
+      { nodeId: toProcessNodeId('dense-turbine'), title: '汽机调门执行器', x: 33, y: 88, layerId: 'field-device', iconKey: 'instrument', deviceStatus: 'offline', metricKeys: [] },
+    ],
     edges: [],
   }
 }
@@ -424,6 +456,34 @@ describe('CanvasTopologyAdapter 响应式布局与直线优先路由', () => {
     adapter.dispose()
   })
 
+  it.each([
+    [600, 240],
+    [731, 357],
+    [770, 336],
+    [1280, 720],
+  ])('%d×%d 下同层标题按邻居间距限宽且不相交', (width, height) => {
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const adapter = new CanvasTopologyAdapter(createCanvas())
+    const inspection = prepareGeometry(adapter, createDenseUnitLayerTopology(), width, height)
+    const layouts = [...inspection.layoutByNodeId.values()].sort((left, right) => left.x - right.x)
+
+    for (let index = 1; index < layouts.length; index += 1) {
+      const previous = layouts[index - 1]
+      const current = layouts[index]
+      if (!previous || !current) continue
+      expect(previous.titleBounds.right).toBeLessThanOrEqual(current.titleBounds.left)
+    }
+    // 窄画布下锅炉三分支标题宽度应因相邻中心距受限；宽画布有足够空间时保持统一最大宽度。
+    if (width <= 731) {
+      expect(layouts[0]?.titleMaxWidth).toBeLessThan(layouts[3]?.titleMaxWidth ?? Number.POSITIVE_INFINITY)
+      expect(layouts[3]?.titleMaxWidth).toBeGreaterThan(layouts[0]?.titleMaxWidth ?? 0)
+    } else {
+      expect(layouts[0]?.titleMaxWidth).toBeGreaterThanOrEqual((layouts[3]?.titleMaxWidth ?? 0) - 1)
+    }
+    adapter.dispose()
+  })
+
   it('孤立节点选中后绘制高对比外圈，且不改变视觉、命中或路由边界', () => {
     const strokes: StrokeInspection[] = []
     const pendingFrames: FrameRequestCallback[] = []
@@ -458,6 +518,31 @@ describe('CanvasTopologyAdapter 响应式布局与直线优先路由', () => {
     expect(afterSelection?.visualBounds).toEqual(beforeSelection?.visualBounds)
     expect(afterSelection?.hitBounds).toEqual(beforeSelection?.hitBounds)
     expect(afterSelection?.routeBounds).toEqual(beforeSelection?.routeBounds)
+
+    adapter.dispose()
+  })
+
+  it('窄视口绘制节点标题时不通过 Canvas 最大宽度参数横向压缩字形', () => {
+    const textDrawings: TextDrawingInspection[] = []
+    const pendingFrames: FrameRequestCallback[] = []
+    vi.stubGlobal('Image', TestImage)
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      pendingFrames.push(callback)
+      return pendingFrames.length
+    }))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+
+    const adapter = new CanvasTopologyAdapter(createRecordingCanvas([], textDrawings))
+    adapter.resize(600, 240)
+    adapter.setTopology(createDenseUnitLayerTopology())
+    pendingFrames.shift()?.(0)
+
+    const inspection = adapter as unknown as AdapterGeometryInspection
+    inspection.draw()
+
+    const titleDrawings = textDrawings.filter((drawing) => drawing.text.includes('磨煤机') || drawing.text.includes('变频器'))
+    expect(titleDrawings.length).toBeGreaterThan(0)
+    expect(titleDrawings.every((drawing) => drawing.maxWidth === undefined)).toBe(true)
 
     adapter.dispose()
   })
@@ -510,6 +595,30 @@ describe('CanvasTopologyAdapter 响应式布局与直线优先路由', () => {
     expect(route?.points[0]?.x).not.toBe(route?.points[1]?.x)
     expect(route?.points[0]?.y).not.toBe(route?.points[1]?.y)
     expect(route && inspection.findAvailableEdgeLabelPlacement(route, 40, 12)).toBeDefined()
+    adapter.dispose()
+  })
+
+  it('长协议标签保持字体比例，放得下时显示完整文本而不使用横向压缩', () => {
+    const textDrawings: TextDrawingInspection[] = []
+    const canvas = createRecordingCanvas([], textDrawings)
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const adapter = new CanvasTopologyAdapter(canvas)
+    const topology = createRouteTopology(
+      [{ id: 'protocol-left', x: 20, y: 50 }, { id: 'protocol-right', x: 80, y: 50 }],
+      [{ id: 'edge.modbus', from: 'protocol-left', to: 'protocol-right', protocolLabel: '基于传输控制协议的Modbus协议（Modbus TCP）' }],
+    )
+    const inspection = prepareGeometry(adapter, topology, 1000, 400)
+    const route = inspection.routeByEdgeId.get('edge.modbus')
+    expect(route).toBeDefined()
+    if (!route) return
+
+    const context = canvas.getContext('2d') as unknown as CanvasRenderingContext2D
+    inspection.drawEdgeLabel(context, '基于传输控制协议的Modbus协议（Modbus TCP）', route, '#22d3ee')
+    const drawing = textDrawings.at(-1)
+    expect(drawing?.text).toBe('基于传输控制协议的Modbus协议（Modbus TCP）')
+    // 第四个参数缺失，浏览器不会对文字做横向压缩；标签宽度不足时由字符省略逻辑处理。
+    expect(drawing?.maxWidth).toBeUndefined()
     adapter.dispose()
   })
 

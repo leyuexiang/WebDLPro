@@ -43,6 +43,8 @@ const canvasViewSession = new TopologyDrilldownCanvasViewSession()
 const activeDrilldown = shallowRef<{
   content?: TopologyDrilldownContent
   errorMessage?: string
+  /** 下钻提示沿用触发入口当前状态，子节点和模型说明节点不另造状态快照。 */
+  sourceNodeId: ProcessNodeId
   triggerElement: HTMLButtonElement
 } | null>(null)
 /** 浏览器可能先发 fullscreenchange（全屏变化）再把同一次 Escape（退出键）交给文档，需短时去重。 */
@@ -51,6 +53,16 @@ let lastNativeFullscreenExitAt = Number.NEGATIVE_INFINITY
 let preserveOverlayForNextEscape = false
 
 const isDrilldownOpen = computed(() => activeDrilldown.value !== null)
+const activeDrilldownStatus = computed<TopologyDeviceStatus>(() => {
+  const sourceNodeId = activeDrilldown.value?.sourceNodeId
+  const sourceNode = sourceNodeId
+    ? props.topology.nodes.find((node) => node.nodeId === sourceNodeId)
+    : undefined
+  // 说明节点没有正式设备状态；统一复用入口状态，缺失时回退到发布基线的离线状态。
+  return sourceNodeId
+    ? props.nodeStatuses?.get(sourceNodeId) ?? sourceNode?.deviceStatus ?? 'offline'
+    : 'offline'
+})
 
 /**
  * 组合根只能取得当前已挂载画布的受控端口，不能越过面板创建第二个 Canvas（画布）。
@@ -128,7 +140,7 @@ async function handleOpenDrilldown(nodeId: ProcessNodeId, contentKey: string, tr
     else content = result.content
   }
 
-  activeDrilldown.value = { content, errorMessage, triggerElement }
+  activeDrilldown.value = { content, errorMessage, sourceNodeId: nodeId, triggerElement }
   await nextTick()
   drilldownOverlay.value?.focusInitial()
 }
@@ -238,6 +250,7 @@ onBeforeUnmount(() => {
       ref="drilldownOverlay"
       :content="activeDrilldown.content"
       :error-message="activeDrilldown.errorMessage"
+      :status="activeDrilldownStatus"
       :fullscreen="isFullscreen"
       @close="void closeDrilldown()"
       @toggle-fullscreen="void toggleFullscreen()"

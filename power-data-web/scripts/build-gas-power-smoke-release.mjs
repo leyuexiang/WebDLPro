@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { assertReleaseArtifact, writeReleaseArtifactIntegrity } from './release-artifact-contract.mjs'
 import {
+  coalPowerEdgeColors,
   coalPowerProcessSteps,
   coalPowerSceneNodeMappings,
   createCoalPowerActions,
@@ -549,29 +550,35 @@ const ccgtOtTopology = Object.freeze({
       label: '蒸汽轮机控制区域',
     }),
   ]),
+  /**
+   * 连线颜色和实/虚线严格复用燃煤拓扑的四类颜色常量：灰色表示企业 IT，
+   * 蓝色表示 DMZ/厂级网络，绿色表示厂级到单元控制层，橙色表示单元控制到现场设备层。
+   * 颜色是资料中的二维视觉分类，不代表告警、故障、权限或实时通信状态；每条边显式登记，
+   * 渲染器不得根据节点坐标、标题或层级运行时猜测。三-边15按资料保留绿色虚线。
+   */
   edges: Object.freeze([
-    Object.freeze({ edgeId: 'route.enterprise-core-to-ems', fromNodeId: 'enterprise-core-switch', toNodeId: 'ems-system', title: '企业管理网通信' }),
-    Object.freeze({ edgeId: 'route.enterprise-core-to-firewall', fromNodeId: 'enterprise-core-switch', toNodeId: 'enterprise-firewall', title: '企业网安全边界' }),
-    Object.freeze({ edgeId: 'route.enterprise-firewall-to-dmz', fromNodeId: 'enterprise-firewall', toNodeId: 'dmz-industrial-firewall', title: '企业网至生产 DMZ' }),
-    Object.freeze({ edgeId: 'route.dmz-to-dcs-core', fromNodeId: 'dmz-industrial-firewall', toNodeId: 'gas-network', title: '生产 DMZ 至 DCS 监控核心' }),
-    Object.freeze({ edgeId: 'route.dcs-core-to-historian', fromNodeId: 'gas-network', toNodeId: 'historian-data-server', title: '历史数据同步' }),
-    Object.freeze({ edgeId: 'route.dcs-core-to-scada', fromNodeId: 'gas-network', toNodeId: 'scada-security-gateway', title: 'SCADA 数据交换', protocolLabel: 'DNP3' }),
-    Object.freeze({ edgeId: 'route.dcs-core-to-operator', fromNodeId: 'gas-network', toNodeId: 'operator-station', title: '机组操作网络' }),
-    Object.freeze({ edgeId: 'route.dcs-core-to-engineering', fromNodeId: 'gas-network', toNodeId: 'plant-engineering-station', title: '燃机工程维护网络' }),
-    Object.freeze({ edgeId: 'route.dcs-core-to-performance', fromNodeId: 'gas-network', toNodeId: 'plant-data-station', title: '性能优化网络' }),
-    Object.freeze({ edgeId: 'route.dcs-core-to-markvie', fromNodeId: 'gas-network', toNodeId: 'inlet-duct', title: '燃机控制链路', protocolLabel: '专用控制总线' }),
-    Object.freeze({ edgeId: 'route.dcs-core-to-hrsg', fromNodeId: 'gas-network', toNodeId: 'hrsg', title: '余热锅炉控制链路' }),
-    Object.freeze({ edgeId: 'route.dcs-core-to-steam', fromNodeId: 'gas-network', toNodeId: 'steam-turbine', title: '汽机控制链路' }),
-    Object.freeze({ edgeId: 'route.dcs-core-to-generator', fromNodeId: 'gas-network', toNodeId: 'generator', title: '发电机保护链路' }),
-    Object.freeze({ edgeId: 'route.dcs-core-to-auxiliary', fromNodeId: 'gas-network', toNodeId: 'auxiliary-plc', title: '辅机控制链路' }),
-    Object.freeze({ edgeId: 'route.dcs-core-to-sil', fromNodeId: 'gas-network', toNodeId: 'grid-output', title: '燃机安全联锁链路' }),
-    Object.freeze({ edgeId: 'route.markvie-to-pressure-valve', fromNodeId: 'inlet-duct', toNodeId: 'fuel-gas-pressure-valve', title: '燃气调压控制' }),
-    Object.freeze({ edgeId: 'route.markvie-to-actuator', fromNodeId: 'inlet-duct', toNodeId: 'fuel-gas-electric-actuator', title: '燃烧器执行控制' }),
-    Object.freeze({ edgeId: 'route.hrsg-to-temperature-transmitter', fromNodeId: 'hrsg', toNodeId: 'hrsg-drum-level-sensor', title: '余热锅炉温度采集' }),
-    Object.freeze({ edgeId: 'route.steam-to-main-control-valve', fromNodeId: 'steam-turbine', toNodeId: 'steam-main-control-valve', title: '主汽调节控制' }),
-    Object.freeze({ edgeId: 'route.generator-to-outlet-breaker', fromNodeId: 'generator', toNodeId: 'generator-outlet-breaker', title: '发电机出口保护' }),
-    Object.freeze({ edgeId: 'route.auxiliary-to-vfd', fromNodeId: 'auxiliary-plc', toNodeId: 'condensate-pump-vfd', title: '循环水泵控制' }),
-    Object.freeze({ edgeId: 'route.sil-to-leak-detector', fromNodeId: 'grid-output', toNodeId: 'fuel-gas-leak-detector', title: '燃气泄漏安全联锁' }),
+    Object.freeze({ edgeId: 'route.enterprise-core-to-ems', fromNodeId: 'enterprise-core-switch', toNodeId: 'ems-system', title: '企业管理网通信', lineColor: coalPowerEdgeColors.gray, lineStyle: 'solid' }),
+    Object.freeze({ edgeId: 'route.enterprise-core-to-firewall', fromNodeId: 'enterprise-core-switch', toNodeId: 'enterprise-firewall', title: '企业网安全边界', lineColor: coalPowerEdgeColors.gray, lineStyle: 'solid' }),
+    Object.freeze({ edgeId: 'route.enterprise-firewall-to-dmz', fromNodeId: 'enterprise-firewall', toNodeId: 'dmz-industrial-firewall', title: '企业网至生产 DMZ', lineColor: coalPowerEdgeColors.blue, lineStyle: 'solid' }),
+    Object.freeze({ edgeId: 'route.dmz-to-dcs-core', fromNodeId: 'dmz-industrial-firewall', toNodeId: 'gas-network', title: '生产 DMZ 至 DCS 监控核心', lineColor: coalPowerEdgeColors.blue, lineStyle: 'solid' }),
+    Object.freeze({ edgeId: 'route.dcs-core-to-historian', fromNodeId: 'gas-network', toNodeId: 'historian-data-server', title: '历史数据同步', lineColor: coalPowerEdgeColors.blue, lineStyle: 'solid' }),
+    Object.freeze({ edgeId: 'route.dcs-core-to-scada', fromNodeId: 'gas-network', toNodeId: 'scada-security-gateway', title: 'SCADA 数据交换', protocolLabel: 'DNP3', lineColor: coalPowerEdgeColors.blue, lineStyle: 'solid' }),
+    Object.freeze({ edgeId: 'route.dcs-core-to-operator', fromNodeId: 'gas-network', toNodeId: 'operator-station', title: '机组操作网络', lineColor: coalPowerEdgeColors.blue, lineStyle: 'solid' }),
+    Object.freeze({ edgeId: 'route.dcs-core-to-engineering', fromNodeId: 'gas-network', toNodeId: 'plant-engineering-station', title: '燃机工程维护网络', lineColor: coalPowerEdgeColors.blue, lineStyle: 'solid' }),
+    Object.freeze({ edgeId: 'route.dcs-core-to-performance', fromNodeId: 'gas-network', toNodeId: 'plant-data-station', title: '性能优化网络', lineColor: coalPowerEdgeColors.blue, lineStyle: 'solid' }),
+    Object.freeze({ edgeId: 'route.dcs-core-to-markvie', fromNodeId: 'gas-network', toNodeId: 'inlet-duct', title: '燃机控制链路', protocolLabel: '专用控制总线', lineColor: coalPowerEdgeColors.green, lineStyle: 'solid' }),
+    Object.freeze({ edgeId: 'route.dcs-core-to-hrsg', fromNodeId: 'gas-network', toNodeId: 'hrsg', title: '余热锅炉控制链路', lineColor: coalPowerEdgeColors.green, lineStyle: 'solid' }),
+    Object.freeze({ edgeId: 'route.dcs-core-to-steam', fromNodeId: 'gas-network', toNodeId: 'steam-turbine', title: '汽机控制链路', lineColor: coalPowerEdgeColors.green, lineStyle: 'solid' }),
+    Object.freeze({ edgeId: 'route.dcs-core-to-generator', fromNodeId: 'gas-network', toNodeId: 'generator', title: '发电机保护链路', lineColor: coalPowerEdgeColors.green, lineStyle: 'solid' }),
+    Object.freeze({ edgeId: 'route.dcs-core-to-auxiliary', fromNodeId: 'gas-network', toNodeId: 'auxiliary-plc', title: '辅机控制链路', lineColor: coalPowerEdgeColors.green, lineStyle: 'solid' }),
+    Object.freeze({ edgeId: 'route.dcs-core-to-sil', fromNodeId: 'gas-network', toNodeId: 'grid-output', title: '燃机安全联锁链路', lineColor: coalPowerEdgeColors.green, lineStyle: 'dashed' }),
+    Object.freeze({ edgeId: 'route.markvie-to-pressure-valve', fromNodeId: 'inlet-duct', toNodeId: 'fuel-gas-pressure-valve', title: '燃气调压控制', lineColor: coalPowerEdgeColors.orange, lineStyle: 'solid' }),
+    Object.freeze({ edgeId: 'route.markvie-to-actuator', fromNodeId: 'inlet-duct', toNodeId: 'fuel-gas-electric-actuator', title: '燃烧器执行控制', lineColor: coalPowerEdgeColors.orange, lineStyle: 'solid' }),
+    Object.freeze({ edgeId: 'route.hrsg-to-temperature-transmitter', fromNodeId: 'hrsg', toNodeId: 'hrsg-drum-level-sensor', title: '余热锅炉温度采集', lineColor: coalPowerEdgeColors.orange, lineStyle: 'solid' }),
+    Object.freeze({ edgeId: 'route.steam-to-main-control-valve', fromNodeId: 'steam-turbine', toNodeId: 'steam-main-control-valve', title: '主汽调节控制', lineColor: coalPowerEdgeColors.orange, lineStyle: 'solid' }),
+    Object.freeze({ edgeId: 'route.generator-to-outlet-breaker', fromNodeId: 'generator', toNodeId: 'generator-outlet-breaker', title: '发电机出口保护', lineColor: coalPowerEdgeColors.orange, lineStyle: 'solid' }),
+    Object.freeze({ edgeId: 'route.auxiliary-to-vfd', fromNodeId: 'auxiliary-plc', toNodeId: 'condensate-pump-vfd', title: '循环水泵控制', lineColor: coalPowerEdgeColors.orange, lineStyle: 'solid' }),
+    Object.freeze({ edgeId: 'route.sil-to-leak-detector', fromNodeId: 'grid-output', toNodeId: 'fuel-gas-leak-detector', title: '燃气泄漏安全联锁', lineColor: coalPowerEdgeColors.orange, lineStyle: 'solid' }),
   ]),
 })
 

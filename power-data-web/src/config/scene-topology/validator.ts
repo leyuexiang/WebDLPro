@@ -1,6 +1,7 @@
 import { SCENE_IDS, isSceneId, validateStableIdentifier } from '@/config/scene-topology/identifiers'
 import type { SceneTopologyManifest, SceneTopologyManifestValidationIssue } from '@/config/scene-topology/types'
 import { MAX_TOPOLOGY_DRILLDOWN_CONTENT_COUNT } from '@/config/scene-topology/topology-drilldown-registry'
+import { hasTopologyIconKey } from '@/services/topology/topology-icon-registry'
 
 /** 与 Unity 节点快照水位表一致；结构清单超过该值会使清除补偿无法保证完整交付。 */
 export const MAX_DEVICE_STATE_SCENE_NODE_TARGETS_PER_SCENE = 500
@@ -731,6 +732,10 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
         appendIssue(issues, 'drilldown.node-id-collision', '下钻局部节点标识不得复用正式拓扑节点标识。')
       }
       hasNonEmptyString(localNode, 'title', issues, 'drilldown.node-title')
+      // 说明节点必须显式引用正式图标登记表；不接受图片路径、generic占位或按标题推断的未知键。
+      if (!validateIdentifier(localNode.iconKey, '下钻图标键', issues) || !hasTopologyIconKey(String(localNode.iconKey))) {
+        appendIssue(issues, 'drilldown.node-icon-key', '下钻局部节点必须使用图标登记表中的受控图标键。')
+      }
       if (localNode.kind !== 'source' && localNode.kind !== 'logic' && localNode.kind !== 'boundary') {
         appendIssue(issues, 'drilldown.node-kind', '下钻局部节点类型无效。')
       } else {

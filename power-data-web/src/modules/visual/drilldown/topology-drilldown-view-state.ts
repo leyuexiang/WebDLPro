@@ -5,6 +5,8 @@ export interface TopologyDrilldownRenderInstance {
   semanticNodeId: string
   title: string
   kind: TopologyDrilldownNode['kind']
+  /** 下钻只读节点复用受控正式图标键，渲染层按 normal 静态资源展示，不引入实时设备状态。 */
+  iconKey: TopologyDrilldownNode['iconKey']
   x: number
   y: number
   description?: string
@@ -81,6 +83,7 @@ function createRenderInstance(node: TopologyDrilldownNode, instanceId: string, x
     semanticNodeId: node.id,
     title: node.title,
     kind: node.kind,
+    iconKey: node.iconKey,
     x,
     y: node.y,
     description: node.description,

@@ -10,6 +10,7 @@ import type {
   UnityRuntimeKey,
   UnitySceneKey,
 } from '@/config/scene-topology/identifiers'
+import type { TopologyIconKey } from '@/config/process/types'
 
 /** 四态设备视觉与旧拓扑保持一致，但状态来源改由外层父页面的受控消息提供。 */
 export type DeviceVisualStatus = 'normal' | 'alarm' | 'fault' | 'offline'
@@ -95,6 +96,11 @@ export interface TopologyDrilldownNode {
   readonly id: string
   readonly title: string
   readonly kind: 'source' | 'logic' | 'boundary'
+  /**
+   * 下钻说明节点沿用正式拓扑图元登记表中的受控键，只用于静态图标展示。
+   * 这里禁止使用 generic（中性占位），也不保存图片路径；说明节点仍不拥有正式节点编号、状态或三维映射。
+   */
+  readonly iconKey: Exclude<TopologyIconKey, 'generic'>
   readonly x: number
   readonly y: number
   readonly description?: string
