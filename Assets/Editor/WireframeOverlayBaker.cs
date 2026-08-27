@@ -82,12 +82,13 @@ public static class WireframeOverlayBaker
             }
 
             Stopwatch writeStopwatch = Stopwatch.StartNew();
-            WriteMeshAsset(wireframe, assetPath);
+            // 覆盖已有资产时传入的临时网格会被销毁，日志必须使用返回的存活资产引用。
+            Mesh writtenWireframe = WriteMeshAsset(wireframe, assetPath);
             writeStopwatch.Stop();
             bakedCount++;
             Debug.Log(
                 $"[WireframeOverlayBaker] {filters[index].name}: 输出 {assetPath}，" +
-                $"线段={wireframe.GetIndexCount(0) / 2u}，顶点={wireframe.vertexCount}，" +
+                $"线段={writtenWireframe.GetIndexCount(0) / 2u}，顶点={writtenWireframe.vertexCount}，" +
                 $"构建耗时={buildStopwatch.ElapsedMilliseconds} ms，写入耗时={writeStopwatch.ElapsedMilliseconds} ms");
         }
 
@@ -423,7 +424,7 @@ public static class WireframeOverlayBaker
     /// <summary>
     /// 覆盖写入已存在的资产而不是删除重建，保证已引用该网格的场景与预制体不会丢失引用。
     /// </summary>
-    private static void WriteMeshAsset(Mesh wireframe, string assetPath)
+    private static Mesh WriteMeshAsset(Mesh wireframe, string assetPath)
     {
         Mesh existing = AssetDatabase.LoadAssetAtPath<Mesh>(assetPath);
         if (existing != null)
@@ -431,10 +432,11 @@ public static class WireframeOverlayBaker
             EditorUtility.CopySerialized(wireframe, existing);
             Object.DestroyImmediate(wireframe);
             EditorUtility.SetDirty(existing);
-            return;
+            return existing;
         }
 
         AssetDatabase.CreateAsset(wireframe, assetPath);
+        return wireframe;
     }
 
     private static void EnsureOutputDirectory()
