@@ -9,6 +9,8 @@ import type { VisualizationCoordinatorFacade } from '@/modules/visual/orchestrat
 import type { TopologyNodeDoubleClickIntent } from '@/modules/visual/topology/topology-node-interaction'
 import type { SceneObjectSelectionIntent } from '@/modules/visual/orchestration/unity-object-selection-coordinator'
 import type { SceneActivationId } from '@/config/scene-topology/identifiers'
+import { isBusinessVisualizationStableContext } from '@/modules/visual/orchestration/visualization.store'
+import type { BusinessViewOpenPayload, OverviewViewOpenPayload, ViewOpenPayload } from '@/host-bridge/host-protocol'
 
 /**
  * 原子打开视图端口仅接收任务-012已经收敛的领域命令。
@@ -133,7 +135,7 @@ export class HostRuntimeComposition implements HostCommandCoordinatorPort {
       // 必须使用同一 messageId 作为 replyTo，父页面才能把确认与最终稳定视图归入同一次初始化事务。
       if (initialized && !this.disposed) {
         // 初始化也建立当前物理场景代次；后续同场景补同步与跨场景清除债务据此严格隔离。
-        this.deviceStatesUpdate?.resynchronizeLatestSnapshot?.(this.facade.getSnapshot().sceneActivationId ?? undefined)
+        this.resynchronizeLatestBusinessSnapshot()
         this.reportCommittedView(undefined, command.messageId)
       }
       return
@@ -161,7 +163,7 @@ export class HostRuntimeComposition implements HostCommandCoordinatorPort {
   public reportTopologyNodeDoubleClick(intent: TopologyNodeDoubleClickIntent): boolean {
     if (this.disposed || !this.handshake.isInitialized()) return false
     const context = this.getReadyContext()
-    if (!context || context.sceneId !== intent.sceneId || context.topologyId !== intent.topologyId) return false
+    if (!context || !('topologyId' in context) || context.sceneId !== intent.sceneId || context.topologyId !== intent.topologyId) return false
     return this.eventSender.sendTopologyNodeDoubleClick(intent)
   }
 
@@ -172,7 +174,7 @@ export class HostRuntimeComposition implements HostCommandCoordinatorPort {
   public reportSceneObjectSelected(selection: SceneObjectSelectionIntent): boolean {
     if (this.disposed || !this.handshake.isInitialized()) return false
     const context = this.getReadyContext()
-    if (!context) return false
+    if (!context || !('topologyId' in context)) return false
     if (
       selection.sceneId !== context.sceneId ||
       selection.topologyId !== context.topologyId ||
@@ -259,14 +261,20 @@ export class HostRuntimeComposition implements HostCommandCoordinatorPort {
 
   /** 将 system.init 的初始目标转换为与普通 view.open 完全相同的原子事务，避免产生第二套场景切换流程。 */
   private async initializeView(command: Extract<HostCommandMessage, { type: 'system.init' }>): Promise<HostInitializationResult> {
+    const payload: ViewOpenPayload = 'topologyId' in command.payload
+      ? {
+          sceneId: command.payload.sceneId,
+          topologyId: command.payload.topologyId,
+          ...(command.payload.actionId !== undefined ? { actionId: command.payload.actionId } : {}),
+        } as BusinessViewOpenPayload
+      : {
+          sceneId: command.payload.sceneId,
+          ...(command.payload.actionId !== undefined ? { actionId: command.payload.actionId } : {}),
+        } as OverviewViewOpenPayload
     const result = await this.viewOpen.submit({
       type: 'view.open',
       correlationId: command.messageId,
-      payload: {
-        sceneId: command.payload.sceneId,
-        topologyId: command.payload.topologyId,
-        ...(command.payload.actionId !== undefined ? { actionId: command.payload.actionId } : {}),
-      },
+      payload,
     })
 
     if (!result.success) {
@@ -287,7 +295,7 @@ export class HostRuntimeComposition implements HostCommandCoordinatorPort {
 
     if (command.type === 'view.open' || command.type === 'workflow.trigger') {
       // 视图事务已经同时提交场景与拓扑后，才允许按当前权威快照补同步新三维控制器。
-      this.deviceStatesUpdate?.resynchronizeLatestSnapshot?.(this.facade.getSnapshot().sceneActivationId ?? undefined)
+      this.resynchronizeLatestBusinessSnapshot()
       this.reportCommittedView(result.payload.transitionId, result.replyTo)
       return
     }
@@ -312,7 +320,21 @@ export class HostRuntimeComposition implements HostCommandCoordinatorPort {
     const stableContext = snapshot.stableContext
     if (!stableContext || snapshot.runtimeStatus !== 'ready') return undefined
 
-    return { ...stableContext, status: 'ready' }
+    if (isBusinessVisualizationStableContext(stableContext)) {
+      return {
+        sceneId: stableContext.sceneId,
+        topologyId: stableContext.topologyId,
+        actionId: stableContext.actionId,
+        contextRevision: stableContext.contextRevision,
+        status: 'ready',
+      }
+    }
+    return {
+      sceneId: stableContext.sceneId,
+      actionId: null,
+      contextRevision: stableContext.contextRevision,
+      status: 'ready',
+    }
   }
 
   /**
@@ -325,6 +347,13 @@ export class HostRuntimeComposition implements HostCommandCoordinatorPort {
   ): void {
     const context = this.getReadyContext()
     if (context) this.eventSender.sendViewChanged(context, transitionId, replyTo)
+  }
+
+  /** 仅业务稳定上下文需要向 Unity 重投影；平台总览没有拓扑，不得把隐藏旧快照发送给内层运行时。 */
+  private resynchronizeLatestBusinessSnapshot(): void {
+    const snapshot = this.facade.getSnapshot()
+    if (!snapshot.stableContext || !isBusinessVisualizationStableContext(snapshot.stableContext)) return
+    this.deviceStatesUpdate?.resynchronizeLatestSnapshot?.(snapshot.sceneActivationId ?? undefined)
   }
 
   /** 统一创建协议许可的有限错误，任何捕获异常均不在此层读取、拼接或传出。 */

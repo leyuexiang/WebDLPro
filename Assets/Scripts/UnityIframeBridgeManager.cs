@@ -70,6 +70,7 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
     // 场景映射版本由受控 iframe 入口参数传入；switchScene 必须与当前运行时握手的映射一致。
     private string _sceneMappingVersion = LocalSceneMappingVersion;
     private IBusinessSceneController _sceneController;
+    private OverviewSceneController _overviewSceneController;
     private MultiSceneCoordinator _sceneCoordinator;
     // 保留实际订阅对象，确保协调器被销毁或替换时先解除旧委托，避免新协调器因标志残留而未绑定。
     private MultiSceneCoordinator _subscribedSceneCoordinator;
@@ -934,8 +935,52 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
             return;
         }
 
+        UnsubscribeOverviewController();
         _sceneController = controller;
         ClearNodeVisualStateWatermarks();
+        if (controller is OverviewSceneController overviewController)
+        {
+            _overviewSceneController = overviewController;
+            _overviewSceneController.BuildingSelected += HandleOverviewBuildingSelected;
+            _overviewSceneController.BuildingSelectionCleared += HandleOverviewSelectionCleared;
+        }
+    }
+
+    /// <summary>
+    /// 总览建筑点击只上报稳定建筑标识，作为平台决定下一场景的交互意图。
+    /// Unity 不根据目标 sceneId 自行切换；进入业务场景必须等待平台重新发送受控 switchScene 命令，
+    /// 从而与拓扑准备、遮罩、事务标识和失败恢复保持同一原子事务。
+    /// </summary>
+    private void HandleOverviewBuildingSelected(string overviewBuildingId, string targetSceneId, string buildingName)
+    {
+        if (_releaseRequested || _sceneCoordinator == null ||
+            !SceneSwitchProtocolValidator.IsBoundedIdentifier(overviewBuildingId) ||
+            !SceneSwitchProtocolValidator.IsBoundedIdentifier(targetSceneId) ||
+            !BusinessSceneCatalog.IsRequiredSceneId(targetSceneId))
+        {
+            return;
+        }
+
+        ReportObjectSelected(overviewBuildingId, buildingName);
+        StatusText = $"已选择总览建筑 {overviewBuildingId}，等待平台下发目标场景命令。";
+        LogStatusToBrowserConsole();
+    }
+
+    private void HandleOverviewSelectionCleared()
+    {
+        ReportSelectionCleared();
+    }
+
+    private void UnsubscribeOverviewController()
+    {
+        if (_overviewSceneController == null)
+        {
+            return;
+        }
+
+        _overviewSceneController.BuildingSelected -= HandleOverviewBuildingSelected;
+        _overviewSceneController.BuildingSelectionCleared -= HandleOverviewSelectionCleared;
+        _overviewSceneController = null;
     }
 
     /// <summary>释放当前控制器的有限因果索引；字典不包含 Unity 对象，清空不会触发资源销毁或额外分配。</summary>
@@ -1447,6 +1492,7 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
     /// </summary>
     private void UnsubscribeFromSceneCoordinator()
     {
+        UnsubscribeOverviewController();
         if (_sceneCoordinatorSubscribed && !ReferenceEquals(_subscribedSceneCoordinator, null))
         {
             _subscribedSceneCoordinator.ActiveControllerChanged -= HandleActiveControllerChanged;

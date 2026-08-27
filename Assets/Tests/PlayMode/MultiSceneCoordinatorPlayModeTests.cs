@@ -17,6 +17,7 @@ namespace WebDLPro.Unity.Tests
     public sealed class MultiSceneCoordinatorPlayModeTests
     {
         private const string BootstrapScenePath = "Assets/Scenes/Bootstrap.unity";
+        private const string OverviewScenePath = "Assets/Scenes/Overview/Overview.unity";
         private const string GasPowerScenePath = "Assets/Scenes/Business/GasPower.unity";
         private const string CoalPowerScenePath = "Assets/Scenes/Business/CoalPower.unity";
         private const float MaximumWaitSeconds = 15f;
@@ -108,6 +109,53 @@ namespace WebDLPro.Unity.Tests
             Assert.That(CountLoadedBusinessScenes(), Is.EqualTo(1));
         }
 
+        /// <summary>
+        /// Bootstrap 只初始化常驻服务，不得自行选择沙盘或业务场景。
+        /// Overview 和后续业务场景都必须由平台 switchScene 命令驱动，并返回可关联的 sceneChanged。
+        /// </summary>
+        [UnityTest]
+        public IEnumerator 启动场景保持空闲直到平台命令进入总览再切换燃煤()
+        {
+            yield return LoadBootstrap();
+            yield return null;
+            yield return null;
+
+            Assert.That(_coordinator.State, Is.EqualTo(MultiSceneCoordinatorState.Idle));
+            Assert.That(_coordinator.ActiveSceneId, Is.Empty);
+            Assert.That(SceneManager.GetSceneByPath(OverviewScenePath).isLoaded, Is.False);
+            Assert.That(CountLoadedBusinessScenes(), Is.EqualTo(0));
+
+            _bridgeManager = FindBridgeManager();
+            Assert.That(_bridgeManager, Is.Not.Null, "Bootstrap 未创建常驻 Unity 桥接管理器。");
+            SubscribeBridgeOutboundLogs();
+
+            const string overviewRequestId = "request.bridge.bootstrap.overview";
+            const string overviewTransitionId = "transition.bridge.bootstrap.overview";
+            InvokeBridgeMethod(
+                "ReceiveFromParent",
+                CreateSceneSwitchMessage(OverviewSceneCatalog.OverviewSceneId, overviewTransitionId, overviewRequestId));
+            yield return WaitForCompletion(
+                () => HasNotice("sceneChanged", overviewRequestId, overviewTransitionId),
+                "平台总览场景命令未在帧预算内完成。");
+
+            Assert.That(_coordinator.State, Is.EqualTo(MultiSceneCoordinatorState.Ready));
+            Assert.That(_coordinator.ActiveSceneId, Is.EqualTo(OverviewSceneCatalog.OverviewSceneId));
+            Assert.That(SceneManager.GetSceneByPath(OverviewScenePath).isLoaded, Is.True);
+            Assert.That(CountLoadedBusinessScenes(), Is.EqualTo(0));
+
+            const string coalRequestId = "request.bridge.overview.coal";
+            const string coalTransitionId = "transition.bridge.overview.coal";
+            InvokeBridgeMethod(
+                "ReceiveFromParent",
+                CreateSceneSwitchMessage("coal-power", coalTransitionId, coalRequestId));
+            yield return WaitForCompletion(
+                () => HasNotice("sceneChanged", coalRequestId, coalTransitionId),
+                "平台燃煤场景命令未在帧预算内完成。");
+
+            Assert.That(_coordinator.ActiveSceneId, Is.EqualTo("coal-power"));
+            Assert.That(SceneManager.GetSceneByPath(OverviewScenePath).isLoaded, Is.False);
+            Assert.That(CountLoadedBusinessScenes(), Is.EqualTo(1));
+        }
         /// <summary>
         /// 初始化确认属于 requestId（原始请求标识）关联消息，不能携带空的 sceneActivationId（物理场景激活标识）。
         /// 此用例直接经过真实桥接公开入口和 JsonUtility（Unity 内置 JSON 序列化工具），
@@ -264,10 +312,12 @@ namespace WebDLPro.Unity.Tests
                 Assert.That(GetBridgeObjectProperty("CurrentSceneController"), Is.SameAs(_coordinator.ActiveController));
                 Assert.That(_coordinator.ActiveSceneId, Is.EqualTo(stableSceneId));
                 Assert.That(CountLoadedBusinessScenes(), Is.EqualTo(1));
+                // 当前已提交场景的总览本身可能合法持有运行时半透明材质，不能用全局数量误判为上一场景泄漏。
+                // 这里只统计未被任何活动渲染器引用的运行时材质；它们才是释放后遗留的孤儿材质。
                 Assert.That(
-                    CountRuntimeContextMaterials(),
+                    CountOrphanRuntimeContextMaterials(),
                     Is.EqualTo(0),
-                    $"场景请求 {sceneId} 完成后仍残留上一轮运行时半透明材质。");
+                    $"场景请求 {sceneId} 完成后仍残留未被活动渲染器引用的运行时半透明材质。");
 
                 // 每轮都在当前已配置发电场景创建一组真实运行时材质，下一轮切换必须在卸载前主动清理。
                 // 这样九次请求验证的是实际资源生命周期，而不是仅统计协调器或场景实例数量。
@@ -1044,7 +1094,7 @@ namespace WebDLPro.Unity.Tests
         }
 
         /// <summary>
-        /// 仅在测试进程中统计燃气控制器按固定后缀创建的临时材质，用于证明连续切换后资源不会累积。
+        /// 仅在测试进程中统计控制器按固定后缀创建的临时材质。
         /// 生产代码不调用此全局查询，避免把对象扫描放入运行时切换或每帧路径。
         /// </summary>
         private static int CountRuntimeContextMaterials()
@@ -1061,6 +1111,49 @@ namespace WebDLPro.Unity.Tests
             }
 
             return count;
+        }
+
+        /// <summary>
+        /// 统计没有被当前活动渲染器材质槽引用的运行时上下文材质。
+        /// 总览模型可以合法保留上下文材质，所以生命周期断言必须排除当前场景仍在使用的材质，
+        /// 只把真正脱离渲染器引用的对象视为跨场景释放泄漏。
+        /// </summary>
+        private static int CountOrphanRuntimeContextMaterials()
+        {
+            Material[] materials = Resources.FindObjectsOfTypeAll<Material>();
+            HashSet<Material> referencedMaterials = new HashSet<Material>();
+            Renderer[] renderers = Object.FindObjectsByType<Renderer>(FindObjectsSortMode.None);
+            for (int rendererIndex = 0; rendererIndex < renderers.Length; rendererIndex++)
+            {
+                Renderer renderer = renderers[rendererIndex];
+                if (renderer == null)
+                {
+                    continue;
+                }
+
+                Material[] sharedMaterials = renderer.sharedMaterials;
+                for (int materialIndex = 0; materialIndex < sharedMaterials.Length; materialIndex++)
+                {
+                    Material material = sharedMaterials[materialIndex];
+                    if (material != null && material.name.EndsWith(" (Runtime Context)", System.StringComparison.Ordinal))
+                    {
+                        referencedMaterials.Add(material);
+                    }
+                }
+            }
+
+            int orphanCount = 0;
+            for (int materialIndex = 0; materialIndex < materials.Length; materialIndex++)
+            {
+                Material material = materials[materialIndex];
+                if (material != null && material.name.EndsWith(" (Runtime Context)", System.StringComparison.Ordinal) &&
+                    !referencedMaterials.Contains(material))
+                {
+                    orphanCount++;
+                }
+            }
+
+            return orphanCount;
         }
 
         /// <summary>

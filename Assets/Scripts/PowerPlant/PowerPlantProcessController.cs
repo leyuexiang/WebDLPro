@@ -152,6 +152,8 @@ public sealed class PowerPlantProcessController : MonoBehaviour
     [SerializeField] private Transform _sceneRoot;
     [Tooltip("相机由 PowerPlantFreeCameraController 直接控制；流程和总览保持当前视角，节点选中是否聚焦由下方统一开关控制。")]
     [SerializeField] private Camera _interactionCamera;
+    [Tooltip("可选的场景内优先点击消费者。厂房内部入口命中后会消费点击，普通节点聚焦和对象选择回传不会继续执行。")]
+    [SerializeField] private MonoBehaviour _priorityPointerConsumerBehaviour;
     [Tooltip("统一控制拓扑节点选中和 Unity 鼠标选中的镜头行为。关闭时仍保留青色描边与二维拓扑联动，但不移动相机。")]
     [SerializeField] private bool _focusOnSelection = true;
     [SerializeField] private Material _contextFadeMaterial;
@@ -320,6 +322,8 @@ public sealed class PowerPlantProcessController : MonoBehaviour
     private HighlightEffect _offlineStateHighlightEffect;
     // 交互相机上的自由相机控制器只在场景绑定缓存阶段查询一次；拓扑选择高频发生时直接复用引用。
     private PowerPlantFreeCameraController _freeCameraController;
+    // 接口只在场景绑定缓存阶段解析一次；鼠标点击热路径不再执行 GetComponent 或类型扫描。
+    private IBusinessScenePointerConsumer _priorityPointerConsumer;
     private BusinessSceneVisualStateRegistry _visualStateRegistry;
 
     private bool _runtimeResourcesReleased;
@@ -347,6 +351,21 @@ public sealed class PowerPlantProcessController : MonoBehaviour
             _freeCameraController.CancelFocus();
         }
     }
+
+#if UNITY_EDITOR
+    /// <summary>仅供编辑器生成器和编辑模式测试绑定场景内优先点击消费者。</summary>
+    public void ConfigurePriorityPointerConsumerForEditor(MonoBehaviour pointerConsumerBehaviour)
+    {
+        if (Application.isPlaying)
+        {
+            throw new InvalidOperationException("运行时不能修改优先点击消费者配置。");
+        }
+
+        _priorityPointerConsumerBehaviour = pointerConsumerBehaviour;
+        _priorityPointerConsumer = pointerConsumerBehaviour as IBusinessScenePointerConsumer;
+    }
+#endif
+
     /// <summary>返回场景配置时写入的流程标识，适配器据此阻止跨场景复用错误的控制器。</summary>
     public string ConfiguredProcessId => _configuredProcessId;
 
@@ -525,6 +544,7 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         _groundObjectSet.Clear();
         _persistentFlowObjectSet.Clear();
         _overviewOpaqueObjectSet.Clear();
+        _priorityPointerConsumer = null;
     }
 
     /// <summary>
@@ -1336,6 +1356,7 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         _freeCameraController = _interactionCamera != null
             ? _interactionCamera.GetComponent<PowerPlantFreeCameraController>()
             : null;
+        _priorityPointerConsumer = _priorityPointerConsumerBehaviour as IBusinessScenePointerConsumer;
 
         for (int childIndex = 0; childIndex < _sceneRoot.childCount; childIndex++)
         {
@@ -2019,6 +2040,11 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         }
 
         Ray ray = _interactionCamera.ScreenPointToRay(mouse.position.ReadValue());
+        if (TryConsumePriorityPointer(ray))
+        {
+            // 厂房下钻等场景内入口已消费同一次点击；禁止继续触发普通节点 Focus、描边和 objectSelected 回传。
+            return;
+        }
         if (TryResolvePointerSelection(ray, out string sceneNodeId, out GameObject rootObject))
         {
             // Unity 鼠标选中与拓扑选中共用同一套交互描边、镜头和全场半透明上下文。
@@ -2060,6 +2086,17 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         }
 
         UnityIframeBridgeManager.Instance?.ReportSelectionCleared();
+    }
+
+    /// <summary>
+    /// 让显式场景内入口优先消费当前射线。未配置消费者时保持原有普通节点选择路径，
+    /// 消费者返回 true 后调用方必须立即结束本次点击处理。
+    /// </summary>
+    public bool TryConsumePriorityPointer(Ray ray)
+    {
+        return !_runtimeResourcesReleased &&
+               _priorityPointerConsumer != null &&
+               _priorityPointerConsumer.TryConsumePointer(ray);
     }
 
     /// <summary>

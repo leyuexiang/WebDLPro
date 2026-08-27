@@ -89,6 +89,38 @@ describe('单画布多拓扑运行时', () => {
     expect(canvas.setTopology).not.toHaveBeenCalled()
   })
 
+  it('进入平台总览时停用拓扑并清空选择，但保留唯一画布和视口缓存', () => {
+    const canvas = createCanvas()
+    const runtime = new TopologyRuntime(createRegistry(), canvas)
+    const sceneId = toSceneId('gas-power')
+    const topologyId = toTopologyId('gas-power.overview')
+    const selectedNodeId = toNodeId('node.gas-turbine')
+    const transitionId = toTransitionId('transition-overview-deactivate')
+    const prepared = runtime.prepare(sceneId, topologyId, transitionId)
+
+    expect(runtime.activate(prepared!, transitionId)).toBe(true)
+    runtime.setSelection([selectedNodeId], [])
+    canvas.getViewState.mockReturnValue({ zoom: 1.4, offsetX: 18, offsetY: -9 })
+    const topologyCallsBeforeDeactivate = canvas.setTopology.mock.calls.length
+
+    expect(runtime.deactivate()).toBe(true)
+    expect(runtime.deactivate()).toBe(true)
+    expect(runtime.getActiveTopology()).toBeUndefined()
+    expect(canvas.setTopology).toHaveBeenCalledTimes(topologyCallsBeforeDeactivate)
+    expect(canvas.dispose).not.toHaveBeenCalled()
+    expect(canvas.setSelection).toHaveBeenLastCalledWith([], [])
+
+    const restored = runtime.prepare(sceneId, topologyId, toTransitionId('transition-overview-return'))
+    expect(runtime.activate(restored!, toTransitionId('transition-overview-return'))).toBe(true)
+    expect(canvas.restoreViewState).toHaveBeenLastCalledWith({
+      zoom: 1.4,
+      offsetX: 18,
+      offsetY: -9,
+      selectedNodeIds: [],
+      selectedRouteIds: [],
+    })
+  })
+
   it('选择只更新当前画布，释放后清理并禁止后续调用', () => {
     const canvas = createCanvas()
     const runtime = new TopologyRuntime(createRegistry(), canvas)

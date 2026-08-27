@@ -1,4 +1,4 @@
-import { SCENE_IDS } from '@/config/scene-topology/identifiers'
+import { OVERVIEW_SCENE_ID, SCENE_IDS } from '@/config/scene-topology/identifiers'
 import type { HostBridge } from '@/host-bridge/host-bridge'
 import {
   HOST_COMMAND_TYPES,
@@ -68,6 +68,7 @@ export class HostHandshake {
     this.bridge.send(this.createEvent('system.ready', {
       manifestVersion: this.metadata.manifestVersion,
       sceneIds: SCENE_IDS,
+      overviewSceneId: OVERVIEW_SCENE_ID,
       commandCapabilities: this.metadata.commandCapabilities,
       eventCapabilities: this.metadata.eventCapabilities,
     }))

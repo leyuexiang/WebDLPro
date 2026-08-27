@@ -18,7 +18,9 @@ namespace WebDLPro.Unity.Tests
     public sealed class BusinessSceneBootstrapAssetTests
     {
         private const string CatalogAssetPath = "Assets/Configuration/BusinessSceneCatalog.asset";
+        private const string OverviewCatalogAssetPath = "Assets/Configuration/OverviewSceneCatalog.asset";
         private const string BootstrapScenePath = "Assets/Scenes/Bootstrap.unity";
+        private const string OverviewScenePath = "Assets/Scenes/Overview/Overview.unity";
         private const string ExistingGasSceneGuid = "99c9720ab356a0642a771bea13969a05";
 
         private static readonly string[] SceneIds =
@@ -75,28 +77,88 @@ namespace WebDLPro.Unity.Tests
         }
 
         /// <summary>
-        /// 构建第一项必须是轻量 Bootstrap，后续九项必须与目录次序一致。
-        /// 断言只针对正式十个入口，不要求或解释用户保留的旧场景资产。
+        /// 构建第一项必须是轻量 Bootstrap，第二项是独立 Overview，后续九项必须与业务目录次序一致。
+        /// Overview 不计入固定九项业务目录，但必须进入编辑器构建场景清单。
         /// </summary>
         [Test]
-        public void 构建顺序以启动场景和九个业务场景组成()
+        public void 构建顺序区分启动总览和九个业务场景()
         {
             EditorBuildSettingsScene[] buildScenes = EditorBuildSettings.scenes;
 
-            Assert.That(buildScenes, Has.Length.EqualTo(ScenePaths.Length + 1));
+            Assert.That(buildScenes, Has.Length.EqualTo(ScenePaths.Length + 2));
             Assert.That(buildScenes[0].enabled, Is.True);
             Assert.That(buildScenes[0].path, Is.EqualTo(BootstrapScenePath));
+            Assert.That(buildScenes[1].enabled, Is.True);
+            Assert.That(buildScenes[1].path, Is.EqualTo(OverviewScenePath));
             for (int index = 0; index < ScenePaths.Length; index++)
             {
-                Assert.That(buildScenes[index + 1].enabled, Is.True);
-                Assert.That(buildScenes[index + 1].path, Is.EqualTo(ScenePaths[index]));
+                Assert.That(buildScenes[index + 2].enabled, Is.True);
+                Assert.That(buildScenes[index + 2].path, Is.EqualTo(ScenePaths[index]));
             }
         }
 
-        /// <summary>
-        /// 启动场景只挂载常驻基础服务，并将协调器的目录引用固定到正式资产。
-        /// 使用 SerializedObject 读取私有序列化字段可验证实际场景接线，而非只验证脚本类型存在。
-        /// </summary>
+        private static string ToPascalCase(string sceneId)
+        {
+            string[] words = sceneId.Split('-');
+            System.Text.StringBuilder builder = new System.Text.StringBuilder(sceneId.Length);
+            for (int wordIndex = 0; wordIndex < words.Length; wordIndex++)
+            {
+                if (string.IsNullOrEmpty(words[wordIndex]))
+                {
+                    continue;
+                }
+
+                builder.Append(char.ToUpperInvariant(words[wordIndex][0]));
+                if (words[wordIndex].Length > 1)
+                {
+                    builder.Append(words[wordIndex], 1, words[wordIndex].Length - 1);
+                }
+            }
+
+            return builder.ToString();
+        }
+
+        /// <summary>旧测试名保留为兼容入口，实际断言由新的分层构建顺序测试覆盖。</summary>
+        [Test]
+        public void 构建顺序以启动场景和九个业务场景组成()
+        {
+            构建顺序区分启动总览和九个业务场景();
+        }
+
+        [Test]
+        public void 独立总览目录和九个内置建筑占位已接线()
+        {
+            OverviewSceneCatalog catalog = AssetDatabase.LoadAssetAtPath<OverviewSceneCatalog>(OverviewCatalogAssetPath);
+            Assert.That(catalog, Is.Not.Null);
+            Assert.That(catalog.ValidateForRuntime(), Is.Empty);
+            Assert.That(catalog.Entry.SceneId, Is.EqualTo(OverviewSceneCatalog.OverviewSceneId));
+            Assert.That(catalog.Entry.ScenePath, Is.EqualTo(OverviewScenePath));
+
+            Scene overviewScene = EditorSceneManager.OpenScene(OverviewScenePath, OpenSceneMode.Additive);
+            try
+            {
+                GameObject[] roots = overviewScene.GetRootGameObjects();
+                OverviewBuildingPlaceholder[] buildings = roots[0].GetComponentsInChildren<OverviewBuildingPlaceholder>(true);
+                Assert.That(buildings, Has.Length.EqualTo(9));
+                for (int index = 0; index < SceneIds.Length; index++)
+                {
+                    OverviewBuildingPlaceholder building = Array.Find(
+                        buildings,
+                        candidate => candidate != null && candidate.TargetSceneId == SceneIds[index]);
+                    Assert.That(building, Is.Not.Null, $"总览缺少目标场景映射：{SceneIds[index]}");
+                    Assert.That(building.OverviewBuildingId, Is.EqualTo($"overview-building.{SceneIds[index]}"));
+                    Assert.That(building.name, Is.EqualTo($"OverviewBuilding_{ToPascalCase(SceneIds[index])}"));
+                }
+                Assert.That(roots[0].GetComponent<OverviewSceneController>(), Is.Not.Null);
+                Assert.That(roots[0].GetComponentsInChildren<Renderer>(true), Has.Length.EqualTo(10));
+            }
+            finally
+            {
+                EditorSceneManager.CloseScene(overviewScene, true);
+            }
+        }
+
+
         [Test]
         public void 启动场景持有常驻服务和正式目录引用()
         {
@@ -112,8 +174,11 @@ namespace WebDLPro.Unity.Tests
 
                 MultiSceneCoordinator coordinator = runtimeRoot.GetComponent<MultiSceneCoordinator>();
                 Assert.That(coordinator, Is.Not.Null);
-                SerializedProperty catalogProperty = new SerializedObject(coordinator).FindProperty("_sceneCatalog");
+                SerializedObject coordinatorObject = new SerializedObject(coordinator);
+                SerializedProperty catalogProperty = coordinatorObject.FindProperty("_sceneCatalog");
+                SerializedProperty overviewCatalogProperty = coordinatorObject.FindProperty("_overviewSceneCatalog");
                 Assert.That(catalogProperty.objectReferenceValue, Is.EqualTo(AssetDatabase.LoadAssetAtPath<BusinessSceneCatalog>(CatalogAssetPath)));
+                Assert.That(overviewCatalogProperty.objectReferenceValue, Is.EqualTo(AssetDatabase.LoadAssetAtPath<OverviewSceneCatalog>(OverviewCatalogAssetPath)));
             }
             finally
             {

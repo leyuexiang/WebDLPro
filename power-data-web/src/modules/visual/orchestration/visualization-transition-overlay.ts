@@ -1,3 +1,4 @@
+import { isOverviewSceneId } from '@/config/scene-topology/identifiers'
 import type { VisualizationRuntimeStatus } from '@/modules/visual/orchestration/visualization.store'
 import type { VisualizationCoordinatorSnapshot } from '@/modules/visual/orchestration/visualization-coordinator'
 
@@ -29,7 +30,9 @@ export function getVisualizationTransitionOverlayState(
 ): VisualizationTransitionOverlayState {
   const hasActiveTarget = source.activeTransitionId !== null
     && source.targetSceneId !== null
-    && source.targetTopologyId !== null
+    && (isOverviewSceneId(source.targetSceneId)
+      ? source.targetTopologyId === null
+      : source.targetTopologyId !== null)
 
   if (!hasActiveTarget || !isTransitioningStatus(source.runtimeStatus)) {
     return { visible: false }

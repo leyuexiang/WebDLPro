@@ -1,4 +1,5 @@
-import { isSceneId, validateStableIdentifier } from '@/config/scene-topology/identifiers'
+import { isSceneId, isViewSceneId, validateStableIdentifier } from '@/config/scene-topology/identifiers'
+import type { ViewSceneId } from '@/config/scene-topology/identifiers'
 
 /** 网页图形通信的固定通道与协议版本；业务模块不能覆盖这些安全边界。 */
 export const WEBGL_PROTOCOL_CHANNEL = 'power3d-unity' as const
@@ -70,7 +71,7 @@ export interface WebglRequestAcknowledgementPayload {
  * 协议版本由信封的 version 表达；映射版本单独校验，避免同一协议下新旧场景目录混用。
  */
 export interface WebglSwitchScenePayload {
-  sceneId: string
+  sceneId: ViewSceneId
   transitionId: string
   sceneMappingVersion: string
   /** 为 true 时禁止 Unity 使用同场景快速完成路径，必须卸载并重建物理场景实例。 */
@@ -141,7 +142,7 @@ export interface WebglSetNodeVisibilityPayload {
  */
 export interface WebglSceneLoadProgressPayload {
   requestId: string
-  sceneId: string
+  sceneId: ViewSceneId
   transitionId: string
   stageCode: 'unloading-scene' | 'loading-scene' | 'initializing-scene' | 'restoring-scene'
   progress: number
@@ -153,7 +154,7 @@ export interface WebglSceneLoadProgressPayload {
  */
 export interface WebglSceneChangedPayload {
   requestId: string
-  sceneId: string
+  sceneId: ViewSceneId
   transitionId: string
   /** Unity 每次真实提交或恢复业务场景时生成的新实例标识；同场景拓扑切换保持不变。 */
   sceneActivationId: string
@@ -282,7 +283,7 @@ export function isWebglSwitchScenePayload(value: unknown): value is WebglSwitchS
 
   const candidate = value as Record<string, unknown>
   return (
-    isBoundedIdentifier(candidate.sceneId) &&
+    isViewSceneId(candidate.sceneId) &&
     isBoundedIdentifier(candidate.transitionId) &&
     isBoundedIdentifier(candidate.sceneMappingVersion) &&
     typeof candidate.forceReload === 'boolean'
@@ -366,7 +367,7 @@ export function isWebglSceneLoadProgressPayload(value: unknown): value is WebglS
   const candidate = value as Record<string, unknown>
   return (
     isBoundedIdentifier(candidate.requestId) &&
-    isBoundedIdentifier(candidate.sceneId) &&
+    isViewSceneId(candidate.sceneId) &&
     isBoundedIdentifier(candidate.transitionId) &&
     isSceneLoadStageCode(candidate.stageCode) &&
     typeof candidate.progress === 'number' &&
@@ -383,7 +384,7 @@ export function isWebglSceneChangedPayload(value: unknown): value is WebglSceneC
   const candidate = value as Record<string, unknown>
   return (
     isBoundedIdentifier(candidate.requestId) &&
-    isBoundedIdentifier(candidate.sceneId) &&
+    isViewSceneId(candidate.sceneId) &&
     isBoundedIdentifier(candidate.transitionId) &&
     isBoundedIdentifier(candidate.sceneActivationId) &&
     validateStableIdentifier(candidate.sceneActivationId).length === 0 &&

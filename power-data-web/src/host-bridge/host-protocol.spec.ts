@@ -5,7 +5,7 @@ import {
   validateHostCommandMessage,
   validateHostEventMessage,
 } from '@/host-bridge/host-protocol'
-import { SCENE_IDS } from '@/config/scene-topology/identifiers'
+import { OVERVIEW_SCENE_ID, SCENE_IDS } from '@/config/scene-topology/identifiers'
 
 /** 每条测试从同一份完整信封派生，确保失败原因仅来自当前用例修改的字段。 */
 function createCommandEnvelope(type: string, payload: unknown): Record<string, unknown> {
@@ -211,10 +211,16 @@ describe('外层内嵌框架协议', () => {
       status: 'ready',
     } as const
     const events: readonly [string, unknown, string?][] = [
-      ['system.ready', { manifestVersion: '2026.08.04.1', sceneIds: SCENE_IDS, commandCapabilities: ['system.init'], eventCapabilities: ['system.ack'] }],
+      ['system.ready', { manifestVersion: '2026.08.04.1', sceneIds: SCENE_IDS, overviewSceneId: OVERVIEW_SCENE_ID, commandCapabilities: ['system.init'], eventCapabilities: ['system.ack'] }],
       ['system.ack', { success: true, context: stableContext }, 'parent-init-01'],
       ['command.result', { success: false, status: 'failed', error: undeclaredCapabilityError }, 'parent-command-01'],
-      ['view.changed', { ...stableContext, transitionId: 'transition-view-01' }],
+      ['view.changed', {
+        sceneId: stableContext.sceneId,
+        topologyId: stableContext.topologyId,
+        actionId: stableContext.actionId,
+        contextRevision: stableContext.contextRevision,
+        transitionId: 'transition-view-01',
+      }],
       ['topology.node.dblclick', { sceneId: 'gas-power', topologyId: 'gas-power.overview', nodeId: 'node.gas-turbine.01' }],
       ['scene.object.selected', { sceneId: 'gas-power', sceneNodeId: 'scene.gas-turbine.01', nodeId: 'node.gas-turbine.01' }],
       ['state.snapshot', { manifestVersion: '2026.08.04.1', context: stableContext, unityStatus: 'ready', topologyStatus: 'ready' }, 'parent-state-01'],
@@ -224,6 +230,31 @@ describe('外层内嵌框架协议', () => {
     events.forEach(([type, payload, replyTo]) => {
       expect(validateHostEventMessage(createEventEnvelope(type, payload, replyTo)).status, type).toBe('valid')
     })
+  })
+
+  it('允许平台总览省略拓扑，并拒绝总览伪造拓扑或业务场景缺失拓扑', () => {
+    expect(validateHostCommandMessage(createCommandEnvelope('system.init', { sceneId: 'overview' })).status).toBe('valid')
+    expect(validateHostCommandMessage(createCommandEnvelope('view.open', { sceneId: 'overview', expectedContextRevision: 4 })).status).toBe('valid')
+    expect(validateHostCommandMessage(createCommandEnvelope('view.open', {
+      sceneId: 'overview',
+      topologyId: 'topology.gas-power.overview',
+    })).status).toBe('invalid')
+    expect(validateHostCommandMessage(createCommandEnvelope('view.open', { sceneId: 'gas-power' })).status).toBe('invalid')
+
+    const overviewContext = { sceneId: 'overview', actionId: null, contextRevision: 5, status: 'ready' }
+    const changed = createEventEnvelope('view.changed', {
+      sceneId: 'overview',
+      actionId: null,
+      contextRevision: 5,
+    })
+    expect(validateHostEventMessage(changed).status).toBe('valid')
+    expect(Object.hasOwn(changed.payload as object, 'topologyId')).toBe(false)
+    expect(validateHostEventMessage(createEventEnvelope('state.snapshot', {
+      manifestVersion: '2026.08.04.1',
+      context: overviewContext,
+      unityStatus: 'ready',
+      topologyStatus: 'idle',
+    }, 'parent-overview-state'))).toMatchObject({ status: 'valid' })
   })
 
   it('拒绝缺失或伪造的通道、版本、实例、会话、消息标识和时间戳', () => {

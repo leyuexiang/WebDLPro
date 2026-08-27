@@ -3,7 +3,8 @@ import { toActionId, toNodeId, toSceneId, toSceneNodeId, toSessionId, toTopology
 import { HostBridge } from '@/host-bridge/host-bridge'
 import { HOST_COMMAND_TIMEOUT_MS } from '@/host-bridge/host-command-lifecycle'
 import { HostRuntimeComposition, type HostDeviceStatesUpdatePort, type HostViewOpenPort, type HostWorkflowTriggerPort } from '@/host-bridge/host-runtime-composition'
-import type { HostCommandMessage, HostEventMessage } from '@/host-bridge/host-protocol'
+import { isBusinessViewOpenPayload, type HostCommandMessage, type HostEventMessage } from '@/host-bridge/host-protocol'
+import { OVERVIEW_SCENE_ID } from '@/config/scene-topology/identifiers'
 import type { VisualizationCoordinatorFacade } from '@/modules/visual/orchestration/visualization-coordinator-facade'
 import type { VisualizationCoordinatorSnapshot } from '@/modules/visual/orchestration/visualization-coordinator'
 
@@ -49,15 +50,21 @@ function createComposition(
     submit: async (command) => {
       openCalls.push(command.correlationId)
       snapshot = createSnapshot({
-        stableContext: {
-          sceneId: command.payload.sceneId,
-          topologyId: command.payload.topologyId,
-          actionId: command.payload.actionId ?? null,
-          contextRevision: 1,
-        },
+        stableContext: isBusinessViewOpenPayload(command.payload)
+          ? {
+              sceneId: command.payload.sceneId,
+              topologyId: command.payload.topologyId,
+              actionId: command.payload.actionId ?? null,
+              contextRevision: 1,
+            }
+          : {
+              sceneId: command.payload.sceneId,
+              actionId: null,
+              contextRevision: 1,
+            },
         runtimeStatus: 'ready',
         unityStatus: 'ready',
-        topologyStatus: 'ready',
+        topologyStatus: isBusinessViewOpenPayload(command.payload) ? 'ready' : 'idle',
       })
       return { success: true, status: 'completed', contextRevision: 1 }
     },
@@ -124,6 +131,35 @@ describe('外层运行时组合根', () => {
    * 初始化失败不走普通命令结果路径：父页面必须先收到失败确认，再收到同一 replyTo 的脱敏系统错误。
    * 此处选用清单版本不一致，是无需伪造场景或 Unity 失败即可稳定触发的握手失败分支。
    */
+  it('总览初始化不携带拓扑、不重投影业务状态，并发送无拓扑稳定视图', async () => {
+    const resynchronizeLatestSnapshot = vi.fn()
+    const deviceStatesUpdate: HostDeviceStatesUpdatePort = {
+      submit: vi.fn().mockResolvedValue({ success: true, status: 'completed' }),
+      resynchronizeLatestSnapshot,
+      dispose: vi.fn(),
+    }
+    const { composition, sent, openCalls } = createComposition(async () => ({ success: true }), undefined, deviceStatesUpdate)
+    composition.start()
+
+    await composition.handleCommand(createCommand('system.init', {
+      sceneId: OVERVIEW_SCENE_ID,
+    }, 'parent-init-overview'))
+
+    expect(openCalls).toEqual(['parent-init-overview'])
+    expect(resynchronizeLatestSnapshot).not.toHaveBeenCalled()
+    expect(sent).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'view.changed',
+        replyTo: 'parent-init-overview',
+        payload: { sceneId: OVERVIEW_SCENE_ID, actionId: null, contextRevision: 1 },
+      }),
+    ]))
+    const changed = sent.find((event) => event.type === 'view.changed')
+    if (changed?.type !== 'view.changed') throw new Error('总览初始化必须产生 view.changed。')
+    expect(Object.hasOwn(changed.payload, 'topologyId')).toBe(false)
+    composition.dispose()
+  })
+
   it('初始化失败同时发送关联失败确认和系统错误，且不提交视图', async () => {
     const { composition, sent, openCalls } = createComposition()
     composition.start()

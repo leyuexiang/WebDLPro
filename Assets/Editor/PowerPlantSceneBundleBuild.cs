@@ -10,9 +10,8 @@ using UnityEngine;
 using WebDLPro.Unity.SceneRuntime;
 
 /// <summary>
-/// 构建九个业务场景的 WebGL 资产包，并生成可由运行时校验的场景目录与内容摘要。
-/// 该脚本不根据模型或文件名称推测业务归属，只读取已校验的 BusinessSceneCatalog；
-/// 业务场景各自成为独立包，两个及以上场景共同依赖的可打包资产只进入一个共享包。
+/// 构建独立 Overview 与九个业务场景的 WebGL 资产包，并生成可由运行时校验的场景目录与内容摘要。
+/// Overview 使用独立场景类型字段，不进入九项业务目录闭集。
 /// </summary>
 public static class PowerPlantSceneBundleBuild
 {
@@ -20,6 +19,7 @@ public static class PowerPlantSceneBundleBuild
     public const string CatalogFileName = "scene-catalog.json";
     public const string ContentSummaryFileName = "scene-content-summary.json";
     private const string CatalogAssetPath = "Assets/Configuration/BusinessSceneCatalog.asset";
+    private const string OverviewCatalogAssetPath = "Assets/Configuration/OverviewSceneCatalog.asset";
     private const string SharedBundleName = "scene-shared";
 
     /// <summary>
@@ -49,7 +49,13 @@ public static class PowerPlantSceneBundleBuild
             throw new BuildFailedException($"正式九场景目录校验失败：{issues[0].Code}。");
         }
 
-        List<SceneBuildInput> inputs = CreateBuildInputs(catalog);
+        OverviewSceneCatalog overviewCatalog = AssetDatabase.LoadAssetAtPath<OverviewSceneCatalog>(OverviewCatalogAssetPath);
+        if (overviewCatalog == null || overviewCatalog.ValidateForRuntime().Count > 0)
+        {
+            throw new BuildFailedException("独立总览场景目录校验失败。");
+        }
+
+        List<SceneBuildInput> inputs = CreateBuildInputs(catalog, overviewCatalog);
         string bundleOutputDirectory = Path.Combine(unityOutputPath, BundleDirectoryName);
         Directory.CreateDirectory(bundleOutputDirectory);
 
@@ -91,9 +97,9 @@ public static class PowerPlantSceneBundleBuild
     /// 根据正式目录建立构建输入，逐项确认每个路径确实是 SceneAsset。
     /// 这一步阻止“目录存在但文件被移动或改成其他资产”的发布，不会扫描 Assets/Art 来猜测所属场景。
     /// </summary>
-    private static List<SceneBuildInput> CreateBuildInputs(BusinessSceneCatalog catalog)
+    private static List<SceneBuildInput> CreateBuildInputs(BusinessSceneCatalog catalog, OverviewSceneCatalog overviewCatalog)
     {
-        List<SceneBuildInput> inputs = new List<SceneBuildInput>(catalog.Entries.Count);
+        List<SceneBuildInput> inputs = new List<SceneBuildInput>(catalog.Entries.Count + 1);
         for (int index = 0; index < catalog.Entries.Count; index++)
         {
             BusinessSceneCatalogEntry entry = catalog.Entries[index];
@@ -101,12 +107,27 @@ public static class PowerPlantSceneBundleBuild
             {
                 throw new BuildFailedException("正式目录中的业务场景文件不存在或类型错误。");
             }
-            inputs.Add(new SceneBuildInput(entry.SceneId, entry.UnitySceneKey, entry.ScenePath, CreateSceneBundleName(entry.SceneId)));
+            inputs.Add(new SceneBuildInput(entry.SceneId, entry.UnitySceneKey, entry.ScenePath, CreateSceneBundleName(entry.SceneId), "business"));
         }
 
-        if (inputs.Count != BusinessSceneCatalog.GetRequiredSceneIds().Count)
+        if (!overviewCatalog.TryCreateRuntimeEntry(out BusinessSceneCatalogEntry overviewEntry, out _))
         {
-            throw new BuildFailedException("场景资源构建必须且只能接收九个业务场景。");
+            throw new BuildFailedException("独立总览场景目录未能转换为资源包构建条目。");
+        }
+        if (AssetDatabase.LoadAssetAtPath<SceneAsset>(overviewEntry.ScenePath) == null)
+        {
+            throw new BuildFailedException("独立总览场景文件不存在或类型错误。");
+        }
+        inputs.Add(new SceneBuildInput(
+            overviewEntry.SceneId,
+            overviewEntry.UnitySceneKey,
+            overviewEntry.ScenePath,
+            CreateSceneBundleName(overviewEntry.SceneId),
+            "overview"));
+
+        if (inputs.Count != BusinessSceneCatalog.GetRequiredSceneIds().Count + 1)
+        {
+            throw new BuildFailedException("场景资源构建必须且只能接收独立总览和九个业务场景。");
         }
         return inputs;
     }
@@ -146,8 +167,8 @@ public static class PowerPlantSceneBundleBuild
     }
 
     /// <summary>
-    /// 显式声明共享包和九个场景包。非共享依赖由 Unity 随所属场景包收集；
-    /// 共享依赖被单独声明后，Unity 清单会把它们列为各场景包的依赖，避免同一资源复制九份。
+    /// 显式声明共享包、独立总览包和九个业务场景包。非共享依赖由 Unity 随所属场景包收集；
+    /// 共享依赖被单独声明后，Unity 清单会把它们列为各场景包的依赖，避免同一资源复制多份。
     /// </summary>
     private static List<AssetBundleBuild> CreateBundleBuilds(IReadOnlyList<SceneBuildInput> inputs, List<string> sharedDependencyPaths)
     {
@@ -219,6 +240,7 @@ public static class PowerPlantSceneBundleBuild
             scenes.Add(new SceneBundleSceneDocument
             {
                 sceneId = input.SceneId,
+                sceneType = input.SceneType,
                 unitySceneKey = input.UnitySceneKey,
                 scenePath = input.ScenePath,
                 bundleName = input.BundleName
@@ -347,9 +369,9 @@ public static class PowerPlantSceneBundleBuild
     /// </summary>
     private static void ValidateBuildOutput(SceneBundleCatalogDocument catalog, string bundleOutputDirectory)
     {
-        if (catalog.scenes == null || catalog.scenes.Length != BusinessSceneCatalog.GetRequiredSceneIds().Count)
+        if (catalog.scenes == null || catalog.scenes.Length != BusinessSceneCatalog.GetRequiredSceneIds().Count + 1)
         {
-            throw new BuildFailedException("场景资源目录未包含完整九场景。");
+            throw new BuildFailedException("场景资源目录未包含独立 Overview 和完整九场景。");
         }
         HashSet<string> bundleNames = new HashSet<string>(catalog.bundles.Select(bundle => bundle.bundleName), StringComparer.Ordinal);
         for (int index = 0; index < catalog.scenes.Length; index++)
@@ -422,14 +444,17 @@ public static class PowerPlantSceneBundleBuild
         public string UnitySceneKey { get; }
         public string ScenePath { get; }
         public string BundleName { get; }
+        // sceneType 只用于资源目录分层校验，不参与业务 sceneId 映射；Overview 与 business 包共享同一加载和释放边界。
+        public string SceneType { get; }
         public string[] DependencyPaths { get; private set; } = Array.Empty<string>();
 
-        public SceneBuildInput(string sceneId, string unitySceneKey, string scenePath, string bundleName)
+        public SceneBuildInput(string sceneId, string unitySceneKey, string scenePath, string bundleName, string sceneType)
         {
             SceneId = sceneId;
             UnitySceneKey = unitySceneKey;
             ScenePath = scenePath;
             BundleName = bundleName;
+            SceneType = sceneType;
         }
 
         public void SetDependencyPaths(string[] dependencyPaths)
@@ -462,6 +487,7 @@ public static class PowerPlantSceneBundleBuild
     private sealed class SceneBundleSceneDocument
     {
         public string sceneId;
+        public string sceneType;
         public string unitySceneKey;
         public string scenePath;
         public string bundleName;

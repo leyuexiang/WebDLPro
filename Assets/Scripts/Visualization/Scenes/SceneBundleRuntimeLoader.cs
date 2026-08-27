@@ -481,20 +481,38 @@ namespace WebDLPro.Unity.SceneRuntime
                 }
             }
 
-            HashSet<string> sceneIds = new HashSet<string>(StringComparer.Ordinal);
+            HashSet<string> businessSceneIds = new HashSet<string>(StringComparer.Ordinal);
+            bool overviewSceneFound = false;
             HashSet<string> sceneBundleNames = new HashSet<string>(StringComparer.Ordinal);
             for (int index = 0; index < catalog.scenes.Length; index++)
             {
                 SceneBundleSceneDocument scene = catalog.scenes[index];
-                if (scene == null || !BusinessSceneCatalog.IsRequiredSceneId(scene.sceneId) || !sceneIds.Add(scene.sceneId) ||
-                    !result.ContainsKey(scene.bundleName ?? string.Empty) || !sceneBundleNames.Add(scene.bundleName))
+                if (scene == null || !sceneBundleNames.Add(scene.bundleName) ||
+                    !result.ContainsKey(scene.bundleName ?? string.Empty))
+                {
+                    return false;
+                }
+
+                if (string.Equals(scene.sceneType, "overview", StringComparison.Ordinal))
+                {
+                    if (overviewSceneFound || !OverviewSceneCatalog.IsOverviewSceneId(scene.sceneId))
+                    {
+                        return false;
+                    }
+                    overviewSceneFound = true;
+                    continue;
+                }
+
+                if (!string.Equals(scene.sceneType, "business", StringComparison.Ordinal) ||
+                    !BusinessSceneCatalog.IsRequiredSceneId(scene.sceneId) ||
+                    !businessSceneIds.Add(scene.sceneId))
                 {
                     return false;
                 }
             }
 
             bundleByName = result;
-            return sceneIds.Count == BusinessSceneCatalog.GetRequiredSceneIds().Count;
+            return overviewSceneFound && businessSceneIds.Count == BusinessSceneCatalog.GetRequiredSceneIds().Count;
         }
 
         private static bool ContainsScenePath(string[] scenePaths, string expectedScenePath)
@@ -598,6 +616,7 @@ namespace WebDLPro.Unity.SceneRuntime
         private sealed class SceneBundleSceneDocument
         {
             public string sceneId;
+            public string sceneType;
             public string bundleName;
         }
     }

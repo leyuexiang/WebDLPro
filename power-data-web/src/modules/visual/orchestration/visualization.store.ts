@@ -1,6 +1,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import type { ActionId, NodeId, RouteId, SceneActivationId, SceneId, SceneNodeId, TopologyId, TransitionId } from '@/config/scene-topology/identifiers'
+import { isOverviewSceneId } from '@/config/scene-topology/identifiers'
+import type { ActionId, NodeId, OverviewSceneId, RouteId, SceneActivationId, SceneId, SceneNodeId, TopologyId, TransitionId, ViewSceneId } from '@/config/scene-topology/identifiers'
 
 /** 选择来源用于阻断二维单击、Unity 反向选择和外层事件之间的聚焦回环。 */
 export type VisualizationSelectionSource = 'topology' | 'unity' | 'external' | 'system'
@@ -23,12 +24,21 @@ export interface VisualizationSceneLoadProgress {
   progress: number
 }
 
-/** 可序列化的稳定上下文，是外层状态快照和 view.changed（视图变更）事件的唯一来源。 */
-export interface VisualizationStableContext {
-  sceneId: SceneId
-  topologyId: TopologyId
+/** 可序列化的稳定上下文；平台总览不保存或伪造 topologyId。 */
+type VisualizationStableContextBase = {
   actionId: ActionId | null
   contextRevision: number
+}
+
+export type BusinessVisualizationStableContext = VisualizationStableContextBase & { sceneId: SceneId; topologyId: TopologyId }
+export type OverviewVisualizationStableContext = VisualizationStableContextBase & { sceneId: OverviewSceneId; topologyId?: never }
+export type VisualizationStableContext = BusinessVisualizationStableContext | OverviewVisualizationStableContext
+
+/** 在稳定上下文中收窄业务分支，只有该分支可进入拓扑清单与业务状态投影。 */
+export function isBusinessVisualizationStableContext(
+  value: VisualizationStableContext,
+): value is BusinessVisualizationStableContext {
+  return !isOverviewSceneId(value.sceneId)
 }
 
 /** 有限诊断不保存异常对象或完整外部载荷，只保留稳定代码与关联标识。 */
@@ -50,8 +60,8 @@ export type VisualizationTransitionOutcome = 'completed' | 'failed' | 'supersede
  */
 export interface VisualizationTransitionSummary {
   transitionId: TransitionId
-  sceneId: SceneId
-  topologyId: TopologyId
+  sceneId: ViewSceneId
+  topologyId: TopologyId | null
   actionId: ActionId | null
   previousContextRevision: number
   outcome: VisualizationTransitionOutcome
@@ -72,7 +82,7 @@ export const useVisualizationStore = defineStore('visualization', () => {
    */
   const sceneActivationId = ref<SceneActivationId | null>(null)
   const activeTransitionId = ref<TransitionId | null>(null)
-  const targetSceneId = ref<SceneId | null>(null)
+  const targetSceneId = ref<ViewSceneId | null>(null)
   const targetTopologyId = ref<TopologyId | null>(null)
   const targetActionId = ref<ActionId | null>(null)
   const runtimeStatus = ref<VisualizationRuntimeStatus>('idle')
@@ -101,8 +111,8 @@ export const useVisualizationStore = defineStore('visualization', () => {
    */
   function beginTransition(
     transitionId: TransitionId,
-    sceneId: SceneId,
-    topologyId: TopologyId,
+    sceneId: ViewSceneId,
+    topologyId: TopologyId | null,
     actionId: ActionId | null,
     forceSceneSwitch = false,
   ): void {
@@ -143,19 +153,21 @@ export const useVisualizationStore = defineStore('visualization', () => {
    */
   function commitStableContext(
     transitionId: TransitionId,
-    sceneId: SceneId,
-    topologyId: TopologyId,
+    sceneId: ViewSceneId,
+    topologyId: TopologyId | null,
     actionId: ActionId | null,
     nextSceneActivationId: SceneActivationId | null = sceneActivationId.value,
   ): boolean {
     if (activeTransitionId.value !== transitionId) return false
+    if (!isOverviewSceneId(sceneId) && topologyId === null) return false
 
     appendActiveTransitionSummary('completed')
-    stableContext.value = {
-      sceneId,
-      topologyId,
-      actionId,
-      contextRevision: (stableContext.value?.contextRevision ?? 0) + 1,
+    const nextContextRevision = (stableContext.value?.contextRevision ?? 0) + 1
+    if (isOverviewSceneId(sceneId)) {
+      stableContext.value = { sceneId, actionId: null, contextRevision: nextContextRevision }
+    } else {
+      // 业务分支已在入口拒绝空拓扑，保证稳定业务上下文永远同时拥有场景和拓扑。
+      stableContext.value = { sceneId, topologyId: topologyId!, actionId, contextRevision: nextContextRevision }
     }
     sceneActivationId.value = nextSceneActivationId
     activeTransitionId.value = null
@@ -164,8 +176,15 @@ export const useVisualizationStore = defineStore('visualization', () => {
     targetActionId.value = null
     runtimeStatus.value = 'ready'
     unityStatus.value = 'ready'
-    topologyStatus.value = 'ready'
+    topologyStatus.value = isOverviewSceneId(sceneId) ? 'idle' : 'ready'
     sceneLoadProgress.value = null
+    if (isOverviewSceneId(sceneId)) {
+      // 平台总览提交时同步清空旧业务选择；Canvas 与视口仍由拓扑运行时保留挂载。
+      selectedNodeIds.value = []
+      selectedRouteIds.value = []
+      selectedSceneNodeId.value = null
+      selectionSource.value = 'system'
+    }
     activeTransitionStartedAt.value = null
     return true
   }
@@ -192,10 +211,15 @@ export const useVisualizationStore = defineStore('visualization', () => {
     runtimeStatus.value = stableContext.value ? 'ready' : 'error'
     sceneLoadProgress.value = null
     if (stableContext.value) {
-      // 事务失败后继续展示上一个稳定场景与拓扑，因此两个子系统状态必须同步恢复为 ready。
-      // 若保留 preparing/failed，会形成“稳定上下文可用但遮罩仍认为正在切换”的混合状态。
+      // 失败后恢复上一个稳定视图；平台总览保持拓扑空闲，业务场景恢复同一 Canvas 就绪态。
       unityStatus.value = 'ready'
-      topologyStatus.value = 'ready'
+      topologyStatus.value = isOverviewSceneId(stableContext.value.sceneId) ? 'idle' : 'ready'
+      if (isOverviewSceneId(stableContext.value.sceneId)) {
+        selectedNodeIds.value = []
+        selectedRouteIds.value = []
+        selectedSceneNodeId.value = null
+        selectionSource.value = 'system'
+      }
     } else {
       unityStatus.value = 'failed'
       topologyStatus.value = 'failed'
@@ -261,7 +285,6 @@ export const useVisualizationStore = defineStore('visualization', () => {
     if (
       !activeTransitionId.value
       || !targetSceneId.value
-      || !targetTopologyId.value
     ) return
 
     const startedAt = activeTransitionStartedAt.value ?? Date.now()

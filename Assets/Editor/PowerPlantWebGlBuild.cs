@@ -268,24 +268,26 @@ public static class PowerPlantWebGlBuild
     }
 
     /// <summary>
-    /// 构建设置保留九个场景的编辑器登记，供目录校验与资产包构建使用；
-    /// 但主播放器不直接使用该列表，只允许 Bootstrap 进入首屏数据。顺序错误会阻止发布。
+    /// 构建设置登记 Bootstrap、独立 Overview 和九个业务场景；业务目录校验仍只读取九个业务场景。
+    /// 主播放器仍只嵌入 Bootstrap，Overview 与业务场景统一通过场景资源包按需加载。
     /// </summary>
     private static void ValidateBuildSettings()
     {
         EditorBuildSettingsScene[] buildScenes = EditorBuildSettings.scenes;
-        if (buildScenes == null || buildScenes.Length != BusinessSceneCatalog.GetRequiredSceneIds().Count + 1 ||
-            !buildScenes[0].enabled || !string.Equals(buildScenes[0].path, BootstrapScenePath, StringComparison.Ordinal))
+        int expectedBuildSceneCount = BusinessSceneCatalog.GetRequiredSceneIds().Count + 2;
+        if (buildScenes == null || buildScenes.Length != expectedBuildSceneCount ||
+            !buildScenes[0].enabled || !string.Equals(buildScenes[0].path, BootstrapScenePath, StringComparison.Ordinal) ||
+            !buildScenes[1].enabled || !string.Equals(buildScenes[1].path, OverviewSceneCatalog.OverviewScenePath, StringComparison.Ordinal))
         {
-            throw new BuildFailedException("构建设置必须以 Bootstrap 为索引零，并登记完整九个业务场景。");
+            throw new BuildFailedException("构建设置必须依次登记 Bootstrap、Overview 和完整九个业务场景。");
         }
 
-        int enabledBusinessSceneCount = buildScenes.Count(scene =>
+        int enabledNonBootstrapSceneCount = buildScenes.Count(scene =>
             scene.enabled &&
             !string.Equals(scene.path, BootstrapScenePath, StringComparison.Ordinal));
-        if (enabledBusinessSceneCount != BusinessSceneCatalog.GetRequiredSceneIds().Count)
+        if (enabledNonBootstrapSceneCount != expectedBuildSceneCount - 1)
         {
-            throw new BuildFailedException("构建设置中的业务场景数量不完整，不能构建资源包。");
+            throw new BuildFailedException("构建设置中的 Overview 或业务场景数量不完整，不能构建资源包。");
         }
     }
 

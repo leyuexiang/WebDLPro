@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import {
+  OVERVIEW_SCENE_ID,
   SCENE_IDS,
   toActionId,
   toSceneActivationId,
@@ -157,6 +158,7 @@ function createHandler(
     topologyRuntime,
     unity,
     facade,
+    'mapping.runtime.test.1',
     () => transitionIds.shift() ?? toTransitionId('transition.view-open.fallback'),
     onPhysicalRuntimeRecovered,
   )
@@ -255,6 +257,30 @@ describe('view.open 原子切换事务', () => {
     await expect(pending).resolves.toMatchObject({ success: true, status: 'completed', contextRevision: 2 })
     expect(canvas.setTopology).toHaveBeenCalledTimes(2)
     expect(store.stableContext).toEqual({ sceneId: toSceneId('wind-power'), topologyId: windDetailTopologyId, actionId: windResetActionId, contextRevision: 2 })
+  })
+
+  it('业务场景切入平台总览后停用单画布并省略稳定拓扑，再由业务命令复用画布恢复', async () => {
+    const { handler, unity, canvas, store, topologyRuntime } = createHandler()
+    await handler.submit(createViewOpen())
+    topologyRuntime.setSelection([], [])
+    const overviewResult = await handler.submit({
+      type: 'view.open',
+      correlationId: 'host-view-open-overview',
+      payload: { sceneId: OVERVIEW_SCENE_ID },
+    })
+
+    expect(overviewResult).toMatchObject({ success: true, status: 'completed', contextRevision: 2 })
+    expect(unity.switchScene).toHaveBeenLastCalledWith(OVERVIEW_SCENE_ID, 'mapping.runtime.test.1', toTransitionId('transition.view-open.2'))
+    expect(topologyRuntime.getActiveTopology()).toBeUndefined()
+    expect(store.stableContext).toEqual({ sceneId: OVERVIEW_SCENE_ID, actionId: null, contextRevision: 2 })
+    expect(store.topologyStatus).toBe('idle')
+    expect(store.selectedNodeIds).toEqual([])
+    expect(canvas.dispose).not.toHaveBeenCalled()
+
+    const businessResult = await handler.submit(createViewOpen(toSceneId('gas-power'), gasDetailTopologyId))
+    expect(businessResult).toMatchObject({ success: true, status: 'completed', contextRevision: 3 })
+    expect(topologyRuntime.getActiveTopology()?.topologyId).toBe(gasDetailTopologyId)
+    expect(canvas.dispose).not.toHaveBeenCalled()
   })
 
   it('同场景切换只激活新拓扑，不重复切换 Unity 业务场景', async () => {

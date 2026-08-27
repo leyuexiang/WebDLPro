@@ -11,6 +11,21 @@ namespace WebDLPro.Unity.Tests
     /// <summary>验证九场景目录、能力登记和事务过滤的纯逻辑，不依赖用户正在编辑的 SampleScene。</summary>
     public sealed class BusinessSceneRuntimeTests
     {
+        private sealed class TestOverviewPresenter : MonoBehaviour, IOverviewBuildingVisualStatePresenter
+        {
+            public void ApplyVisualState(BusinessSceneNodeVisualState visualState)
+            {
+            }
+
+            public void ClearVisualState()
+            {
+            }
+
+            public void ReleaseVisualState()
+            {
+            }
+        }
+
         /// <summary>
         /// 未配置碰撞体的已登记模型仍应由渲染器包围盒命中；这是燃煤场景三维反向选择的低成本后备路径。
         /// 测试目标只携带显式 sceneNodeId（三维节点标识），不使用对象名称推断映射。
@@ -47,9 +62,79 @@ namespace WebDLPro.Unity.Tests
             }
         }
 
-        /// <summary>
-        /// 前方未映射碰撞体距离必须阻断后方包围盒命中，避免后备路径穿过地面或建筑选择不可见设备。
-        /// </summary>
+        [Test]
+        public void 总览点击代理只解析显式建筑标识并拒绝未登记碰撞体()
+        {
+            GameObject runtimeRoot = new GameObject("OverviewRuntimeTestRoot");
+            GameObject cameraObject = new GameObject("OverviewCameraTest");
+            GameObject building = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            GameObject unregistered = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            try
+            {
+                runtimeRoot.transform.position = new Vector3(1000f, 0f, 0f);
+                cameraObject.transform.position = new Vector3(1000f, 0f, -5f);
+                building.transform.position = new Vector3(1000f, 0f, 0f);
+                unregistered.transform.position = new Vector3(1003f, 0f, 0f);
+                building.transform.SetParent(runtimeRoot.transform, true);
+
+                OverviewSceneController controller = runtimeRoot.AddComponent<OverviewSceneController>();
+                Camera camera = cameraObject.AddComponent<Camera>();
+                OverviewBuildingPlaceholder placeholder = building.AddComponent<OverviewBuildingPlaceholder>();
+                TestOverviewPresenter presenter = building.AddComponent<TestOverviewPresenter>();
+                placeholder.ConfigureForEditor(
+                    "overview-building.synthetic",
+                    "coal-power",
+                    building.GetComponent<Renderer>(),
+                    building.GetComponent<Collider>(),
+                    presenter);
+                controller.ConfigureForEditor(camera);
+
+                BusinessSceneCommandResult initializationResult = default;
+                IEnumerator initialization = controller.InitializeAsync(
+                    new BusinessSceneInitializationContext("overview", "overview", "transition.synthetic", false),
+                    result => initializationResult = result);
+                while (initialization.MoveNext())
+                {
+                }
+
+                Assert.That(initializationResult.Success, Is.True, initializationResult.Message);
+                Physics.SyncTransforms();
+                Assert.That(
+                    controller.TryResolveBuilding(
+                        new Ray(new Vector3(1000f, 0f, -5f), Vector3.forward),
+                        out string overviewBuildingId,
+                        out string targetSceneId,
+                        out GameObject buildingRoot),
+                    Is.True);
+                Assert.That(overviewBuildingId, Is.EqualTo("overview-building.synthetic"));
+                Assert.That(targetSceneId, Is.EqualTo("coal-power"));
+                Assert.That(buildingRoot, Is.SameAs(building));
+
+                Assert.That(
+                    controller.TryResolveBuilding(
+                        new Ray(new Vector3(1003f, 0f, -5f), Vector3.forward),
+                        out _,
+                        out _,
+                        out _),
+                    Is.False);
+                Assert.That(controller.ReleaseScene().Success, Is.True);
+                Assert.That(
+                    controller.TryResolveBuilding(
+                        new Ray(new Vector3(1000f, 0f, -5f), Vector3.forward),
+                        out _,
+                        out _,
+                        out _),
+                    Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(unregistered);
+                Object.DestroyImmediate(building);
+                Object.DestroyImmediate(cameraObject);
+                Object.DestroyImmediate(runtimeRoot);
+            }
+        }
+
         [Test]
         public void 渲染器后备命中遵守前方物理遮挡距离()
         {
@@ -100,6 +185,326 @@ namespace WebDLPro.Unity.Tests
             Assert.That(entry.UnitySceneKey, Is.EqualTo("test-unity-key.gas-power"));
 
             Object.DestroyImmediate(catalog);
+        }
+
+        /// <summary>
+        /// 以下测试只使用 synthetic 稳定 ID，不绑定真实模型、正式平台设备或九个 Overview 占位建筑，
+        /// 用于验证 R-004/R-005 的纯数据规则在外部资料缺失时仍可独立验收。
+        /// </summary>
+        [Test]
+        public void 三层映射合成目录通过校验并建立稳定索引()
+        {
+            ThreeLayerBindingCatalog catalog = CreateSyntheticThreeLayerCatalog();
+            try
+            {
+                Assert.That(catalog.ValidateForRuntime(), Is.Empty);
+                Assert.That(ThreeLayerBindingIndex.TryCreate(catalog, out ThreeLayerBindingIndex index, out IReadOnlyList<ThreeLayerBindingValidationIssue> issues), Is.True);
+                Assert.That(issues, Is.Empty);
+                Assert.That(index.TryGetNode("node.synthetic.alpha", out ThreeLayerNodeBinding node), Is.True);
+                Assert.That(node.SceneNodeId, Is.EqualTo("scene-node.synthetic.alpha"));
+                Assert.That(index.TryGetOverviewBuildingId("group.synthetic.alpha", out string buildingId), Is.True);
+                Assert.That(buildingId, Is.EqualTo("overview-building.synthetic.alpha"));
+                Assert.That(index.GetNodeIdsForDeviceGroup("group.synthetic.alpha").Count, Is.EqualTo(2));
+            }
+            finally
+            {
+                Object.DestroyImmediate(catalog);
+            }
+        }
+
+        [Test]
+        public void 三层映射拒绝重复场景节点和设备组建筑冲突()
+        {
+            ThreeLayerBindingCatalog catalog = ScriptableObject.CreateInstance<ThreeLayerBindingCatalog>();
+            catalog.SetEntriesForEditor(
+                new[]
+                {
+                    new ThreeLayerNodeBinding("node.synthetic.a", "coal-power", true, "scene-node.synthetic.same", "group.synthetic", true, "overview-building.synthetic.a"),
+                    new ThreeLayerNodeBinding("node.synthetic.b", "coal-power", true, "scene-node.synthetic.same", "group.synthetic", true, "overview-building.synthetic.b")
+                },
+                System.Array.Empty<ThreeLayerPipeBinding>(),
+                System.Array.Empty<ThreeLayerAreaBinding>(),
+                System.Array.Empty<ThreeLayerEffectProfileBinding>(),
+                System.Array.Empty<ThreeLayerPipeImpactRule>(),
+                System.Array.Empty<ThreeLayerAreaImpactRule>());
+
+            try
+            {
+                IReadOnlyList<ThreeLayerBindingValidationIssue> issues = catalog.ValidateForRuntime();
+                Assert.That(issues, Has.Some.Matches<ThreeLayerBindingValidationIssue>(issue => issue.Code == "binding.scene-node-duplicate"));
+                Assert.That(issues, Has.Some.Matches<ThreeLayerBindingValidationIssue>(issue => issue.Code == "binding.group-building-conflict"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(catalog);
+            }
+        }
+
+        [Test]
+        public void 三层状态聚合遵循故障告警离线正常优先级()
+        {
+            BusinessSceneNodeVisualState[] states =
+            {
+                BusinessSceneNodeVisualState.Normal,
+                BusinessSceneNodeVisualState.Offline,
+                BusinessSceneNodeVisualState.Alarm,
+                BusinessSceneNodeVisualState.Fault
+            };
+
+            Assert.That(ThreeLayerStateAggregator.Aggregate(states), Is.EqualTo(BusinessSceneNodeVisualState.Fault));
+            Assert.That(ThreeLayerStateAggregator.Max(BusinessSceneNodeVisualState.Alarm, BusinessSceneNodeVisualState.Offline), Is.EqualTo(BusinessSceneNodeVisualState.Alarm));
+            Assert.That(ThreeLayerStateAggregator.Aggregate(new[] { BusinessSceneNodeVisualState.Normal, BusinessSceneNodeVisualState.Offline }), Is.EqualTo(BusinessSceneNodeVisualState.Offline));
+            Assert.That(ThreeLayerStateAggregator.Aggregate(System.Array.Empty<BusinessSceneNodeVisualState>()), Is.EqualTo(BusinessSceneNodeVisualState.Normal));
+        }
+
+        [Test]
+        public void 三层影响投影合并多来源并在恢复后清空()
+        {
+            ThreeLayerBindingCatalog catalog = CreateSyntheticThreeLayerCatalog();
+            try
+            {
+                Assert.That(ThreeLayerBindingIndex.TryCreate(catalog, out ThreeLayerBindingIndex index, out _), Is.True);
+                Dictionary<string, BusinessSceneNodeVisualState> groupStates = new Dictionary<string, BusinessSceneNodeVisualState>
+                {
+                    ["group.synthetic.alpha"] = BusinessSceneNodeVisualState.Fault,
+                    ["group.synthetic.beta"] = BusinessSceneNodeVisualState.Fault
+                };
+                HashSet<string> activePipeIds = new HashSet<string>();
+                HashSet<string> activeAreaIds = new HashSet<string>();
+
+                ThreeLayerImpactProjector.Project(groupStates, index, activePipeIds, activeAreaIds);
+                Assert.That(activePipeIds, Does.Contain("pipe.synthetic.shared"));
+                Assert.That(activeAreaIds, Does.Contain("area.synthetic.alpha"));
+
+                groupStates["group.synthetic.alpha"] = BusinessSceneNodeVisualState.Normal;
+                ThreeLayerImpactProjector.Project(groupStates, index, activePipeIds, activeAreaIds);
+                Assert.That(activePipeIds, Does.Contain("pipe.synthetic.shared"), "另一个异常来源仍存在时共享管道不能恢复。");
+
+                groupStates["group.synthetic.beta"] = BusinessSceneNodeVisualState.Normal;
+                ThreeLayerImpactProjector.Project(groupStates, index, activePipeIds, activeAreaIds);
+                Assert.That(activePipeIds, Is.Empty);
+                Assert.That(activeAreaIds, Is.Empty);
+            }
+            finally
+            {
+                Object.DestroyImmediate(catalog);
+            }
+        }
+
+        [Test]
+        public void 三层影响规则拒绝未知目标和空触发条件()
+        {
+            ThreeLayerBindingCatalog catalog = ScriptableObject.CreateInstance<ThreeLayerBindingCatalog>();
+            catalog.SetEntriesForEditor(
+                new[]
+                {
+                    new ThreeLayerNodeBinding("node.synthetic.source", "coal-power", true, "scene-node.synthetic.source", "group.synthetic.source", false, string.Empty)
+                },
+                System.Array.Empty<ThreeLayerPipeBinding>(),
+                System.Array.Empty<ThreeLayerAreaBinding>(),
+                System.Array.Empty<ThreeLayerEffectProfileBinding>(),
+                new[] { new ThreeLayerPipeImpactRule("group.synthetic.source", "pipe.synthetic.unknown", false, false, false) },
+                System.Array.Empty<ThreeLayerAreaImpactRule>());
+
+            try
+            {
+                IReadOnlyList<ThreeLayerBindingValidationIssue> issues = catalog.ValidateForRuntime();
+                Assert.That(issues, Has.Some.Matches<ThreeLayerBindingValidationIssue>(issue => issue.Code == "binding.pipe-impact-target-unknown"));
+                Assert.That(issues, Has.Some.Matches<ThreeLayerBindingValidationIssue>(issue => issue.Code == "binding.impact-trigger-empty"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(catalog);
+            }
+        }
+        [Test]
+        public void 三层材质属性块按逻辑属性映射并恢复基线()
+        {
+            GameObject visualRoot = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            Material flowMaterial = null;
+            try
+            {
+                Renderer renderer = visualRoot.GetComponent<Renderer>();
+                Shader flowShader = Shader.Find("自定义/URP/管道流动");
+                Assert.That(flowShader, Is.Not.Null, "管道流动着色器必须可用于材质属性契约测试。");
+
+                flowMaterial = new Material(flowShader);
+                renderer.sharedMaterial = flowMaterial;
+                Material originalSharedMaterial = renderer.sharedMaterial;
+                int preservedVectorPropertyId = Shader.PropertyToID("_BaseMap_ST");
+                Vector4 preservedVector = new Vector4(2f, 3f, 4f, 5f);
+                MaterialPropertyBlock originalPropertyBlock = new MaterialPropertyBlock();
+                originalPropertyBlock.SetVector(preservedVectorPropertyId, preservedVector);
+                renderer.SetPropertyBlock(originalPropertyBlock, 0);
+
+                Assert.That(
+                    ThreeLayerMaterialPropertyAdapter.TryCreate(
+                        renderer,
+                        0,
+                        out ThreeLayerMaterialPropertyAdapter adapter,
+                        out string error),
+                    Is.True,
+                    error);
+                Assert.That(adapter.PropertyIds.Color, Is.Not.EqualTo(0));
+                Assert.That(adapter.PropertyIds.Opacity, Is.Not.EqualTo(0));
+                Assert.That(adapter.PropertyIds.FlowSpeed, Is.Not.EqualTo(0));
+                Assert.That(adapter.PropertyIds.FlowDirection, Is.Not.EqualTo(0));
+                Assert.That(adapter.PropertyIds.EmissionIntensity, Is.Not.EqualTo(0));
+
+                Color overrideColor = new Color(1f, 0.2f, 0.1f, 0.7f);
+                Vector4 overrideDirection = new Vector4(0f, 1f, 0f, 0f);
+                ThreeLayerMaterialPropertyValues values = new ThreeLayerMaterialPropertyValues
+                {
+                    HasColor = true,
+                    Color = overrideColor,
+                    HasOpacity = true,
+                    Opacity = 0.35f,
+                    HasFlowSpeed = true,
+                    FlowSpeed = 0f,
+                    HasFlowDirection = true,
+                    FlowDirection = overrideDirection,
+                    HasEmissionIntensity = true,
+                    EmissionIntensity = 2.5f
+                };
+                Assert.That(adapter.Apply(values), Is.True);
+
+                MaterialPropertyBlock inspectionBlock = new MaterialPropertyBlock();
+                renderer.GetPropertyBlock(inspectionBlock, 0);
+                Assert.That(inspectionBlock.GetColor(adapter.PropertyIds.Color).r, Is.EqualTo(overrideColor.r).Within(0.001f));
+                Assert.That(inspectionBlock.GetColor(adapter.PropertyIds.Color).g, Is.EqualTo(overrideColor.g).Within(0.001f));
+                Assert.That(inspectionBlock.GetColor(adapter.PropertyIds.Color).b, Is.EqualTo(overrideColor.b).Within(0.001f));
+                Assert.That(inspectionBlock.GetColor(adapter.PropertyIds.Color).a, Is.EqualTo(overrideColor.a).Within(0.001f));
+                Assert.That(inspectionBlock.GetFloat(adapter.PropertyIds.Opacity), Is.EqualTo(0.35f).Within(0.001f));
+                Assert.That(inspectionBlock.GetFloat(adapter.PropertyIds.FlowSpeed), Is.EqualTo(0f).Within(0.001f));
+                Assert.That(inspectionBlock.GetVector(adapter.PropertyIds.FlowDirection), Is.EqualTo(overrideDirection));
+                Assert.That(inspectionBlock.GetFloat(adapter.PropertyIds.EmissionIntensity), Is.EqualTo(2.5f).Within(0.001f));
+                Assert.That(inspectionBlock.GetVector(preservedVectorPropertyId), Is.EqualTo(preservedVector));
+                Assert.That(renderer.sharedMaterial, Is.SameAs(originalSharedMaterial));
+
+                Assert.That(adapter.Restore(), Is.True);
+                renderer.GetPropertyBlock(inspectionBlock, 0);
+                Assert.That(inspectionBlock.GetColor(adapter.PropertyIds.Color), Is.EqualTo(flowMaterial.GetColor(adapter.PropertyIds.Color)));
+                Assert.That(inspectionBlock.GetFloat(adapter.PropertyIds.Opacity), Is.EqualTo(flowMaterial.GetFloat(adapter.PropertyIds.Opacity)).Within(0.001f));
+                Assert.That(inspectionBlock.GetFloat(adapter.PropertyIds.FlowSpeed), Is.EqualTo(flowMaterial.GetFloat(adapter.PropertyIds.FlowSpeed)).Within(0.001f));
+                Assert.That(inspectionBlock.GetVector(adapter.PropertyIds.FlowDirection), Is.EqualTo(flowMaterial.GetVector(adapter.PropertyIds.FlowDirection)));
+                Assert.That(inspectionBlock.GetFloat(adapter.PropertyIds.EmissionIntensity), Is.EqualTo(flowMaterial.GetFloat(adapter.PropertyIds.EmissionIntensity)).Within(0.001f));
+                Assert.That(inspectionBlock.GetVector(preservedVectorPropertyId), Is.EqualTo(preservedVector));
+
+                adapter.Release();
+                adapter.Release();
+                Assert.That(adapter.Apply(ThreeLayerMaterialPropertyValues.ForColor(Color.white)), Is.False);
+            }
+            finally
+            {
+                if (flowMaterial != null)
+                {
+                    Object.DestroyImmediate(flowMaterial);
+                }
+
+                Object.DestroyImmediate(visualRoot);
+            }
+        }
+
+        /// <summary>
+        /// R-009 管道流动适配器只按显式 pipeId/routeId 控制已登记材质槽：
+        /// 多个异常来源共享一条管道时保持停流，全部解除后恢复原始流速；路由倍率不能绕过异常停流。
+        /// </summary>
+        [Test]
+        public void 三层管道流动按显式路由停流恢复并保持材质基线()
+        {
+            ThreeLayerBindingCatalog catalog = CreateSyntheticThreeLayerCatalog();
+            GameObject visualRoot = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            Material firstMaterial = null;
+            Material secondMaterial = null;
+            ThreeLayerMaterialPropertyAdapter firstAdapter = null;
+            ThreeLayerMaterialPropertyAdapter secondAdapter = null;
+            ThreeLayerPipeFlowRuntime flowRuntime = null;
+            try
+            {
+                Assert.That(ThreeLayerBindingIndex.TryCreate(catalog, out ThreeLayerBindingIndex index, out _), Is.True);
+                Shader flowShader = Shader.Find("自定义/URP/管道流动");
+                Assert.That(flowShader, Is.Not.Null, "管道流动着色器必须可用于 R-009 测试。");
+
+                firstMaterial = new Material(flowShader);
+                secondMaterial = new Material(flowShader);
+                firstMaterial.SetFloat("_FlowSpeed", 1.5f);
+                secondMaterial.SetFloat("_FlowSpeed", 2.5f);
+                Renderer renderer = visualRoot.GetComponent<Renderer>();
+                renderer.sharedMaterials = new[] { firstMaterial, secondMaterial };
+
+                Assert.That(
+                    ThreeLayerMaterialPropertyAdapter.TryCreate(renderer, 0, out firstAdapter, out string firstError),
+                    Is.True,
+                    firstError);
+                Assert.That(
+                    ThreeLayerMaterialPropertyAdapter.TryCreate(renderer, 1, out secondAdapter, out string secondError),
+                    Is.True,
+                    secondError);
+                Assert.That(firstAdapter.OriginalFlowSpeed, Is.EqualTo(1.5f).Within(0.001f));
+                Assert.That(secondAdapter.OriginalFlowSpeed, Is.EqualTo(2.5f).Within(0.001f));
+
+                flowRuntime = new ThreeLayerPipeFlowRuntime(index);
+                Assert.That(
+                    flowRuntime.TryRegisterPipe(
+                        "pipe.synthetic.shared",
+                        new[] { firstAdapter, secondAdapter },
+                        out string registrationError),
+                    Is.True,
+                    registrationError);
+                Assert.That(flowRuntime.RegisteredPipeCount, Is.EqualTo(1));
+                Assert.That(
+                    flowRuntime.ApplyImpact(new HashSet<string> { "pipe.synthetic.unknown" }).Success,
+                    Is.False);
+
+                Assert.That(
+                    flowRuntime.ApplyImpact(new HashSet<string> { "pipe.synthetic.shared" }).Success,
+                    Is.True);
+                Assert.That(ReadFlowSpeed(renderer, 0, firstAdapter), Is.EqualTo(0f).Within(0.001f));
+                Assert.That(ReadFlowSpeed(renderer, 1, secondAdapter), Is.EqualTo(0f).Within(0.001f));
+                Assert.That(flowRuntime.IsPipeStopped("pipe.synthetic.shared"), Is.True);
+
+                Assert.That(
+                    flowRuntime.SetRouteFlow("route.synthetic.shared", true, 2f).Success,
+                    Is.True);
+                Assert.That(ReadFlowSpeed(renderer, 0, firstAdapter), Is.EqualTo(0f).Within(0.001f));
+                Assert.That(ReadFlowSpeed(renderer, 1, secondAdapter), Is.EqualTo(0f).Within(0.001f));
+
+                Assert.That(flowRuntime.ApplyImpact(new HashSet<string>()).Success, Is.True);
+                Assert.That(ReadFlowSpeed(renderer, 0, firstAdapter), Is.EqualTo(3f).Within(0.001f));
+                Assert.That(ReadFlowSpeed(renderer, 1, secondAdapter), Is.EqualTo(5f).Within(0.001f));
+                Assert.That(flowRuntime.IsPipeStopped("pipe.synthetic.shared"), Is.False);
+
+                Assert.That(flowRuntime.SetRouteFlow("route.synthetic.shared", false, 1f).Success, Is.True);
+                Assert.That(ReadFlowSpeed(renderer, 0, firstAdapter), Is.EqualTo(0f).Within(0.001f));
+                Assert.That(ReadFlowSpeed(renderer, 1, secondAdapter), Is.EqualTo(0f).Within(0.001f));
+                Assert.That(flowRuntime.Release().Success, Is.True);
+                Assert.That(flowRuntime.Release().Success, Is.True);
+                Assert.That(flowRuntime.IsReleased, Is.True);
+            }
+            finally
+            {
+                if (flowRuntime != null && !flowRuntime.IsReleased)
+                {
+                    flowRuntime.Release();
+                }
+                else
+                {
+                    firstAdapter?.Release();
+                    secondAdapter?.Release();
+                }
+
+                if (firstMaterial != null)
+                {
+                    Object.DestroyImmediate(firstMaterial);
+                }
+                if (secondMaterial != null)
+                {
+                    Object.DestroyImmediate(secondMaterial);
+                }
+
+                Object.DestroyImmediate(visualRoot);
+                Object.DestroyImmediate(catalog);
+            }
         }
 
         [Test]
@@ -621,11 +1026,13 @@ namespace WebDLPro.Unity.Tests
             string buildScriptPath = Path.Combine(Application.dataPath, "Editor", "PowerPlantWebGlBuild.cs");
             string bundleBuildScriptPath = Path.Combine(Application.dataPath, "Editor", "PowerPlantSceneBundleBuild.cs");
             string coordinatorPath = Path.Combine(Application.dataPath, "Scripts", "Visualization", "Scenes", "MultiSceneCoordinator.cs");
+            string bridgePath = Path.Combine(Application.dataPath, "Scripts", "UnityIframeBridgeManager.cs");
             string bundleLoaderPath = Path.Combine(Application.dataPath, "Scripts", "Visualization", "Scenes", "SceneBundleRuntimeLoader.cs");
             string resourceScopePath = Path.Combine(Application.dataPath, "Scripts", "Visualization", "Scenes", "BusinessSceneResourceScope.cs");
             string buildScriptSource = File.ReadAllText(buildScriptPath);
             string bundleBuildScriptSource = File.ReadAllText(bundleBuildScriptPath);
             string coordinatorSource = File.ReadAllText(coordinatorPath);
+            string bridgeSource = File.ReadAllText(bridgePath);
             string bundleLoaderSource = File.ReadAllText(bundleLoaderPath);
             string resourceScopeSource = File.ReadAllText(resourceScopePath);
 
@@ -651,6 +1058,10 @@ namespace WebDLPro.Unity.Tests
             Assert.That(bundleBuildScriptSource, Does.Contain("contentVersion = ComputeSceneContentVersion(sceneBundles)"));
             Assert.That(bundleBuildScriptSource, Does.Contain("transferSizeBytes = sceneBundles.Sum"));
             Assert.That(bundleBuildScriptSource, Does.Not.Contain("Addressables"));
+            Assert.That(coordinatorSource, Does.Not.Contain("private IEnumerator Start()"), "Bootstrap 不得通过生命周期方法默认选择场景。");
+            Assert.That(coordinatorSource, Does.Not.Contain("transition.bootstrap.overview"), "协调器不得生成自动进入沙盘的内部事务。");
+            Assert.That(bridgeSource, Does.Not.Contain("transition.overview."), "沙盘建筑点击不得绕过平台生成内部场景事务。");
+            Assert.That(bridgeSource, Does.Contain("等待平台下发目标场景命令"));
             Assert.That(coordinatorSource, Does.Contain("RecordRuntimeStage"));
             Assert.That(coordinatorSource, Does.Contain("_sceneBundleLoader.LoadSceneAsync"));
             Assert.That(coordinatorSource, Does.Contain("ReleaseSceneBundle"));
@@ -719,6 +1130,49 @@ namespace WebDLPro.Unity.Tests
             Assert.That(browserBridgeSource, Does.Contain("'switchScene'"));
             Assert.That(browserBridgeSource, Does.Contain("'sceneLoadProgress'"));
             Assert.That(browserBridgeSource, Does.Contain("'sceneChanged'"));
+        }
+
+        private static ThreeLayerBindingCatalog CreateSyntheticThreeLayerCatalog()
+        {
+            ThreeLayerBindingCatalog catalog = ScriptableObject.CreateInstance<ThreeLayerBindingCatalog>();
+            catalog.SetEntriesForEditor(
+                new[]
+                {
+                    new ThreeLayerNodeBinding("node.synthetic.alpha", "coal-power", true, "scene-node.synthetic.alpha", "group.synthetic.alpha", true, "overview-building.synthetic.alpha"),
+                    new ThreeLayerNodeBinding("node.synthetic.beta", "coal-power", true, "scene-node.synthetic.beta", "group.synthetic.alpha", true, "overview-building.synthetic.alpha"),
+                    new ThreeLayerNodeBinding("node.synthetic.gamma", "coal-power", false, string.Empty, "group.synthetic.beta", false, string.Empty)
+                },
+                new[]
+                {
+                    new ThreeLayerPipeBinding("pipe.synthetic.shared", "route.synthetic.shared", "coal-power")
+                },
+                new[]
+                {
+                    new ThreeLayerAreaBinding("area.synthetic.alpha", "coal-power", "effect.synthetic.area")
+                },
+                new[]
+                {
+                    new ThreeLayerEffectProfileBinding("effect.synthetic.area", ThreeLayerAreaEffectType.AreaCover)
+                },
+                new[]
+                {
+                    new ThreeLayerPipeImpactRule("group.synthetic.alpha", "pipe.synthetic.shared", false, true, false),
+                    new ThreeLayerPipeImpactRule("group.synthetic.beta", "pipe.synthetic.shared", false, true, false)
+                },
+                new[]
+                {
+                    new ThreeLayerAreaImpactRule("group.synthetic.alpha", "area.synthetic.alpha", false, true, false)
+                });
+            return catalog;
+        }
+        private static float ReadFlowSpeed(
+            Renderer renderer,
+            int materialIndex,
+            ThreeLayerMaterialPropertyAdapter adapter)
+        {
+            MaterialPropertyBlock propertyBlock = new MaterialPropertyBlock();
+            renderer.GetPropertyBlock(propertyBlock, materialIndex);
+            return propertyBlock.GetFloat(adapter.PropertyIds.FlowSpeed);
         }
 
         private static List<BusinessSceneCatalogEntry> CreateCompleteTestEntries()

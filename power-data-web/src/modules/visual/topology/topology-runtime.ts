@@ -127,6 +127,36 @@ export class TopologyRuntime {
     }
   }
 
+  /**
+   * 平台总览成功切入后停用业务拓扑，但不销毁或替换唯一 Canvas。
+   * 当前视口先写入有限缓存，选择同步清空；重复停用保持幂等，状态更新随后只进入权威缓存而不会触碰隐藏旧图。
+   */
+  public deactivate(): boolean {
+    if (this.disposed) return false
+    const previousTopology = this.activeTopology
+    if (!previousTopology) {
+      this.deviceStateCache.setActiveContext(undefined, undefined)
+      return true
+    }
+
+    try {
+      this.cacheActiveViewState(previousTopology.topologyId)
+      const cachedState = this.viewStateByTopologyId.get(previousTopology.topologyId) ?? this.getDefaultViewState()
+      this.cacheViewState(previousTopology.topologyId, {
+        ...cachedState,
+        selectedNodeIds: [],
+        selectedRouteIds: [],
+      })
+      this.canvas.setSelection([], [])
+      this.activeTopology = undefined
+      this.deviceStateCache.setActiveContext(undefined, undefined)
+      return true
+    } catch {
+      // 停用失败时保留原活动拓扑，由事务层回切 Unity 或进入明确错误态，不能提交隐藏但仍可操作的旧拓扑。
+      return false
+    }
+  }
+
   /** 单次选择只更新当前画布，不重建拓扑、节点索引或路径缓存。 */
   public setSelection(nodeIds: readonly NodeId[], routeIds: readonly RouteId[]): void {
     if (this.disposed || !this.activeTopology) return

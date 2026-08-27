@@ -1,6 +1,7 @@
 import type { TransitionId } from '@/config/scene-topology/identifiers'
 import type { TopologyNodeDoubleClickIntent } from '@/modules/visual/topology/topology-node-interaction'
 import {
+  isBusinessHostVisualizationContext,
   isHostEventMessage,
   type CommandResultPayload,
   type HostEventMessage,
@@ -103,13 +104,21 @@ export class HostEventSender {
   public sendViewChanged(context: HostVisualizationContext, transitionId?: TransitionId, replyTo?: string): boolean {
     if (context.status !== 'ready') return false
 
-    return this.send('view.changed', {
-      sceneId: context.sceneId,
-      topologyId: context.topologyId,
-      actionId: context.actionId,
-      contextRevision: context.contextRevision,
-      ...(transitionId !== undefined ? { transitionId } : {}),
-    }, replyTo)
+    const payload = isBusinessHostVisualizationContext(context)
+      ? {
+          sceneId: context.sceneId,
+          topologyId: context.topologyId,
+          actionId: context.actionId,
+          contextRevision: context.contextRevision,
+          ...(transitionId !== undefined ? { transitionId } : {}),
+        }
+      : {
+          sceneId: context.sceneId,
+          actionId: context.actionId,
+          contextRevision: context.contextRevision,
+          ...(transitionId !== undefined ? { transitionId } : {}),
+        }
+    return this.send('view.changed', payload, replyTo)
   }
 
   /**
@@ -143,15 +152,23 @@ export class HostEventSender {
    * 调用方必须传入原命令 messageId 作为 replyTo，状态快照不会包含设备全量状态、场景对象或原始消息。
    */
   public sendStateSnapshot(replyTo: string, payload: StateSnapshotPayload): boolean {
+    const context = isBusinessHostVisualizationContext(payload.context)
+      ? {
+          sceneId: payload.context.sceneId,
+          topologyId: payload.context.topologyId,
+          actionId: payload.context.actionId,
+          contextRevision: payload.context.contextRevision,
+          status: payload.context.status,
+        }
+      : {
+          sceneId: payload.context.sceneId,
+          actionId: payload.context.actionId,
+          contextRevision: payload.context.contextRevision,
+          status: payload.context.status,
+        }
     return this.send('state.snapshot', {
       manifestVersion: payload.manifestVersion,
-      context: {
-        sceneId: payload.context.sceneId,
-        topologyId: payload.context.topologyId,
-        actionId: payload.context.actionId,
-        contextRevision: payload.context.contextRevision,
-        status: payload.context.status,
-      },
+      context,
       unityStatus: payload.unityStatus,
       topologyStatus: payload.topologyStatus,
     }, replyTo)

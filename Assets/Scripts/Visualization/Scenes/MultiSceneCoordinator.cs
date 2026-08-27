@@ -136,6 +136,8 @@ namespace WebDLPro.Unity.SceneRuntime
         public static MultiSceneCoordinator Instance { get; private set; }
 
         [SerializeField] private BusinessSceneCatalog _sceneCatalog;
+        // Overview 使用独立目录，避免把全局沙盘误加入九项业务目录；运行时只在协调器入口处统一转换为受控场景条目。
+        [SerializeField] private OverviewSceneCatalog _overviewSceneCatalog;
         [SerializeField] private LoadingOverlayController _loadingOverlay;
         [SerializeField] private SceneBundleRuntimeLoader _sceneBundleLoader;
 
@@ -181,6 +183,16 @@ namespace WebDLPro.Unity.SceneRuntime
             }
             _sceneCatalog = sceneCatalog;
         }
+
+        /// <summary>仅供编辑器场景生成器和编辑模式测试注入独立总览目录。</summary>
+        public void SetOverviewSceneCatalogForEditor(OverviewSceneCatalog overviewSceneCatalog)
+        {
+            if (Application.isPlaying)
+            {
+                throw new InvalidOperationException("运行时不能替换正式总览目录。");
+            }
+            _overviewSceneCatalog = overviewSceneCatalog;
+        }
 #endif
 
         private void Awake()
@@ -213,9 +225,10 @@ namespace WebDLPro.Unity.SceneRuntime
         }
 
         /// <summary>
-        /// 请求切换只接受正式目录中的可用场景。新请求立即取代处理中和待处理请求的提交权，
-        /// 但底层 Unity 异步操作会安全收尾并卸载迟到场景，避免留下隐藏活动场景；forceReload 为 true 时
-        /// 同场景也必须重建物理实例，用于清除超时动作可能遗留的未知副作用。
+        /// 请求切换只接受平台通过桥接层提交的正式目录场景。Bootstrap 初始化后保持 Idle，
+        /// 不自行选择总览或任一业务场景；进入和返回 Overview 也必须使用同一 switchScene 事务。
+        /// 新请求立即取代处理中和待处理请求的提交权，但底层 Unity 异步操作会安全收尾并卸载迟到场景，
+        /// 避免留下隐藏活动场景；forceReload 为 true 时同场景也必须重建物理实例，用于清除超时动作可能遗留的未知副作用。
         /// </summary>
         public bool RequestSwitchScene(string sceneId, string transitionId, bool forceReload = false)
         {
@@ -229,9 +242,9 @@ namespace WebDLPro.Unity.SceneRuntime
                 EmitImmediateFailure(sceneId, transitionId, "scene-catalog-invalid", "validation", validationMessage);
                 return false;
             }
-            if (!_sceneCatalog.TryGetBySceneId(sceneId, out BusinessSceneCatalogEntry entry))
+            if (!TryGetSceneEntry(sceneId, out BusinessSceneCatalogEntry entry))
             {
-                EmitImmediateFailure(sceneId, transitionId, "scene-unknown", "validation", "目标场景未在正式目录中登记。");
+                EmitImmediateFailure(sceneId, transitionId, "scene-unknown", "validation", "目标场景未在正式总览或业务目录中登记。");
                 return false;
             }
             if (entry.Availability != BusinessSceneAvailability.Available)
@@ -729,6 +742,23 @@ namespace WebDLPro.Unity.SceneRuntime
             }
         }
 
+        private bool TryGetSceneEntry(string sceneId, out BusinessSceneCatalogEntry entry)
+        {
+            if (_sceneCatalog != null && _sceneCatalog.TryGetBySceneId(sceneId, out entry))
+            {
+                return true;
+            }
+
+            if (_overviewSceneCatalog != null &&
+                _overviewSceneCatalog.TryCreateRuntimeEntry(out entry, out _))
+            {
+                return string.Equals(sceneId, entry.SceneId, StringComparison.Ordinal);
+            }
+
+            entry = null;
+            return false;
+        }
+
         private bool TryValidateCatalog(out string message)
         {
             if (_sceneCatalog == null)
@@ -736,10 +766,21 @@ namespace WebDLPro.Unity.SceneRuntime
                 message = "未配置正式九场景目录资产。";
                 return false;
             }
-            IReadOnlyList<BusinessSceneCatalogValidationIssue> issues = _sceneCatalog.ValidateForRuntime();
-            if (issues.Count > 0)
+            IReadOnlyList<BusinessSceneCatalogValidationIssue> businessIssues = _sceneCatalog.ValidateForRuntime();
+            if (businessIssues.Count > 0)
             {
-                message = issues[0].Message;
+                message = businessIssues[0].Message;
+                return false;
+            }
+            if (_overviewSceneCatalog == null)
+            {
+                message = "未配置独立总览场景目录资产。";
+                return false;
+            }
+            IReadOnlyList<OverviewSceneCatalogValidationIssue> overviewIssues = _overviewSceneCatalog.ValidateForRuntime();
+            if (overviewIssues.Count > 0)
+            {
+                message = overviewIssues[0].Message;
                 return false;
             }
 

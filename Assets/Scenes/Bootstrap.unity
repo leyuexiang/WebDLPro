@@ -167,7 +167,10 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   _sceneCatalog: {fileID: 11400000, guid: 01d53ea00ff7cd3479243adc5a000ca7, type: 2}
+  _overviewSceneCatalog: {fileID: 11400000, guid: e50d65087fdc7eb45ad4a32a5328b3ca,
+    type: 2}
   _loadingOverlay: {fileID: 0}
+  _sceneBundleLoader: {fileID: 0}
 --- !u!114 &2089220850
 MonoBehaviour:
   m_ObjectHideFlags: 0

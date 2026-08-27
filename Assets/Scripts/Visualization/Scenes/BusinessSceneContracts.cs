@@ -67,6 +67,17 @@ namespace WebDLPro.Unity.SceneRuntime
         }
     }
 
+    /// <summary>
+    /// 总览代表建筑的异常视觉接口。运行时场景层只依赖稳定建筑 ID 和四态枚举，
+    /// 高亮插件、材质和闪烁实现留在具体呈现组件，避免产生程序集反向依赖。
+    /// </summary>
+    public interface IOverviewBuildingVisualStatePresenter
+    {
+        void ApplyVisualState(BusinessSceneNodeVisualState visualState);
+        void ClearVisualState();
+        void ReleaseVisualState();
+    }
+
     /// <summary>初始化上下文只携带稳定目录标识和事务标识，不暴露场景路径或加载对象。</summary>
     public readonly struct BusinessSceneInitializationContext
     {

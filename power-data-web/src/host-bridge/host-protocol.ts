@@ -1,5 +1,5 @@
-import { SCENE_IDS, isSceneId, validateStableIdentifier } from '@/config/scene-topology/identifiers'
-import type { ActionId, NodeId, SceneId, SceneNodeId, SessionId, TopologyId, TransitionId } from '@/config/scene-topology/identifiers'
+import { OVERVIEW_SCENE_ID, SCENE_IDS, isOverviewSceneId, isSceneId, isViewSceneId, validateStableIdentifier } from '@/config/scene-topology/identifiers'
+import type { ActionId, NodeId, OverviewSceneId, SceneId, SceneNodeId, SessionId, TopologyId, TransitionId, ViewSceneId } from '@/config/scene-topology/identifiers'
 import type { DeviceVisualStatus } from '@/config/scene-topology/types'
 
 /** 外层父页面与可视化子应用的固定通道；禁止与 Unity 内层通道混用。 */
@@ -77,21 +77,19 @@ export interface HostMessageEnvelope<TType extends HostMessageType, TPayload> {
   payload: TPayload
 }
 
-/** 初始视图只引用稳定场景、拓扑与动作标识，不接收路径、模型名或 Unity 方法名。 */
-export interface SystemInitPayload {
-  sceneId: SceneId
-  topologyId: TopologyId
-  actionId?: ActionId | null
-  expectedManifestVersion?: string
-}
+/** 业务视图目标必须携带拓扑；平台总览必须真正省略拓扑且不能携带业务动作。 */
+export type BusinessViewTarget = { sceneId: SceneId; topologyId: TopologyId; actionId?: ActionId | null }
+export type OverviewViewTarget = { sceneId: OverviewSceneId; topologyId?: never; actionId?: null }
 
-/** 直接打开场景和拓扑的受控命令；上下文版本可用于拒绝父页面的旧操作。 */
-export interface ViewOpenPayload {
-  sceneId: SceneId
-  topologyId: TopologyId
-  actionId?: ActionId | null
-  expectedContextRevision?: number
-}
+/** 初始视图复用同一场景命令；清单版本只约束业务发布清单本身。 */
+export type SystemInitPayload =
+  | (BusinessViewTarget & { expectedManifestVersion?: string })
+  | (OverviewViewTarget & { expectedManifestVersion?: string })
+
+/** 直接打开视图的受控命令；上下文版本可用于拒绝父页面的旧操作。 */
+export type BusinessViewOpenPayload = BusinessViewTarget & { expectedContextRevision?: number }
+export type OverviewViewOpenPayload = OverviewViewTarget & { expectedContextRevision?: number }
+export type ViewOpenPayload = BusinessViewOpenPayload | OverviewViewOpenPayload
 
 /** 触发动作时只允许有限的标量参数，禁止对象嵌套、函数与任意资源地址。 */
 export interface WorkflowTriggerPayload {
@@ -129,14 +127,16 @@ export type HostCommandMessage =
   | HostMessageEnvelope<'state.get', StateGetPayload>
   | HostMessageEnvelope<'system.dispose', SystemDisposePayload>
 
-/** 外层状态快照与结果共享的稳定上下文，不保存窗口、画布或 Unity 对象。 */
-export interface HostVisualizationContext {
-  sceneId: SceneId
-  topologyId: TopologyId
+/** 外层状态快照与结果共享的稳定上下文；平台总览上下文不建立假拓扑。 */
+type HostVisualizationContextBase = {
   actionId: ActionId | null
   contextRevision: number
   status: 'initializing' | 'ready' | 'error' | 'released'
 }
+
+export type BusinessHostVisualizationContext = HostVisualizationContextBase & { sceneId: SceneId; topologyId: TopologyId }
+export type OverviewHostVisualizationContext = HostVisualizationContextBase & { sceneId: OverviewSceneId; topologyId?: never }
+export type HostVisualizationContext = BusinessHostVisualizationContext | OverviewHostVisualizationContext
 
 /** 首版错误码与协议规范一一对应；调用方不能将 Error.message 原样回传。 */
 export type HostProtocolErrorCode =
@@ -169,16 +169,17 @@ export interface HostProtocolError {
   message: string
   stage: 'handshake' | 'validation' | 'preparing-topology' | 'switching-scene' | 'executing-action' | 'activating-topology' | 'disposing'
   recoverable: boolean
-  sceneId?: SceneId
+  sceneId?: ViewSceneId
   topologyId?: TopologyId
   actionId?: ActionId
   transitionId?: TransitionId
 }
 
-/** 准备就绪事件只暴露发布能力和固定场景目录，不暴露内部资源位置。 */
+/** 准备就绪事件保持九项业务目录不变，并用独立字段声明平台总览能力。 */
 export interface SystemReadyPayload {
   manifestVersion: string
   sceneIds: readonly SceneId[]
+  overviewSceneId: OverviewSceneId
   commandCapabilities: readonly HostCommandType[]
   eventCapabilities: readonly HostEventType[]
 }
@@ -199,14 +200,15 @@ export interface CommandResultPayload {
   error: HostProtocolError | null
 }
 
-/** 只有全部场景、动作和拓扑完成提交后才能发送的稳定视图上下文。 */
-export interface ViewChangedPayload {
-  sceneId: SceneId
-  topologyId: TopologyId
+/** 只有场景及其可选业务拓扑完成提交后才能发送的稳定视图上下文。 */
+export type ViewChangedPayload = {
   actionId: ActionId | null
   contextRevision: number
   transitionId?: TransitionId
-}
+} & (
+  | { sceneId: SceneId; topologyId: TopologyId }
+  | { sceneId: OverviewSceneId; topologyId?: never }
+)
 
 /** 节点双击事件只公开当前结构清单中的稳定节点编号。 */
 export interface TopologyNodeDoubleClickPayload {
@@ -406,18 +408,37 @@ function isRecord(value: unknown): value is UnknownRecord {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype)
 }
 
-/** 初始化载荷校验场景、拓扑、可选动作和清单版本，所有关系校验留给后续协调器。 */
+/** 初始化载荷先校验业务/总览目标互斥关系，再校验可选清单版本。 */
 function isSystemInitPayload(value: unknown): value is SystemInitPayload {
-  if (!isRecord(value) || !isSceneId(value.sceneId) || !isStableIdentifier(value.topologyId)) return false
-  if (value.actionId !== undefined && value.actionId !== null && !isStableIdentifier(value.actionId)) return false
+  if (!isRecord(value) || !hasOnlyOwnKeys(value, ['sceneId', 'topologyId', 'actionId', 'expectedManifestVersion'])) return false
+  if (!isHostViewTarget(value)) return false
   return value.expectedManifestVersion === undefined || isBoundedString(value.expectedManifestVersion)
 }
 
-/** 直接打开载荷不允许额外资源字段；上下文版本若存在必须可安全比较。 */
+/** 直接打开载荷复用同一目标校验；上下文版本若存在必须可安全比较。 */
 function isViewOpenPayload(value: unknown): value is ViewOpenPayload {
-  if (!isRecord(value) || !isSceneId(value.sceneId) || !isStableIdentifier(value.topologyId)) return false
-  if (value.actionId !== undefined && value.actionId !== null && !isStableIdentifier(value.actionId)) return false
+  if (!isRecord(value) || !hasOnlyOwnKeys(value, ['sceneId', 'topologyId', 'actionId', 'expectedContextRevision'])) return false
+  if (!isHostViewTarget(value)) return false
   return value.expectedContextRevision === undefined || isNonNegativeInteger(value.expectedContextRevision)
+}
+
+/** 业务场景强制拓扑，平台总览强制省略拓扑且动作只能省略或为 null。 */
+function isHostViewTarget(value: UnknownRecord): boolean {
+  if (isOverviewSceneId(value.sceneId)) {
+    return !Object.hasOwn(value, 'topologyId') && (value.actionId === undefined || value.actionId === null)
+  }
+  return isSceneId(value.sceneId) && isStableIdentifier(value.topologyId)
+    && (value.actionId === undefined || value.actionId === null || isStableIdentifier(value.actionId))
+}
+
+/** 在已校验视图载荷中收窄业务分支，调用方才能访问拓扑清单。 */
+export function isBusinessViewOpenPayload(value: ViewOpenPayload): value is BusinessViewOpenPayload {
+  return isSceneId(value.sceneId)
+}
+
+/** 在已校验稳定上下文中收窄业务分支，平台总览不会进入业务事件和状态投影。 */
+export function isBusinessHostVisualizationContext(value: HostVisualizationContext): value is BusinessHostVisualizationContext {
+  return isSceneId(value.sceneId)
 }
 
 /** 动作参数使用一层标量字典，避免父页面构造深层对象绕过动作白名单。 */
@@ -463,9 +484,9 @@ function isSystemDisposePayload(value: unknown): value is SystemDisposePayload {
   return isRecord(value) && (value.reason === undefined || isBoundedString(value.reason, HOST_PROTOCOL_LIMITS.descriptionLength))
 }
 
-/** ready 必须发布九个固定场景且命令、事件能力均来自协议白名单。 */
+/** ready 必须保持九项业务闭集，并独立声明唯一平台总览标识。 */
 function isSystemReadyPayload(value: unknown): value is SystemReadyPayload {
-  if (!isRecord(value) || !isBoundedString(value.manifestVersion)) return false
+  if (!isRecord(value) || !isBoundedString(value.manifestVersion) || value.overviewSceneId !== OVERVIEW_SCENE_ID) return false
   const sceneIds = value.sceneIds
   if (!Array.isArray(sceneIds) || sceneIds.length !== SCENE_IDS.length || !sceneIds.every(isSceneId)) return false
   if (new Set(sceneIds).size !== SCENE_IDS.length || !SCENE_IDS.every((sceneId) => sceneIds.includes(sceneId))) return false
@@ -488,9 +509,11 @@ function isCommandResultPayload(value: unknown): value is CommandResultPayload {
   return (value.status === 'failed' || value.status === 'superseded') && isHostProtocolError(value.error)
 }
 
-/** 视图变更必须引用固定场景和稳定拓扑，动作可明确为空。 */
+/** 视图变更必须使用已提交的业务或平台总览上下文形态。 */
 function isViewChangedPayload(value: unknown): value is ViewChangedPayload {
-  return isRecord(value) && isSceneId(value.sceneId) && isStableIdentifier(value.topologyId) && (value.actionId === null || isStableIdentifier(value.actionId)) && isNonNegativeInteger(value.contextRevision) && (value.transitionId === undefined || isStableIdentifier(value.transitionId))
+  if (!isRecord(value) || !hasOnlyOwnKeys(value, ['sceneId', 'topologyId', 'actionId', 'contextRevision', 'transitionId'])) return false
+  if (!isHostViewTarget(value) || value.actionId === undefined || !isNonNegativeInteger(value.contextRevision)) return false
+  return value.transitionId === undefined || isStableIdentifier(value.transitionId)
 }
 
 /** 双击事件只允许三个结构标识，任何旧设备编号或附加映射字段都会被拒绝。 */
@@ -513,14 +536,16 @@ function isSystemErrorPayload(value: unknown): value is SystemErrorPayload {
   return isRecord(value) && isHostProtocolError(value.error)
 }
 
-/** 稳定上下文不能省略场景、拓扑和版本；动作必须显式为空或稳定动作标识。 */
+/** 稳定上下文必须精确满足业务或平台总览形态，平台总览不能残留 topologyId 属性。 */
 function isHostVisualizationContext(value: unknown): value is HostVisualizationContext {
-  return isRecord(value) && isSceneId(value.sceneId) && isStableIdentifier(value.topologyId) && (value.actionId === null || isStableIdentifier(value.actionId)) && isNonNegativeInteger(value.contextRevision) && ['initializing', 'ready', 'error', 'released'].includes(String(value.status))
+  if (!isRecord(value) || !hasOnlyOwnKeys(value, ['sceneId', 'topologyId', 'actionId', 'contextRevision', 'status'])) return false
+  if (!isHostViewTarget(value) || value.actionId === undefined || !isNonNegativeInteger(value.contextRevision)) return false
+  return ['initializing', 'ready', 'error', 'released'].includes(String(value.status))
 }
 
 /** 错误校验只允许规范列出的代码与阶段，且可选关联字段都必须是稳定标识。 */
 function isHostProtocolError(value: unknown): value is HostProtocolError {
-  return isRecord(value) && isHostProtocolErrorCode(value.code) && isBoundedString(value.message, HOST_PROTOCOL_LIMITS.descriptionLength) && ['handshake', 'validation', 'preparing-topology', 'switching-scene', 'executing-action', 'activating-topology', 'disposing'].includes(String(value.stage)) && typeof value.recoverable === 'boolean' && (value.sceneId === undefined || isSceneId(value.sceneId)) && (value.topologyId === undefined || isStableIdentifier(value.topologyId)) && (value.actionId === undefined || isStableIdentifier(value.actionId)) && (value.transitionId === undefined || isStableIdentifier(value.transitionId))
+  return isRecord(value) && isHostProtocolErrorCode(value.code) && isBoundedString(value.message, HOST_PROTOCOL_LIMITS.descriptionLength) && ['handshake', 'validation', 'preparing-topology', 'switching-scene', 'executing-action', 'activating-topology', 'disposing'].includes(String(value.stage)) && typeof value.recoverable === 'boolean' && (value.sceneId === undefined || isViewSceneId(value.sceneId)) && (value.topologyId === undefined || isStableIdentifier(value.topologyId)) && (value.actionId === undefined || isStableIdentifier(value.actionId)) && (value.transitionId === undefined || isStableIdentifier(value.transitionId))
 }
 
 /** 首版错误码集合集中在此处，避免桥接各处以任意字符串拼装错误。 */

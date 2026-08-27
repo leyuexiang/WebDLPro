@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { SCENE_IDS, toSessionId } from '@/config/scene-topology/identifiers'
+import { OVERVIEW_SCENE_ID, SCENE_IDS, toSessionId } from '@/config/scene-topology/identifiers'
 import { createHostBridgeStartup, HostBridge } from '@/host-bridge/host-bridge'
 import { HOST_PROTOCOL_CHANNEL, HOST_PROTOCOL_VERSION, type HostEventMessage } from '@/host-bridge/host-protocol'
 import { WindowMessageRouter } from '@/host-bridge/message-router'
@@ -95,6 +95,7 @@ describe('外层桥安全边界', () => {
       payload: {
         manifestVersion: '2026.08.04.1',
         sceneIds: SCENE_IDS,
+        overviewSceneId: OVERVIEW_SCENE_ID,
         commandCapabilities: ['system.init', 'state.get'],
         eventCapabilities: ['system.ack', 'system.error'],
       },

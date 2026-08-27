@@ -125,7 +125,8 @@ function handleSelectNode(processNodeId: string): void {
     .map((edge) => edge.edgeId)
   const snapshot = facade.getSnapshot()
   // 过期 Canvas 回调不得污染新场景或新拓扑；等待态、切换态和已释放态同样在这里被阻断。
-  if (snapshot.runtimeStatus !== 'ready' || snapshot.stableContext?.sceneId !== activeTopology.sceneId || snapshot.stableContext.topologyId !== activeTopology.topologyId) return
+  const context = snapshot.stableContext
+  if (snapshot.runtimeStatus !== 'ready' || !context || !('topologyId' in context) || context.sceneId !== activeTopology.sceneId || context.topologyId !== activeTopology.topologyId) return
   if (snapshot.selectedNodeIds.length === 1 && snapshot.selectedNodeIds[0] === nodeId && snapshot.selectedRouteIds.length === routeIds.length && snapshot.selectedRouteIds.every((routeId) => routeIds.includes(routeId))) return
 
   const result = facade.submit({
@@ -157,7 +158,8 @@ function handleClearSelection(): void {
   if (!runtime || !activeTopology || !facade) return
 
   const snapshot = facade.getSnapshot()
-  if (snapshot.runtimeStatus !== 'ready' || snapshot.stableContext?.sceneId !== activeTopology.sceneId || snapshot.stableContext.topologyId !== activeTopology.topologyId) return
+  const context = snapshot.stableContext
+  if (snapshot.runtimeStatus !== 'ready' || !context || !('topologyId' in context) || context.sceneId !== activeTopology.sceneId || context.topologyId !== activeTopology.topologyId) return
   const hasTwoDimensionalSelection = snapshot.selectedNodeIds.length > 0 || snapshot.selectedRouteIds.length > 0
   if (hasTwoDimensionalSelection) {
     const result = facade.submit({

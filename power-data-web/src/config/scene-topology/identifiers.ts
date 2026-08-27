@@ -25,6 +25,10 @@ const sceneIdValues = [
 
 /** 固定场景值与品牌共同保证原始字符串、错误场景和其他标识类型均不可直接替换。 */
 export type SceneId = (typeof sceneIdValues)[number] & StableIdentifier<'scene'>
+/** 平台总览是独立视图场景，不属于九项业务场景闭集，也不参与业务清单拓扑校验。 */
+export type OverviewSceneId = 'overview' & StableIdentifier<'overview-scene'>
+/** 所有可由 system.init/view.open 打开的场景联合；业务清单仍只接受 SceneId。 */
+export type ViewSceneId = SceneId | OverviewSceneId
 export type TopologyId = StableIdentifier<'topology'>
 export type ActionId = StableIdentifier<'action'>
 export type NodeId = StableIdentifier<'topology-node'>
@@ -43,6 +47,9 @@ export type StepId = StableIdentifier<'step'>
 export type RouteId = StableIdentifier<'route'>
 export type UnitySceneKey = StableIdentifier<'unity-scene-key'>
 export type UnityRuntimeKey = StableIdentifier<'unity-runtime-key'>
+
+/** 固定平台总览标识独立导出，禁止调用方将其追加到 SCENE_IDS。 */
+export const OVERVIEW_SCENE_ID = 'overview' as OverviewSceneId
 
 /** 仅导出完成品牌转换的固定场景数组，组件不应自行复制或排序场景目录。 */
 export const SCENE_IDS: readonly SceneId[] = sceneIdValues.map((value) => value as SceneId)
@@ -103,6 +110,27 @@ export function toSceneId(value: string): SceneId {
 /** 用于不可信外部输入的非抛出式场景判断，成功后可安全窄化为品牌场景标识。 */
 export function isSceneId(value: unknown): value is SceneId {
   return typeof value === 'string' && sceneIdValues.includes(value as (typeof sceneIdValues)[number])
+}
+
+/** 平台总览只接受唯一固定值，不能用标题、别名或业务场景标识替代。 */
+export function isOverviewSceneId(value: unknown): value is OverviewSceneId {
+  return value === OVERVIEW_SCENE_ID
+}
+
+/** system.init/view.open 与 Unity 场景事件共用的完整视图场景守卫。 */
+export function isViewSceneId(value: unknown): value is ViewSceneId {
+  return isSceneId(value) || isOverviewSceneId(value)
+}
+
+/** 在已验证的视图场景联合中收窄为九项业务场景，供需要拓扑清单的调用方使用。 */
+export function isBusinessViewSceneId(value: ViewSceneId): value is SceneId {
+  return isSceneId(value)
+}
+
+/** 将已验证的业务或平台总览字符串转换为视图场景标识。 */
+export function toViewSceneId(value: string): ViewSceneId {
+  if (isOverviewSceneId(value)) return OVERVIEW_SCENE_ID
+  return toSceneId(value)
 }
 
 /** 以下工厂函数分别创建严格隔离的稳定标识。 */

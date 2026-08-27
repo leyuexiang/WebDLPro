@@ -48,7 +48,7 @@ export class UnityObjectSelectionCoordinator {
     const snapshot = this.facade.getSnapshot()
     const context = snapshot.stableContext
     const activeTopology = this.topologyRuntime.getActiveTopology()
-    if (!context || snapshot.runtimeStatus !== 'ready' || !activeTopology) {
+    if (!context || !('topologyId' in context) || snapshot.runtimeStatus !== 'ready' || !activeTopology) {
       this.recordDiagnostic('unity.selection.context.unavailable', correlationId)
       return undefined
     }
@@ -130,7 +130,7 @@ export class UnityObjectSelectionCoordinator {
     const snapshot = this.facade.getSnapshot()
     const context = snapshot.stableContext
     const activeTopology = this.topologyRuntime.getActiveTopology()
-    if (!context || snapshot.runtimeStatus !== 'ready' || !activeTopology) {
+    if (!context || !('topologyId' in context) || snapshot.runtimeStatus !== 'ready' || !activeTopology) {
       this.recordDiagnostic('unity.selection-clear.context.unavailable', correlationId)
       return false
     }

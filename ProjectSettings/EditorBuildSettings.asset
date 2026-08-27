@@ -9,6 +9,9 @@ EditorBuildSettings:
     path: Assets/Scenes/Bootstrap.unity
     guid: 03c5f7021e314494ab7ed633133aca50
   - enabled: 1
+    path: Assets/Scenes/Overview/Overview.unity
+    guid: 4120e7085a07bf641baf3261e6bc1102
+  - enabled: 1
     path: Assets/Scenes/Business/CoalPower.unity
     guid: 1f8e1bd581131d448b618f21597ed68a
   - enabled: 1

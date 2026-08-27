@@ -1,12 +1,13 @@
+import { isOverviewSceneId } from '@/config/scene-topology/identifiers'
 import type {
   ActionId,
   NodeId,
   RouteId,
   SceneActivationId,
-  SceneId,
   SceneNodeId,
   TopologyId,
   TransitionId,
+  ViewSceneId,
 } from '@/config/scene-topology/identifiers'
 import type {
   VisualizationDiagnostic,
@@ -28,8 +29,8 @@ export type VisualizationDomainCommand =
   | {
       type: 'transition.begin'
       transitionId: TransitionId
-      sceneId: SceneId
-      topologyId: TopologyId
+      sceneId: ViewSceneId
+      topologyId: TopologyId | null
       actionId: ActionId | null
       expectedContextRevision?: number
       /** 补偿恢复时即使逻辑稳定场景相同，也必须要求 Unity 重新确认物理场景。 */
@@ -39,7 +40,7 @@ export type VisualizationDomainCommand =
   | {
       type: 'unity.load-progress.reported'
       transitionId: TransitionId
-      sceneId: SceneId
+      sceneId: ViewSceneId
       stageCode: VisualizationSceneLoadStage
       progress: number
     }
@@ -47,8 +48,8 @@ export type VisualizationDomainCommand =
   | {
       type: 'transition.commit'
       transitionId: TransitionId
-      sceneId: SceneId
-      topologyId: TopologyId
+      sceneId: ViewSceneId
+      topologyId: TopologyId | null
       actionId: ActionId | null
       /** 真实 Unity 场景实例标识；同场景拓扑切换沿用上一个稳定上下文的值。 */
       sceneActivationId?: SceneActivationId | null
@@ -110,7 +111,7 @@ export interface VisualizationCoordinatorStatePort {
   /** 与稳定上下文绑定的真实 Unity 场景实例；旧测试替身缺失时视为不可证明。 */
   readonly sceneActivationId?: SceneActivationId | null
   readonly activeTransitionId: TransitionId | null
-  readonly targetSceneId: SceneId | null
+  readonly targetSceneId: ViewSceneId | null
   readonly targetTopologyId: TopologyId | null
   readonly targetActionId: ActionId | null
   readonly runtimeStatus: VisualizationRuntimeStatus
@@ -125,8 +126,8 @@ export interface VisualizationCoordinatorStatePort {
   readonly recentTransitionSummaries?: readonly VisualizationTransitionSummary[]
   beginTransition(
     transitionId: TransitionId,
-    sceneId: SceneId,
-    topologyId: TopologyId,
+    sceneId: ViewSceneId,
+    topologyId: TopologyId | null,
     actionId: ActionId | null,
     forceSceneSwitch?: boolean,
   ): void
@@ -135,8 +136,8 @@ export interface VisualizationCoordinatorStatePort {
   setSceneLoadProgress(progress: VisualizationSceneLoadProgress | null): void
   commitStableContext(
     transitionId: TransitionId,
-    sceneId: SceneId,
-    topologyId: TopologyId,
+    sceneId: ViewSceneId,
+    topologyId: TopologyId | null,
     actionId: ActionId | null,
     sceneActivationId?: SceneActivationId | null,
   ): boolean
@@ -163,7 +164,7 @@ export interface VisualizationCoordinatorSnapshot {
   /** 当前稳定 Unity 物理实例标识；缺失时对象选择协调器会安全拒绝。 */
   sceneActivationId?: SceneActivationId | null
   activeTransitionId: TransitionId | null
-  targetSceneId: SceneId | null
+  targetSceneId: ViewSceneId | null
   targetTopologyId: TopologyId | null
   targetActionId: ActionId | null
   runtimeStatus: VisualizationRuntimeStatus
@@ -253,6 +254,10 @@ export class VisualizationCoordinator {
     const currentRevision = this.state.stableContext?.contextRevision ?? 0
     if (command.expectedContextRevision !== undefined && command.expectedContextRevision !== currentRevision) {
       return this.rejected('context.revision.conflict', 'validation', '调用方期望的上下文版本与当前稳定版本不一致。', true)
+    }
+    const targetsOverview = isOverviewSceneId(command.sceneId)
+    if ((targetsOverview && (command.topologyId !== null || command.actionId !== null)) || (!targetsOverview && command.topologyId === null)) {
+      return this.rejected('transition.target.mismatch', 'validation', '业务场景与平台总览的拓扑、动作目标形态不一致。', true)
     }
 
     if (
@@ -344,8 +349,14 @@ export class VisualizationCoordinator {
     ) {
       return this.rejected('transition.target.mismatch', 'transition', '提交目标与当前事务准备目标不一致。', true)
     }
-    if (this.state.unityStatus !== 'ready' || this.state.topologyStatus !== 'ready') {
-      return this.rejected('transition.subsystems.not-ready', 'transition', 'Unity 与拓扑尚未同时就绪，不能提交稳定上下文。', true)
+    const targetsOverview = isOverviewSceneId(command.sceneId)
+    const topologyReady = targetsOverview
+      ? this.state.topologyStatus === 'idle'
+      : this.state.topologyStatus === 'ready'
+    if (this.state.unityStatus !== 'ready' || !topologyReady) {
+      return this.rejected('transition.subsystems.not-ready', 'transition', targetsOverview
+        ? 'Unity 尚未就绪或拓扑尚未进入空闲态，不能提交平台总览。'
+        : 'Unity 与拓扑尚未同时就绪，不能提交稳定上下文。', true)
     }
 
     const committed = this.state.commitStableContext(
@@ -390,8 +401,8 @@ export class VisualizationCoordinator {
 
   /** 选择只在稳定可操作状态写入；切换遮罩期间的点击事件不会污染旧稳定上下文。 */
   private replaceSelection(command: Extract<VisualizationDomainCommand, { type: 'selection.replace' }>): VisualizationCoordinatorResult {
-    if (this.state.runtimeStatus !== 'ready' || !this.state.stableContext) {
-      return this.rejected('runtime.not-ready', 'selection', '当前视图尚未进入稳定可操作状态。', true)
+    if (this.state.runtimeStatus !== 'ready' || !this.state.stableContext || isOverviewSceneId(this.state.stableContext.sceneId)) {
+      return this.rejected('runtime.not-ready', 'selection', '当前业务拓扑尚未进入稳定可操作状态。', true)
     }
 
     this.state.setSelection(

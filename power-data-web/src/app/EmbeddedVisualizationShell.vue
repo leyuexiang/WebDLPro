@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, provide, ref, shallowRef, watch } from 'vue'
 import { readDeploymentConfiguration } from '@/config/deployment/deployment-config'
-import { toSceneId, toTransitionId } from '@/config/scene-topology/identifiers'
+import { isOverviewSceneId, toTransitionId, toViewSceneId } from '@/config/scene-topology/identifiers'
 import {
   createContainerTooSmallReason,
   createEmbeddedShellCorrelationId,
@@ -146,6 +146,11 @@ const transitionOverlay = computed(() => getVisualizationTransitionOverlayState(
   targetTopologyId: visualizationStore.targetTopologyId,
   runtimeStatus: visualizationStore.runtimeStatus,
 }))
+/** 仅已提交的平台总览上下文控制布局；进行中目标不得提前隐藏业务拓扑。 */
+const overviewActive = computed(() => (
+  visualizationStore.runtimeStatus === 'ready'
+  && Boolean(visualizationStore.stableContext && isOverviewSceneId(visualizationStore.stableContext.sceneId))
+))
 
 /**
  * 启动遮罩直接读取唯一宿主控制器的生命周期，并与协调器的稳定上下文合并判断。
@@ -167,6 +172,7 @@ const visualizationMaskVisible = computed(() => {
 const drilldownEnabled = computed(() => (
   runtimeHostStatus.value === 'ready'
   && visualizationStore.hasStableContext
+  && !overviewActive.value
   && !transitionOverlay.value.visible
 ))
 
@@ -412,7 +418,8 @@ function startHostRuntimeCompositionIfReady(): void {
   const registry = manifestState.value.status === 'ready' ? manifestState.value.registry : undefined
   const runtime = topologyRuntime.value
   const runtimeHost = getRuntimeHostController()
-  if (!configuration || !manifest || !registry || !runtime || !runtimeHost || runtimeHost.status.value !== 'ready') return
+  const unitySceneMappingVersion = sceneBaseline.value.bundle?.runtime?.sceneMappingVersion
+  if (!configuration || !manifest || !registry || !runtime || !runtimeHost || !unitySceneMappingVersion || runtimeHost.status.value !== 'ready') return
 
   const bridge = hostBridge
   if (!bridge || hostBridgeStartup?.status !== 'ready') return
@@ -429,6 +436,7 @@ function startHostRuntimeCompositionIfReady(): void {
     runtime,
     new VisualizationRuntimeViewOpenPort(runtimeHost),
     visualizationCoordinatorFacade,
+    unitySceneMappingVersion,
     undefined,
     // 失败回退或超时补偿会产生新的 Unity 物理实例；无需等待平台重推，直接从有限权威快照重投影。
     (sceneActivationId) => deviceStatesUpdate.resynchronizeLatestSnapshot(sceneActivationId),
@@ -482,7 +490,7 @@ function startHostRuntimeCompositionIfReady(): void {
     visualizationCoordinatorFacade.submit({
       type: 'unity.load-progress.reported',
       transitionId: toTransitionId(payload.transitionId),
-      sceneId: toSceneId(payload.sceneId),
+      sceneId: toViewSceneId(payload.sceneId),
       stageCode: payload.stageCode,
       progress: payload.progress,
     })
@@ -557,7 +565,7 @@ onBeforeUnmount(() => {
     <!-- Unity 启动登记与正式注册表均通过后才创建两类运行时；二者任一缺失都不会把旧燃气拓扑传给画布。 -->
     <div
       v-else-if="sceneBaseline.bundle && manifestState.status === 'ready'"
-      class="embedded-visualization-shell__content"
+      :class="['embedded-visualization-shell__content', { 'embedded-visualization-shell__content--overview': overviewActive }]"
       :aria-busy="visualizationMaskVisible ? 'true' : 'false'"
     >
       <VisualizationRuntimeHost ref="visualizationRuntimeHost" v-slot="{ status }">
@@ -594,11 +602,13 @@ onBeforeUnmount(() => {
         </section>
 
         <!-- 下半区固定取得可用高度的一半，并始终复用一个画布；它只接受正式原子清单运行时的激活结果，不以燃气配置回退猜测当前拓扑。 -->
-        <section
-          class="embedded-visualization-shell__topology"
-          aria-label="二维拓扑容器"
-          :inert="visualizationMaskVisible"
-        >
+          <section
+            class="embedded-visualization-shell__topology"
+            aria-label="二维拓扑容器"
+            v-show="!overviewActive"
+            :inert="visualizationMaskVisible || overviewActive"
+            :aria-hidden="overviewActive ? 'true' : 'false'"
+          >
           <ManifestTopologyRuntimePanel
             :registry="manifestState.registry"
             :drilldown-enabled="drilldownEnabled"
@@ -667,6 +677,18 @@ onBeforeUnmount(() => {
   gap: 1px;
   /* 两侧留白不是业务容器，统一使用三维区的纯黑基底，避免拓扑青色背景扩展到未占用区域。 */
   background: #020617;
+}
+
+.embedded-visualization-shell__content--overview {
+  grid-template-rows: minmax(0, 1fr) 0;
+  gap: 0;
+}
+
+/* 平台总览只改变已提交稳定上下文对应的布局，不重建 Unity iframe 或拓扑 Canvas。 */
+.embedded-visualization-shell__content--overview .embedded-visualization-shell__scene :deep(.process-scene--reserved) {
+  inline-size: 100%;
+  block-size: 100%;
+  aspect-ratio: auto;
 }
 
 /*
