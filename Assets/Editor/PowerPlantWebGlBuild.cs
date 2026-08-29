@@ -70,21 +70,21 @@ public static class PowerPlantWebGlBuild
     /// 兼容既有“高亮流程”命令行入口：该入口语义固定为开发构建，
     /// 便于保留调试符号和开发诊断；正式发布必须改用 BuildProductionWebGl。
     /// </summary>
-    [MenuItem("Tools/Power Plant/WebGL/Build Highlight Flow WebGL")]
+    [MenuItem("Tools/WebDLPro/WebGL/构建高亮流程开发包")]
     public static void BuildHighlightFlowWebGl()
     {
         BuildDevelopmentWebGl();
     }
 
     /// <summary>构建开发 WebGL 包：仅此入口显式启用开发模式，用于本地排错与测试。</summary>
-    [MenuItem("Tools/Power Plant/WebGL/Build Development WebGL")]
+    [MenuItem("Tools/WebDLPro/WebGL/构建开发包")]
     public static void BuildDevelopmentWebGl()
     {
         BuildWebGl(DevelopmentOutputPath, true, ResolveReleaseId());
     }
 
     /// <summary>构建正式 WebGL 包：不附加开发模式，作为发布流水线的唯一正式入口。</summary>
-    [MenuItem("Tools/Power Plant/WebGL/Build Production WebGL")]
+    [MenuItem("Tools/WebDLPro/WebGL/构建正式包")]
     public static void BuildProductionWebGl()
     {
         string releaseId = ResolveReleaseId();

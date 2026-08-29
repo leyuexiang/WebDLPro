@@ -296,6 +296,7 @@ GameObject:
   - component: {fileID: 44485862}
   - component: {fileID: 44485861}
   - component: {fileID: 44485864}
+  - component: {fileID: 44485865}
   m_Layer: 0
   m_Name: PowerPlantRuntime
   m_TagString: Untagged
@@ -513,6 +514,36 @@ MonoBehaviour:
   _showPanel: 1
   _autoTestInterval: 2.5
   _bridgeInstanceId: local-demo-001
+--- !u!114 &44485865
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 44485860}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 44e2ca6ae5d981d4b9930eb6cbdbfe4a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _targets:
+  - {fileID: 1256348497}
+  _playOnStart: 1
+  _loop: 1
+  _pulseMaterial: {fileID: 2100000, guid: addb3ae0e8623da418cbbb27f87e88ab, type: 2}
+  _pulseColor: {r: 0, g: 1.2, b: 2.4, a: 1}
+  _pulsePeakOpacity: 0.52
+  _pulseRimPower: 2.4
+  _pulseRimIntensity: 2.2
+  _pulseStartScale: 0.18
+  _pulseEndScale: 2.4
+  _shieldMaterial: {fileID: 2100000, guid: 0d77aa8e488a15b4da992de4100f90b5, type: 2}
+  _shieldColor: {r: 0, g: 0.9, b: 2.6, a: 1}
+  _shieldOpacity: 0.34
+  _shieldRimPower: 2.1
+  _shieldRimIntensity: 1.8
+  _shieldScalePadding: 1.2
+  _duration: 1.8
 --- !u!1001 &155172868
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -3199,6 +3230,12 @@ PrefabInstance:
 --- !u!4 &1256348496 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: -8679921383154817045, guid: c9ea4ea805645d2418e956ec5b4bdb76,
+    type: 3}
+  m_PrefabInstance: {fileID: 1256348495}
+  m_PrefabAsset: {fileID: 0}
+--- !u!1 &1256348497 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 919132149155446097, guid: c9ea4ea805645d2418e956ec5b4bdb76,
     type: 3}
   m_PrefabInstance: {fileID: 1256348495}
   m_PrefabAsset: {fileID: 0}

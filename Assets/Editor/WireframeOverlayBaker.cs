@@ -25,7 +25,7 @@ public static class WireframeOverlayBaker
     private const int PackedCoordinateMax = (1 << (PackedCoordinateBits - 1)) - 1;
     private const int PackedCoordinateMask = (1 << PackedCoordinateBits) - 1;
 
-    [MenuItem("Tools/Power Plant/Bake Wireframe Overlay (选中对象)")]
+    [MenuItem("Tools/WebDLPro/资源烘焙/线框/烘焙选中对象")]
     public static void BakeSelection()
     {
         GameObject[] selection = Selection.gameObjects;
@@ -49,7 +49,7 @@ public static class WireframeOverlayBaker
     /// <summary>
     /// 打开线框烘焙设置窗口。角度设置独立于已生成资产；只有下一次手动烘焙才会应用新值。
     /// </summary>
-    [MenuItem("Tools/Power Plant/线框烘焙设置")]
+    [MenuItem("Tools/WebDLPro/资源烘焙/线框/烘焙设置")]
     private static void OpenBakeSettings()
     {
         WireframeOverlayBakeSettingsWindow.Open();
@@ -72,7 +72,7 @@ public static class WireframeOverlayBaker
                 continue;
             }
 
-            string assetPath = $"{OutputDirectory}/{BuildAssetFileName(source)}";
+            string assetPath = GetWireframeAssetPath(source);
             Stopwatch buildStopwatch = Stopwatch.StartNew();
             Mesh wireframe = BuildWireframeMesh(source);
             buildStopwatch.Stop();
@@ -456,6 +456,19 @@ public static class WireframeOverlayBaker
     /// 输出文件名带上源模型文件前缀。不同 FBX 内部网格常常同名（例如燃气与燃煤的“低中高压汽轮机”），
     /// 只用网格名会让后烘焙的结果覆盖前一个。
     /// </summary>
+    /// <summary>
+    /// 根据源网格计算线框资产路径。烘焙器和全息管理器共用该规则，避免编辑器工具与烘焙结果发生命名漂移。
+    /// </summary>
+    public static string GetWireframeAssetPath(Mesh source)
+    {
+        if (source == null)
+        {
+            return string.Empty;
+        }
+
+        return $"{OutputDirectory}/{BuildAssetFileName(source)}";
+    }
+
     private static string BuildAssetFileName(Mesh source)
     {
         string sourceAssetPath = AssetDatabase.GetAssetPath(source);

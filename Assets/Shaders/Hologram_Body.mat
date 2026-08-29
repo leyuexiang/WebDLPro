@@ -25,10 +25,11 @@ Material:
     m_TexEnvs: []
     m_Ints: []
     m_Floats:
-    - _Opacity: 0.177
-    - _RimIntensity: 1.5
-    - _RimPower: 2.6
+    - _Opacity: 0.098
+    - _RimIntensity: 4
+    - _RimPower: 1.7
     m_Colors:
-    - _BaseColor: {r: 0.18, g: 0.55, b: 0.95, a: 1}
-    - _RimColor: {r: 0.5, g: 0.88, b: 1, a: 1}
+    - _BaseColor: {r: 0.18039213, g: 0.25517523, b: 0.9490196, a: 1}
+    - _BreathingParams: {r: 0, g: 0, b: 0, a: 0}
+    - _RimColor: {r: 0.5019608, g: 0.8941042, b: 1, a: 1}
   m_BuildTextureStacks: []
