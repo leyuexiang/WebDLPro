@@ -1,0 +1,131 @@
+using System;
+using UnityEngine;
+
+/// <summary>
+/// WaiKeHeBing 的三维气流体积控制器。
+/// 体积网格的横截面由多组低面数环形采样组成，网格边界在外壳内侧，
+/// 流动方向和颜色由现有管道流动材质控制；运行时只更新材质属性块，不创建网格或材质实例。
+/// </summary>
+[DisallowMultipleComponent]
+public sealed class WaiKeHeBingGasVolumeController : MonoBehaviour
+{
+    private static readonly int FlowSpeedPropertyId = Shader.PropertyToID("_FlowSpeed");
+    private static readonly int FlowColorPropertyId = Shader.PropertyToID("_FlowColor");
+    private static readonly int FlowIntensityPropertyId = Shader.PropertyToID("_FlowIntensity");
+    private static readonly int FlowDirectionPropertyId = Shader.PropertyToID("_FlowDirectionOS");
+
+    [Header("流体体积")]
+    [Tooltip("蓝色进气体积网格。")]
+    [SerializeField] private Renderer _blueVolumeRenderer;
+    [Tooltip("红色排气体积网格。")]
+    [SerializeField] private Renderer _redVolumeRenderer;
+    [Tooltip("蓝色进气流速，正值配合局部 X 方向从设备入口流向出口。")]
+    [SerializeField] private float _blueFlowSpeed = 1.2f;
+    [Tooltip("红色排气流速，正值配合局部 X 方向从设备入口流向出口。")]
+    [SerializeField] private float _redFlowSpeed = 1.35f;
+    [Tooltip("流动亮度。")]
+    [SerializeField, Range(0f, 8f)] private float _flowIntensity = 2.2f;
+    [Tooltip("启用组件时是否播放流动。")]
+    [SerializeField] private bool _playOnEnable = true;
+
+    [Header("颜色")]
+    [Tooltip("蓝色进气体积和粒子叠加层颜色。")]
+    [SerializeField, ColorUsage(true, true)] private Color _blueFlowColor = new Color(0.02f, 0.35f, 1f, 1f);
+    [Tooltip("红色排气体积和粒子叠加层颜色。")]
+    [SerializeField, ColorUsage(true, true)] private Color _redFlowColor = new Color(1f, 0.03f, 0.01f, 1f);
+
+    [Header("粒子叠加")]
+    [Tooltip("蓝色流体体积内部的粒子叠加层；粒子从蓝色体积网格内部生成。")]
+    [SerializeField] private ParticleSystem _blueParticleOverlay;
+    [Tooltip("红色流体体积内部的粒子叠加层；粒子从红色体积网格内部生成。")]
+    [SerializeField] private ParticleSystem _redParticleOverlay;
+
+    private bool _isPlaying;
+    private MaterialPropertyBlock _propertyBlock;
+
+    /// <summary>
+    /// 配置预先生成的蓝色和红色体积网格；不复制共享材质，避免增加运行时内存。
+    /// </summary>
+    public void Configure(Renderer blueVolumeRenderer, Renderer redVolumeRenderer)
+    {
+        _blueVolumeRenderer = blueVolumeRenderer;
+        _redVolumeRenderer = redVolumeRenderer;
+        ApplyMaterialProperties();
+    }
+
+    public void Play()
+    {
+        _isPlaying = true;
+        SetParticlePlayback(true);
+    }
+
+    public void Pause()
+    {
+        _isPlaying = false;
+        SetParticlePlayback(false);
+    }
+
+    public void SetIntensity(float intensity)
+    {
+        _flowIntensity = Mathf.Clamp(intensity, 0f, 8f);
+        ApplyMaterialProperties();
+    }
+
+    private void OnEnable()
+    {
+        _isPlaying = _playOnEnable;
+        SetParticlePlayback(_isPlaying);
+        ApplyMaterialProperties();
+    }
+
+    private void LateUpdate()
+    {
+        if (_isPlaying)
+            ApplyMaterialProperties();
+    }
+
+    /// <summary>
+    /// 通过材质属性块覆盖流速和颜色，保留项目现有管道流动着色器的批处理兼容性。
+    /// _FlowDirectionOS 设为 X 正轴，体积网格 UV0 由编辑器生成并沿设备轴向递增。
+    /// </summary>
+    private void ApplyMaterialProperties()
+    {
+        _propertyBlock ??= new MaterialPropertyBlock();
+        ApplyMaterialProperties(_blueVolumeRenderer, _blueFlowColor, _blueFlowSpeed);
+        ApplyMaterialProperties(_redVolumeRenderer, _redFlowColor, _redFlowSpeed);
+    }
+
+    private void ApplyMaterialProperties(Renderer renderer, Color color, float speed)
+    {
+        if (renderer == null)
+            return;
+
+        _propertyBlock.Clear();
+        renderer.GetPropertyBlock(_propertyBlock);
+        _propertyBlock.SetColor(FlowColorPropertyId, color);
+        _propertyBlock.SetFloat(FlowSpeedPropertyId, _isPlaying ? speed : 0f);
+        _propertyBlock.SetFloat(FlowIntensityPropertyId, _flowIntensity);
+        _propertyBlock.SetVector(FlowDirectionPropertyId, new Vector4(1f, 0f, 0f, 0f));
+        renderer.SetPropertyBlock(_propertyBlock);
+    }
+
+    /// <summary>
+    /// 让体积与粒子叠加层共享播放状态；停止时清除粒子，避免重新播放时残留旧粒子。
+    /// </summary>
+    private void SetParticlePlayback(bool play)
+    {
+        SetParticlePlayback(_blueParticleOverlay, play);
+        SetParticlePlayback(_redParticleOverlay, play);
+    }
+
+    private static void SetParticlePlayback(ParticleSystem particleSystem, bool play)
+    {
+        if (particleSystem == null)
+            return;
+
+        if (play)
+            particleSystem.Play(true);
+        else
+            particleSystem.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+    }
+}

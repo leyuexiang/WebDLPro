@@ -10,7 +10,7 @@ public static class PowerPlantPipelineUvBaker
     private const string SceneRootName = "场景";
     private const string OutputDirectory = "Assets/Art/Generated/PipelineFlow";
 
-    [MenuItem("Tools/Power Plant/Bake Flow UVs")]
+    [MenuItem("Tools/WebDLPro/资源烘焙/管道流动 UV")]
     public static void BakeFlowUvs()
     {
         Transform sceneRoot = GameObject.Find(SceneRootName)?.transform;

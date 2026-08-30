@@ -18,7 +18,7 @@ public static class PowerPlantSceneSetup
     private const string CoalSceneRootName = "SceneRoot";
     private const string CoalEquipmentRootName = "Equipment";
 
-    [MenuItem("Tools/WebDLPro/Configure Current Power Plant Scene")]
+    [MenuItem("Tools/WebDLPro/场景配置/配置当前燃气发电场景")]
     private static void ConfigureCurrentScene()
     {
         Scene activeScene = SceneManager.GetActiveScene();
@@ -89,8 +89,8 @@ public static class PowerPlantSceneSetup
     /// PowerPlantProcessController 的属性面板（Inspector）中通过对象引用配置并保存。
     /// 该入口只负责创建桥接所需的空壳，避免再次把模型名称固化到编辑器代码中。
     /// </summary>
-    [MenuItem("Tools/WebDLPro/Configure Coal Power Scene (Inspector)")]
-    [MenuItem("Tools/WebDLPro/Configure Coal Power Scene")]
+    [MenuItem("Tools/WebDLPro/场景配置/准备燃煤发电场景（属性面板）")]
+    [MenuItem("Tools/WebDLPro/场景配置/准备燃煤发电场景")]
     private static void PrepareCoalSceneForInspector()
     {
         Scene activeScene = SceneManager.GetActiveScene();
@@ -199,7 +199,7 @@ public static class PowerPlantSceneSetup
         return material;
     }
 
-    [MenuItem("Tools/WebDLPro/Configure Current Power Plant Scene", true)]
+    [MenuItem("Tools/WebDLPro/场景配置/配置当前燃气发电场景", true)]
     private static bool ValidateConfigureCurrentScene()
     {
         return SceneManager.GetActiveScene().IsValid();

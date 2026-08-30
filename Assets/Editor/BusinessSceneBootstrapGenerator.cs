@@ -69,7 +69,7 @@ public static class BusinessSceneBootstrapGenerator
     /// 供菜单和无界面命令行共用的唯一生成入口。
     /// 首次运行会创建全部资产；后续运行只校验既有资产并重建构建设置，绝不重写场景文件。
     /// </summary>
-    [MenuItem("Tools/WebDLPro/场景/创建九个业务空场景与映射")]
+    [MenuItem("Tools/WebDLPro/场景配置/创建九个业务空场景与映射")]
     public static void CreateOrValidateBusinessSceneBootstrap()
     {
         bool allAssetsExist = AreAllGeneratedAssetsPresent();
