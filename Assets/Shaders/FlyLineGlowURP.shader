@@ -23,7 +23,8 @@ Shader "自定义/URP/飞线信号亮点"
             Tags { "LightMode" = "UniversalForward" }
             Blend One One
             ZWrite Off
-            ZTest LEqual
+            // 信号线即使穿过模型也必须可见；不写入深度，避免改变场景深度缓冲。
+            ZTest Always
             Cull Off
 
             HLSLPROGRAM
