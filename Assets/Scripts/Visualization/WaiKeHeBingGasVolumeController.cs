@@ -19,10 +19,14 @@ public sealed class WaiKeHeBingGasVolumeController : MonoBehaviour
     [SerializeField] private Renderer _blueVolumeRenderer;
     [Tooltip("红色排气体积网格。")]
     [SerializeField] private Renderer _redVolumeRenderer;
+    [Tooltip("橘色燃烧体积网格，用于覆盖 YuanTong/Tong 内部燃烧区域。")]
+    [SerializeField] private Renderer _orangeVolumeRenderer;
     [Tooltip("蓝色进气流速，正值配合局部 X 方向从设备入口流向出口。")]
     [SerializeField] private float _blueFlowSpeed = 1.2f;
     [Tooltip("红色排气流速，正值配合局部 X 方向从设备入口流向出口。")]
     [SerializeField] private float _redFlowSpeed = 1.35f;
+    [Tooltip("橘色燃烧体积流速；负值表示沿局部 X 轴反向流动，匹配燃烧段实际方向。")]
+    [SerializeField] private float _orangeFlowSpeed = -0.95f;
     [Tooltip("流动亮度。")]
     [SerializeField, Range(0f, 8f)] private float _flowIntensity = 2.2f;
     [Tooltip("启用组件时是否播放流动。")]
@@ -33,6 +37,8 @@ public sealed class WaiKeHeBingGasVolumeController : MonoBehaviour
     [SerializeField, ColorUsage(true, true)] private Color _blueFlowColor = new Color(0.02f, 0.35f, 1f, 1f);
     [Tooltip("红色排气体积和粒子叠加层颜色。")]
     [SerializeField, ColorUsage(true, true)] private Color _redFlowColor = new Color(1f, 0.03f, 0.01f, 1f);
+    [Tooltip("橘色燃烧体积颜色。")]
+    [SerializeField, ColorUsage(true, true)] private Color _orangeFlowColor = new Color(1.5f, 0.16f, 0.015f, 1f);
 
     [Header("粒子叠加")]
     [Tooltip("蓝色流体体积内部的粒子叠加层；粒子从蓝色体积网格内部生成。")]
@@ -50,6 +56,15 @@ public sealed class WaiKeHeBingGasVolumeController : MonoBehaviour
     {
         _blueVolumeRenderer = blueVolumeRenderer;
         _redVolumeRenderer = redVolumeRenderer;
+        ApplyMaterialProperties();
+    }
+
+    /// <summary>
+    /// 配置橘色燃烧体积；单独保留该入口，避免改变已有蓝红体积的调用方式。
+    /// </summary>
+    public void ConfigureOrangeVolume(Renderer orangeVolumeRenderer)
+    {
+        _orangeVolumeRenderer = orangeVolumeRenderer;
         ApplyMaterialProperties();
     }
 
@@ -93,6 +108,7 @@ public sealed class WaiKeHeBingGasVolumeController : MonoBehaviour
         _propertyBlock ??= new MaterialPropertyBlock();
         ApplyMaterialProperties(_blueVolumeRenderer, _blueFlowColor, _blueFlowSpeed);
         ApplyMaterialProperties(_redVolumeRenderer, _redFlowColor, _redFlowSpeed);
+        ApplyMaterialProperties(_orangeVolumeRenderer, _orangeFlowColor, _orangeFlowSpeed);
     }
 
     private void ApplyMaterialProperties(Renderer renderer, Color color, float speed)
