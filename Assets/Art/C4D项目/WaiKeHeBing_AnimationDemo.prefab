@@ -12810,7 +12810,17 @@ MonoBehaviour:
   _blueInternalFlow: {fileID: 1977079919091313368}
   _redInternalFlow: {fileID: 1460840672970296316}
   _orangeCombustionFlame: {fileID: 0}
-  _tongFlameJets: []
+  _tongFlameJets:
+  - {fileID: 385638375397867915}
+  - {fileID: 6378341596025173707}
+  - {fileID: 3278408924165397672}
+  - {fileID: 5340650292562866905}
+  - {fileID: 6901526541896301554}
+  - {fileID: 2107241929857151129}
+  - {fileID: 5909050766006426472}
+  - {fileID: 87077906491582382}
+  - {fileID: 7590953003515338900}
+  - {fileID: 3401813868800556543}
   _tongFlameEmissionRate: 42
   _blueInternalFlowConstraint: {fileID: 1977079919091313368}
   _redInternalFlowConstraint: {fileID: 1460840672970296316}
@@ -12825,7 +12835,7 @@ MonoBehaviour:
   _sectionPadding: 0.09
   _blueVolumeRenderer: {fileID: 2319071591865343001}
   _redVolumeRenderer: {fileID: 6113979052223838041}
-  _orangeVolumeRenderer: {fileID: 0}
+  _orangeVolumeRenderer: {fileID: 5046455023495931418}
   _blueFlowSpeed: 1.45
   _redFlowSpeed: 1.35
   _orangeFlowSpeed: -0.95
@@ -38337,6 +38347,11 @@ PrefabInstance:
       propertyPath: m_Name
       value: InitialFlame
       objectReference: {fileID: 0}
+    - target: {fileID: 1594618088173093783, guid: 527003514571e5e4f86f2afc23200fed,
+        type: 3}
+      propertyPath: playOnAwake
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 3342275176268676853, guid: 527003514571e5e4f86f2afc23200fed,
         type: 3}
       propertyPath: m_LocalPosition.x
@@ -38392,6 +38407,12 @@ PrefabInstance:
     m_AddedGameObjects: []
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: 527003514571e5e4f86f2afc23200fed, type: 3}
+--- !u!198 &2107241929857151129 stripped
+ParticleSystem:
+  m_CorrespondingSourceObject: {fileID: 1594618088173093783, guid: 527003514571e5e4f86f2afc23200fed,
+    type: 3}
+  m_PrefabInstance: {fileID: 801453735175385870}
+  m_PrefabAsset: {fileID: 0}
 --- !u!4 &2701439035981712891 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 3342275176268676853, guid: 527003514571e5e4f86f2afc23200fed,
@@ -38411,6 +38432,11 @@ PrefabInstance:
       propertyPath: m_Name
       value: InitialFlame
       objectReference: {fileID: 0}
+    - target: {fileID: 1594618088173093783, guid: 527003514571e5e4f86f2afc23200fed,
+        type: 3}
+      propertyPath: playOnAwake
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 3342275176268676853, guid: 527003514571e5e4f86f2afc23200fed,
         type: 3}
       propertyPath: m_LocalPosition.x
@@ -38466,6 +38492,12 @@ PrefabInstance:
     m_AddedGameObjects: []
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: 527003514571e5e4f86f2afc23200fed, type: 3}
+--- !u!198 &385638375397867915 stripped
+ParticleSystem:
+  m_CorrespondingSourceObject: {fileID: 1594618088173093783, guid: 527003514571e5e4f86f2afc23200fed,
+    type: 3}
+  m_PrefabInstance: {fileID: 1403760500812087836}
+  m_PrefabAsset: {fileID: 0}
 --- !u!4 &4402564595503906025 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 3342275176268676853, guid: 527003514571e5e4f86f2afc23200fed,
@@ -38485,6 +38517,11 @@ PrefabInstance:
       propertyPath: m_Name
       value: InitialFlame
       objectReference: {fileID: 0}
+    - target: {fileID: 1594618088173093783, guid: 527003514571e5e4f86f2afc23200fed,
+        type: 3}
+      propertyPath: playOnAwake
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 3342275176268676853, guid: 527003514571e5e4f86f2afc23200fed,
         type: 3}
       propertyPath: m_LocalPosition.x
@@ -38540,6 +38577,12 @@ PrefabInstance:
     m_AddedGameObjects: []
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: 527003514571e5e4f86f2afc23200fed, type: 3}
+--- !u!198 &87077906491582382 stripped
+ParticleSystem:
+  m_CorrespondingSourceObject: {fileID: 1594618088173093783, guid: 527003514571e5e4f86f2afc23200fed,
+    type: 3}
+  m_PrefabInstance: {fileID: 1663064486657877049}
+  m_PrefabAsset: {fileID: 0}
 --- !u!4 &4140569227462892236 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 3342275176268676853, guid: 527003514571e5e4f86f2afc23200fed,
@@ -38723,6 +38766,11 @@ PrefabInstance:
       propertyPath: m_Name
       value: InitialFlame
       objectReference: {fileID: 0}
+    - target: {fileID: 1594618088173093783, guid: 527003514571e5e4f86f2afc23200fed,
+        type: 3}
+      propertyPath: playOnAwake
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 3342275176268676853, guid: 527003514571e5e4f86f2afc23200fed,
         type: 3}
       propertyPath: m_LocalPosition.x
@@ -38784,6 +38832,12 @@ Transform:
     type: 3}
   m_PrefabInstance: {fileID: 4113074002671631976}
   m_PrefabAsset: {fileID: 0}
+--- !u!198 &3401813868800556543 stripped
+ParticleSystem:
+  m_CorrespondingSourceObject: {fileID: 1594618088173093783, guid: 527003514571e5e4f86f2afc23200fed,
+    type: 3}
+  m_PrefabInstance: {fileID: 4113074002671631976}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1001 &4277864633695543103
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -38796,6 +38850,11 @@ PrefabInstance:
         type: 3}
       propertyPath: m_Name
       value: InitialFlame
+      objectReference: {fileID: 0}
+    - target: {fileID: 1594618088173093783, guid: 527003514571e5e4f86f2afc23200fed,
+        type: 3}
+      propertyPath: playOnAwake
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 3342275176268676853, guid: 527003514571e5e4f86f2afc23200fed,
         type: 3}
@@ -38858,6 +38917,12 @@ Transform:
     type: 3}
   m_PrefabInstance: {fileID: 4277864633695543103}
   m_PrefabAsset: {fileID: 0}
+--- !u!198 &3278408924165397672 stripped
+ParticleSystem:
+  m_CorrespondingSourceObject: {fileID: 1594618088173093783, guid: 527003514571e5e4f86f2afc23200fed,
+    type: 3}
+  m_PrefabInstance: {fileID: 4277864633695543103}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1001 &4908944411043846399
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -38870,6 +38935,11 @@ PrefabInstance:
         type: 3}
       propertyPath: m_Name
       value: InitialFlame
+      objectReference: {fileID: 0}
+    - target: {fileID: 1594618088173093783, guid: 527003514571e5e4f86f2afc23200fed,
+        type: 3}
+      propertyPath: playOnAwake
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 3342275176268676853, guid: 527003514571e5e4f86f2afc23200fed,
         type: 3}
@@ -38926,6 +38996,12 @@ PrefabInstance:
     m_AddedGameObjects: []
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: 527003514571e5e4f86f2afc23200fed, type: 3}
+--- !u!198 &5909050766006426472 stripped
+ParticleSystem:
+  m_CorrespondingSourceObject: {fileID: 1594618088173093783, guid: 527003514571e5e4f86f2afc23200fed,
+    type: 3}
+  m_PrefabInstance: {fileID: 4908944411043846399}
+  m_PrefabAsset: {fileID: 0}
 --- !u!4 &7656743332624852490 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 3342275176268676853, guid: 527003514571e5e4f86f2afc23200fed,
@@ -38945,6 +39021,11 @@ PrefabInstance:
       propertyPath: m_Name
       value: InitialFlame
       objectReference: {fileID: 0}
+    - target: {fileID: 1594618088173093783, guid: 527003514571e5e4f86f2afc23200fed,
+        type: 3}
+      propertyPath: playOnAwake
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 3342275176268676853, guid: 527003514571e5e4f86f2afc23200fed,
         type: 3}
       propertyPath: m_LocalPosition.x
@@ -39000,6 +39081,12 @@ PrefabInstance:
     m_AddedGameObjects: []
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: 527003514571e5e4f86f2afc23200fed, type: 3}
+--- !u!198 &6901526541896301554 stripped
+ParticleSystem:
+  m_CorrespondingSourceObject: {fileID: 1594618088173093783, guid: 527003514571e5e4f86f2afc23200fed,
+    type: 3}
+  m_PrefabInstance: {fileID: 5324975912537618533}
+  m_PrefabAsset: {fileID: 0}
 --- !u!4 &7459149493377255056 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 3342275176268676853, guid: 527003514571e5e4f86f2afc23200fed,
@@ -39019,6 +39106,11 @@ PrefabInstance:
       propertyPath: m_Name
       value: InitialFlame
       objectReference: {fileID: 0}
+    - target: {fileID: 1594618088173093783, guid: 527003514571e5e4f86f2afc23200fed,
+        type: 3}
+      propertyPath: playOnAwake
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 3342275176268676853, guid: 527003514571e5e4f86f2afc23200fed,
         type: 3}
       propertyPath: m_LocalPosition.x
@@ -39074,6 +39166,12 @@ PrefabInstance:
     m_AddedGameObjects: []
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: 527003514571e5e4f86f2afc23200fed, type: 3}
+--- !u!198 &6378341596025173707 stripped
+ParticleSystem:
+  m_CorrespondingSourceObject: {fileID: 1594618088173093783, guid: 527003514571e5e4f86f2afc23200fed,
+    type: 3}
+  m_PrefabInstance: {fileID: 5667027313050907996}
+  m_PrefabAsset: {fileID: 0}
 --- !u!4 &6973673116787297193 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 3342275176268676853, guid: 527003514571e5e4f86f2afc23200fed,
@@ -39093,6 +39191,11 @@ PrefabInstance:
       propertyPath: m_Name
       value: InitialFlame
       objectReference: {fileID: 0}
+    - target: {fileID: 1594618088173093783, guid: 527003514571e5e4f86f2afc23200fed,
+        type: 3}
+      propertyPath: playOnAwake
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 3342275176268676853, guid: 527003514571e5e4f86f2afc23200fed,
         type: 3}
       propertyPath: m_LocalPosition.x
@@ -39148,6 +39251,12 @@ PrefabInstance:
     m_AddedGameObjects: []
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: 527003514571e5e4f86f2afc23200fed, type: 3}
+--- !u!198 &5340650292562866905 stripped
+ParticleSystem:
+  m_CorrespondingSourceObject: {fileID: 1594618088173093783, guid: 527003514571e5e4f86f2afc23200fed,
+    type: 3}
+  m_PrefabInstance: {fileID: 6646457178917171534}
+  m_PrefabAsset: {fileID: 0}
 --- !u!4 &8241253094255120315 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 3342275176268676853, guid: 527003514571e5e4f86f2afc23200fed,
@@ -39373,6 +39482,11 @@ PrefabInstance:
       propertyPath: m_Name
       value: InitialFlame
       objectReference: {fileID: 0}
+    - target: {fileID: 1594618088173093783, guid: 527003514571e5e4f86f2afc23200fed,
+        type: 3}
+      propertyPath: playOnAwake
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 3342275176268676853, guid: 527003514571e5e4f86f2afc23200fed,
         type: 3}
       propertyPath: m_LocalPosition.x
@@ -39431,6 +39545,12 @@ PrefabInstance:
 --- !u!4 &5844377824321248758 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 3342275176268676853, guid: 527003514571e5e4f86f2afc23200fed,
+    type: 3}
+  m_PrefabInstance: {fileID: 9185446831802229507}
+  m_PrefabAsset: {fileID: 0}
+--- !u!198 &7590953003515338900 stripped
+ParticleSystem:
+  m_CorrespondingSourceObject: {fileID: 1594618088173093783, guid: 527003514571e5e4f86f2afc23200fed,
     type: 3}
   m_PrefabInstance: {fileID: 9185446831802229507}
   m_PrefabAsset: {fileID: 0}
