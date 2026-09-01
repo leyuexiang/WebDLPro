@@ -44,7 +44,7 @@ Material:
     - _BumpScale: 1
     - _FlowContrast: 1.1
     - _FlowIntensity: 2.6
-    - _FlowSpeed: 1.45
+    - _FlowSpeed: 0
     - _FlowTiling: 1.15
     - _FlowWidth: 0.72
     - _Metallic: 0.76

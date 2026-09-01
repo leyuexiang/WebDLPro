@@ -22,8 +22,12 @@ public sealed class WaiKeHeBingGasFlowEffectController : MonoBehaviour
     [SerializeField] private ParticleSystem _blueInternalFlow;
     [Tooltip("模型内部红色排气粒子系统，可选；留空时仅播放外部排气火焰。")]
     [SerializeField] private ParticleSystem _redInternalFlow;
-    [Tooltip("燃烧段橙黄色火焰粒子系统，可选；用于表现燃烧室内部火焰。")]
+    [Tooltip("燃烧段橘黄色火焰粒子系统，可选；用于表现燃烧室内部火焰。")]
     [SerializeField] private ParticleSystem _orangeCombustionFlame;
+    [Tooltip("Tong 内部每个小筒对应的橘色火焰喷射粒子系统。")]
+    [SerializeField] private ParticleSystem[] _tongFlameJets = Array.Empty<ParticleSystem>();
+    [Tooltip("单个小筒在强度为 1 时的火焰发射率。")]
+    [SerializeField, Min(0f)] private float _tongFlameEmissionRate = 12f;
 
     [Header("内部截面约束")]
     [Tooltip("蓝色内部气流使用的粒子系统；粒子中心会被限制在椭圆截面内。")]
@@ -60,6 +64,26 @@ public sealed class WaiKeHeBingGasFlowEffectController : MonoBehaviour
         ParticleSystem redExhaustFlame,
         ParticleSystem blueInternalFlow,
         ParticleSystem redInternalFlow,
+        ParticleSystem orangeCombustionFlame,
+        ParticleSystem[] tongFlameJets)
+    {
+        _blueIntakeCloud = blueIntakeCloud;
+        _redExhaustFlame = redExhaustFlame;
+        _blueInternalFlow = blueInternalFlow;
+        _redInternalFlow = redInternalFlow;
+        _orangeCombustionFlame = orangeCombustionFlame;
+        _tongFlameJets = tongFlameJets ?? Array.Empty<ParticleSystem>();
+    }
+
+    /// <summary>
+    /// 保留现有五参数配置入口，已有场景工具只需继续配置公共气流对象；
+    /// Tong 火焰由单独入口绑定，避免破坏已有调用方。
+    /// </summary>
+    public void Configure(
+        ParticleSystem blueIntakeCloud,
+        ParticleSystem redExhaustFlame,
+        ParticleSystem blueInternalFlow,
+        ParticleSystem redInternalFlow,
         ParticleSystem orangeCombustionFlame)
     {
         _blueIntakeCloud = blueIntakeCloud;
@@ -67,6 +91,15 @@ public sealed class WaiKeHeBingGasFlowEffectController : MonoBehaviour
         _blueInternalFlow = blueInternalFlow;
         _redInternalFlow = redInternalFlow;
         _orangeCombustionFlame = orangeCombustionFlame;
+    }
+
+    /// <summary>
+    /// 单独配置 Tong 下的多组火焰喷射，运行时数组引用固定，不再进行层级搜索。
+    /// </summary>
+    public void ConfigureTongFlameJets(ParticleSystem[] tongFlameJets)
+    {
+        _tongFlameJets = tongFlameJets ?? Array.Empty<ParticleSystem>();
+        SetParticlePlayback(_tongFlameJets, _isPlaying);
     }
 
     /// <summary>
@@ -98,6 +131,7 @@ public sealed class WaiKeHeBingGasFlowEffectController : MonoBehaviour
         SetEmissionRate(_blueInternalFlow, clampedIntensity);
         SetEmissionRate(_redInternalFlow, clampedIntensity);
         SetEmissionRate(_orangeCombustionFlame, clampedIntensity);
+        SetEmissionRate(_tongFlameJets, clampedIntensity * _tongFlameEmissionRate);
     }
 
     private void OnEnable()
@@ -113,6 +147,7 @@ public sealed class WaiKeHeBingGasFlowEffectController : MonoBehaviour
         SetParticlePlayback(_blueInternalFlow, play);
         SetParticlePlayback(_redInternalFlow, play);
         SetParticlePlayback(_orangeCombustionFlame, play);
+        SetParticlePlayback(_tongFlameJets, play);
     }
 
     private void LateUpdate()
@@ -193,6 +228,15 @@ public sealed class WaiKeHeBingGasFlowEffectController : MonoBehaviour
             particleSystem.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
     }
 
+    private static void SetParticlePlayback(ParticleSystem[] particleSystems, bool play)
+    {
+        if (particleSystems == null)
+            return;
+
+        for (var i = 0; i < particleSystems.Length; i++)
+            SetParticlePlayback(particleSystems[i], play);
+    }
+
     private static void SetEmissionRate(ParticleSystem particleSystem, float intensity)
     {
         if (particleSystem == null)
@@ -202,5 +246,14 @@ public sealed class WaiKeHeBingGasFlowEffectController : MonoBehaviour
         var rate = emission.rateOverTime;
         rate.constant = intensity;
         emission.rateOverTime = rate;
+    }
+
+    private static void SetEmissionRate(ParticleSystem[] particleSystems, float emissionRate)
+    {
+        if (particleSystems == null)
+            return;
+
+        for (var i = 0; i < particleSystems.Length; i++)
+            SetEmissionRate(particleSystems[i], emissionRate);
     }
 }

@@ -20,7 +20,13 @@ namespace WebDLPro.Unity.Tests
         private const string CatalogAssetPath = "Assets/Configuration/BusinessSceneCatalog.asset";
         private const string OverviewCatalogAssetPath = "Assets/Configuration/OverviewSceneCatalog.asset";
         private const string BootstrapScenePath = "Assets/Scenes/Bootstrap.unity";
+
+        // 总览场景路径用于校验构建顺序、总览目录映射及九个建筑占位是否正确接线。
         private const string OverviewScenePath = "Assets/Scenes/Overview/Overview.unity";
+
+        // 合并外壳预制体与演示场景路径用于同时验证源预制体和场景实例的粒子排气配置。
+        private const string WaiKeHeBingPrefabPath = "Assets/Art/C4D项目/WaiKeHeBing_AnimationDemo.prefab";
+        private const string ShowTestScenePath = "Assets/Scenes/ShowTest/ShowTest.unity";
         private const string ExistingGasSceneGuid = "99c9720ab356a0642a771bea13969a05";
 
         private static readonly string[] SceneIds =
@@ -384,6 +390,31 @@ namespace WebDLPro.Unity.Tests
         }
 
         /// <summary>
+        /// 红色体积叠加粒子必须只由生命周期速度的本地负 Z 分量驱动火箭式尾焰方向。
+        /// 主模块起始速度会沿发射形状正向施加初速度；一旦保留正值，就会压过较小的负 Z 速度，
+        /// 导致尾气向设备内部倒灌。该测试同时检查预制体源和 ShowTest 场景实例，防止只修其中一处。
+        /// </summary>
+        [Test]
+        public void 合并外壳红色粒子叠加层仅沿负Z排气()
+        {
+            GameObject prefabRoot = AssetDatabase.LoadAssetAtPath<GameObject>(WaiKeHeBingPrefabPath);
+            Assert.That(prefabRoot, Is.Not.Null, "缺少合并外壳预制体，无法校验红色粒子叠加层。");
+            AssertRedParticleOverlayExhaustsThroughNegativeLocalZ(prefabRoot, "预制体源");
+
+            Scene showTestScene = EditorSceneManager.OpenScene(ShowTestScenePath, OpenSceneMode.Additive);
+            try
+            {
+                GameObject sceneRoot = FindRootGameObjectByName(showTestScene.GetRootGameObjects(), "WaiKeHeBing_AnimationDemo");
+                Assert.That(sceneRoot, Is.Not.Null, "ShowTest 场景缺少合并外壳实例，无法确认场景覆盖是否同步。");
+                AssertRedParticleOverlayExhaustsThroughNegativeLocalZ(sceneRoot, "ShowTest 场景实例");
+            }
+            finally
+            {
+                EditorSceneManager.CloseScene(showTestScene, true);
+            }
+        }
+
+        /// <summary>
         /// 测试程序集只依赖新运行时程序集，不能直接建立对旧桥接或燃气程序集的编译引用。
         /// 因此以已实例化组件的精确类型名核验场景保留内容，既不放宽实际资产检查，也不污染程序集边界。
         /// </summary>
@@ -416,6 +447,77 @@ namespace WebDLPro.Unity.Tests
                     {
                         return component;
                     }
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// 在指定根节点下读取体积控制器序列化引用，直接校验运行时真实使用的红色叠加粒子。
+        /// 校验不按对象名重新查找粒子系统，避免测试通过但控制器仍引用旧对象或错误层。
+        /// </summary>
+        private static void AssertRedParticleOverlayExhaustsThroughNegativeLocalZ(GameObject root, string context)
+        {
+            MonoBehaviour controller = FindComponentByTypeName(new[] { root }, "WaiKeHeBingGasVolumeController");
+            Assert.That(controller, Is.Not.Null, $"{context} 缺少 WaiKeHeBingGasVolumeController。");
+
+            SerializedProperty overlayProperty = new SerializedObject(controller).FindProperty("_redParticleOverlay");
+            Assert.That(overlayProperty, Is.Not.Null, $"{context} 控制器缺少 _redParticleOverlay 序列化字段。");
+            ParticleSystem redParticleOverlay = overlayProperty.objectReferenceValue as ParticleSystem;
+            Assert.That(redParticleOverlay, Is.Not.Null, $"{context} 未绑定红色粒子叠加层。");
+
+            ParticleSystem.MainModule main = redParticleOverlay.main;
+            ParticleSystem.MinMaxCurve startSpeed = main.startSpeed;
+            Assert.That(GetMaxCurveValue(startSpeed), Is.EqualTo(0f).Within(0.001f), $"{context} 的主模块起始速度必须为 0，不能沿形状正向发射。");
+            Assert.That(GetMaxCurveValue(main.startSize), Is.LessThanOrEqualTo(0.2f), $"{context} 的喷口粒子尺寸必须足够小，形成火焰团而不是团状雾。");
+            Assert.That(GetMinCurveValue(main.startLifetime), Is.GreaterThanOrEqualTo(0.6f), $"{context} 的生命周期必须支撑可见火焰尾迹。");
+
+            ParticleSystem.VelocityOverLifetimeModule velocity = redParticleOverlay.velocityOverLifetime;
+            Assert.That(velocity.enabled, Is.True, $"{context} 必须启用生命周期速度模块。");
+            Assert.That(GetMinCurveValue(velocity.z), Is.LessThanOrEqualTo(-12f), $"{context} 的 Z 速度下限必须形成高速发动机尾焰动势。");
+            Assert.That(GetMaxCurveValue(velocity.z), Is.LessThanOrEqualTo(-8f), $"{context} 的 Z 速度上限仍必须指向本地负 Z。");
+            Assert.That(Mathf.Abs(GetMaxCurveValue(velocity.x)), Is.LessThanOrEqualTo(0.8f), $"{context} 的 X 方向扩散只能辅助锥形尾焰展开，不能主导排气方向。");
+            Assert.That(Mathf.Abs(GetMaxCurveValue(velocity.y)), Is.LessThanOrEqualTo(0.8f), $"{context} 的 Y 方向扩散只能辅助锥形尾焰展开，不能主导排气方向。");
+
+            ParticleSystemRenderer overlayRenderer = redParticleOverlay.GetComponent<ParticleSystemRenderer>();
+            Assert.That(overlayRenderer, Is.Not.Null, $"{context} 缺少粒子渲染器。");
+            Assert.That(overlayRenderer.sharedMaterial, Is.Not.Null, $"{context} 必须绑定火焰材质。");
+            Assert.That(overlayRenderer.sharedMaterial.name, Is.EqualTo("Flames_B_mtl"), $"{context} 应使用火焰纹理材质而不是纯色流光材质。");
+            Assert.That(overlayRenderer.renderMode, Is.EqualTo(ParticleSystemRenderMode.Billboard), $"{context} 应使用 billboard（公告板）而不是速度拉伸，避免变成长条光带。");
+            Assert.That(overlayRenderer.velocityScale, Is.EqualTo(0f).Within(0.001f), $"{context} 的速度拉伸比例必须关闭。");
+        }
+
+        /// <summary>
+        /// 读取 MinMaxCurve（最小最大曲线）的有效上界；覆盖常量和双常量两种项目当前使用的序列化模式。
+        /// 非常量曲线不是本测试的目标，返回 curveMultiplier 作为保守近似，避免未来改为曲线时测试直接误读为 0。
+        /// </summary>
+        private static float GetMaxCurveValue(ParticleSystem.MinMaxCurve curve)
+        {
+            return curve.mode switch
+            {
+                ParticleSystemCurveMode.TwoConstants => curve.constantMax,
+                ParticleSystemCurveMode.Constant => curve.constant,
+                _ => curve.curveMultiplier
+            };
+        }
+
+        /// <summary>
+        /// 读取 MinMaxCurve（最小最大曲线）的有效下界；与上界辅助函数配对，统一处理粒子速度范围断言。
+        /// </summary>
+        private static float GetMinCurveValue(ParticleSystem.MinMaxCurve curve)
+        {
+            return curve.mode == ParticleSystemCurveMode.TwoConstants ? curve.constantMin : GetMaxCurveValue(curve);
+        }
+
+        /// <summary>只在已打开场景根对象中按精确名称查找实例，避免全局对象查询混入其他测试场景。</summary>
+        private static GameObject FindRootGameObjectByName(GameObject[] roots, string expectedName)
+        {
+            for (int rootIndex = 0; rootIndex < roots.Length; rootIndex++)
+            {
+                if (roots[rootIndex].name == expectedName)
+                {
+                    return roots[rootIndex];
                 }
             }
 
