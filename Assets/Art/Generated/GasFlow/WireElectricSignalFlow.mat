@@ -7,7 +7,7 @@ Material:
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_Name: WaiKeHeBing_BlueVolume
+  m_Name: WireElectricSignalFlow
   m_Shader: {fileID: 4800000, guid: a8e159c45bf64dcd8e1f7b94c3a0d761, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
@@ -16,7 +16,7 @@ Material:
   m_LightmapFlags: 4
   m_EnableInstancingVariants: 0
   m_DoubleSidedGI: 0
-  m_CustomRenderQueue: 3000
+  m_CustomRenderQueue: -1
   stringTagMap: {}
   disabledShaderPasses: []
   m_LockedProperties: 
@@ -42,19 +42,18 @@ Material:
     m_Ints: []
     m_Floats:
     - _BumpScale: 1
-    - _FlowContrast: 1.1
-    - _FlowIntensity: 2.6
+    - _FlowContrast: 1.5
+    - _FlowIntensity: 2.8
     - _FlowSpeed: 0
-    - _FlowTiling: 1.15
-    - _FlowWidth: 0.72
-    - _Metallic: 0.76
+    - _FlowTiling: 1.2
+    - _FlowWidth: 0.12
+    - _Metallic: 0.85
     - _MetallicGlossMapEnabled: 0
     - _NormalMapEnabled: 0
-    - _Opacity: 0.24
-    - _Smoothness: 0.5
-    - _Spiral: 0.16
+    - _Opacity: 1
+    - _Smoothness: 0.7
     m_Colors:
-    - _BaseColor: {r: 0.01, g: 0.16, b: 0.72, a: 0.68}
-    - _FlowColor: {r: 0.01, g: 0.32, b: 1, a: 1}
+    - _BaseColor: {r: 0.22, g: 0.22, b: 0.25, a: 1}
+    - _FlowColor: {r: 0.4, g: 1.5, b: 2.2, a: 1}
     - _FlowDirectionOS: {r: 1, g: 0, b: 0, a: 0}
   m_BuildTextureStacks: []
