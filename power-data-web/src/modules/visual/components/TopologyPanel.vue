@@ -1,28 +1,24 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ProcessNodeId, RouteId } from '@/config/process/identifiers'
 import type { TopologyDefinition, TopologyDeviceStatus } from '@/config/process/types'
-import type { TopologyDrilldownContent } from '@/config/scene-topology/types'
-import type { TopologyDrilldownLookupResult } from '@/config/scene-topology/topology-drilldown-registry'
 import TopologyCanvas from '@/modules/visual/components/TopologyCanvas.vue'
+import CoalTopologyRuntimeCanvas from '@/modules/visual/topology-preview/CoalTopologyRuntimeCanvas.vue'
+import GasTopologyRuntimeCanvas from '@/modules/visual/topology-preview/GasTopologyRuntimeCanvas.vue'
 import { createTopologyPanelPresentation } from '@/modules/visual/components/topology-panel-presentation'
 import type { TopologyCanvasController } from '@/modules/visual/components/topology-canvas-controller'
-import {
-  TopologyDrilldownCanvasViewSession,
-  type TopologyDrilldownCloseReason,
-} from '@/modules/visual/components/topology-drilldown-canvas-view-session'
-import TopologyDrilldownOverlay from '@/modules/visual/drilldown/TopologyDrilldownOverlay.vue'
 
 const props = defineProps<{
   topology: TopologyDefinition
   selectedNodeIds: readonly ProcessNodeId[]
   selectedRouteIds: readonly RouteId[]
+  /**
+   * 第三层关键环节稳定态为 true。此时保留唯一二维画布实例，只暂停输入、尺寸观察和重绘；
+   * 返回第二层后在同一实例上恢复已保存的拓扑、视口与选择。
+   */
+  suspended?: boolean
   /** 状态快照是独立运行时数据，不会改写当前拓扑定义或触发画布路径重建。 */
   nodeStatuses?: ReadonlyMap<ProcessNodeId, TopologyDeviceStatus>
-  /** 内容解析保持只读和常数时间；没有解析器时入口仍显示固定空态，不按标题生成内容。 */
-  resolveDrilldownContent?: (contentKey: string, version: string) => TopologyDrilldownLookupResult
-  /** 由壳层稳定上下文门禁控制；场景切换期间隐藏旧拓扑遗留的下钻入口。 */
-  drilldownEnabled?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -34,34 +30,89 @@ const emit = defineEmits<{
 }>()
 
 const panelElement = ref<HTMLElement | null>(null)
-const panelTitleElement = ref<HTMLHeadingElement | null>(null)
 const isFullscreen = ref(false)
 const topologyCanvas = ref<TopologyCanvasController | null>(null)
-const drilldownOverlay = ref<InstanceType<typeof TopologyDrilldownOverlay> | null>(null)
-/** 独立会话统一消费画布快照，确保同一旧快照不会被重复恢复或跨拓扑复用。 */
-const canvasViewSession = new TopologyDrilldownCanvasViewSession()
-const activeDrilldown = shallowRef<{
-  content?: TopologyDrilldownContent
-  errorMessage?: string
-  /** 下钻提示沿用触发入口当前状态，子节点和模型说明节点不另造状态快照。 */
-  sourceNodeId: ProcessNodeId
-  triggerElement: HTMLButtonElement
-} | null>(null)
-/** 浏览器可能先发 fullscreenchange（全屏变化）再把同一次 Escape（退出键）交给文档，需短时去重。 */
-let lastNativeFullscreenExitAt = Number.NEGATIVE_INFINITY
-/** 从覆盖层进入原生全屏后，下一次退出键只负责退出全屏，不得同时关闭说明层。 */
-let preserveOverlayForNextEscape = false
 
-const isDrilldownOpen = computed(() => activeDrilldown.value !== null)
-const activeDrilldownStatus = computed<TopologyDeviceStatus>(() => {
-  const sourceNodeId = activeDrilldown.value?.sourceNodeId
-  const sourceNode = sourceNodeId
-    ? props.topology.nodes.find((node) => node.nodeId === sourceNodeId)
-    : undefined
-  // 说明节点没有正式设备状态；统一复用入口状态，缺失时回退到发布基线的离线状态。
-  return sourceNodeId
-    ? props.nodeStatuses?.get(sourceNodeId) ?? sourceNode?.deviceStatus ?? 'offline'
-    : 'offline'
+/**
+ * 最新 JSON 组态图接管燃气、燃煤两个“总览”拓扑；两类场景均已下线流程子图。新版燃煤
+ * 明确不需要子拓扑，因而只能精确匹配 `topology.coal-power.overview`，不得依据标题、
+ * sceneId（场景标识）或节点数量泛化替换任何过滤视图。两种画布都继续复用同一控制器、
+ * 状态快照和事件协议，不会改变原有的 Unity（三维引擎）协调链路。
+ */
+const usesLatestJsonOverviewCanvas = computed(() => {
+  const topologyKey = String(props.topology.topologyKey)
+  return topologyKey === 'topology.gas-power.overview' || topologyKey === 'topology.coal-power.overview'
+})
+
+/** 该开关只在已确认的燃煤总览键成立，防止其他场景意外创建燃煤 JSON 运行时画布。 */
+const usesLatestCoalOverviewCanvas = computed(() => String(props.topology.topologyKey) === 'topology.coal-power.overview')
+
+/**
+ * 拓扑切换时 Vue（渐进式网页框架）会在下一渲染批次替换实际画布组件，而运行时会在同一同步事务内
+ * 连续调用 setTopology、restoreViewState 和 setSelection。稳定代理先缓存最新命令，再在新画布挂载后
+ * 一次性补发，防止命令误落到即将卸载的旧画布或丢失三维反向选择。
+ */
+let pendingControllerTopology = props.topology
+let pendingControllerNodeIds: readonly ProcessNodeId[] = props.selectedNodeIds
+let pendingControllerRouteIds: readonly RouteId[] = props.selectedRouteIds
+let pendingControllerStatuses: ReadonlyMap<ProcessNodeId, TopologyDeviceStatus> = props.nodeStatuses ?? new Map()
+let pendingControllerViewState: ReturnType<TopologyCanvasController['getViewState']>
+let canvasControllerDisposed = false
+let canvasControllerSuspended = Boolean(props.suspended)
+
+const stableCanvasController: TopologyCanvasController = Object.freeze({
+  setTopology(topology: TopologyDefinition) {
+    pendingControllerTopology = topology
+    // 新拓扑没有视图快照时不能继承上一拓扑的平移与缩放；运行时若有快照会紧接着重新写入。
+    pendingControllerViewState = undefined
+    if (!canvasControllerSuspended) topologyCanvas.value?.setTopology(topology)
+  },
+  setSelection(nodeIds: readonly ProcessNodeId[], routeIds: readonly RouteId[]) {
+    pendingControllerNodeIds = nodeIds
+    pendingControllerRouteIds = routeIds
+    if (!canvasControllerSuspended) topologyCanvas.value?.setSelection(nodeIds, routeIds)
+  },
+  setNodeStatuses(statuses: ReadonlyMap<ProcessNodeId, TopologyDeviceStatus>) {
+    pendingControllerStatuses = statuses
+    if (!canvasControllerSuspended) topologyCanvas.value?.setNodeStatuses(statuses)
+  },
+  getViewState() {
+    return topologyCanvas.value?.getViewState() ?? pendingControllerViewState
+  },
+  restoreViewState(state: ReturnType<TopologyCanvasController['getViewState']> extends infer ViewState
+    ? Exclude<ViewState, undefined>
+    : never) {
+    pendingControllerViewState = state
+    if (!canvasControllerSuspended) topologyCanvas.value?.restoreViewState(state)
+  },
+  resetView() {
+    // 显式重置会废弃旧视口快照，避免后续恢复或画布实现替换时再次回放已经失效的位置。
+    pendingControllerViewState = undefined
+    if (!canvasControllerSuspended) topologyCanvas.value?.resetView()
+  },
+  setSuspended(suspended: boolean) {
+    if (canvasControllerDisposed || canvasControllerSuspended === suspended) return
+    canvasControllerSuspended = suspended
+    const controller = topologyCanvas.value
+    if (!controller) return
+
+    controller.setSuspended(suspended)
+    if (suspended) return
+
+    // 暂停期间只保留每类数据的最新快照；恢复时按固定顺序一次补发，避免触发重复布局。
+    controller.setTopology(pendingControllerTopology)
+    controller.setNodeStatuses(pendingControllerStatuses)
+    controller.setSelection(pendingControllerNodeIds, pendingControllerRouteIds)
+    if (pendingControllerViewState) controller.restoreViewState(pendingControllerViewState)
+    // 每次从全屏三维重新显示第二层拓扑，都以当前容器尺寸完整适配并居中；只重置视口，不重建画布。
+    pendingControllerViewState = undefined
+    controller.resetView()
+  },
+  dispose() {
+    if (canvasControllerDisposed) return
+    canvasControllerDisposed = true
+    topologyCanvas.value?.dispose()
+  },
 })
 
 /**
@@ -70,7 +121,7 @@ const activeDrilldownStatus = computed<TopologyDeviceStatus>(() => {
  * 不能因为端口存在就猜测存在业务节点、设备或三维映射。
  */
 function getCanvasController(): TopologyCanvasController | undefined {
-  return topologyCanvas.value ?? undefined
+  return stableCanvasController
 }
 
 /** 仅暴露单画布端口；全屏状态和 DOM（文档对象模型）元素继续由面板内部管理。 */
@@ -79,6 +130,28 @@ defineExpose({ getCanvasController })
 /** 展示模型只从当前拓扑计算，切换场景或拓扑时无需复制组件或维护燃气专用条件分支。 */
 const presentation = computed(() => createTopologyPanelPresentation(props.topology))
 
+/** 画布实现发生替换后补发同一份运行时快照；每类数据只保留最新值，不累积历史命令。 */
+watch(topologyCanvas, (controller) => {
+  if (!controller || canvasControllerDisposed) return
+  controller.setSuspended(canvasControllerSuspended)
+  if (canvasControllerSuspended) return
+  controller.setTopology(pendingControllerTopology)
+  controller.setNodeStatuses(pendingControllerStatuses)
+  controller.setSelection(pendingControllerNodeIds, pendingControllerRouteIds)
+  if (pendingControllerViewState) controller.restoreViewState(pendingControllerViewState)
+}, { flush: 'post' })
+
+/**
+ * 模式切换只改变现有控制器的运行许可，不参与画布组件选择，因此第三层往返不会触发卸载和重建。
+ */
+watch(() => props.suspended, (suspended) => {
+  stableCanvasController.setSuspended(Boolean(suspended))
+}, { immediate: true, flush: 'post' })
+
+watch(() => props.nodeStatuses, (statuses) => {
+  pendingControllerStatuses = statuses ?? new Map()
+})
+
 /**
  * 全屏状态只以浏览器实际登记的全屏元素为准，不能在点击后直接反转本地布尔值。
  * 平台通过 iframe（内嵌框架）承载本应用时，只要父 iframe 声明 fullscreen（全屏）权限，
@@ -86,12 +159,7 @@ const presentation = computed(() => createTopologyPanelPresentation(props.topolo
  * 或其他元素接管全屏时，按钮名称和画布尺寸都会跟随 fullscreenchange（全屏变化）恢复。
  */
 function synchronizeFullscreenState(): void {
-  const wasFullscreen = isFullscreen.value
   isFullscreen.value = document.fullscreenElement === panelElement.value
-  if (!wasFullscreen && isFullscreen.value && isDrilldownOpen.value) preserveOverlayForNextEscape = true
-  if (wasFullscreen && !isFullscreen.value && isDrilldownOpen.value) {
-    lastNativeFullscreenExitAt = globalThis.performance.now()
-  }
 }
 
 /**
@@ -104,8 +172,6 @@ async function toggleFullscreen(): Promise<void> {
 
   try {
     if (document.fullscreenElement === panel) {
-      // 用户点击覆盖层自身的退出全屏按钮不需要保留下一次 Escape（退出键）。
-      preserveOverlayForNextEscape = false
       await document.exitFullscreen()
       return
     }
@@ -118,94 +184,31 @@ async function toggleFullscreen(): Promise<void> {
 }
 
 /**
- * 打开前只保存一次正式画布视图快照；说明内容必须同时匹配当前节点、内容键和拓扑版本。
- * 所有失败都停留在局部固定空态，不替换正式拓扑、发送三维命令或触发外层事务。
+ * 工具栏重置与自动恢复使用同一受控端口，确保普通 Canvas 和两种 Meta2D 画布行为一致。
+ * 空态和暂停态不执行命令，防止隐藏画布在尺寸为零时产生无效视口。
  */
-async function handleOpenDrilldown(nodeId: ProcessNodeId, contentKey: string, triggerElement: HTMLButtonElement): Promise<void> {
-  const sourceNode = props.topology.nodes.find((node) => node.nodeId === nodeId)
-  canvasViewSession.capture(props.topology.topologyKey, topologyCanvas.value?.getViewState())
-
-  let content: TopologyDrilldownContent | undefined
-  let errorMessage: string | undefined
-  if (!sourceNode || sourceNode.drilldown?.contentKey !== contentKey) {
-    errorMessage = '当前拓扑中不存在匹配的下钻入口。'
-  } else if (!props.resolveDrilldownContent) {
-    errorMessage = '下钻说明资源尚未加载。'
-  } else {
-    const result = props.resolveDrilldownContent(contentKey, props.topology.configVersion)
-    if (result.status === 'missing') errorMessage = '下钻说明内容缺失。'
-    else if (result.status === 'version-mismatch') errorMessage = '下钻说明内容版本与当前拓扑不一致。'
-    else if (String(result.content.sourceNodeId) !== String(nodeId)) errorMessage = '下钻说明内容与当前入口不匹配。'
-    else if (result.content.nodes.length === 0 || result.content.edges.length === 0) errorMessage = '下钻说明内容为空。'
-    else content = result.content
-  }
-
-  activeDrilldown.value = { content, errorMessage, sourceNodeId: nodeId, triggerElement }
-  await nextTick()
-  drilldownOverlay.value?.focusInitial()
+function resetTopologyView(): void {
+  if (presentation.value.isEmpty || canvasControllerSuspended) return
+  stableCanvasController.resetView()
 }
 
-/**
- * 普通关闭恢复同一拓扑的画布数值快照；拓扑切换关闭只丢弃旧快照，不得覆盖新拓扑刚恢复的视图。
- * 全程不调用 prepare/activate（准备/激活）且不重建 Canvas（画布）；触发按钮消失时焦点回退到面板标题。
- */
-async function closeDrilldown(reason: TopologyDrilldownCloseReason = 'regular-close', returnFocus = true): Promise<void> {
-  const previous = activeDrilldown.value
-  if (!previous) return
-  activeDrilldown.value = null
-  preserveOverlayForNextEscape = false
-  // 在等待界面刷新前先消费快照；拓扑切换路径会在此处立即丢弃旧拓扑状态。
-  const snapshot = canvasViewSession.finish(reason)
-  await nextTick()
-  // 普通关闭等待期间也可能发生拓扑切换，因此恢复前必须再次核对快照归属。
-  if (snapshot?.topologyKey === props.topology.topologyKey) {
-    topologyCanvas.value?.restoreViewState(snapshot.viewState)
-  }
-  if (!returnFocus) return
-  if (previous.triggerElement.isConnected) previous.triggerElement.focus()
-  else panelTitleElement.value?.focus()
-}
-
-/** 原生全屏中的第一次退出键交给浏览器退出全屏；常规态退出键只关闭局部覆盖层。 */
-function handleDocumentKeydown(event: KeyboardEvent): void {
-  if (event.key !== 'Escape' || !isDrilldownOpen.value) return
-  if (preserveOverlayForNextEscape) {
-    preserveOverlayForNextEscape = false
-    return
-  }
-  if (isFullscreen.value || document.fullscreenElement === panelElement.value) return
-  // 同一次物理退出键不得同时退出原生全屏和关闭覆盖层；稍后的第二次退出键仍按正常关闭处理。
-  if (globalThis.performance.now() - lastNativeFullscreenExitAt < 350) return
-  event.preventDefault()
-  void closeDrilldown()
-}
-
-/** 监听浏览器原生 Esc 与权限状态变化；组件卸载后立即移除，避免多拓扑切换累积监听器。 */
+/** 监听浏览器原生全屏状态；组件卸载后立即移除，避免多拓扑切换累积监听器。 */
 onMounted(() => {
   document.addEventListener('fullscreenchange', synchronizeFullscreenState)
-  document.addEventListener('keydown', handleDocumentKeydown)
-})
-
-/** 切换拓扑时立即释放旧说明层；新拓扑必须由自身可见入口重新打开，禁止迟到内容恢复。 */
-watch(() => props.topology.topologyKey, () => {
-  if (isDrilldownOpen.value) void closeDrilldown('topology-change', false)
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('fullscreenchange', synchronizeFullscreenState)
-  document.removeEventListener('keydown', handleDocumentKeydown)
-  activeDrilldown.value = null
-  canvasViewSession.clear()
 })
 </script>
 
 <template>
   <section ref="panelElement" :class="['topology-panel', { 'topology-panel--fullscreen': isFullscreen }]" :aria-label="presentation.title">
-    <div class="topology-panel__content" :inert="isDrilldownOpen" :aria-hidden="isDrilldownOpen ? 'true' : undefined">
+    <div class="topology-panel__content">
     <header class="topology-panel__header">
       <div>
         <p class="eyebrow">控制网络拓扑</p>
-        <h2 ref="panelTitleElement" tabindex="-1">{{ presentation.title }}</h2>
+        <h2>{{ presentation.title }}</h2>
       </div>
       <div class="topology-panel__actions">
         <div v-if="presentation.legends.length > 0" class="topology-panel__legend" aria-label="当前拓扑连线图例">
@@ -213,10 +216,20 @@ onBeforeUnmount(() => {
             <i :class="['topology-panel__line', `topology-panel__line--${legend.modifier}`]" />{{ legend.label }}
           </span>
         </div>
+        <button
+          type="button"
+          class="topology-panel__action-button topology-panel__action-button--text"
+          :disabled="presentation.isEmpty || Boolean(props.suspended)"
+          aria-label="重置拓扑图位置"
+          title="重置拓扑图位置"
+          @click="resetTopologyView"
+        >
+          重置
+        </button>
         <!-- 常规态显示放大图标；全屏态改为关闭图标，减少用户寻找退出入口的成本。 -->
         <button
           type="button"
-          class="topology-panel__fullscreen-button"
+          class="topology-panel__action-button"
           :aria-label="isFullscreen ? '退出拓扑图全屏展示' : '全屏展示拓扑图'"
           :aria-pressed="isFullscreen"
           :title="isFullscreen ? '退出全屏' : '全屏展示'"
@@ -226,7 +239,30 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </header>
+    <CoalTopologyRuntimeCanvas
+      v-if="usesLatestCoalOverviewCanvas"
+      ref="topologyCanvas"
+      :topology="props.topology"
+      :selected-node-ids="props.selectedNodeIds"
+      :selected-route-ids="props.selectedRouteIds"
+      :node-statuses="props.nodeStatuses"
+      @select-node="emit('selectNode', $event)"
+      @clear-selection="emit('clearSelection')"
+      @double-click-node="emit('doubleClickNode', $event)"
+    />
+    <GasTopologyRuntimeCanvas
+      v-else-if="usesLatestJsonOverviewCanvas"
+      ref="topologyCanvas"
+      :topology="props.topology"
+      :selected-node-ids="props.selectedNodeIds"
+      :selected-route-ids="props.selectedRouteIds"
+      :node-statuses="props.nodeStatuses"
+      @select-node="emit('selectNode', $event)"
+      @clear-selection="emit('clearSelection')"
+      @double-click-node="emit('doubleClickNode', $event)"
+    />
     <TopologyCanvas
+      v-else
       ref="topologyCanvas"
       v-show="!presentation.isEmpty"
       :topology="props.topology"
@@ -234,27 +270,15 @@ onBeforeUnmount(() => {
       :selected-route-ids="props.selectedRouteIds"
       :node-statuses="props.nodeStatuses"
       :fullscreen="isFullscreen"
-      :drilldown-enabled="props.drilldownEnabled"
       @select-node="emit('selectNode', $event)"
       @clear-selection="emit('clearSelection')"
       @double-click-node="emit('doubleClickNode', $event)"
-      @open-drilldown="handleOpenDrilldown"
     />
     <!-- 空态提示与隐藏的唯一预备画布独立渲染：保留实例避免切换时重建资源，提示仍准确说明尚无已激活拓扑。 -->
     <p v-if="presentation.isEmpty" class="topology-panel__empty">{{ presentation.emptyMessage }}</p>
     <!-- 与参考原型一致，提供键盘退出提示；按钮本身始终保留为可见的关闭入口。 -->
     <p v-if="isFullscreen" class="topology-panel__fullscreen-hint" role="status">按 Esc 键退出全屏</p>
     </div>
-    <TopologyDrilldownOverlay
-      v-if="activeDrilldown"
-      ref="drilldownOverlay"
-      :content="activeDrilldown.content"
-      :error-message="activeDrilldown.errorMessage"
-      :status="activeDrilldownStatus"
-      :fullscreen="isFullscreen"
-      @close="void closeDrilldown()"
-      @toggle-fullscreen="void toggleFullscreen()"
-    />
   </section>
 </template>
 
@@ -325,7 +349,7 @@ onBeforeUnmount(() => {
   font-size: 0.75rem;
 }
 
-.topology-panel__fullscreen-button {
+.topology-panel__action-button {
   display: inline-grid;
   flex: 0 0 auto;
   inline-size: 30px;
@@ -340,11 +364,24 @@ onBeforeUnmount(() => {
   transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
 }
 
-.topology-panel__fullscreen-button:hover,
-.topology-panel__fullscreen-button:focus-visible {
+.topology-panel__action-button:hover:not(:disabled),
+.topology-panel__action-button:focus-visible {
   border-color: #67e8f9;
   background: rgba(8, 145, 178, 0.42);
   color: #ffffff;
+}
+
+.topology-panel__action-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+/* 重置按钮保留可见文字，避免只靠图标或悬浮提示表达关键恢复能力。 */
+.topology-panel__action-button--text {
+  inline-size: auto;
+  min-inline-size: 46px;
+  padding-inline: 9px;
+  font-size: 0.75rem;
 }
 
 .topology-panel__legend span {

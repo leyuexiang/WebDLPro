@@ -33,8 +33,8 @@ function createCommandEnvelope(): Record<string, unknown> {
 
 describe('外层桥安全边界', () => {
   it('启动参数必须同时匹配部署来源、实例标识和固定协议版本', () => {
-    const valid = createHostBridgeStartup('?parentOrigin=https%3A%2F%2Fportal.example.test&instanceId=visual-shell-01&protocolVersion=1', deploymentConfiguration, () => sessionId)
-    const forgedOrigin = createHostBridgeStartup('?parentOrigin=https%3A%2F%2Fforged.example.test&instanceId=visual-shell-01&protocolVersion=1', deploymentConfiguration, () => sessionId)
+    const valid = createHostBridgeStartup('?parentOrigin=https%3A%2F%2Fportal.example.test&instanceId=visual-shell-01&protocolVersion=2', deploymentConfiguration, () => sessionId)
+    const forgedOrigin = createHostBridgeStartup('?parentOrigin=https%3A%2F%2Fforged.example.test&instanceId=visual-shell-01&protocolVersion=2', deploymentConfiguration, () => sessionId)
 
     expect(valid.status).toBe('ready')
     expect(forgedOrigin.status).toBe('invalid')

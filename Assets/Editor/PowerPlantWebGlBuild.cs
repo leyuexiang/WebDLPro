@@ -39,6 +39,13 @@ public static class PowerPlantWebGlBuild
         public string[] setNodeVisualStateRequiredFields;
         public int clearNodeVisualStateSchemaVersion;
         public string[] clearNodeVisualStateRequiredFields;
+        public int processDetailCommandSchemaVersion;
+        public string[] prepareProcessDetailRequiredFields;
+        public string[] commitProcessDetailRequiredFields;
+        public string[] abortProcessDetailRequiredFields;
+        public string[] enterProcessDetailRequiredFields;
+        public string[] exitProcessDetailRequiredFields;
+        public string[] setProcessDetailPlaybackRequiredFields;
     }
 
     public const string DevelopmentOutputPath = "Builds/WebGL-Development";
@@ -175,6 +182,7 @@ public static class PowerPlantWebGlBuild
             // 先生成资产包和文本清单，再让播放器在裁剪阶段读取该清单，保留只存在于业务场景包中的控制器类型。
             // 若此步骤失败，正式构建仍停留在暂存目录，不会覆盖任何已发布版本。
             PowerPlantSceneBundleBuild.BuildSceneBundles(outputPath, releaseId);
+            PowerPlantProcessDetailBundleBuild.BuildProcessDetailBundles(outputPath, releaseId);
             string assetBundleManifestPath = PowerPlantSceneBundleBuild.GetAssetBundleManifestPath(outputPath);
             if (!File.Exists(assetBundleManifestPath))
             {
@@ -261,7 +269,14 @@ public static class PowerPlantWebGlBuild
             setNodeVisualStateSchemaVersion = WebGlProtocolContract.SetNodeVisualStateSchemaVersion,
             setNodeVisualStateRequiredFields = WebGlProtocolContract.CreateSetNodeVisualStateRequiredFields(),
             clearNodeVisualStateSchemaVersion = WebGlProtocolContract.ClearNodeVisualStateSchemaVersion,
-            clearNodeVisualStateRequiredFields = WebGlProtocolContract.CreateClearNodeVisualStateRequiredFields()
+            clearNodeVisualStateRequiredFields = WebGlProtocolContract.CreateClearNodeVisualStateRequiredFields(),
+            processDetailCommandSchemaVersion = WebGlProtocolContract.ProcessDetailCommandSchemaVersion,
+            prepareProcessDetailRequiredFields = WebGlProtocolContract.CreatePrepareProcessDetailRequiredFields(),
+            commitProcessDetailRequiredFields = WebGlProtocolContract.CreateCommitProcessDetailRequiredFields(),
+            abortProcessDetailRequiredFields = WebGlProtocolContract.CreateAbortProcessDetailRequiredFields(),
+            enterProcessDetailRequiredFields = WebGlProtocolContract.CreateEnterProcessDetailRequiredFields(),
+            exitProcessDetailRequiredFields = WebGlProtocolContract.CreateExitProcessDetailRequiredFields(),
+            setProcessDetailPlaybackRequiredFields = WebGlProtocolContract.CreateSetProcessDetailPlaybackRequiredFields()
         };
         string metadataPath = Path.Combine(absoluteOutputPath, WebGlProtocolContract.MetadataFileName);
         File.WriteAllText(metadataPath, JsonUtility.ToJson(metadata, true), new UTF8Encoding(false));

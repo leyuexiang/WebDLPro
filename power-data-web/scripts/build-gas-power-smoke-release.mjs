@@ -11,7 +11,6 @@ import {
   createCoalPowerActions,
   createCoalPowerTopologies,
 } from './coal-power-topology.mjs'
-import { createCoalPowerDrilldowns, createGasPowerDrilldowns } from './topology-drilldowns.mjs'
 
 /**
  * 燃气发电发布包构建器。
@@ -29,7 +28,9 @@ const releasesRoot = path.join(projectRoot, 'Builds', 'Releases')
  * unityReleaseId 完全一致；构建前会继续逐项复核结构版本和必需命令，避免同名目录或旧压缩产物绕过门禁。
  * 正式归档或合作方联调若需切换基线，必须通过 --unity-release-id 显式指定并接受同一套门禁校验。
  */
-const defaultUnityReleaseId = 'power-scenes-unity-local-20260820-003'
+// 默认指向已经通过两阶段关键环节协议门禁的只读 Unity 网页图形基线；
+// 调用方仍可显式指定其他发布标识，但结构版本、命令字段和发布标识必须全部通过同一套校验。
+const defaultUnityReleaseId = 'three-layer-unity-demo-20260831-2300'
 let unityReleaseId = defaultUnityReleaseId
 let host = '127.0.0.1'
 const defaultPort = 5523
@@ -55,19 +56,27 @@ function getUnityRuntimeKey(sceneId) {
 }
 
 const unityProtocolMetadataFileName = 'webgl-protocol-capabilities.json'
-const expectedUnityProtocolMetadataSchemaVersion = 5
+const expectedUnityProtocolMetadataSchemaVersion = 9
 const expectedUnityProtocolChannel = 'power3d-unity'
-const expectedUnityProtocolVersion = 1
+const expectedUnityProtocolVersion = 2
 const expectedSceneChangedSchemaVersion = 2
 const expectedSwitchSceneRecoverySchemaVersion = 1
 const expectedSetNodeVisualStateSchemaVersion = 3
 const expectedClearNodeVisualStateSchemaVersion = 1
+// 第九版元数据在第三层事务基础上增加独立命名镜头点命令；发布前必须与 Unity 构建保持一致。
+const expectedProcessDetailCommandSchemaVersion = 2
 const maximumUnityProtocolMetadataBytes = 16 * 1024
 const requiredSceneChangedFields = Object.freeze(['requestId', 'sceneId', 'transitionId', 'sceneActivationId', 'success'])
 const requiredSwitchSceneFields = Object.freeze(['sceneId', 'transitionId', 'sceneMappingVersion', 'forceReload'])
 const requiredSwitchSceneRecoveryFields = Object.freeze(['requestId', 'success', 'sceneActivationId'])
 const requiredSetNodeVisualStateFields = Object.freeze(['sceneNodeId', 'visualState', 'snapshotSequence', 'statusUpdatedAt', 'sourceRevision'])
 const requiredClearNodeVisualStateFields = Object.freeze(['sceneNodeId', 'snapshotSequence'])
+const requiredEnterProcessDetailFields = Object.freeze(['sceneId', 'processId', 'stepId', 'processDetailId', 'transitionId'])
+const requiredPrepareProcessDetailFields = Object.freeze(['sceneId', 'processId', 'stepId', 'processDetailId', 'transitionId'])
+const requiredCommitProcessDetailFields = Object.freeze(['sceneId', 'processDetailId', 'transitionId'])
+const requiredAbortProcessDetailFields = Object.freeze(['sceneId', 'processDetailId', 'transitionId'])
+const requiredExitProcessDetailFields = Object.freeze(['sceneId', 'processDetailId', 'transitionId'])
+const requiredSetProcessDetailPlaybackFields = Object.freeze(['sceneId', 'processDetailId', 'playing'])
 // 发布门禁必须逐项验证下行命令，尤其是空白点击依赖的 clearSelection；
 // 否则旧 Unity 包会通过静态检查，却在正式握手或用户点击空白时才暴露不兼容。
 const requiredUnityCommandCapabilities = Object.freeze([
@@ -75,6 +84,14 @@ const requiredUnityCommandCapabilities = Object.freeze([
   'resize',
   'switchScene',
   'enterProcessStep',
+  'moveCameraToPose',
+  // enterProcessDetail 仅保留旧宿主兼容；新前端只通过以下三条事务命令进入或同场景切换关键环节。
+  'enterProcessDetail',
+  'prepareProcessDetail',
+  'commitProcessDetail',
+  'abortProcessDetail',
+  'exitProcessDetail',
+  'setProcessDetailPlayback',
   'resetScene',
   'focusNode',
   'clearSelection',
@@ -106,17 +123,22 @@ const loopbackHostNames = new Set(['127.0.0.1', 'localhost', '::1', '[::1]', '0.
 const localOnlyListenHosts = new Set(['127.0.0.1', 'localhost', '::1', '[::1]'])
 // 合作方平台已固定使用 5575 访问联调服务；生成器和产物门禁共用该约束，避免说明文件、服务监听与平台配置漂移。
 const partnerIntegrationPort = 5575
+// 页面外层握手和收到初始化后的 Unity 稳定视图准备属于两个独立阶段。
+// 外层不下载 Unity 大资源，保持15秒短门限；只有 Unity 启动与初始稳定视图使用120秒。
+const outerReadyTimeoutMilliseconds = 15_000
+const unityAndInitialViewTimeoutMilliseconds = 120_000
 const supportedReleaseOptions = new Set([
   '--release-id', '--unity-release-id', '--package-type', '--listen-host', '--port', '--include-self-test',
-  '--public-origin', '--platform-parent-origin', '--unity-parent-origin', '--unity-entry-url', '--manifest-url', '--scene',
+  '--public-origin', '--platform-parent-origin', '--unity-parent-origin',
+  '--unity-entry-url', '--manifest-url', '--scene',
 ])
 
 /**
  * 仅登记已经在 GasPower.unity（燃气场景）与 PowerPlantProcessController（燃气流程控制器）中逐项核对的二维—三维节点映射。
  * 键和值即使文本相同也以显式映射保存；运行时绝不按节点名称、坐标或图元键推导三维对象。
  * 其余控制网络节点没有已登记的燃气三维目标，因此必须保持为纯二维节点，不会收到聚焦命令。
- * 本包只开放三个关键流程节点映射；总览动作不聚焦单个二维节点，因此不会为它伪造节点映射。
- * 下列三项仍必须逐项显式登记，不能根据相同字符串自动关联。
+ * 本包仅开放总览动作；总览动作不聚焦单个二维节点，因此不会为它伪造节点映射。
+ * 三维联动仍通过下方逐项核验的节点映射完成，不能根据相同字符串自动关联。
  */
 const verifiedGasSceneNodeIdByTopologyNodeId = new Map([
   // 权威总图中的 Mark VIe 控制器是燃机流程的二维入口；它与 Unity 中已核验的燃机逻辑节点显式对应。
@@ -128,15 +150,27 @@ const verifiedGasSceneNodeIdByTopologyNodeId = new Map([
 /**
  * 仅发布已由 GasPower 场景播放模式逐项验证的“流程标识 + 步骤标识”组合。
  *
- * `overview`（总览）与三项关键环节均已由 GasPower 场景播放模式验证，允许成为外部受控动作；
- * `gas-network` 和其他历史导览步骤尚无完整交付证据，不能被本测试包伪装成可调用流程。
- * 这样后续动作清单只有引用下列组合时才会通过契约校验，不能借标题、坐标或相邻节点补造三维目标。
+ * 新版仅保留总览。历史关键流程已按产品决策下线，不能继续作为外部动作或结构清单能力发布。
+ * 这样后续动作清单只能引用总览组合，不能借标题、坐标或相邻节点补造流程入口。
  */
 const verifiedGasProcessSteps = Object.freeze([
   Object.freeze({ processId: 'gas-power-generation', stepId: 'overview' }),
-  Object.freeze({ processId: 'gas-power-generation', stepId: 'gas-turbine' }),
-  Object.freeze({ processId: 'gas-power-generation', stepId: 'hrsg' }),
-  Object.freeze({ processId: 'gas-power-generation', stepId: 'steam-turbine' }),
+])
+
+/**
+ * 第三层关键环节目录使用稳定编号建立唯一映射，运行时不得根据预制体名称、层级路径或坐标猜测资源。
+ * 目录结构本身支持零到多项；本轮只登记已经提供独立精细模型的燃气轮机，不生成其他环节占位。
+ */
+const gasProcessDetails = Object.freeze([
+  Object.freeze({
+    sceneId: 'gas-power',
+    processId: 'gas-power-generation',
+    stepId: 'gas-turbine',
+    processDetailId: 'process-detail.gas-power.gas-turbine',
+    resourceId: 'process-detail-resource.gas-power.gas-turbine',
+    cameraPoseId: 'camera-pose.gas-power.gas-turbine',
+    stateNodeId: 'gas-turbine',
+  }),
 ])
 
 /**
@@ -413,7 +447,8 @@ export async function ensureUnityBuildSupportsSceneActivation(unitySourceDirecto
       metadata.sceneChangedSchemaVersion !== expectedSceneChangedSchemaVersion ||
       metadata.switchSceneRecoverySchemaVersion !== expectedSwitchSceneRecoverySchemaVersion ||
       metadata.setNodeVisualStateSchemaVersion !== expectedSetNodeVisualStateSchemaVersion ||
-      metadata.clearNodeVisualStateSchemaVersion !== expectedClearNodeVisualStateSchemaVersion) {
+      metadata.clearNodeVisualStateSchemaVersion !== expectedClearNodeVisualStateSchemaVersion ||
+      metadata.processDetailCommandSchemaVersion !== expectedProcessDetailCommandSchemaVersion) {
     throw new Error('Unity 协议元数据的结构版本、信封通道或协议版本与当前前端不一致。')
   }
   if (typeof expectedUnityReleaseId !== 'string' || metadata.unityReleaseId !== expectedUnityReleaseId) {
@@ -434,6 +469,30 @@ export async function ensureUnityBuildSupportsSceneActivation(unitySourceDirecto
     metadata.clearNodeVisualStateRequiredFields,
     requiredClearNodeVisualStateFields,
   )
+  const missingEnterProcessDetailFields = findMissingRequiredFields(
+    metadata.enterProcessDetailRequiredFields,
+    requiredEnterProcessDetailFields,
+  )
+  const missingPrepareProcessDetailFields = findMissingRequiredFields(
+    metadata.prepareProcessDetailRequiredFields,
+    requiredPrepareProcessDetailFields,
+  )
+  const missingCommitProcessDetailFields = findMissingRequiredFields(
+    metadata.commitProcessDetailRequiredFields,
+    requiredCommitProcessDetailFields,
+  )
+  const missingAbortProcessDetailFields = findMissingRequiredFields(
+    metadata.abortProcessDetailRequiredFields,
+    requiredAbortProcessDetailFields,
+  )
+  const missingExitProcessDetailFields = findMissingRequiredFields(
+    metadata.exitProcessDetailRequiredFields,
+    requiredExitProcessDetailFields,
+  )
+  const missingSetProcessDetailPlaybackFields = findMissingRequiredFields(
+    metadata.setProcessDetailPlaybackRequiredFields,
+    requiredSetProcessDetailPlaybackFields,
+  )
   const missingCommandCapabilities = findMissingRequiredFields(
     metadata.commandCapabilities,
     requiredUnityCommandCapabilities,
@@ -447,6 +506,12 @@ export async function ensureUnityBuildSupportsSceneActivation(unitySourceDirecto
       missingSwitchSceneRecoveryFields.length > 0 ||
       missingSetNodeVisualStateFields.length > 0 ||
       missingClearNodeVisualStateFields.length > 0 ||
+      missingEnterProcessDetailFields.length > 0 ||
+      missingPrepareProcessDetailFields.length > 0 ||
+      missingCommitProcessDetailFields.length > 0 ||
+      missingAbortProcessDetailFields.length > 0 ||
+      missingExitProcessDetailFields.length > 0 ||
+      missingSetProcessDetailPlaybackFields.length > 0 ||
       missingCommandCapabilities.length > 0 ||
       missingEventCapabilities.length > 0) {
     throw new Error(
@@ -456,6 +521,12 @@ export async function ensureUnityBuildSupportsSceneActivation(unitySourceDirecto
         ...missingSwitchSceneRecoveryFields,
         ...missingSetNodeVisualStateFields,
         ...missingClearNodeVisualStateFields,
+        ...missingEnterProcessDetailFields,
+        ...missingPrepareProcessDetailFields,
+        ...missingCommitProcessDetailFields,
+        ...missingAbortProcessDetailFields,
+        ...missingExitProcessDetailFields,
+        ...missingSetProcessDetailPlaybackFields,
         ...missingCommandCapabilities,
         ...missingEventCapabilities,
       ].join('、')}。请重新构建 Unity 正式基线。`,
@@ -582,89 +653,8 @@ const ccgtOtTopology = Object.freeze({
   ]),
 })
 
-/**
- * 三个关键环节严格采用《通用拓扑图参考0810_AI友好版》第3.1至3.3节的展示节点集合。
- * 连线只能复用来源总图中“两端均属于展示集合”的已核验连接；资料没有提供的连接不得推断或补造。
- * 节点顺序按资料中的隔离区、厂级、单元控制、现场设备层保存；二维坐标直接复用总图，切换时不会跳位。
- */
-const ccgtFlowViews = Object.freeze([
-  Object.freeze({
-    topologyId: 'topology.gas-power.gas-turbine',
-    title: '燃气轮机关键环节',
-    visibleNodeIds: Object.freeze([
-      'scada-security-gateway', 'operator-station', 'gas-network', 'plant-engineering-station', 'plant-data-station',
-      'inlet-duct', 'generator', 'auxiliary-plc', 'grid-output',
-      'fuel-gas-pressure-valve', 'fuel-gas-electric-actuator', 'hrsg-drum-level-sensor', 'steam-main-control-valve',
-      'generator-outlet-breaker', 'condensate-pump-vfd', 'fuel-gas-leak-detector',
-    ]),
-    visibleEdgeIds: Object.freeze([
-      'route.dcs-core-to-scada', 'route.dcs-core-to-operator', 'route.dcs-core-to-engineering', 'route.dcs-core-to-performance',
-      'route.dcs-core-to-markvie', 'route.dcs-core-to-generator', 'route.dcs-core-to-auxiliary', 'route.dcs-core-to-sil',
-      'route.markvie-to-pressure-valve', 'route.markvie-to-actuator', 'route.generator-to-outlet-breaker',
-      'route.auxiliary-to-vfd', 'route.sil-to-leak-detector',
-    ]),
-    // 资料要求展示全部七个现场节点，其中汽机主汽调节阀和余热锅炉温度变送器在本子图内没有合法连线。
-    allowedOrphanNodeIds: Object.freeze(['hrsg-drum-level-sensor', 'steam-main-control-valve']),
-    get nodeLayoutOverrides() { return createOverviewLayoutOverrides(this.visibleNodeIds) },
-  }),
-  Object.freeze({
-    topologyId: 'topology.gas-power.hrsg',
-    title: '余热锅炉关键环节',
-    visibleNodeIds: Object.freeze([
-      'scada-security-gateway', 'operator-station', 'gas-network', 'plant-engineering-station', 'plant-data-station', 'hrsg',
-      'fuel-gas-pressure-valve', 'fuel-gas-electric-actuator', 'hrsg-drum-level-sensor', 'steam-main-control-valve',
-      'generator-outlet-breaker', 'condensate-pump-vfd', 'fuel-gas-leak-detector',
-    ]),
-    visibleEdgeIds: Object.freeze([
-      'route.dcs-core-to-scada', 'route.dcs-core-to-operator', 'route.dcs-core-to-engineering', 'route.dcs-core-to-performance',
-      'route.dcs-core-to-hrsg', 'route.hrsg-to-temperature-transmitter',
-    ]),
-    // 下列现场节点由资料明确要求展示，但总图中没有两端都落入本子图的合法连线，必须保留且不得补线。
-    allowedOrphanNodeIds: Object.freeze([
-      'fuel-gas-pressure-valve', 'fuel-gas-electric-actuator', 'steam-main-control-valve',
-      'generator-outlet-breaker', 'condensate-pump-vfd', 'fuel-gas-leak-detector',
-    ]),
-    get nodeLayoutOverrides() { return createOverviewLayoutOverrides(this.visibleNodeIds) },
-  }),
-  Object.freeze({
-    topologyId: 'topology.gas-power.steam-turbine',
-    title: '蒸汽轮机关键环节',
-    visibleNodeIds: Object.freeze([
-      'scada-security-gateway', 'operator-station', 'gas-network', 'plant-engineering-station', 'plant-data-station',
-      'steam-turbine', 'generator', 'auxiliary-plc',
-      'fuel-gas-pressure-valve', 'fuel-gas-electric-actuator', 'hrsg-drum-level-sensor', 'steam-main-control-valve',
-      'generator-outlet-breaker', 'condensate-pump-vfd', 'fuel-gas-leak-detector',
-    ]),
-    visibleEdgeIds: Object.freeze([
-      'route.dcs-core-to-scada', 'route.dcs-core-to-operator', 'route.dcs-core-to-engineering', 'route.dcs-core-to-performance',
-      'route.dcs-core-to-steam', 'route.dcs-core-to-generator', 'route.dcs-core-to-auxiliary',
-      'route.steam-to-main-control-valve', 'route.generator-to-outlet-breaker', 'route.auxiliary-to-vfd',
-    ]),
-    // 资料要求同时展示全部七个现场节点；其中四个在本子图内没有对应控制器端点，因此显式登记为孤立节点。
-    allowedOrphanNodeIds: Object.freeze([
-      'fuel-gas-pressure-valve', 'fuel-gas-electric-actuator', 'hrsg-drum-level-sensor', 'fuel-gas-leak-detector',
-    ]),
-    get nodeLayoutOverrides() { return createOverviewLayoutOverrides(this.visibleNodeIds) },
-  }),
-])
-
-/**
- * 子图只保存节点集合，坐标始终从唯一权威总图按标识投影。
- * 未知节点会在构建阶段立即失败，禁止静默回退到猜测坐标或把资料层级错误带入发布包。
- */
-function createOverviewLayoutOverrides(visibleNodeIds) {
-  const nodeById = new Map(ccgtOtTopology.nodes.map((node) => [node.nodeId, node]))
-  return Object.freeze(visibleNodeIds.map((nodeId) => {
-    const node = nodeById.get(nodeId)
-    if (!node) throw new Error(`关键流程引用了总图不存在的节点：${nodeId}`)
-    return Object.freeze({ nodeId, x: node.x, y: node.y })
-  }))
-}
-
 /** 将唯一总图和只读流程过滤规则转换为当前发布清单格式。 */
 function createCcgtTopologies(manifestVersion) {
-  // 可下钻入口由同版本正式说明内容建立一次索引；节点标题和现场连线不参与能力推断。
-  const drilldownBySourceNodeId = new Map(createGasPowerDrilldowns(manifestVersion).map((content) => [content.sourceNodeId, content.contentKey]))
   const overview = {
     topologyId: 'topology.gas-power.overview',
     sceneId: 'gas-power',
@@ -676,9 +666,6 @@ function createCcgtTopologies(manifestVersion) {
       return {
         ...node,
         ...(sceneNodeId ? { sceneNodeId } : {}),
-        ...(drilldownBySourceNodeId.has(node.nodeId) ? {
-          drilldown: { enabled: true, contentKey: drilldownBySourceNodeId.get(node.nodeId), trigger: 'button' },
-        } : {}),
         deviceStatus: 'offline',
         /*
          * 所有来源节点都用稳定 nodeId（节点标识）参与外部协议。平台读取该标识并在自身系统内
@@ -694,28 +681,12 @@ function createCcgtTopologies(manifestVersion) {
     })),
   }
 
-  const flowTopologies = ccgtFlowViews.map((view) => ({
-    topologyId: view.topologyId,
-    sceneId: 'gas-power',
-    title: view.title,
-    configVersion: manifestVersion,
-    // 节点、边和层级均由来源总图在 TopologyRegistry（拓扑注册表）加载时一次投影，禁止复制业务事实。
-    nodes: [],
-    edges: [],
-    filter: {
-      sourceTopologyId: overview.topologyId,
-      visibleNodeIds: [...view.visibleNodeIds],
-      visibleEdgeIds: [...view.visibleEdgeIds],
-      ...(view.allowedOrphanNodeIds ? { allowedOrphanNodeIds: [...view.allowedOrphanNodeIds] } : {}),
-      nodeLayoutOverrides: view.nodeLayoutOverrides.map((override) => ({ ...override })),
-    },
-  }))
-
-  return [overview, ...flowTopologies]
+  // 新 JSON 图纸完整承载总览，不再生成旧版关键流程过滤拓扑及其局部排布。
+  return [overview]
 }
 
 /**
- * 固定九场景闭集由已验证夹具提供，燃气条目替换为一张权威总图及三个过滤流程视图。
+ * 固定九场景闭集由已验证夹具提供，燃气条目替换为一张权威总图。
  * 这既满足运行时的闭集契约，也明确表达另外八个场景仍没有业务内容，不能被本测试包初始化或验收。
  */
 export async function createGasOnlyManifest(releaseId) {
@@ -728,6 +699,7 @@ export async function createGasOnlyManifest(releaseId) {
       actionId: 'action.gas-power.overview',
       title: '返回燃气总览',
       targetSceneId: 'gas-power',
+      targetViewMode: 'business',
       targetTopologyId: 'topology.gas-power.overview',
       allowedParameters: [],
       /*
@@ -742,29 +714,14 @@ export async function createGasOnlyManifest(releaseId) {
       actionId: 'action.gas-power.gas-turbine',
       title: '进入燃气轮机关键环节',
       targetSceneId: 'gas-power',
-      targetTopologyId: 'topology.gas-power.gas-turbine',
+      targetViewMode: 'process-detail',
+      processDetailId: 'process-detail.gas-power.gas-turbine',
       allowedParameters: [],
-      unityAction: { type: 'enterProcessStep', processId: 'gas-power-generation', stepId: 'gas-turbine', defaultUnitId: 'all', isolate: true },
-      failurePolicy: 'keep-current-context',
-      configVersion: manifestVersion,
-    },
-    {
-      actionId: 'action.gas-power.hrsg',
-      title: '进入余热锅炉关键环节',
-      targetSceneId: 'gas-power',
-      targetTopologyId: 'topology.gas-power.hrsg',
-      allowedParameters: [],
-      unityAction: { type: 'enterProcessStep', processId: 'gas-power-generation', stepId: 'hrsg', defaultUnitId: 'all', isolate: true },
-      failurePolicy: 'keep-current-context',
-      configVersion: manifestVersion,
-    },
-    {
-      actionId: 'action.gas-power.steam-turbine',
-      title: '进入蒸汽轮机关键环节',
-      targetSceneId: 'gas-power',
-      targetTopologyId: 'topology.gas-power.steam-turbine',
-      allowedParameters: [],
-      unityAction: { type: 'enterProcessStep', processId: 'gas-power-generation', stepId: 'steam-turbine', defaultUnitId: 'all', isolate: true },
+      /*
+       * 第三层只发送独立关键环节命令。流程步骤过滤、节点聚焦、上下文半透明和包围盒定位
+       * 均不属于该事务，也不得通过动作参数绕过目录的固定资源、相机位和状态节点映射。
+       */
+      unityAction: { type: 'enterProcessDetail', processDetailId: 'process-detail.gas-power.gas-turbine' },
       failurePolicy: 'keep-current-context',
       configVersion: manifestVersion,
     },
@@ -776,7 +733,7 @@ export async function createGasOnlyManifest(releaseId) {
     // Unity 当前桥接器只接受该已验证映射版本；其余占位场景同样保持契约一致，但不会被测试宿主选择。
     sceneMappingVersion: unitySceneMappingVersion,
     resourceVersion: scene.sceneId === 'gas-power' ? `resource.${unityReleaseId}.gas-power` : `placeholder.${scene.sceneId}`,
-    // 外层只可触发一项总览复位和三项关键流程动作；不暴露任意 Unity 方法、模型名或临时步骤字符串。
+    // 外层只可触发燃气总览和唯一独立燃机环节；不暴露 Unity 方法、模型名或临时步骤字符串。
     supportedActionIds: scene.sceneId === 'gas-power' ? gasActionDefinitions.map((action) => action.actionId) : [],
     topologyIds: scene.sceneId === 'gas-power' ? gasTopologies.map((topology) => topology.topologyId) : scene.topologyIds,
   }))
@@ -796,9 +753,9 @@ export async function createGasOnlyManifest(releaseId) {
   const unitySceneMappings = fixture.unitySceneMappings.map((mapping) => ({
     ...mapping,
     mappingVersion: unitySceneMappingVersion,
-    // 只发布总览和三个外部流程动作实际使用、且已由场景序列化配置核验的步骤；没有三维路由证据，因此路径始终为空。
+    // 只发布总览步骤及已核验的三维节点映射；没有三维路由证据，因此路径始终为空。
     sceneNodeIds: mapping.sceneId === 'gas-power' ? [...verifiedGasSceneNodeIdByTopologyNodeId.values()] : [],
-    // 流程能力独立于二维节点点击映射：仅总览及三个明确交付的流程步骤可成为外部 workflow.trigger（工作流触发）目标。
+    // 第二层流程能力独立于二维节点点击映射：这里只保留总览步骤；燃机第三层由 processDetails（关键环节目录）承载。
     // 复制对象而非复用冻结数组中的对象，防止后续清单处理代码意外修改共享声明。
     processSteps: mapping.sceneId === 'gas-power'
       ? verifiedGasProcessSteps.map((step) => ({ ...step }))
@@ -813,9 +770,11 @@ export async function createGasOnlyManifest(releaseId) {
     unityRuntimeKey: getUnityRuntimeKey('gas-power'),
     scenes,
     topologies,
-    // 说明内容与清单同版本原子发布，但不加入场景 topologyIds（可切换拓扑标识集合）。
-    drilldowns: createGasPowerDrilldowns(manifestVersion),
+    // 产品已下线下钻，清单显式发布空集合，避免旧内容继续出现在注册表或外部接口中。
+    drilldowns: [],
     actions: gasActionDefinitions,
+    // 返回新对象，防止构建流程或测试意外修改冻结的唯一目录源。
+    processDetails: gasProcessDetails.map((detail) => ({ ...detail })),
     unitySceneMappings,
   }
 }
@@ -825,7 +784,7 @@ export async function createGasOnlyManifest(releaseId) {
  *
  * 燃气自测包继续由 createGasOnlyManifest（燃气独立清单生成器）生成，避免改变既有燃气
  * 回归用例的 23 节点/22 连线基线；燃煤使用同一九场景闭集和相同协议边界，但只激活
- * coal-power 的总图、三个过滤视图、四个动作以及 Unity 属性面板已确认的映射。
+ * coal-power 的总图、总览动作以及 Unity 属性面板已确认的映射。
  */
 export async function createCoalPowerManifest(releaseId) {
   const fixturePath = path.join(workspaceRoot, 'tests', 'fixtures', 'scene-topology-contract-valid.json')
@@ -874,8 +833,11 @@ export async function createCoalPowerManifest(releaseId) {
     unityRuntimeKey: getUnityRuntimeKey('coal-power'),
     scenes,
     topologies,
-    drilldowns: createCoalPowerDrilldowns(manifestVersion),
+    // 产品已下线下钻，燃煤清单同样不再发布旧说明内容。
+    drilldowns: [],
     actions: coalActionDefinitions,
+    // 燃煤本轮没有第三层资源，显式空数组验证目录天然支持零项，而非伪造占位环节。
+    processDetails: [],
     unitySceneMappings,
   }
 }
@@ -883,8 +845,8 @@ export async function createCoalPowerManifest(releaseId) {
 /**
  * 生成同时承载燃气、燃煤真实配置的原子结构清单。
  *
- * 两个独立清单生成器继续保留为场景专项回归夹具；正式发布改用本函数一次装配八张真实拓扑、
- * 八个受控动作和六组三维映射。initialSceneId（初始场景标识）只决定当前入口使用的运行时别名，
+ * 两个独立清单生成器继续保留为场景专项回归夹具；正式发布改用本函数一次装配两张真实总览拓扑、
+ * 两个受控总览动作和六组三维映射。initialSceneId（初始场景标识）只决定当前入口使用的运行时别名，
  * 不再裁剪另一场景内容，因此同一 Unity 实例可在燃气、燃煤之间往返并保持双向选中。
  */
 export async function createConfiguredPowerScenesManifest(releaseId, initialSceneId = 'gas-power') {
@@ -912,9 +874,10 @@ export async function createConfiguredPowerScenesManifest(releaseId, initialScen
   ].map((topology) => ({ ...topology, configVersion: manifestVersion }))
   const actions = [...gasManifest.actions, ...coalManifest.actions]
     .map((action) => ({ ...action, configVersion: manifestVersion }))
-  // 联合包统一改写说明资源版本，保证入口、内容和拓扑始终属于同一原子发布。
-  const drilldowns = [...(gasManifest.drilldowns ?? []), ...(coalManifest.drilldowns ?? [])]
-    .map((content) => ({ ...content, version: manifestVersion }))
+  const processDetails = [...gasManifest.processDetails, ...coalManifest.processDetails]
+    .map((detail) => ({ ...detail }))
+  // 两张新版图均不支持下钻，联合清单不再合并任何历史说明内容。
+  const drilldowns = []
   const unitySceneMappings = gasManifest.unitySceneMappings.map((gasMapping) => {
     if (gasMapping.sceneId !== 'coal-power') return { ...gasMapping }
     const coalMapping = coalMappingBySceneId.get(gasMapping.sceneId)
@@ -931,22 +894,21 @@ export async function createConfiguredPowerScenesManifest(releaseId, initialScen
     topologies,
     drilldowns,
     actions,
+    processDetails,
     unitySceneMappings,
   }
 }
 
 /**
- * 内部自测宿主页：先初始化燃气总图，再以标准 workflow.trigger（工作流触发）验证三个受控流程动作，
- * 最后以同一动作重新请求来源总图，验证过滤视图可以恢复全部二维节点和连线。
- * 该页面只用于开发和自动化回归，测试按钮与状态文字不会进入平台根入口。
- * 它绝不直接访问 Unity iframe；所有请求都经嵌入壳的清单校验和原子事务编排。
+ * 内部自测宿主页只覆盖本轮唯一纵向链路：全局沙盘 → 燃气业务总览 → 独立燃机关键环节。
+ * 页面保留三层导航，并在关键环节稳定后显示播放/停止按钮。播放按钮只发送受控外层命令，
+ * 由当前子应用从稳定上下文解析关键环节并转发 Unity，不使用设备四态模拟动态控制，也不直连 Unity 内嵌框架。
  */
 export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power') {
   if (initialSceneId !== 'gas-power' && initialSceneId !== 'coal-power') {
     throw new Error('本地自测页初始场景只能是 gas-power 或 coal-power。')
   }
 
-  const initialSceneTitle = initialSceneId === 'coal-power' ? '燃煤' : '燃气'
   return `<!doctype html>
 <html lang="zh-CN">
   <head>
@@ -954,118 +916,141 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <!-- 使用空数据站点图标，避免本地联调浏览器自动请求不存在的 /favicon.ico 并产生与业务无关的 404。 -->
     <link rel="icon" href="data:," />
-    <title>燃气发电场景与拓扑联调包</title>
+    <title>燃气轮机关键环节全链路自测包</title>
     <style>
       html, body, #visualization-shell { inline-size: 100%; block-size: 100%; margin: 0; overflow: hidden; background: #061323; }
       #visualization-shell { display: block; border: 0; }
-      .test-controls { position: fixed; z-index: 2; inset-inline-start: 12px; inset-block-start: 12px; display: grid; gap: 8px; inline-size: min(19rem, calc(100% - 24px)); max-block-size: calc(100% - 24px); overflow: auto; padding: 10px; border: 1px solid rgb(103 232 249 / 45%); border-radius: 8px; color: #cffafe; background: rgb(8 47 73 / 92%); font: 12px/1.4 system-ui, sans-serif; }
-      .test-controls__title { font-weight: 700; }
-      .test-controls__hint { margin: 0; color: #bae6fd; }
-      .test-controls__scene { display: grid; gap: 5px; padding-block-start: 6px; border-block-start: 1px solid rgb(103 232 249 / 25%); }
-      .test-controls__scene-title { color: #67e8f9; font-weight: 700; }
-      .test-controls button { min-block-size: 32px; border: 1px solid rgb(103 232 249 / 45%); border-radius: 5px; color: #e0f2fe; background: #0c4a6e; cursor: pointer; }
-      .test-controls button:hover:not(:disabled) { background: #075985; }
-      .test-controls button:disabled { opacity: .55; cursor: wait; }
-      .test-status { position: fixed; z-index: 2; inset-inline-end: 12px; inset-block-end: 12px; max-inline-size: min(30rem, calc(100% - 24px)); padding: 8px 10px; border: 1px solid rgb(103 232 249 / 45%); border-radius: 6px; color: #cffafe; background: rgb(8 47 73 / 88%); font: 12px/1.4 system-ui, sans-serif; pointer-events: none; }
+       .test-controls { position: fixed; z-index: 2; inset-inline-start: 12px; inset-block-start: 12px; display: grid; gap: 8px; inline-size: min(17rem, calc(100% - 24px)); padding: 10px; border: 1px solid rgb(103 232 249 / 45%); border-radius: 8px; color: #cffafe; background: rgb(8 47 73 / 92%); font: 12px/1.4 system-ui, sans-serif; }
+       .test-controls__title { font-weight: 700; }
+       .test-controls__hint { margin: 0; color: #bae6fd; }
+       .test-controls__actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; padding-block-start: 6px; border-block-start: 1px solid rgb(103 232 249 / 25%); }
+       .test-controls__playback { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
+       .test-controls button { min-block-size: 32px; border: 1px solid rgb(103 232 249 / 45%); border-radius: 5px; color: #e0f2fe; background: #0c4a6e; cursor: pointer; }
+       .test-controls button:hover:not(:disabled) { background: #075985; }
+       .test-controls button:disabled { opacity: .55; cursor: wait; }
+       .test-status { position: fixed; z-index: 2; inset-inline-end: 12px; inset-block-end: 12px; max-inline-size: min(30rem, calc(100% - 24px)); padding: 8px 10px; border: 1px solid rgb(103 232 249 / 45%); border-radius: 6px; color: #cffafe; background: rgb(8 47 73 / 88%); font: 12px/1.4 system-ui, sans-serif; pointer-events: none; }
     </style>
   </head>
   <body>
     <!-- 仅承载嵌入壳；真实 Unity iframe 由壳内唯一宿主创建，外层测试页绝不直连 Unity。 -->
     <iframe id="visualization-shell" title="燃气发电场景与拓扑嵌入壳" allow="fullscreen"></iframe>
-    <section class="test-controls" aria-label="双场景外部消息测试操作">
-      <span class="test-controls__title">双场景外部流程触发测试（手动）</span>
-      <p class="test-controls__hint">按钮会向嵌入壳发送 workflow.trigger（工作流触发）消息，验证场景、总览、关键流程和三维联动。</p>
-      <div class="test-controls__scene" aria-label="燃气发电场景操作">
-        <span class="test-controls__scene-title">燃气发电</span>
-        <button type="button" data-action-id="action.gas-power.overview" data-overview-command disabled>燃气总览</button>
-        <button type="button" data-action-id="action.gas-power.gas-turbine" disabled>燃气轮机关键流程</button>
-        <button type="button" data-action-id="action.gas-power.hrsg" disabled>余热锅炉关键流程</button>
-        <button type="button" data-action-id="action.gas-power.steam-turbine" disabled>蒸汽轮机关键流程</button>
+    <section class="test-controls" aria-label="燃气轮机第三层外部消息测试操作">
+      <span class="test-controls__title">燃气轮机单环节全链路自测</span>
+      <p class="test-controls__hint">进入关键环节后可使用播放/停止控制；按钮仅通过外层受控协议操作当前三维模型。</p>
+      <div class="test-controls__actions" aria-label="视图链路操作">
+        <button type="button" data-command="overview" disabled>沙盘</button>
+        <button type="button" data-action-id="action.gas-power.overview" disabled>燃气</button>
+        <button type="button" data-action-id="action.gas-power.gas-turbine" disabled>关键环节</button>
       </div>
-      <div class="test-controls__scene" aria-label="燃煤发电场景操作">
-        <span class="test-controls__scene-title">燃煤发电</span>
-        <button type="button" data-action-id="action.coal-power.overview" data-overview-command disabled>燃煤总览</button>
-        <button type="button" data-action-id="action.coal-power.combustion" disabled>燃烧系统关键流程</button>
-        <button type="button" data-action-id="action.coal-power.water-steam-cycle" disabled>汽水循环关键流程</button>
-        <button type="button" data-action-id="action.coal-power.power-output" disabled>发电输出关键流程</button>
+      <div class="test-controls__playback" aria-label="关键环节播放控制">
+        <button type="button" data-playback="play" disabled>播放</button>
+        <button type="button" data-playback="stop" disabled>停止</button>
       </div>
     </section>
-     <output id="test-status" class="test-status" aria-live="polite">正在建立${initialSceneTitle}发电联调链路。</output>
+     <output id="test-status" class="test-status" aria-live="polite">正在建立第二版协议并初始化全局沙盘。</output>
     <script>
       (() => {
         // 协议常量与 Vue 壳严格一致；只保留本次初始化需要的有限状态，避免测试页累积完整消息或业务载荷。
         const channel = 'power-scene-topology-shell';
-        const version = 1;
+        const version = ${expectedUnityProtocolVersion};
         const instanceId = 'gas-power-smoke-host';
         const shell = document.querySelector('#visualization-shell');
         const status = document.querySelector('#test-status');
         const actionButtons = Array.from(document.querySelectorAll('[data-action-id]'));
-        const commandButtons = actionButtons;
-        // 测试页只允许清单中已经登记的八个动作，禁止通过页面输入拼接任意场景、拓扑或 Unity 方法。
+        const playbackButtons = Array.from(document.querySelectorAll('[data-playback]'));
+        const overviewButton = document.querySelector('[data-command="overview"]');
+        const commandButtons = [...actionButtons, overviewButton].filter(Boolean);
+        // 页面只允许总览和唯一燃机关键环节动作，燃煤及其他燃气环节均不能通过页面构造。
         const allowedActionIds = new Set([
-          'action.gas-power.overview', 'action.gas-power.gas-turbine', 'action.gas-power.hrsg', 'action.gas-power.steam-turbine',
-          'action.coal-power.overview', 'action.coal-power.combustion', 'action.coal-power.water-steam-cycle', 'action.coal-power.power-output',
+          'action.gas-power.overview',
+          'action.gas-power.gas-turbine',
         ]);
         const shellOrigin = window.location.origin;
         let sessionId = '';
         let messageSequence = 0;
         let contextRevision;
-        let activeSceneId = '';
+        let stableViewMode = '';
+        const pendingMessageIds = new Set();
+        const completedMessageIds = new Set();
 
-        /** 所有测试命令共用一个在途门禁，避免人工连点制造与本次验证无关的并发事务。 */
+        /**
+         * 所有可见导航按钮共用一个在途门禁，防止并发视图命令覆盖当前事务。
+         */
         function setCommandButtonsDisabled(disabled) {
           commandButtons.forEach((button) => { button.disabled = disabled; });
         }
 
-        /** 仅用当前会话生成一次受控初始化信封，不接受页面输入或任意场景、拓扑、Unity 方法名。 */
-        function initializeSelectedScene() {
+        /** 播放控制只在关键环节稳定态可用，导航切换或播放命令在途时临时锁定，避免重复下发。 */
+        function setPlaybackButtonsDisabled(disabled) {
+          playbackButtons.forEach((button) => { button.disabled = disabled; });
+        }
+
+        function refreshPlaybackButtons() {
+          setPlaybackButtonsDisabled(stableViewMode !== 'process-detail' || pendingMessageIds.size > 0);
+        }
+
+        /** 所有命令共享同一第二版信封工厂，标识只由受控前缀和本地单调序号生成。 */
+        function sendCommand(type, payload, prefix) {
           if (!sessionId) return;
           messageSequence += 1;
+          const messageId = prefix + '-' + messageSequence;
+          pendingMessageIds.add(messageId);
           shell.contentWindow?.postMessage({
             channel,
             version,
             instanceId,
             sessionId,
-            messageId: 'gas-power-smoke-init-' + messageSequence,
-            type: 'system.init',
+            messageId,
+            type,
             timestamp: Date.now(),
-            payload: {
-              sceneId: '${initialSceneId}',
-              topologyId: 'topology.${initialSceneId}.overview',
-              expectedManifestVersion: '${manifestVersion}',
-            },
+            payload,
           }, shellOrigin);
+          return messageId;
+        }
+
+        /** 初始化目标固定为全局沙盘；第一层没有拓扑，也不会预加载任何第三层资源。 */
+        function initializeOverview() {
+          sendCommand('system.init', {
+            sceneId: 'overview',
+            expectedManifestVersion: '${manifestVersion}',
+          }, 'gas-turbine-self-test-init');
         }
 
         /**
-         * 仅向当前已协商的嵌入壳发送四项清单动作之一，并携带最近稳定上下文版本。
+         * 仅向当前已协商的嵌入壳发送两项清单动作之一，并携带最近稳定上下文版本。
          * 版本不匹配由壳返回明确冲突，页面不会绕过事务直接切换拓扑或调用 Unity 方法。
          */
         function triggerWorkflow(actionId) {
           if (!sessionId || !Number.isSafeInteger(contextRevision) || !allowedActionIds.has(actionId)) return;
-          messageSequence += 1;
           setCommandButtonsDisabled(true);
           status.textContent = '正在执行受控流程动作：' + actionId + '。';
-          shell.contentWindow?.postMessage({
-            channel,
-            version,
-            instanceId,
-            sessionId,
-            messageId: 'gas-power-smoke-workflow-' + messageSequence,
-            type: 'workflow.trigger',
-            timestamp: Date.now(),
-            payload: { actionId, expectedContextRevision: contextRevision },
-          }, shellOrigin);
+          return sendCommand('workflow.trigger', { actionId, expectedContextRevision: contextRevision }, 'gas-turbine-self-test-workflow');
         }
 
         actionButtons.forEach((button) => {
           button.addEventListener('click', () => triggerWorkflow(button.dataset.actionId ?? ''));
         });
 
-        // 保留一个显式总览入口函数，便于浏览器控制台手动执行同一条受控外部消息路径。
-        function openGasOverview() {
-          triggerWorkflow('action.gas-power.overview');
+        /** 返回沙盘只调用外层受控视图命令，不能伪造一张空拓扑代表第一层。 */
+        function returnToOverview() {
+          if (!Number.isSafeInteger(contextRevision)) return;
+          setCommandButtonsDisabled(true);
+          sendCommand('view.open', { sceneId: 'overview', expectedContextRevision: contextRevision }, 'gas-turbine-self-test-overview');
         }
+
+        overviewButton?.addEventListener('click', returnToOverview);
+
+        /** 播放/停止只携带布尔开关和稳定上下文版本，场景与关键环节编号由子应用从当前上下文读取。 */
+        function setProcessDetailPlayback(playing) {
+          if (!sessionId || stableViewMode !== 'process-detail' || !Number.isSafeInteger(contextRevision)) return;
+          setPlaybackButtonsDisabled(true);
+          status.textContent = playing ? '正在请求播放关键环节动态。' : '正在请求停止关键环节动态。';
+          return sendCommand('process-detail.playback', { playing, expectedContextRevision: contextRevision }, 'gas-turbine-self-test-playback');
+        }
+
+        playbackButtons.forEach((button) => {
+          button.addEventListener('click', () => setProcessDetailPlayback(button.dataset.playback === 'play'));
+        });
 
         /** 只接受来自当前嵌入壳、当前来源和当前实例的事件，防止同源旁路页面伪造初始化完成。 */
         window.addEventListener('message', (event) => {
@@ -1075,27 +1060,69 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
 
           if (message.type === 'system.ready' && typeof message.sessionId === 'string') {
             sessionId = message.sessionId;
-             status.textContent = '${initialSceneTitle}运行时已就绪，正在加载现有${initialSceneTitle}发电场景与拓扑。';
-            initializeSelectedScene();
+            status.textContent = '运行时已就绪，正在进入全局沙盘。';
+            initializeOverview();
             return;
           }
 
-          if (message.type === 'view.changed' && (message.payload?.sceneId === 'gas-power' || message.payload?.sceneId === 'coal-power') && Number.isSafeInteger(message.payload?.contextRevision)) {
-            activeSceneId = message.payload.sceneId;
+          if (message.type === 'view.changed' && Number.isSafeInteger(message.payload?.contextRevision)) {
+            if (typeof message.replyTo === 'string' && completedMessageIds.has(message.replyTo)) {
+              // 已经结案的命令不得再次改变页面所认定的稳定视图；迟到结果必须在页面内部隔离，
+              // 避免旧结果覆盖当前上下文或重新显示已移除的诊断列表。
+              return;
+            }
             contextRevision = message.payload.contextRevision;
+            stableViewMode = message.payload.viewMode ?? (message.payload.sceneId === 'overview' ? 'overview' : 'business');
             setCommandButtonsDisabled(false);
-            const sceneTitle = activeSceneId === 'coal-power' ? '燃煤' : '燃气';
-            if (message.payload?.actionId === 'action.gas-power.overview' && message.payload?.topologyId === 'topology.gas-power.overview') {
-              status.textContent = '燃气总拓扑与三维总览已完成复位。';
-            } else if (message.payload?.topologyId === 'topology.' + activeSceneId + '.overview') {
-              status.textContent = sceneTitle + '总览与三维场景已完成切换。';
+            refreshPlaybackButtons();
+            if (stableViewMode === 'process-detail') {
+              const validDetail = message.payload.sceneId === 'gas-power' &&
+                message.payload.processDetailId === 'process-detail.gas-power.gas-turbine' &&
+                message.payload.topologyId === undefined;
+              status.textContent = validDetail
+                ? '燃气轮机独立模型已提交：全屏三维且无拓扑。'
+                : '失败：第三层稳定状态包含错误编号或残留拓扑。';
+            } else if (stableViewMode === 'business' &&
+              message.payload.topologyId === 'topology.gas-power.overview' &&
+              message.payload?.actionId === 'action.gas-power.overview') {
+              // 业务层不能只凭同名二维拓扑显示成功，必须同时确认本次受控总览动作已经提交。
+              status.textContent = '燃气业务场景与燃气总拓扑已稳定提交。';
+            } else if (stableViewMode === 'overview' && message.payload.sceneId === 'overview' && message.payload.topologyId === undefined) {
+              status.textContent = '全局沙盘已稳定提交，当前无拓扑。';
             } else {
-              status.textContent = sceneTitle + '关键流程已切换为 ' + message.payload.topologyId + '，三维动作已完成提交。';
+              status.textContent = '失败：收到不属于本轮链路的稳定视图。';
             }
             return;
           }
 
-          if (message.type === 'system.ack' && message.payload?.success !== true) {
+          if (message.type === 'command.result' && typeof message.replyTo === 'string') {
+            pendingMessageIds.delete(message.replyTo);
+            completedMessageIds.add(message.replyTo);
+            while (completedMessageIds.size > 32) completedMessageIds.delete(completedMessageIds.values().next().value);
+            if (message.payload?.success !== true) {
+              const errorCode = typeof message.payload?.error?.code === 'string' && /^[a-z0-9.-]{1,64}$/.test(message.payload.error.code)
+                ? message.payload.error.code
+                : 'unknown';
+              status.textContent = '操作未完成，上一稳定视图保持不变（错误码：' + errorCode + '）。';
+            }
+            if (pendingMessageIds.size === 0 && Number.isSafeInteger(contextRevision)) setCommandButtonsDisabled(false);
+            refreshPlaybackButtons();
+            return;
+          }
+
+          if (message.type === 'system.ack' && typeof message.replyTo === 'string') {
+            pendingMessageIds.delete(message.replyTo);
+            if (message.payload?.success === true) {
+              /*
+               * system.ack（系统受理回执）只证明初始化命令已被壳接收；同一 replyTo 后面仍会收到
+               * view.changed（稳定视图变更）。因此这里绝不能写入 completedMessageIds（已完成命令集合），
+               * 否则首次沙盘稳定视图会被误判为迟到结果并被丢弃。真正终结业务命令的仍是 command.result。
+               */
+              return;
+            }
+          }
+
+          if ((message.type === 'system.ack' || message.type === 'system.error') && message.payload?.success !== true) {
             /*
              * 联调包必须展示外层协议已经收敛的稳定错误码和阶段，否则运行诊断只剩通用失败文案，
              * 无法区分场景加载、拓扑激活或动作执行失败。这里只接受长度受限的标识字符，
@@ -1107,7 +1134,7 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
             const errorStage = typeof message.payload?.error?.stage === 'string' && /^[a-z0-9.-]{1,64}$/.test(message.payload.error.stage)
               ? message.payload.error.stage
               : 'unknown';
-             status.textContent = '${initialSceneTitle}联调初始化未完成（错误码：' + errorCode + '；阶段：' + errorStage + '）。';
+             status.textContent = '事务未完成，上一稳定视图应保持不变（错误码：' + errorCode + '；阶段：' + errorStage + '）。';
             if (Number.isSafeInteger(contextRevision)) setCommandButtonsDisabled(false);
           }
         });
@@ -1154,7 +1181,7 @@ function createIndependentServiceEntryPage(sceneId = 'gas-power') {
         } else {
           shellUrl.searchParams.set('parentOrigin', window.location.origin);
           shellUrl.searchParams.set('instanceId', '${directAccessInstanceId}');
-          shellUrl.searchParams.set('protocolVersion', '1');
+          shellUrl.searchParams.set('protocolVersion', '${expectedUnityProtocolVersion}');
           shellUrl.searchParams.set('directAccess', '1');
         }
         // 场景与总览参数由发布包固定，即使平台附带自身桥接参数也不能把燃煤壳退回燃气运行时登记。
@@ -1206,7 +1233,7 @@ export function createHostPage(manifestVersion, packageType = 'local-test', scen
       (() => {
         // 协议常量与 Vue 壳严格一致；平台入口只保留初始化所需的最小会话状态。
         const channel = 'power-scene-topology-shell';
-        const version = 1;
+        const version = ${expectedUnityProtocolVersion};
         const instanceId = '${sceneInstanceId}';
         const shell = document.querySelector('#visualization-shell');
         const shellOrigin = window.location.origin;
@@ -1262,16 +1289,32 @@ export function createHostPage(manifestVersion, packageType = 'local-test', scen
 
 /**
  * 运行服务根据 Unity WebGL 的压缩扩展名返回正确 Content-Encoding（内容编码）和 MIME（媒体类型），
- * 并为不可变发布目录设置入口短缓存、版本资源长期缓存及浏览器安全响应头。
- * 这避免普通静态服务器把 .br 文件当成未压缩脚本，也避免入口或清单被长期缓存后引用错误版本。
+ * 并为不可变发布目录设置入口短缓存、普通小型版本资源长期缓存及浏览器安全响应头。
+ * Unity 主播放器和场景资源体积大、切换版本频繁，必须单独使用 no-store（禁止存储），不能沿用
+ * 普通版本资源的长期缓存；这同时避免 .br 文件被误当作未压缩脚本，以及旧入口引用错误版本。
  */
 // 导出生成函数供发布契约测试检查最终服务脚本文本；直接执行构建时仍只写入不可变发布目录。
-export function createStaticServer() {
+export function createStaticServer(packageType = 'local-test') {
+  if (!releasePackageTypes.includes(packageType)) throw new Error('无法为未知包类型生成静态服务。')
   const runtimeSelfOrigin = addressMode === 'runtime-self-origin'
   const unityOrigin = runtimeSelfOrigin ? undefined : new URL(unityEntryUrl).origin
   const manifestOrigin = runtimeSelfOrigin ? undefined : new URL(topologyManifestUrl).origin
   const publicOrigin = runtimeSelfOrigin ? undefined : hostOrigin
   const serviceLabel = releaseSceneId === 'coal-power' ? '燃煤' : '燃气'
+  /**
+   * 只有本地测试包生成清理旧回环缓存的路径分支。合作方和正式服务从源代码层面移除
+   * 自测页名称与本机地址说明，避免不可达的死分支仍污染交付文本和安全审阅结果。
+   */
+  const localBrowserCacheResetSource = packageType === 'local-test'
+    ? `  /*
+   * 本地测试包通常复用 127.0.0.1 和固定端口。根入口在加载壳之前清理该来源的旧缓存，
+   * 可恢复浏览器已经产生 ERR_CACHE_READ_FAILURE（缓存读取失败）的损坏条目；
+   * 只对本地根入口和自测页生效，不影响其他包的不可变资源缓存。
+   */
+  const resetLocalBrowserCache = requestUrl.pathname === '/'
+    || requestUrl.pathname === '/index.html'
+    || requestUrl.pathname === '/self-test.html'`
+    : '  const resetLocalBrowserCache = false'
   return `import { createServer } from 'node:http'
 import { readFile, stat } from 'node:fs/promises'
 import { networkInterfaces } from 'node:os'
@@ -1283,6 +1326,7 @@ import { fileURLToPath } from 'node:url'
 const releaseRoot = path.dirname(fileURLToPath(import.meta.url))
 const host = ${JSON.stringify(host)}
 const port = ${port}
+const packageType = ${JSON.stringify(packageType)}
 const addressMode = ${JSON.stringify(addressMode)}
 const configuredPlatformParentOrigin = ${JSON.stringify(runtimeSelfOrigin ? null : platformParentOrigin)}
 const configuredUnityOrigin = ${JSON.stringify(unityOrigin ?? null)}
@@ -1402,11 +1446,22 @@ function decodeBrotli(buffer) {
 }
 
 /**
- * HTML 入口和 JSON 清单每次复用前必须重新验证，确保宿主不会引用旧版本清单；
- * 其余文件属于发布标识唯一、成功后不再覆盖的目录，可长期缓存以减少 Unity 大资源的重复传输。
+ * HTML 入口和 JSON 清单每次复用前必须重新验证，确保宿主不会引用旧版本清单。
+ * 本地测试会频繁在同一回环来源切换不可变包，因此壳脚本和样式禁止写入磁盘缓存，
+ * 避免浏览器继续读取旧包留下的损坏缓存。Unity 播放器、场景包和关键环节资源同样禁止长期 HTTP 缓存；
+ * Unity 构建还会关闭 WebGL dataCaching，双重避免大资源长期占用浏览器磁盘和旧版本空间。
  */
 function readCacheControl(filePath) {
   const withoutCompression = filePath.endsWith('.br') ? filePath.slice(0, -3) : filePath
+  const relativePath = path.relative(releaseRoot, withoutCompression).split(path.sep).join('/')
+  const isLocalShellAsset = packageType === 'local-test' && relativePath.startsWith('shell/assets/')
+  if (isLocalShellAsset) return 'no-store'
+  // Unity 的主播放器、场景资源包和关键环节资源体积大且由发布标识管理；禁止浏览器长期 HTTP 缓存，
+  // 使停止服务或更换包后可由操作系统回收临时响应，避免与 Unity 内部离线缓存叠加占用磁盘。
+  const isUnityLargeAsset = relativePath.startsWith('unity/Build/')
+    || relativePath.startsWith('unity/SceneBundles/')
+    || relativePath.startsWith('unity/ProcessDetailBundles/')
+  if (isUnityLargeAsset) return 'no-store'
   const extension = path.extname(withoutCompression).toLowerCase()
   return extension === '.html' || extension === '.json'
     ? 'no-cache, max-age=0, must-revalidate'
@@ -1434,8 +1489,9 @@ const server = createServer(async (request, response) => {
    * Vite 壳使用相对资源基址（./assets）。/embed 是历史兼容地址，若直接把 shell/index.html
    * 返回给它，浏览器会把脚本解析为 /assets/*，而真实文件位于 /shell/assets/*；路由重载后
    * 因此会出现空白壳。保留全部查询参数重定向到规范入口，既修复资源基址，又不丢失握手字段。
-   */
+  */
   const requestUrl = new URL(request.url ?? '/', 'http://' + host)
+${localBrowserCacheResetSource}
   if (requestUrl.pathname === '/embed') {
     response.writeHead(302, {
       ...baseSecurityHeaders,
@@ -1475,6 +1531,7 @@ const server = createServer(async (request, response) => {
     }
     // 内容安全策略只对 HTML 文档生效，避免给二进制大资源重复发送无意义的长响应头。
     if (path.extname(filePath).toLowerCase() === '.html') headers['content-security-policy'] = createContentSecurityPolicy()
+    if (resetLocalBrowserCache) headers['clear-site-data'] = '"cache"'
     if (compressedAsset && !decodeForNetworkClient) headers['content-encoding'] = 'br'
     response.writeHead(200, headers)
     if (request.method === 'HEAD') {
@@ -1564,9 +1621,9 @@ function createReadme(releaseConfiguration, sourceNodeCount, sourceEdgeCount) {
     ? `${releaseConfiguration.publicOrigin}/`
     : isRuntimeSelfOrigin
       ? './'
-    : `${releaseConfiguration.publicOrigin}/?parentOrigin=${encodeURIComponent(releaseConfiguration.platformParentOrigin)}&instanceId=${sceneId}-instance-01&protocolVersion=1`
+    : `${releaseConfiguration.publicOrigin}/?parentOrigin=${encodeURIComponent(releaseConfiguration.platformParentOrigin)}&instanceId=${sceneId}-instance-01&protocolVersion=${expectedUnityProtocolVersion}`
   const platformEntryUrl = isRuntimeSelfOrigin
-    ? `./?parentOrigin=<平台页面来源>&instanceId=${sceneId}-instance-01&protocolVersion=1`
+    ? `./?parentOrigin=<平台页面来源>&instanceId=${sceneId}-instance-01&protocolVersion=${expectedUnityProtocolVersion}`
     : publicEntryUrl
   const manifestGuidance = isRuntimeSelfOrigin
     ? '- 场景拓扑结构清单：服务当前地址下的 `/scene-topology-manifest.json`。平台读取其中的 `nodeId`（节点标识）并自行维护真实设备映射，不向本包注入设备编号或改写清单。'
@@ -1575,10 +1632,9 @@ function createReadme(releaseConfiguration, sourceNodeCount, sourceEdgeCount) {
     ? `
 ## 浏览器手动测试入口
 
-打开同目录的 \`self-test.html\`，不要只打开根入口。页面左上角会在握手完成后启用八个外部消息按钮：燃气/燃煤各自的总览和三个关键流程。
-每次点击都会通过 \`workflow.trigger\`（工作流触发）发送消息；页面状态只在场景与拓扑事务稳定提交后更新。
-
-建议手测顺序：燃气总览 → 燃气关键流程 → 燃煤总览 → 燃煤关键流程 → 返回燃气总览；然后点击拓扑节点验证三维聚焦，点击三维对象验证拓扑反向选中，点击空白验证清除选择。
+打开同目录的 \`self-test.html\`，不要只打开根入口。页面会先初始化全局沙盘，提供“沙盘”“燃气”“关键环节”三个导航按钮。
+进入燃气轮机关键环节后，使用页面“播放”“停止”按钮验收动态控制；按钮通过外层受控协议调用当前关键环节，不伪造设备状态。
+加载失败测试应使用缺少第三层资源的专用内部构建；页面会显示受控错误码并保留上一稳定视图，不向正式协议注入模拟失败参数。
 `
     : ''
   const localBoundary = isLocalTest
@@ -1631,20 +1687,29 @@ ${localSelfTestGuidance}
 - 遮罩只显示等待指示器，不显示百分比、进度文字或进度条；这些进度事件仅供内部诊断和控制台联调使用。
 - Unity 就绪且首个稳定视图提交后遮罩自动解除；运行时失败或释放时显示固定中文状态，不展示原始错误码、关联标识或外部异常正文。
 
+## 资源缓存要求
+
+- Unity 网页图形离线数据缓存必须关闭；主播放器目录、场景资源包和关键环节资源必须返回 \`Cache-Control: no-store\`（禁止存储）。
+- 反向代理不得覆盖上述响应头或改成长缓存；浏览器每次启动按当前发布包重新请求 Unity 大资源，避免旧版本和大文件长期占用站点缓存。
+- HTML（超文本标记语言）、JSON（数据交换格式）和错误响应继续使用重新验证策略；普通小型版本化脚本、样式和图元可按部署策略缓存。
+
 ## 联调检查
 
 - 页面显示${sceneTitle}发电三维模型。
 - 页面显示${sceneTitle}总拓扑图，共 ${sourceNodeCount} 个节点、${sourceEdgeCount} 条连线。
 - 页面只有一个三维实例和一个拓扑画布。
+- 燃气轮机关键环节使用独立精细模型，全屏三维且不携带拓扑；返回后恢复原燃气总拓扑。
+- 燃气轮机正常、告警、故障、离线只更新四态视觉，不改变旋转、粒子和气流的播放许可；播放与停止由独立 Unity 交互控制，协议壳不提供额外网页按钮。
 - 单击已映射的拓扑节点，三维模型聚焦并显示描边。
 - 单击拓扑空白区域，取消二维选中和三维交互描边。
 - 支持三维全屏、拓扑全屏，以及拓扑缩放、平移和重置。
-- ${sourceNodeCount} 个总览源节点都可上报稳定 \`nodeId\`；三个关键环节复用总览节点，不重复生成节点或三维映射。
+- ${sourceNodeCount} 个总览源节点都可上报稳定 \`nodeId\`；唯一燃气轮机第三层使用固定关键环节、资源、相机位和状态节点编号。
 ${manifestGuidance}
 
 ## 联调范围
 
 - 本地测试包打开根地址后自动进入${sceneTitle}总览（${sceneTopologyId}）；合作方联调包可脱离平台直接打开查看，嵌入平台后再由平台在握手后发送初始化命令。
+- 外层和 Unity 均使用第二版协议；第一版父页面不能与本包完成握手。
 - 本包只携带不可变结构清单；平台读取 \`nodeId\` 后在平台内部维护真实设备映射，并按 \`nodeId\` 推送完整节点状态快照。
 - ${sourceNodeCount} 个节点均可上报节点双击事件，但当前只有 3 个节点具备已核验三维映射；其余节点只更新二维状态。
 - 平台只使用根地址并传入父来源、实例标识和协议版本，不得修改包内摘要脚本和 Unity 压缩资源。
@@ -1744,7 +1809,7 @@ async function main() {
     // 本地自测页使用联合清单，因此无论入口初始场景为何，都能在同一个 Unity 实例内往返燃气与燃煤。
     await writeFile(path.join(stagingDirectory, 'self-test.html'), createSelfTestPage(manifest.manifestVersion, releaseSceneId), 'utf8')
   }
-  await writeFile(path.join(stagingDirectory, 'server.mjs'), createStaticServer(), 'utf8')
+  await writeFile(path.join(stagingDirectory, 'server.mjs'), createStaticServer(releaseConfiguration.packageType), 'utf8')
   await writeFile(path.join(stagingDirectory, 'README.md'), createReadme(releaseConfiguration, sourceTopology.nodes.length, sourceTopology.edges.length), 'utf8')
   await writeFile(path.join(stagingDirectory, 'release-manifest.json'), `${JSON.stringify({
     releaseId,
@@ -1752,10 +1817,18 @@ async function main() {
     packageType: releaseConfiguration.packageType,
     deploymentMode: releaseConfiguration.packageType === 'local-test' ? 'local-loopback' : 'independent-service-iframe',
     platformArtifactPatchingAllowed: false,
-    scope: 'gas-and-coal-overview-and-filtered-workflows',
+    scope: 'overview-gas-business-and-single-gas-turbine-process-detail',
     unityReleaseId,
     unityRuntimeKey: selectedUnityRuntimeKey,
     manifestVersion: manifest.manifestVersion,
+    // 外层和 Unity 同步升级到第二版，第一版父页面或第一版 Unity 基线均由握手与发布门禁拒绝。
+    protocolVersions: { host: expectedUnityProtocolVersion, unity: expectedUnityProtocolVersion },
+    // 两个阶段分别计时：外层就绪保持15秒；收到唯一初始化请求后，才开始120秒 Unity 和初始稳定视图等待。
+    // 显式写入发布摘要可避免平台把 Unity 的120秒预算错误地从页面加载或外层握手开始计算。
+    runtimeTimeouts: {
+      outerReadyMilliseconds: outerReadyTimeoutMilliseconds,
+      unityAndInitialViewMilliseconds: unityAndInitialViewTimeoutMilliseconds,
+    },
     // 平台包必须为 false；该字段让交付审阅无需扫描 HTML 即可确认内部自测页是否随包生成。
     selfTestIncluded: includeSelfTest,
     sourceTopology: { topologyId: sourceTopology.topologyId, nodeCount: sourceTopology.nodes.length, edgeCount: sourceTopology.edges.length },
@@ -1791,12 +1864,26 @@ async function main() {
       entryMode: releaseConfiguration.packageType === 'local-test' ? 'local-bootstrap-host' : 'platform-direct-shell-redirect',
       publicEntryUrl: releaseConfiguration.addressMode === 'runtime-self-origin' ? './' : `${releaseConfiguration.publicOrigin}/`,
     },
+    /*
+     * 缓存策略写入发布摘要并由产物门禁强制校验，防止后续打包或反向代理把 Unity 大资源
+     * 误归入普通版本化静态文件。网页图形离线数据缓存和 HTTP 缓存是两层独立机制，必须同时关闭。
+     */
+    cachePolicy: {
+      unityWebGLDataCaching: false,
+      unityLargeResources: 'no-store',
+      unityLargeResourcePaths: ['unity/Build/', 'unity/SceneBundles/', 'unity/ProcessDetailBundles/'],
+    },
     // 此摘要完全由上方同一发布清单派生，供发布审阅快速确认真实三维能力边界。
     unityMapping,
     ...(releaseSceneId === 'gas-power' ? { gasUnityMapping: unityMapping } : {}),
     // 状态消息名称为兼容既有外层协议继续保留 device.states.update，但状态项主键和双击事件均只使用 nodeId。
-    includedCapabilities: ['node-events', 'node-states', 'node-scene-mapping'],
-    workflowActions: manifest.actions.map((action) => ({ actionId: action.actionId, targetTopologyId: action.targetTopologyId })),
+    includedCapabilities: ['node-events', 'node-states', 'node-scene-mapping', 'process-detail'],
+    workflowActions: manifest.actions.map((action) => ({
+      actionId: action.actionId,
+      targetViewMode: action.targetViewMode,
+      ...(action.targetTopologyId ? { targetTopologyId: action.targetTopologyId } : {}),
+      ...(action.processDetailId ? { processDetailId: action.processDetailId } : {}),
+    })),
     excludedCapabilities: ['route-mapping', 'other-seven-scene-content'],
   }, null, 2)}\n`, 'utf8')
 

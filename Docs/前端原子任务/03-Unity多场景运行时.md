@@ -1,5 +1,7 @@
 # Unity 多场景运行时任务
 
+> **2026-08-31 第三层补充：** 新第三层关键环节使用 `prepareProcessDetail → commitProcessDetail` 两阶段事务和 `processDetailId` 加载、展示细节资源；准备或前端布局提交失败时使用 `abortProcessDetail` 取消候选资源。同场景关键环节直接切换复用该事务，不先退出第二层。`enterProcessDetail` 与 `enterProcessStep` 仅作历史兼容，不得再驱动新链路。
+
 ## 任务-015：常驻启动场景与构建设置
 
 **前置：** 任务-004、005。
@@ -14,7 +16,7 @@
 
 **前置：** 任务-015。
 
-**需求：** 定义每个业务场景必须实现的初始化、流程进入、节点聚焦、状态更新、路径流动、复位和释放接口。
+**需求：** 定义每个业务场景必须实现的初始化、关键环节细节进入/退出、历史流程兼容、节点聚焦、状态更新、路径流动、复位和释放接口。
 
 **交付：** `IBusinessSceneController`、场景能力登记表和基类或适配器。
 
@@ -64,7 +66,7 @@
 
 **前置：** 任务-016、018。
 
-**需求：** 将 `enterProcessStep`、`focusNode`、`clearSelection`、`setNodeVisualState`、`setRouteFlow` 和 `resetScene` 转发给当前场景控制器；统一使用稳定映射标识。`focusNode` 更新交互描边，并由 `_focusOnSelection` 统一开关决定是否聚焦镜头；`clearSelection` 只取消拓扑选择对应的三维交互描边，不得重置场景、流程、显隐或镜头。Unity 鼠标空白点击另通过 `selectionCleared` 上行事件同步清除二维拓扑选择。
+**需求：** 将 `prepareProcessDetail`、`commitProcessDetail`、`abortProcessDetail`、`exitProcessDetail`、历史兼容 `enterProcessDetail`/`enterProcessStep`、`focusNode`、`clearSelection`、`setNodeVisualState`、`setRouteFlow` 和 `resetScene` 转发给当前场景控制器；统一使用稳定映射标识。准备阶段只加载候选资源且不改变当前展示；提交阶段才切换展示锚点、专用相机位和状态重放；取消准备只释放候选资源。以上命令不操作拓扑。`focusNode` 更新交互描边，并由 `_focusOnSelection` 统一开关决定是否聚焦镜头；`clearSelection` 只取消厂区拓扑选择对应的三维交互描边，不得重置场景、流程、显隐或镜头。Unity 鼠标空白点击另通过 `selectionCleared` 上行事件同步清除厂区二维拓扑选择。
 
 **交付：** Unity 场景命令适配层和命令结果。
 

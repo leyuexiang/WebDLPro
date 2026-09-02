@@ -1,4 +1,4 @@
-import { toSceneNodeId, validateStableIdentifier } from '@/config/scene-topology/identifiers'
+import { isOverviewSceneId, isSceneId, toSceneNodeId, validateStableIdentifier } from '@/config/scene-topology/identifiers'
 import type { NodeId, SceneId, SceneNodeId, TopologyId } from '@/config/scene-topology/identifiers'
 import type { TopologyRegistry } from '@/config/scene-topology/topology-registry'
 import type { SceneObjectSelectedPayload } from '@/host-bridge/host-protocol'
@@ -114,6 +114,63 @@ export class UnityObjectSelectionCoordinator {
   }
 
   /**
+   * 将无拓扑总览中的建筑点击转换为目标业务视图意图。
+   * 总览不创建伪拓扑；只接受 `overview-building.<固定场景>` 这一稳定编号，并从正式场景目录读取默认拓扑。
+   */
+  public resolveOverviewBuilding(selection: VisualizationObjectSelection): OverviewBuildingSelectionIntent | undefined {
+    const incomingMessageId = selection.messageId
+    if (!isBoundedIncomingMessageId(incomingMessageId)) {
+      this.recordDiagnostic('unity.overview-selection.correlation.invalid', 'unity-overview-selection-invalid')
+      return undefined
+    }
+    if (this.handledIncomingMessageIds.has(incomingMessageId)) return undefined
+    this.rememberIncomingMessageId(incomingMessageId)
+    const correlationId = this.createCorrelationId()
+
+    const snapshot = this.facade.getSnapshot()
+    const context = snapshot.stableContext
+    if (!context || !isOverviewSceneId(context.sceneId) || snapshot.runtimeStatus !== 'ready') {
+      this.recordDiagnostic('unity.overview-selection.context.unavailable', correlationId)
+      return undefined
+    }
+    if (!isOverviewSceneId(selection.payload.sceneId)) {
+      this.recordDiagnostic('unity.overview-selection.scene.mismatch', correlationId)
+      return undefined
+    }
+    if (!snapshot.sceneActivationId || selection.payload.sceneActivationId !== snapshot.sceneActivationId) {
+      this.recordDiagnostic('unity.overview-selection.activation.mismatch', correlationId)
+      return undefined
+    }
+    if (validateStableIdentifier(selection.payload.sceneNodeId).length > 0) {
+      this.recordDiagnostic('unity.overview-selection.building.invalid', correlationId)
+      return undefined
+    }
+
+    const buildingIdPrefix = 'overview-building.'
+    if (!selection.payload.sceneNodeId.startsWith(buildingIdPrefix)) {
+      this.recordDiagnostic('unity.overview-selection.mapping.missing', correlationId)
+      return undefined
+    }
+    const targetSceneId = selection.payload.sceneNodeId.slice(buildingIdPrefix.length)
+    if (!isSceneId(targetSceneId) || selection.payload.sceneNodeId !== `${buildingIdPrefix}${targetSceneId}`) {
+      this.recordDiagnostic('unity.overview-selection.mapping.missing', correlationId)
+      return undefined
+    }
+    const targetTopology = this.registry.getDefaultTopology(targetSceneId)
+    if (!targetTopology) {
+      this.recordDiagnostic('unity.overview-selection.topology.missing', correlationId)
+      return undefined
+    }
+
+    return {
+      sceneId: targetSceneId,
+      topologyId: targetTopology.topologyId,
+      expectedContextRevision: context.contextRevision,
+      correlationId,
+    }
+  }
+
+  /**
    * 将 Unity 三维空白点击转换为当前拓扑的空选择。
    * 该入口只更新二维状态，不下发 clearSelection，避免“Unity 清除 → 前端回发 → Unity 再清除”的回环。
    */
@@ -196,6 +253,13 @@ export class UnityObjectSelectionCoordinator {
     this.correlationSequence += 1
     return `unity-selection-${this.correlationSequence}`
   }
+}
+
+export interface OverviewBuildingSelectionIntent {
+  sceneId: SceneId
+  topologyId: TopologyId
+  expectedContextRevision: number
+  correlationId: string
 }
 
 /**

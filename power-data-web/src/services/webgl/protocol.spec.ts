@@ -5,6 +5,13 @@ import {
   isWebglObjectSelectedPayload,
   isWebglSelectionClearedPayload,
   isWebglEnterProcessStepPayload,
+  isWebglMoveCameraToPosePayload,
+  isWebglEnterProcessDetailPayload,
+  isWebglPrepareProcessDetailPayload,
+  isWebglCommitProcessDetailPayload,
+  isWebglAbortProcessDetailPayload,
+  isWebglExitProcessDetailPayload,
+  isWebglSetProcessDetailPlaybackPayload,
   isWebglReadyPayload,
   isWebglRequestAcknowledgementPayload,
   isWebglSceneChangedPayload,
@@ -89,6 +96,8 @@ describe('网页图形协议', () => {
   it('校验流程、三维节点、四态状态和路径动作载荷', () => {
     expect(isWebglEnterProcessStepPayload({ processId: 'gas-power-generation', stepId: 'gas-turbine', unitId: 'unit-01', isolate: true })).toBe(true)
     expect(isWebglEnterProcessStepPayload({ processId: 'gas-power-generation', stepId: '', isolate: true })).toBe(false)
+    expect(isWebglMoveCameraToPosePayload({ cameraPoseId: 'gas-power.camera.inlet' })).toBe(true)
+    expect(isWebglMoveCameraToPosePayload({ cameraPoseId: '', position: [0, 0, 0] })).toBe(false)
 
     expect(isWebglFocusNodePayload({ sceneNodeId: 'node.gas-turbine', selectionId: 'selection.topology.01', isolate: true })).toBe(true)
     expect(isWebglFocusNodePayload({ sceneNodeId: 'node.gas-turbine', isolate: true })).toBe(false)
@@ -122,6 +131,41 @@ describe('网页图形协议', () => {
     expect(isWebglSetNodeVisibilityPayload({ sceneNodeId: 'node.gas-turbine', enabled: 'false' })).toBe(false)
   })
 
+  it('第三层命令必须携带事务标识，并拒绝旧流程过滤或资源注入字段', () => {
+    const enterPayload = {
+      sceneId: 'gas-power',
+      processId: 'gas-power-generation',
+      stepId: 'gas-turbine',
+      processDetailId: 'process-detail.gas-power.gas-turbine',
+      transitionId: 'transition.process-detail.gas-turbine.01',
+    }
+    expect(isWebglEnterProcessDetailPayload(enterPayload)).toBe(true)
+    expect(isWebglPrepareProcessDetailPayload(enterPayload)).toBe(true)
+    expect(isWebglEnterProcessDetailPayload({ ...enterPayload, transitionId: '' })).toBe(false)
+    expect(isWebglEnterProcessDetailPayload({ ...enterPayload, topologyId: 'topology.gas-power.overview' })).toBe(false)
+    expect(isWebglEnterProcessDetailPayload({ ...enterPayload, resourcePath: 'Assets/Art/C4D项目/WaiKeHeBing_AnimationDemo.prefab' })).toBe(false)
+
+    const exitPayload = {
+      sceneId: 'gas-power',
+      processDetailId: 'process-detail.gas-power.gas-turbine',
+      transitionId: 'transition.process-detail.gas-turbine.01',
+    }
+    expect(isWebglExitProcessDetailPayload(exitPayload)).toBe(true)
+    expect(isWebglCommitProcessDetailPayload(exitPayload)).toBe(true)
+    expect(isWebglAbortProcessDetailPayload(exitPayload)).toBe(true)
+    expect(isWebglExitProcessDetailPayload({ ...exitPayload, transitionId: '' })).toBe(false)
+    expect(isWebglExitProcessDetailPayload({ ...exitPayload, cameraPoseId: 'camera-pose.gas-power.gas-turbine' })).toBe(false)
+
+    const playbackPayload = {
+      sceneId: 'gas-power',
+      processDetailId: 'process-detail.gas-power.gas-turbine',
+      playing: false,
+    }
+    expect(isWebglSetProcessDetailPlaybackPayload(playbackPayload)).toBe(true)
+    expect(isWebglSetProcessDetailPlaybackPayload({ ...playbackPayload, playing: 'false' })).toBe(false)
+    expect(isWebglSetProcessDetailPlaybackPayload({ ...playbackPayload, visualState: 'fault' })).toBe(false)
+  })
+
   it('三维空白清除只接受场景和物理实例标识，不接受空节点或扩展字段', () => {
     const selectionClearedPayload = { sceneId: 'gas-power', sceneActivationId: 'scene-activation.gas-1' }
     expect(isWebglSelectionClearedPayload(selectionClearedPayload)).toBe(true)
@@ -137,6 +181,7 @@ describe('网页图形协议', () => {
     expect(isWebglObjectSelectedPayload({ ...objectSelectedPayload, sceneNodeId: 'Assets/Scenes/GasPower.unity' })).toBe(false)
     expect(isWebglObjectSelectedPayload({ ...objectSelectedPayload, sceneNodeId: 'a'.repeat(129) })).toBe(false)
     expect(isWebglObjectSelectedPayload({ ...objectSelectedPayload, sceneId: 'unregistered-scene' })).toBe(false)
+    expect(isWebglObjectSelectedPayload({ sceneId: 'overview', sceneNodeId: 'overview-building.gas-power', sceneActivationId: 'scene-activation.overview-1' })).toBe(true)
     expect(isWebglObjectSelectedPayload({ ...objectSelectedPayload, sceneActivationId: '' })).toBe(false)
     // 对象名称和其他扩展字段一律拒绝，防止旧 Unity 构建把未经映射的内部文本带入选择链路。
     expect(isWebglObjectSelectedPayload({ ...objectSelectedPayload, nodeName: '燃气轮机对象' })).toBe(false)

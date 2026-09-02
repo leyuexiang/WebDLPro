@@ -6,7 +6,7 @@ function createTimer(): EmbeddedShellStartupTimer {
 }
 
 describe('嵌入壳页面级启动期限', () => {
-  it('15 秒内成功启动会清理计时器且不触发超时', () => {
+  it('外层协议在 15 秒内发送就绪会清理计时器且不触发超时', () => {
     vi.useFakeTimers()
     const onTimeout = vi.fn()
     const deadline = new EmbeddedShellStartupDeadline(onTimeout, createTimer())
@@ -17,7 +17,7 @@ describe('嵌入壳页面级启动期限', () => {
     vi.useRealTimers()
   })
 
-  it('15 秒未完成时只触发一次超时，迟到成功不能恢复期限', () => {
+  it('外层协议 15 秒未就绪时只触发一次超时，迟到成功不能恢复期限', () => {
     vi.useFakeTimers()
     const onTimeout = vi.fn()
     const deadline = new EmbeddedShellStartupDeadline(onTimeout, createTimer())

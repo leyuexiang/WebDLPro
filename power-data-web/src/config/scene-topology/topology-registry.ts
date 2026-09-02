@@ -1,5 +1,5 @@
-import type { ActionId, NodeId, SceneId, SceneNodeId, TopologyId } from '@/config/scene-topology/identifiers'
-import type { ActionDefinition, SceneDefinition, SceneTopologyManifest, SceneTopologyManifestValidationIssue, TopologyDefinition, TopologyNodeDefinition } from '@/config/scene-topology/types'
+import type { ActionId, NodeId, ProcessDetailId, SceneId, SceneNodeId, TopologyId } from '@/config/scene-topology/identifiers'
+import type { ActionDefinition, ProcessDetailDefinition, SceneDefinition, SceneTopologyManifest, SceneTopologyManifestValidationIssue, TopologyDefinition, TopologyNodeDefinition } from '@/config/scene-topology/types'
 import { validateSceneTopologyManifest } from '@/config/scene-topology/validator'
 import { TopologyDrilldownRegistry, type TopologyDrilldownLookupResult } from '@/config/scene-topology/topology-drilldown-registry'
 
@@ -78,6 +78,9 @@ export class TopologyRegistry {
   private readonly topologyById: ReadonlyMap<TopologyId, TopologyDefinition>
   /** 动作与场景、拓扑同属一份原子清单；事务处理器只能从这里读取已校验映射。 */
   private readonly actionById: ReadonlyMap<ActionId, ActionDefinition>
+  /** 第三层目录在清单装载时一次建立索引，进入热路径只执行常数时间精确查询。 */
+  private readonly processDetailById: ReadonlyMap<ProcessDetailId, ProcessDetailDefinition>
+  private readonly processDetailsBySceneId: ReadonlyMap<SceneId, readonly ProcessDetailDefinition[]>
   /** 每个逻辑节点的二维目标和可选三维目标在加载时派生，避免每份状态快照重复解析拓扑。 */
   private readonly nodeStateProjectionByNodeId: ReadonlyMap<NodeId, RegisteredNodeStateProjection>
   /** 三维反向选择使用“场景 + 三维节点”复合键一次索引，禁止按对象名称或设备编号猜测。 */
@@ -92,6 +95,17 @@ export class TopologyRegistry {
     this.sceneById = new Map(manifest.scenes.map((scene) => [scene.sceneId, scene]))
     this.topologyById = new Map(resolvedTopologies.map((topology) => [topology.topologyId, topology]))
     this.actionById = new Map(manifest.actions.map((action) => [action.actionId, action]))
+    const processDetails = manifest.processDetails ?? []
+    this.processDetailById = new Map(processDetails.map((detail) => [detail.processDetailId, Object.freeze(detail)]))
+    const mutableDetailsBySceneId = new Map<SceneId, ProcessDetailDefinition[]>()
+    for (const detail of processDetails) {
+      const entries = mutableDetailsBySceneId.get(detail.sceneId) ?? []
+      entries.push(detail)
+      mutableDetailsBySceneId.set(detail.sceneId, entries)
+    }
+    this.processDetailsBySceneId = new Map(
+      [...mutableDetailsBySceneId].map(([sceneId, entries]) => [sceneId, Object.freeze([...entries])]),
+    )
     this.drilldownRegistry = new TopologyDrilldownRegistry(manifest.drilldowns ?? [])
     this.nodeByTopologyReference = new Map(
       resolvedTopologies.flatMap((topology) => topology.nodes.map((node) => [this.createTopologyNodeReference(topology.topologyId, node.nodeId), node] as const)),
@@ -169,6 +183,16 @@ export class TopologyRegistry {
   /** 返回已通过发布校验的动作定义；调用方仍须核对其目标场景和拓扑是否匹配当前事务。 */
   public getAction(actionId: ActionId): ActionDefinition | undefined {
     return this.actionById.get(actionId)
+  }
+
+  /** 只按稳定关键环节编号读取目录项；未知编号不会按步骤、标题或模型名回退。 */
+  public getProcessDetail(processDetailId: ProcessDetailId): ProcessDetailDefinition | undefined {
+    return this.processDetailById.get(processDetailId)
+  }
+
+  /** 返回场景明确登记的零到多个第三层入口，顺序沿用发布清单且不暴露可写数组。 */
+  public listProcessDetailsForScene(sceneId: SceneId): readonly ProcessDetailDefinition[] {
+    return this.processDetailsBySceneId.get(sceneId) ?? []
   }
 
   /**

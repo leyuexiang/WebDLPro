@@ -308,7 +308,7 @@ export class ViewOpenTransactionHandler {
     if (!action) {
       return this.failure('action.unknown', 'validation', '目标动作未在当前原子清单中登记。', undefined, payload)
     }
-    if (action.targetSceneId !== payload.sceneId || action.targetTopologyId !== payload.topologyId) {
+    if (action.targetViewMode !== 'business' || action.targetSceneId !== payload.sceneId || action.targetTopologyId !== payload.topologyId) {
       return this.failure('action.context.mismatch', 'validation', '动作目标与请求的场景和拓扑不一致。', undefined, payload)
     }
     return undefined

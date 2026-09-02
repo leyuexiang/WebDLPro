@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
+using WebDLPro.Unity.SceneRuntime;
 
 /// <summary>
 /// WebGL 运行时的自由相机控制。
@@ -9,7 +10,7 @@ using UnityEngine.InputSystem;
 [DisallowMultipleComponent]
 [RequireComponent(typeof(Camera))]
 [DefaultExecutionOrder(100)]
-public sealed class PowerPlantFreeCameraController : MonoBehaviour
+public sealed class PowerPlantFreeCameraController : MonoBehaviour, IBusinessSceneCameraSnapshotController
 {
     [Header("移动")]
     [SerializeField, Min(0.1f)] private float _moveSpeed = 24f;
@@ -58,9 +59,11 @@ public sealed class PowerPlantFreeCameraController : MonoBehaviour
     // 不重新查询场景对象或创建临时数据，保证燃气和燃煤场景各自保留自己的初始视角。
     private Vector3 _initialPosition;
     private Quaternion _initialRotation;
+    private Camera _camera;
 
     private void Awake()
     {
+        _camera = GetComponent<Camera>();
         // 在任何运行时输入和节点聚焦发生前缓存场景资产的初始世界变换；后续流程切换只读取这份缓存。
         _initialPosition = transform.position;
         _initialRotation = transform.rotation;
@@ -191,15 +194,77 @@ public sealed class PowerPlantFreeCameraController : MonoBehaviour
     }
 
     /// <summary>
+    /// 平滑移动到场景显式配置的镜头位。该入口只使用调用方提供的位置和旋转，
+    /// 不读取模型包围盒，也不扫描场景；用户产生任意手动输入时仍会立即取消补间并接管镜头。
+    /// </summary>
+    public void MoveToPose(Transform targetPose)
+    {
+        if (targetPose == null)
+        {
+            return;
+        }
+
+        MoveToPose(targetPose.position, targetPose.rotation);
+    }
+
+    /// <summary>
+    /// 捕获进入第三层前的当前业务镜头。快照只保存值，不持有场景对象引用，资源释放后仍可安全恢复。
+    /// </summary>
+    public BusinessSceneCameraPoseSnapshot CaptureCurrentPose()
+    {
+        _camera ??= GetComponent<Camera>();
+        return new BusinessSceneCameraPoseSnapshot(
+            transform.position,
+            transform.rotation,
+            _camera.fieldOfView,
+            _camera.orthographicSize,
+            _camera.orthographic);
+    }
+
+    /// <summary>恢复第三层进入前保存的世界变换与投影参数，并复用现有无分配镜头补间。</summary>
+    public void MoveToSnapshot(BusinessSceneCameraPoseSnapshot snapshot)
+    {
+        if (!snapshot.IsValid)
+        {
+            return;
+        }
+
+        _camera ??= GetComponent<Camera>();
+        _camera.orthographic = snapshot.Orthographic;
+        _camera.fieldOfView = snapshot.FieldOfView;
+        _camera.orthographicSize = snapshot.OrthographicSize;
+        MoveToPose(snapshot.Position, snapshot.Rotation);
+    }
+
+    /// <summary>
+    /// 平滑移动到确定的世界空间位置和旋转。补间复用现有缓存字段，运行时不会创建协程或临时集合。
+    /// </summary>
+    public void MoveToPose(Vector3 targetPosition, Quaternion targetRotation)
+    {
+        _focusStartPosition = transform.position;
+        _focusStartRotation = transform.rotation;
+        _focusTargetPosition = targetPosition;
+        _focusTargetRotation = targetRotation;
+        _focusElapsed = 0f;
+        _isAutoFocusing = _focusDuration > 0f;
+
+        if (!_isAutoFocusing)
+        {
+            transform.SetPositionAndRotation(targetPosition, targetRotation);
+            SyncLookAngles();
+        }
+    }
+
+    /// <summary>
     /// 以模型渲染包围盒生成保持当前水平观察侧的轻微俯视镜位。
     /// 距离由相机垂直与水平视野中较窄的一侧决定，确保宽屏和窄屏都能完整容纳目标；
     /// 本方法不扫描场景、不分配集合，只在拓扑节点实际选中时调用一次。
     /// </summary>
     public void FocusBounds(Bounds bounds)
     {
-        Camera camera = GetComponent<Camera>();
-        float verticalHalfFieldOfView = camera.fieldOfView * Mathf.Deg2Rad * 0.5f;
-        float horizontalHalfFieldOfView = Mathf.Atan(Mathf.Tan(verticalHalfFieldOfView) * camera.aspect);
+        _camera ??= GetComponent<Camera>();
+        float verticalHalfFieldOfView = _camera.fieldOfView * Mathf.Deg2Rad * 0.5f;
+        float horizontalHalfFieldOfView = Mathf.Atan(Mathf.Tan(verticalHalfFieldOfView) * _camera.aspect);
         float limitingHalfFieldOfView = Mathf.Min(verticalHalfFieldOfView, horizontalHalfFieldOfView);
         float boundingRadius = Mathf.Max(bounds.extents.magnitude, 0.01f);
         float distance = Mathf.Max(

@@ -37,6 +37,7 @@ public static class BusinessSceneBootstrapGenerator
             BusinessSceneCapability.ClearSelection |
             BusinessSceneCapability.UpdateNodeVisualState |
             BusinessSceneCapability.ClearNodeVisualState |
+            BusinessSceneCapability.MoveCameraToPose |
             BusinessSceneCapability.SetNodeVisibility |
             BusinessSceneCapability.ResetScene |
             BusinessSceneCapability.Release,
@@ -52,6 +53,7 @@ public static class BusinessSceneBootstrapGenerator
             // 目录提前声明用于让场景解析器核对预期能力，适配器仍会在登记失败时拒绝命令。
             BusinessSceneCapability.UpdateNodeVisualState |
             BusinessSceneCapability.ClearNodeVisualState |
+            BusinessSceneCapability.MoveCameraToPose |
             BusinessSceneCapability.SetNodeVisibility |
             BusinessSceneCapability.ResetScene |
             BusinessSceneCapability.Release,
@@ -145,6 +147,8 @@ public static class BusinessSceneBootstrapGenerator
         MultiSceneCoordinator coordinator = runtimeRoot.AddComponent<MultiSceneCoordinator>();
         coordinator.SetSceneCatalogForEditor(catalog);
         runtimeRoot.AddComponent<UnityIframeBridgeManager>();
+        // 本地从 Bootstrap 直接播放时自动进入总览；组件在正式构建中不执行，平台协议仍是生产唯一入口。
+        runtimeRoot.AddComponent<BootstrapOverviewAutoEnterTest>();
         EditorSceneManager.SaveScene(bootstrapScene, BootstrapScenePath, false);
     }
 
@@ -283,6 +287,11 @@ public static class BusinessSceneBootstrapGenerator
                 }
 
                 coordinator.SetOverviewSceneCatalogForEditor(overviewCatalog);
+                if (roots[rootIndex].GetComponent<BootstrapOverviewAutoEnterTest>() == null)
+                {
+                    // 既有 Bootstrap 同样补齐本地联调入口，保持首次生成与升级路径一致。
+                    roots[rootIndex].AddComponent<BootstrapOverviewAutoEnterTest>();
+                }
                 EditorSceneManager.MarkSceneDirty(bootstrapScene);
                 EditorSceneManager.SaveScene(bootstrapScene, BootstrapScenePath, false);
                 return;

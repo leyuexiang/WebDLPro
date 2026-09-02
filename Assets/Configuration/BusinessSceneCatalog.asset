@@ -17,12 +17,12 @@ MonoBehaviour:
     _unitySceneKey: coal-power
     _scenePath: Assets/Scenes/Business/CoalPower.unity
     _availability: 1
-    _declaredCapabilities: 1007
+    _declaredCapabilities: 2031
   - _sceneId: gas-power
     _unitySceneKey: gas-power
     _scenePath: Assets/Scenes/Business/GasPower.unity
     _availability: 1
-    _declaredCapabilities: 1007
+    _declaredCapabilities: 2031
   - _sceneId: wind-power
     _unitySceneKey: wind-power
     _scenePath: Assets/Scenes/Business/WindPower.unity

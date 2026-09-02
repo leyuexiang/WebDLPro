@@ -10,9 +10,9 @@ namespace WebDLPro.Unity.SceneRuntime
     public static class WebGlProtocolContract
     {
         public const string Channel = "power3d-unity";
-        public const int ProtocolVersion = 1;
-        // 第五版元数据增加完整上行事件能力；缺少对象选中或选择清除事件的旧构建无法形成三维反向联动，必须阻止发布。
-        public const int MetadataSchemaVersion = 5;
+        public const int ProtocolVersion = 2;
+        // 第九版元数据增加独立命名镜头点命令；该命令只播放相机插值，不复用流程步骤语义。
+        public const int MetadataSchemaVersion = 9;
         // 第二版场景完成结构新增物理 sceneActivationId；全局信封版本保持不变，避免无关命令被迫升级。
         public const int SceneChangedSchemaVersion = 2;
         // 第一版失败恢复声明要求 commandResult 在自动恢复成功时携带新的物理场景激活标识。
@@ -22,6 +22,8 @@ namespace WebDLPro.Unity.SceneRuntime
         public const int SetNodeVisualStateSchemaVersion = 3;
         // 第一版清除命令只携带稳定三维节点和壳内快照序号，由场景控制器恢复登记时的基础视觉。
         public const int ClearNodeVisualStateSchemaVersion = 1;
+        // 第二版第三层命令增加准备、提交和取消准备边界；旧进入命令继续作为兼容组合路径。
+        public const int ProcessDetailCommandSchemaVersion = 2;
         public const string MetadataFileName = "webgl-protocol-capabilities.json";
 
         /// <summary>
@@ -37,6 +39,13 @@ namespace WebDLPro.Unity.SceneRuntime
                 "resize",
                 "switchScene",
                 "enterProcessStep",
+                "moveCameraToPose",
+                "prepareProcessDetail",
+                "commitProcessDetail",
+                "abortProcessDetail",
+                "enterProcessDetail",
+                "exitProcessDetail",
+                "setProcessDetailPlayback",
                 "resetScene",
                 "focusNode",
                 "clearSelection",
@@ -90,6 +99,41 @@ namespace WebDLPro.Unity.SceneRuntime
         public static string[] CreateSetNodeVisualStateRequiredFields()
         {
             return new[] { "sceneNodeId", "visualState", "snapshotSequence", "statusUpdatedAt", "sourceRevision" };
+        }
+
+        /// <summary>准备命令与进入命令使用相同业务映射字段，但成功只表示隐藏候选已就绪。</summary>
+        public static string[] CreatePrepareProcessDetailRequiredFields()
+        {
+            return new[] { "sceneId", "processId", "stepId", "processDetailId", "transitionId" };
+        }
+
+        /// <summary>提交与取消准备只允许引用本地已准备的稳定环节和同一事务标识。</summary>
+        public static string[] CreateCommitProcessDetailRequiredFields()
+        {
+            return new[] { "sceneId", "processDetailId", "transitionId" };
+        }
+
+        public static string[] CreateAbortProcessDetailRequiredFields()
+        {
+            return new[] { "sceneId", "processDetailId", "transitionId" };
+        }
+
+        /// <summary>兼容进入命令必须完整绑定业务场景、流程、步骤、关键环节和事务标识。</summary>
+        public static string[] CreateEnterProcessDetailRequiredFields()
+        {
+            return new[] { "sceneId", "processId", "stepId", "processDetailId", "transitionId" };
+        }
+
+        /// <summary>第三层退出绑定当前场景、活动关键环节和事务标识，不允许网页下发资源或相机参数。</summary>
+        public static string[] CreateExitProcessDetailRequiredFields()
+        {
+            return new[] { "sceneId", "processDetailId", "transitionId" };
+        }
+
+        /// <summary>关键环节播放命令只绑定当前场景、活动环节和明确播放开关。</summary>
+        public static string[] CreateSetProcessDetailPlaybackRequiredFields()
+        {
+            return new[] { "sceneId", "processDetailId", "playing" };
         }
 
         /// <summary>清除命令不得携带颜色或四态；基础视觉只能由当前场景已登记的模型基线决定。</summary>
@@ -219,6 +263,42 @@ namespace WebDLPro.Unity.SceneRuntime
             return SceneSwitchProtocolValidator.IsBoundedIdentifier(processId) &&
                    SceneSwitchProtocolValidator.IsBoundedIdentifier(stepId) &&
                    (string.IsNullOrWhiteSpace(unitId) || SceneSwitchProtocolValidator.IsBoundedIdentifier(unitId));
+        }
+
+        /// <summary>命名镜头点只接受有界稳定标识；具体 Transform 由当前 Unity 场景本地注册表解析。</summary>
+        public static bool IsValidCameraPoseId(string cameraPoseId)
+        {
+            return SceneSwitchProtocolValidator.IsBoundedIdentifier(cameraPoseId);
+        }
+
+        /// <summary>第三层进入命令的业务标识和事务标识全部必填，具体资源和相机位只能由 Unity 本地目录解析。</summary>
+        public static bool IsValidProcessDetail(
+            string sceneId,
+            string processId,
+            string stepId,
+            string processDetailId,
+            string transitionId)
+        {
+            return SceneSwitchProtocolValidator.IsBoundedIdentifier(sceneId) &&
+                   SceneSwitchProtocolValidator.IsBoundedIdentifier(processId) &&
+                   SceneSwitchProtocolValidator.IsBoundedIdentifier(stepId) &&
+                   SceneSwitchProtocolValidator.IsBoundedIdentifier(processDetailId) &&
+                   SceneSwitchProtocolValidator.IsBoundedIdentifier(transitionId);
+        }
+
+        /// <summary>第三层退出只接受当前业务场景、活动关键环节和事务标识。</summary>
+        public static bool IsValidProcessDetailExit(string sceneId, string processDetailId, string transitionId)
+        {
+            return SceneSwitchProtocolValidator.IsBoundedIdentifier(sceneId) &&
+                   SceneSwitchProtocolValidator.IsBoundedIdentifier(processDetailId) &&
+                   SceneSwitchProtocolValidator.IsBoundedIdentifier(transitionId);
+        }
+
+        /// <summary>播放控制只接受当前场景与关键环节稳定标识；布尔值由 JSON 模型直接解析。</summary>
+        public static bool IsValidProcessDetailPlayback(string sceneId, string processDetailId)
+        {
+            return SceneSwitchProtocolValidator.IsBoundedIdentifier(sceneId) &&
+                   SceneSwitchProtocolValidator.IsBoundedIdentifier(processDetailId);
         }
 
         /// <summary>聚焦、显隐和状态更新统一只接受三维节点稳定标识，禁止传入二维 nodeId 或层级路径。</summary>

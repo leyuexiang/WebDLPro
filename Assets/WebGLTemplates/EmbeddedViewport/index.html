@@ -89,8 +89,11 @@
           parsedParentOrigin.origin === parentOrigin;
         if (!isExactHttpOrigin) return;
 
+        // 兜底桥与正式 .jslib 必须共享同一命令能力集合；否则仅在 C# 生命周期较慢时才会漏报
+        // moveCameraToPose（命名镜头定位），导致相同构建出现“有时能握手、有时握手失败”的时序差异。
         const commandCapabilities = [
-          'init', 'resize', 'switchScene', 'enterProcessStep', 'resetScene', 'focusNode',
+          'init', 'resize', 'switchScene', 'enterProcessStep', 'moveCameraToPose', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail',
+          'enterProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'focusNode',
           // clearSelection（清除选择）只撤销拓扑聚焦产生的三维交互描边；
           // 模板兜底桥必须与正式 .jslib 使用同一白名单，否则兜底启动时会拒绝合法空白点击命令。
           'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose',
@@ -109,7 +112,7 @@
             event.source !== window.parent ||
             !data ||
             data.channel !== 'power3d-unity' ||
-            data.version !== 1 ||
+            data.version !== 2 ||
             data.instanceId !== bridge.instanceId ||
             typeof data.messageId !== 'string' ||
             typeof data.timestamp !== 'number' ||
@@ -130,7 +133,7 @@
         window.addEventListener('message', receiveFromParent);
         window.parent.postMessage({
           channel: 'power3d-unity',
-          version: 1,
+          version: 2,
           instanceId: bridgeMetadata.instanceId,
           messageId: `${Date.now()}-ready`,
           type: 'ready',
@@ -138,7 +141,7 @@
             runtimeKey: bridgeMetadata.runtimeKey,
             buildId: bridgeMetadata.buildId,
             sceneMappingVersion: bridgeMetadata.sceneMappingVersion,
-            protocolVersion: 1,
+            protocolVersion: 2,
             resourceDigest: bridgeMetadata.resourceDigest,
             commandCapabilities,
             eventCapabilities,

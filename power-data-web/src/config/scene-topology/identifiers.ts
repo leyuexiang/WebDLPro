@@ -44,6 +44,10 @@ export type TransitionId = StableIdentifier<'transition'>
 export type SceneActivationId = StableIdentifier<'scene-activation'>
 export type ProcessId = StableIdentifier<'process'>
 export type StepId = StableIdentifier<'step'>
+/** 第三层关键环节、独立资源和相机位使用不同品牌，禁止把资源编号当作业务入口编号下发。 */
+export type ProcessDetailId = StableIdentifier<'process-detail'>
+export type ProcessDetailResourceId = StableIdentifier<'process-detail-resource'>
+export type CameraPoseId = StableIdentifier<'camera-pose'>
 export type RouteId = StableIdentifier<'route'>
 export type UnitySceneKey = StableIdentifier<'unity-scene-key'>
 export type UnityRuntimeKey = StableIdentifier<'unity-runtime-key'>
@@ -144,6 +148,9 @@ export const toTransitionId = (value: string): TransitionId => createStableIdent
 export const toSceneActivationId = (value: string): SceneActivationId => createStableIdentifier('scene-activation', value)
 export const toProcessId = (value: string): ProcessId => createStableIdentifier('process', value)
 export const toStepId = (value: string): StepId => createStableIdentifier('step', value)
+export const toProcessDetailId = (value: string): ProcessDetailId => createStableIdentifier('process-detail', value)
+export const toProcessDetailResourceId = (value: string): ProcessDetailResourceId => createStableIdentifier('process-detail-resource', value)
+export const toCameraPoseId = (value: string): CameraPoseId => createStableIdentifier('camera-pose', value)
 export const toRouteId = (value: string): RouteId => createStableIdentifier('route', value)
 export const toUnitySceneKey = (value: string): UnitySceneKey => createStableIdentifier('unity-scene-key', value)
 export const toUnityRuntimeKey = (value: string): UnityRuntimeKey => createStableIdentifier('unity-runtime-key', value)

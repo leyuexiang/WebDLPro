@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEditor;
@@ -73,6 +74,7 @@ namespace WebDLPro.Unity.Tests
                        BusinessSceneCapability.ClearSelection |
                        BusinessSceneCapability.UpdateNodeVisualState |
                        BusinessSceneCapability.ClearNodeVisualState |
+                       BusinessSceneCapability.MoveCameraToPose |
                        BusinessSceneCapability.SetNodeVisibility |
                       BusinessSceneCapability.ResetScene |
                       BusinessSceneCapability.Release
@@ -146,6 +148,15 @@ namespace WebDLPro.Unity.Tests
                 GameObject[] roots = overviewScene.GetRootGameObjects();
                 OverviewBuildingPlaceholder[] buildings = roots[0].GetComponentsInChildren<OverviewBuildingPlaceholder>(true);
                 Assert.That(buildings, Has.Length.EqualTo(9));
+                Dictionary<string, string> replacedModelNames = new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    { "coal-power", "燃煤" },
+                    { "gas-power", "燃气发电站" },
+                    { "wind-power", "风力发电站" },
+                    { "solar-power", "光伏发电站" },
+                    { "substation", "升压站" },
+                    { "distribution", "配电站" }
+                };
                 for (int index = 0; index < SceneIds.Length; index++)
                 {
                     OverviewBuildingPlaceholder building = Array.Find(
@@ -154,14 +165,231 @@ namespace WebDLPro.Unity.Tests
                     Assert.That(building, Is.Not.Null, $"总览缺少目标场景映射：{SceneIds[index]}");
                     Assert.That(building.OverviewBuildingId, Is.EqualTo($"overview-building.{SceneIds[index]}"));
                     Assert.That(building.name, Is.EqualTo($"OverviewBuilding_{ToPascalCase(SceneIds[index])}"));
+
+                    if (!replacedModelNames.TryGetValue(SceneIds[index], out string expectedModelName))
+                    {
+                        continue;
+                    }
+
+                    // 六个已交付沙盘模型保留稳定代理节点，但渲染和点击必须切换到其真实子模型。
+                    Assert.That(building.TargetRenderer, Is.Not.Null);
+                    Assert.That(building.TargetRenderer.gameObject.name, Is.EqualTo(expectedModelName));
+                    Assert.That(building.TargetRenderer.transform.IsChildOf(building.transform), Is.True);
+                    Assert.That(building.InteractionCollider, Is.Not.Null);
+                    Assert.That(building.InteractionCollider.gameObject, Is.SameAs(building.TargetRenderer.gameObject));
+                    MeshRenderer placeholderRenderer = building.GetComponent<MeshRenderer>();
+                    Assert.That(
+                        placeholderRenderer == null || !placeholderRenderer.enabled,
+                        Is.True,
+                        "旧占位方块渲染器必须已移除或停用。 ");
+                    BoxCollider placeholderCollider = building.GetComponent<BoxCollider>();
+                    Assert.That(
+                        placeholderCollider == null || !placeholderCollider.enabled,
+                        Is.True,
+                        "旧占位方块碰撞体必须已移除或停用。 ");
                 }
-                Assert.That(roots[0].GetComponent<OverviewSceneController>(), Is.Not.Null);
-                Assert.That(roots[0].GetComponentsInChildren<Renderer>(true), Has.Length.EqualTo(10));
+                OverviewSceneController overviewController = roots[0].GetComponent<OverviewSceneController>();
+                Assert.That(overviewController, Is.Not.Null);
+                // 总览初始化会在场景加载事务内立即使用该序列化相机，不能依赖运行时按名称查找。
+                // 直接读取序列化属性可在 WebGL 构建前阻断“场景中有相机但控制器未绑定”的配置回归。
+                SerializedProperty interactionCameraProperty =
+                    new SerializedObject(overviewController).FindProperty("_interactionCamera");
+                Assert.That(interactionCameraProperty, Is.Not.Null);
+                Assert.That(interactionCameraProperty.objectReferenceValue, Is.TypeOf<Camera>());
+                Assert.That(
+                    ((Camera)interactionCameraProperty.objectReferenceValue).gameObject.scene,
+                    Is.EqualTo(overviewScene),
+                    "总览交互相机必须显式绑定到当前总览场景，不能引用外部场景对象。");
+                // 只统计启用渲染器：地面一个、六个真实模型、三个尚未替换的占位模型，共十个。
+                // 已替换代理的旧渲染器允许直接移除或停用，不再用组件总数约束合法清理方式。
+                Renderer[] overviewRenderers = roots[0].GetComponentsInChildren<Renderer>(true);
+                int enabledRendererCount = 0;
+                for (int rendererIndex = 0; rendererIndex < overviewRenderers.Length; rendererIndex++)
+                {
+                    if (overviewRenderers[rendererIndex].enabled)
+                    {
+                        enabledRendererCount++;
+                    }
+                }
+                Assert.That(enabledRendererCount, Is.EqualTo(10));
             }
             finally
             {
                 EditorSceneManager.CloseScene(overviewScene, true);
             }
+        }
+
+        /// <summary>
+        /// 总览场景切换会在初始化首帧读取交互相机；该专项资产测试独立于模型渲染器断言，
+        /// 确保即使沙盘模型正在调整，也能稳定阻止空相机引用被构建为 WebGL 发布包。
+        /// </summary>
+        [Test]
+        public void 总览控制器显式绑定当前场景交互相机()
+        {
+            Scene overviewScene = EditorSceneManager.OpenScene(OverviewScenePath, OpenSceneMode.Additive);
+            try
+            {
+                GameObject[] roots = overviewScene.GetRootGameObjects();
+                OverviewSceneController overviewController = null;
+                for (int rootIndex = 0; rootIndex < roots.Length; rootIndex++)
+                {
+                    overviewController = roots[rootIndex].GetComponent<OverviewSceneController>();
+                    if (overviewController != null)
+                    {
+                        break;
+                    }
+                }
+
+                Assert.That(overviewController, Is.Not.Null, "总览场景必须存在唯一运行时控制器。");
+                SerializedProperty interactionCameraProperty =
+                    new SerializedObject(overviewController).FindProperty("_interactionCamera");
+                Assert.That(interactionCameraProperty, Is.Not.Null);
+                Assert.That(interactionCameraProperty.objectReferenceValue, Is.TypeOf<Camera>());
+                Assert.That(
+                    ((Camera)interactionCameraProperty.objectReferenceValue).gameObject.scene,
+                    Is.EqualTo(overviewScene),
+                    "总览交互相机必须序列化绑定到当前场景，不能在运行时按名称补查。");
+            }
+            finally
+            {
+                EditorSceneManager.CloseScene(overviewScene, true);
+            }
+        }
+        /// <summary>
+        /// 六个真实沙盘模型必须至少存在一条从交互相机指向真实模型表面的有效选择射线。
+        /// 其中升压站使用静态网格碰撞体，避免其跨越大片空白区域的包围盒抢先遮挡光伏电站。
+        /// </summary>
+        [Test]
+        public void 六个真实沙盘模型均可解析到显式目标场景且互不遮挡()
+        {
+            Scene overviewScene = EditorSceneManager.OpenScene(OverviewScenePath, OpenSceneMode.Additive);
+            try
+            {
+                GameObject runtimeRoot = Array.Find(
+                    overviewScene.GetRootGameObjects(),
+                    root => root.GetComponent<OverviewSceneController>() != null);
+                Assert.That(runtimeRoot, Is.Not.Null, "总览场景缺少运行时根节点。 ");
+
+                OverviewSceneController controller = runtimeRoot.GetComponent<OverviewSceneController>();
+                SerializedProperty interactionCameraProperty =
+                    new SerializedObject(controller).FindProperty("_interactionCamera");
+                Camera interactionCamera = interactionCameraProperty.objectReferenceValue as Camera;
+                Assert.That(interactionCamera, Is.Not.Null, "总览场景缺少已绑定交互相机。 ");
+
+                BusinessSceneCommandResult initializationResult = default;
+                System.Collections.IEnumerator initialization = controller.InitializeAsync(
+                    new BusinessSceneInitializationContext(
+                        OverviewSceneCatalog.OverviewSceneId,
+                        OverviewSceneCatalog.OverviewSceneId,
+                        "transition.overview-real-model-pick-test",
+                        false),
+                    result => initializationResult = result);
+                while (initialization.MoveNext())
+                {
+                }
+                Assert.That(initializationResult.Success, Is.True, initializationResult.Message);
+                Physics.SyncTransforms();
+
+                string[] realModelSceneIds =
+                {
+                    "coal-power", "gas-power", "wind-power", "solar-power", "substation", "distribution"
+                };
+                OverviewBuildingPlaceholder[] buildings =
+                    runtimeRoot.GetComponentsInChildren<OverviewBuildingPlaceholder>(true);
+                for (int sceneIndex = 0; sceneIndex < realModelSceneIds.Length; sceneIndex++)
+                {
+                    string expectedSceneId = realModelSceneIds[sceneIndex];
+                    OverviewBuildingPlaceholder building = Array.Find(
+                        buildings,
+                        candidate => candidate != null && candidate.TargetSceneId == expectedSceneId);
+                    Assert.That(building, Is.Not.Null, $"缺少真实沙盘模型：{expectedSceneId}。 ");
+                    Assert.That(
+                        TryResolveRealModelSurface(
+                            controller,
+                            interactionCamera,
+                            building,
+                            out string resolvedBuildingId,
+                            out string resolvedSceneId),
+                        Is.True,
+                        $"真实沙盘模型无法通过自身表面射线解析：{expectedSceneId}。 ");
+                    Assert.That(resolvedBuildingId, Is.EqualTo($"overview-building.{expectedSceneId}"));
+                    Assert.That(resolvedSceneId, Is.EqualTo(expectedSceneId));
+                }
+
+                OverviewBuildingPlaceholder substation = Array.Find(
+                    buildings,
+                    candidate => candidate != null && candidate.TargetSceneId == "substation");
+                Assert.That(substation.InteractionCollider, Is.TypeOf<MeshCollider>(),
+                    "升压站必须使用真实网格命中，不能让跨空白区域的大包围盒遮挡光伏电站。 ");
+                Assert.That(substation.TargetRenderer.GetComponent<BoxCollider>().enabled, Is.False,
+                    "升压站旧盒形碰撞体必须停用。 ");
+                Assert.That(controller.ReleaseScene().Success, Is.True);
+            }
+            finally
+            {
+                EditorSceneManager.CloseScene(overviewScene, true);
+            }
+        }
+
+        /// <summary>
+        /// 优先验证已登记碰撞体中心；网格中心可能位于建筑群空隙，因此网格碰撞体按有限三角面采样。
+        /// 此方法只在编辑模式资产门禁中运行，不进入运行时点击热路径。
+        /// </summary>
+        private static bool TryResolveRealModelSurface(
+            OverviewSceneController controller,
+            Camera interactionCamera,
+            OverviewBuildingPlaceholder building,
+            out string overviewBuildingId,
+            out string targetSceneId)
+        {
+            Vector3 cameraPosition = interactionCamera.transform.position;
+            Vector3 colliderCenter = building.InteractionCollider.bounds.center;
+            if (controller.TryResolveBuilding(
+                    new Ray(cameraPosition, (colliderCenter - cameraPosition).normalized),
+                    out overviewBuildingId,
+                    out targetSceneId,
+                    out _) &&
+                targetSceneId == building.TargetSceneId)
+            {
+                return true;
+            }
+
+            MeshFilter meshFilter = building.TargetRenderer.GetComponent<MeshFilter>();
+            Mesh mesh = meshFilter != null ? meshFilter.sharedMesh : null;
+            if (mesh == null)
+            {
+                overviewBuildingId = string.Empty;
+                targetSceneId = string.Empty;
+                return false;
+            }
+
+            Vector3[] vertices = mesh.vertices;
+            int[] triangles = mesh.triangles;
+            int triangleCount = triangles.Length / 3;
+            // 大型升压站只做最多 512 次均匀采样，资产测试耗时与网格面数解耦。
+            int stride = Mathf.Max(1, triangleCount / 512);
+            for (int triangleIndex = 0; triangleIndex < triangleCount; triangleIndex += stride)
+            {
+                int triangleOffset = triangleIndex * 3;
+                Vector3 localCenter = (
+                    vertices[triangles[triangleOffset]] +
+                    vertices[triangles[triangleOffset + 1]] +
+                    vertices[triangles[triangleOffset + 2]]) / 3f;
+                Vector3 worldCenter = meshFilter.transform.TransformPoint(localCenter);
+                if (controller.TryResolveBuilding(
+                        new Ray(cameraPosition, (worldCenter - cameraPosition).normalized),
+                        out overviewBuildingId,
+                        out targetSceneId,
+                        out _) &&
+                    targetSceneId == building.TargetSceneId)
+                {
+                    return true;
+                }
+            }
+
+            overviewBuildingId = string.Empty;
+            targetSceneId = string.Empty;
+            return false;
         }
 
 
@@ -177,6 +405,8 @@ namespace WebDLPro.Unity.Tests
                 Assert.That(runtimeRoot.name, Is.EqualTo("BootstrapRuntime"));
                 Assert.That(runtimeRoot.GetComponent<LoadingOverlayController>(), Is.Not.Null);
                 Assert.That(HasComponentNamed(runtimeRoot, "UnityIframeBridgeManager"), Is.True);
+                Assert.That(runtimeRoot.GetComponent<BootstrapOverviewAutoEnterTest>(), Is.Not.Null,
+                    "Bootstrap 必须保留仅编辑器执行的自动进入总览联调脚本。 ");
 
                 MultiSceneCoordinator coordinator = runtimeRoot.GetComponent<MultiSceneCoordinator>();
                 Assert.That(coordinator, Is.Not.Null);
@@ -292,6 +522,69 @@ namespace WebDLPro.Unity.Tests
         }
 
         /// <summary>
+        /// 燃气业务场景属于第二层，启动时必须保留场景资产中的原始材质。
+        /// 历史总览上下文半透明只能由后续明确的兼容命令触发，不能在场景唤醒阶段自动执行。
+        /// </summary>
+        [Test]
+        public void 燃气第二层启动不应用历史总览半透明上下文()
+        {
+            Scene gasPowerScene = EditorSceneManager.OpenScene(ScenePaths[1], OpenSceneMode.Additive);
+            try
+            {
+                MonoBehaviour controller = FindComponentByTypeName(
+                    gasPowerScene.GetRootGameObjects(),
+                    "PowerPlantProcessController");
+                Assert.That(controller, Is.Not.Null, "燃气场景缺少 PowerPlantProcessController。 ");
+
+                SerializedObject serializedController = new SerializedObject(controller);
+                SerializedProperty applyInitialOverviewContext = serializedController.FindProperty(
+                    "_applyInitialOverviewContext");
+                Assert.That(applyInitialOverviewContext, Is.Not.Null,
+                    "控制器缺少第二层启动视觉的显式配置字段。 ");
+                Assert.That(applyInitialOverviewContext.boolValue, Is.False,
+                    "燃气第二层启动时不能自动将非核心模型切换为历史总览半透明。 ");
+            }
+            finally
+            {
+                EditorSceneManager.CloseScene(gasPowerScene, true);
+            }
+        }
+
+        [Test]
+        public void 取消三维选择时必须恢复聚焦上下文半透明材质()
+        {
+            string sourcePath = Path.Combine(
+                Application.dataPath,
+                "Scripts",
+                "PowerPlant",
+                "PowerPlantProcessController.cs");
+            string source = File.ReadAllText(sourcePath);
+            int clearSelectionIndex = source.IndexOf("public bool TryClearSelection", StringComparison.Ordinal);
+            int clearInteractionIndex = source.IndexOf(
+                "private void ClearInteractionSelectionFromScenePointer",
+                StringComparison.Ordinal);
+            Assert.That(clearSelectionIndex, Is.GreaterThanOrEqualTo(0));
+            Assert.That(clearInteractionIndex, Is.GreaterThan(clearSelectionIndex));
+
+            string clearSelectionBody = source.Substring(
+                clearSelectionIndex,
+                clearInteractionIndex - clearSelectionIndex);
+            Assert.That(clearSelectionBody, Does.Contain("RestoreAllContextFades();"),
+                "拓扑取消选择必须恢复聚焦产生的上下文半透明材质。");
+
+            int nextMethodIndex = source.IndexOf(
+                "public bool TryConsumePriorityPointer",
+                clearInteractionIndex,
+                StringComparison.Ordinal);
+            Assert.That(nextMethodIndex, Is.GreaterThan(clearInteractionIndex));
+            string clearInteractionBody = source.Substring(
+                clearInteractionIndex,
+                nextMethodIndex - clearInteractionIndex);
+            Assert.That(clearInteractionBody, Does.Contain("RestoreAllContextFades();"),
+                "三维空白点击取消选择必须恢复聚焦产生的上下文半透明材质。");
+        }
+
+        /// <summary>
         /// 燃气真实模型的四态视觉能力必须在资产层满足运行时登记的全部前置条件。
         /// 此测试故意不引用默认程序集中的燃气控制器类型，而是通过序列化字段读取其已保存的绑定，
         /// 逐项复现运行时的渲染器收集、材质槽校验和跨节点归属校验。这样模型或材质被编辑后，
@@ -308,11 +601,27 @@ namespace WebDLPro.Unity.Tests
                     "PowerPlantProcessController");
                 Assert.That(controller, Is.Not.Null, "燃气场景缺少 PowerPlantProcessController，无法读取四态绑定。 ");
 
-                SerializedProperty bindings = new SerializedObject(controller).FindProperty("_visualStateBindings");
+                SerializedObject serializedController = new SerializedObject(controller);
+                SerializedProperty bindings = serializedController.FindProperty("_visualStateBindings");
                 Assert.That(bindings, Is.Not.Null, "燃气控制器缺少已序列化的四态视觉绑定字段。 ");
                 Assert.That(bindings.arraySize, Is.EqualTo(3), "燃气场景必须显式绑定燃气轮机、余热锅炉和蒸汽轮机三个真实模型。 ");
 
-                int baseColorPropertyId = Shader.PropertyToID("_BaseColor");
+                SerializedProperty colorPropertyNames = serializedController.FindProperty("_visualStateColorPropertyNames");
+                Assert.That(colorPropertyNames, Is.Not.Null);
+                Assert.That(colorPropertyNames.arraySize, Is.GreaterThan(0), "燃气四态视觉必须登记至少一个材质颜色属性候选。 ");
+                List<int> colorPropertyIds = new List<int>(colorPropertyNames.arraySize);
+                List<string> colorPropertyNameValues = new List<string>(colorPropertyNames.arraySize);
+                for (int propertyIndex = 0; propertyIndex < colorPropertyNames.arraySize; propertyIndex++)
+                {
+                    string propertyName = colorPropertyNames.GetArrayElementAtIndex(propertyIndex).stringValue;
+                    if (!string.IsNullOrWhiteSpace(propertyName))
+                    {
+                        colorPropertyNameValues.Add(propertyName);
+                        colorPropertyIds.Add(Shader.PropertyToID(propertyName));
+                    }
+                }
+                Assert.That(colorPropertyIds, Is.Not.Empty);
+
                 Dictionary<Renderer, string> rendererOwners = new Dictionary<Renderer, string>();
                 List<string> validationErrors = new List<string>();
                 for (int bindingIndex = 0; bindingIndex < bindings.arraySize; bindingIndex++)
@@ -337,7 +646,6 @@ namespace WebDLPro.Unity.Tests
                         }
 
                         Renderer[] renderers = target.GetComponentsInChildren<Renderer>(true);
-                        rendererCount += renderers.Length;
                         for (int rendererIndex = 0; rendererIndex < renderers.Length; rendererIndex++)
                         {
                             Renderer renderer = renderers[rendererIndex];
@@ -346,6 +654,22 @@ namespace WebDLPro.Unity.Tests
                                 validationErrors.Add($"节点 {sceneNodeId} 的目标 {target.name} 包含空渲染器。");
                                 continue;
                             }
+
+                            /*
+                             * 与 PowerPlantProcessController 的运行时登记边界保持一致：设备根对象中的
+                             * TMP（文本网格专业版）标签使用字形图集材质，不具备设备四态材质所需的颜色属性。
+                             * 标签既不参与设备状态替换，也不能导致真实模型的视觉能力登记整体失效；
+                             * 因此仅跳过明确挂载 TMP_Text 的渲染器，其余渲染器仍继续执行完整校验。
+                             * 编辑器测试程序集不直接引用文字组件程序集，故以 Unity 通用的字符串查找方式
+                             * 识别组件类型名，避免测试专用程序集扩大编译依赖边界。
+                             */
+                            if (renderer.GetComponent("TMP_Text") != null)
+                            {
+                                continue;
+                            }
+
+                            // 只统计会被运行时注册表实际接管的设备网格，防止文本标签掩盖空设备绑定。
+                            rendererCount += 1;
                             if (rendererOwners.TryGetValue(renderer, out string ownerNodeId))
                             {
                                 validationErrors.Add($"节点 {sceneNodeId} 与 {ownerNodeId} 共享渲染器 {renderer.name}。");
@@ -367,9 +691,22 @@ namespace WebDLPro.Unity.Tests
                                 {
                                     validationErrors.Add($"节点 {sceneNodeId} 的渲染器 {renderer.name} 在材质槽 {materialIndex} 为空。");
                                 }
-                                else if (!material.HasProperty(baseColorPropertyId))
+                                else
                                 {
-                                    validationErrors.Add($"节点 {sceneNodeId} 的材质 {material.name} 不支持 _BaseColor。 ");
+                                    bool supportsRegisteredColor = false;
+                                    for (int propertyIndex = 0; propertyIndex < colorPropertyIds.Count; propertyIndex++)
+                                    {
+                                        if (material.HasProperty(colorPropertyIds[propertyIndex]))
+                                        {
+                                            supportsRegisteredColor = true;
+                                            break;
+                                        }
+                                    }
+                                    if (!supportsRegisteredColor)
+                                    {
+                                        validationErrors.Add(
+                                            $"节点 {sceneNodeId} 的材质 {material.name} 不支持已登记颜色属性：{string.Join(", ", colorPropertyNameValues)}。 ");
+                                    }
                                 }
                             }
                         }

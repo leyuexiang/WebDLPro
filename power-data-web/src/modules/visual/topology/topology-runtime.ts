@@ -100,9 +100,19 @@ export class TopologyRuntime {
 
     try {
       this.canvas.setTopology(prepared.topology)
-      const viewState = this.viewStateByTopologyId.get(prepared.topologyId) ?? this.getDefaultViewState()
-      this.canvas.restoreViewState(viewState)
-      this.canvas.setSelection(viewState.selectedNodeIds, viewState.selectedRouteIds)
+      const restoredViewState = this.viewStateByTopologyId.get(prepared.topologyId)
+      /*
+       * 首次激活没有用户产生的视口快照，不能伪造 { 缩放: 1, 平移: 0 } 并下发给画布。
+       * JSON 源图元坐标可能远离原点，伪默认值会覆盖画布首次的全图适配，造成数据已加载但
+       * 所有图元落在可视区外。只有从真实活动画布缓存过的视口才允许恢复；首次进入则让
+       * 画布组件依据全部图元自动居中。两种分支都显式清空选择，保持稳定业务状态一致。
+       */
+      if (restoredViewState) {
+        this.canvas.restoreViewState(restoredViewState)
+        this.canvas.setSelection(restoredViewState.selectedNodeIds, restoredViewState.selectedRouteIds)
+      } else {
+        this.canvas.setSelection([], [])
+      }
       // 新画布定义先恢复，再写当前拓扑的状态覆盖；状态缓存不会改动选择、缩放、平移或路径定义。
       this.deviceStateCache.setActiveContext(prepared.sceneId, prepared.topologyId)
       this.canvas.setNodeStatuses(this.deviceStateCache.getActiveTopologyNodeStatuses())
@@ -157,6 +167,40 @@ export class TopologyRuntime {
     }
   }
 
+  /**
+   * 进入第三层前暂停唯一拓扑画布：先保存当前视口和选择，再撤销二维拓扑上下文，但不清空缓存中的选择。
+   * 页面会同时隐藏并 inert（禁用交互）该容器，因此这里不触发 setTopology、布局或重绘；同时保留已校验的
+   * `sceneId + stateNodeId`（场景编号 + 状态节点编号）作为唯一三维投影目标。这样播放、停止等实时状态不会
+   * 因为拓扑暂停而丢失到 Unity 的投递链路，也不会把同场景其他设备状态扩散到独立关键环节模型。
+   * 返回第二层时 activate（激活）会以业务拓扑上下文覆盖此临时筛选，并恢复原视口、选择和当前设备状态。
+   */
+  public suspendForProcessDetail(sceneId: SceneId, stateNodeId: SceneNodeId): boolean {
+    if (this.disposed) return false
+    const previousTopology = this.activeTopology
+    // 调用方只能从同一业务场景进入第三层，防止目录错误将另一场景的设备状态投递给当前独立模型。
+    if (!previousTopology || previousTopology.sceneId !== sceneId) return false
+
+    try {
+      this.cacheActiveViewState(previousTopology.topologyId)
+      this.activeTopology = undefined
+      this.deviceStateCache.setActiveContext(sceneId, undefined, stateNodeId)
+      return true
+    } catch {
+      // 保存失败时继续保留旧活动拓扑，事务遮罩会阻断操作并由上层退出刚加载的第三层实例。
+      return false
+    }
+  }
+
+  /**
+   * 已处第三层时只切换状态投影目标，不激活拓扑、不触碰画布，也不重新加载 Unity 资源。
+   * 调用方必须先由目录验证同场景目标；活动二维拓扑存在时拒绝重定向，防止第二层状态被错误收窄。
+   */
+  public retargetProcessDetail(sceneId: SceneId, stateNodeId: SceneNodeId): boolean {
+    if (this.disposed || this.activeTopology) return false
+    this.deviceStateCache.setActiveContext(sceneId, undefined, stateNodeId)
+    return true
+  }
+
   /** 单次选择只更新当前画布，不重建拓扑、节点索引或路径缓存。 */
   public setSelection(nodeIds: readonly NodeId[], routeIds: readonly RouteId[]): void {
     if (this.disposed || !this.activeTopology) return
@@ -189,7 +233,14 @@ export class TopologyRuntime {
       }
     }
 
-    this.deviceStateCache.setActiveContext(this.activeTopology?.sceneId, this.activeTopology?.topologyId)
+    /*
+     * 第二层以活动拓扑建立完整场景投影；第三层没有活动拓扑时，suspendForProcessDetail 已经登记了
+     * 唯一状态节点筛选。这里不得用 undefined 覆盖该上下文，否则停止按钮提交的故障态会只写入缓存
+     * 而不会生成 Unity 状态命令。
+     */
+    if (this.activeTopology) {
+      this.deviceStateCache.setActiveContext(this.activeTopology.sceneId, this.activeTopology.topologyId)
+    }
     return this.deviceStateCache.apply(batch, (candidate) => {
       /*
        * 二维画布必须先成功接纳候选完整快照，缓存才会交换权威状态引用。
@@ -279,10 +330,15 @@ export class TopologyRuntime {
     if (!previousTopology) return
 
     try {
-      const viewState = this.viewStateByTopologyId.get(previousTopology.topologyId) ?? this.getDefaultViewState()
+      const viewState = this.viewStateByTopologyId.get(previousTopology.topologyId)
       this.canvas.setTopology(previousTopology.topology)
-      this.canvas.restoreViewState(viewState)
-      this.canvas.setSelection(viewState.selectedNodeIds, viewState.selectedRouteIds)
+      // 与正常首次激活保持同一规则：没有真实快照时不覆盖组件的初始全图适配。
+      if (viewState) {
+        this.canvas.restoreViewState(viewState)
+        this.canvas.setSelection(viewState.selectedNodeIds, viewState.selectedRouteIds)
+      } else {
+        this.canvas.setSelection([], [])
+      }
       this.deviceStateCache.setActiveContext(previousTopology.sceneId, previousTopology.topologyId)
       this.canvas.setNodeStatuses(this.deviceStateCache.getActiveTopologyNodeStatuses())
     } catch {

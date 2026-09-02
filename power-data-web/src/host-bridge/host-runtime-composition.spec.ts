@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { toActionId, toNodeId, toSceneId, toSceneNodeId, toSessionId, toTopologyId } from '@/config/scene-topology/identifiers'
 import { HostBridge } from '@/host-bridge/host-bridge'
 import { HOST_COMMAND_TIMEOUT_MS } from '@/host-bridge/host-command-lifecycle'
-import { HostRuntimeComposition, type HostDeviceStatesUpdatePort, type HostViewOpenPort, type HostWorkflowTriggerPort } from '@/host-bridge/host-runtime-composition'
+import { HostRuntimeComposition, type HostDeviceStatesUpdatePort, type HostRuntimeCompositionOptions, type HostViewOpenPort, type HostWorkflowTriggerPort } from '@/host-bridge/host-runtime-composition'
 import { isBusinessViewOpenPayload, type HostCommandMessage, type HostEventMessage } from '@/host-bridge/host-protocol'
 import { OVERVIEW_SCENE_ID } from '@/config/scene-topology/identifiers'
 import type { VisualizationCoordinatorFacade } from '@/modules/visual/orchestration/visualization-coordinator-facade'
@@ -33,6 +33,7 @@ function createComposition(
   releaseInnerRuntime: () => Promise<{ success: boolean }> = async () => ({ success: true }),
   workflowTrigger?: HostWorkflowTriggerPort,
   deviceStatesUpdate?: HostDeviceStatesUpdatePort,
+  options: HostRuntimeCompositionOptions = {},
 ): { composition: HostRuntimeComposition; sent: HostEventMessage[]; openCalls: HostCommandMessage['messageId'][] } {
   const sent: HostEventMessage[] = []
   const parentWindow = { postMessage: (event: HostEventMessage) => sent.push(event) }
@@ -71,7 +72,7 @@ function createComposition(
   }
 
   return {
-    composition: new HostRuntimeComposition(bridge, facade, viewOpen, '2026.08.04', releaseInnerRuntime, workflowTrigger, deviceStatesUpdate),
+    composition: new HostRuntimeComposition(bridge, facade, viewOpen, '2026.08.04', releaseInnerRuntime, workflowTrigger, deviceStatesUpdate, undefined, options),
     sent,
     openCalls,
   }
@@ -85,7 +86,7 @@ function createCommand<TType extends HostCommandMessage['type']>(
 ): Extract<HostCommandMessage, { type: TType }> {
   return {
     channel: 'power-scene-topology-shell',
-    version: 1,
+    version: 2,
     instanceId: 'visual-shell-01',
     sessionId: toSessionId('session-test-01'),
     messageId,
@@ -127,6 +128,59 @@ describe('外层运行时组合根', () => {
     composition.dispose()
   })
 
+  it('提前发送 ready，早到 init 等待 Unity 后才执行并确认稳定视图', async () => {
+    let resolveRuntimeReady: ((ready: boolean) => void) | undefined
+    const waitForInnerRuntimeReady = vi.fn(() => new Promise<boolean>((resolve) => {
+      resolveRuntimeReady = resolve
+    }))
+    const { composition, sent, openCalls } = createComposition(
+      async () => ({ success: true }),
+      undefined,
+      undefined,
+      { waitForInnerRuntimeReady },
+    )
+    composition.start()
+
+    const initialization = composition.handleCommand(createCommand('system.init', {
+      sceneId: toSceneId('gas-power'),
+      topologyId: toTopologyId('topology.gas-power'),
+    }, 'parent-init-before-unity'))
+    await Promise.resolve()
+
+    expect(sent.map((event) => event.type)).toEqual(['system.ready'])
+    expect(openCalls).toEqual([])
+    resolveRuntimeReady?.(true)
+    await initialization
+
+    expect(openCalls).toEqual(['parent-init-before-unity'])
+    expect(sent.map((event) => event.type)).toEqual(['system.ready', 'system.ack', 'view.changed'])
+    expect(sent.slice(1).every((event) => event.replyTo === 'parent-init-before-unity')).toBe(true)
+    composition.dispose()
+  })
+
+  it('Unity 准备失败时返回关联失败确认和系统错误，不调用视图事务', async () => {
+    const { composition, sent, openCalls } = createComposition(
+      async () => ({ success: true }),
+      undefined,
+      undefined,
+      { waitForInnerRuntimeReady: async () => false },
+    )
+    composition.start()
+
+    await composition.handleCommand(createCommand('system.init', {
+      sceneId: toSceneId('gas-power'),
+      topologyId: toTopologyId('topology.gas-power'),
+    }, 'parent-init-runtime-timeout'))
+
+    expect(openCalls).toEqual([])
+    expect(sent.map((event) => event.type)).toEqual(['system.ready', 'system.ack', 'system.error'])
+    expect(sent[1]).toEqual(expect.objectContaining({
+      replyTo: 'parent-init-runtime-timeout',
+      payload: expect.objectContaining({ success: false, error: expect.objectContaining({ code: 'runtime.startup.timeout' }) }),
+    }))
+    composition.dispose()
+  })
+
   /**
    * 初始化失败不走普通命令结果路径：父页面必须先收到失败确认，再收到同一 replyTo 的脱敏系统错误。
    * 此处选用清单版本不一致，是无需伪造场景或 Unity 失败即可稳定触发的握手失败分支。
@@ -151,12 +205,42 @@ describe('外层运行时组合根', () => {
       expect.objectContaining({
         type: 'view.changed',
         replyTo: 'parent-init-overview',
-        payload: { sceneId: OVERVIEW_SCENE_ID, actionId: null, contextRevision: 1 },
+        payload: { viewMode: 'overview', sceneId: OVERVIEW_SCENE_ID, actionId: null, contextRevision: 1 },
       }),
     ]))
     const changed = sent.find((event) => event.type === 'view.changed')
     if (changed?.type !== 'view.changed') throw new Error('总览初始化必须产生 view.changed。')
     expect(Object.hasOwn(changed.payload, 'topologyId')).toBe(false)
+    composition.dispose()
+  })
+
+  it('总览建筑点击复用原子视图事务进入目标业务默认拓扑', async () => {
+    const resynchronizeLatestSnapshot = vi.fn()
+    const deviceStatesUpdate: HostDeviceStatesUpdatePort = {
+      submit: vi.fn().mockResolvedValue({ success: true, status: 'completed' }),
+      resynchronizeLatestSnapshot,
+      dispose: vi.fn(),
+    }
+    const { composition, sent, openCalls } = createComposition(async () => ({ success: true }), undefined, deviceStatesUpdate)
+    composition.start()
+    await composition.handleCommand(createCommand('system.init', { sceneId: OVERVIEW_SCENE_ID }, 'parent-init-overview-click'))
+
+    const opened = await composition.openOverviewBuilding({
+      sceneId: toSceneId('gas-power'),
+      topologyId: toTopologyId('topology.gas-power.overview'),
+      expectedContextRevision: 1,
+      correlationId: 'unity-selection-1',
+    })
+
+    expect(opened).toBe(true)
+    expect(openCalls).toEqual(['parent-init-overview-click', 'unity-selection-1'])
+    expect(resynchronizeLatestSnapshot).toHaveBeenCalledTimes(1)
+    expect(sent.filter((event) => event.type === 'view.changed')).toHaveLength(2)
+    expect(sent.at(-1)).toEqual(expect.objectContaining({
+      type: 'view.changed',
+      payload: expect.objectContaining({ sceneId: 'gas-power', topologyId: 'topology.gas-power.overview' }),
+    }))
+    expect(sent.at(-1)).not.toHaveProperty('replyTo')
     composition.dispose()
   })
 

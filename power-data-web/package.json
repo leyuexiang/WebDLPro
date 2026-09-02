@@ -15,15 +15,16 @@
     "test:unit:watch": "vitest"
   },
   "dependencies": {
+    "@meta2d/core": "1.1.28",
     "pinia": "^4.0.2",
     "vue": "^3.5.40",
     "vue-router": "^5.2.0"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",
-    "jpeg-js": "^0.4.4",
     "@vitejs/plugin-vue": "^6.0.8",
     "@vue/tsconfig": "^0.9.1",
+    "jpeg-js": "^0.4.4",
     "typescript": "^5.9.3",
     "vite": "^8.2.0",
     "vitest": "^4.1.10",

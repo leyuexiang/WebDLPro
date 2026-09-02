@@ -154,7 +154,36 @@ export class DeviceStatesUpdateCoordinator {
    * 该内部补同步不产生外层命令结果，也不会为旧批次保留队列；相同序号由 Unity 新控制器实例重新接纳。
    */
   public resynchronizeLatestSnapshot(sceneActivationId?: SceneActivationId): void {
-    if (this.disposed) return
+    const replay = this.createLatestReplay(sceneActivationId, 'internal-state-replay')
+    if (!replay) return
+    this.scheduleLatestUnitySnapshot(replay.snapshotSequence, replay.targets, replay.diagnostic)
+  }
+
+  /**
+   * 跨场景关键环节必须等目标业务控制器真正接收最新权威状态后才能准备隐藏资源。
+   * 该屏障绕过动画帧单槽，但仍使用有限工作池并等待每条 Unity 回执；普通实时快照继续走原异步快路径，
+   * 因此不会把所有设备状态更新改成阻塞外层命令。
+   */
+  public async resynchronizeLatestSnapshotAndWait(sceneActivationId?: SceneActivationId): Promise<boolean> {
+    const replay = this.createLatestReplay(sceneActivationId, 'internal-state-replay-barrier')
+    if (!replay) return !this.disposed
+    return this.dispatchUnityReplayImmediately(replay)
+  }
+
+  /**
+   * 建立一次场景重放的固定投影和诊断。物理实例变化时先废弃旧代次待发批次，避免旧场景命令进入新控制器；
+   * 空快照或空目标直接返回，不占用诊断槽位，也不创建无意义的异步任务。
+   */
+  private createLatestReplay(
+    sceneActivationId: SceneActivationId | undefined,
+    correlationId: string,
+  ): {
+    snapshotSequence: number
+    generation: number
+    targets: ReadonlyMap<SceneNodeId, UnityNodeVisualStateOperation>
+    diagnostic: DeviceStatesBatchDiagnostic
+  } | undefined {
+    if (this.disposed) return undefined
     if (sceneActivationId && sceneActivationId !== this.activeSceneActivationId) {
       this.unityDispatchGeneration += 1
       this.pendingClearSequenceBySceneNodeId.clear()
@@ -162,12 +191,12 @@ export class DeviceStatesUpdateCoordinator {
     }
     if (sceneActivationId) this.activeSceneActivationId = sceneActivationId
     const snapshot = this.topologyRuntime.getActiveSceneNodeStateSnapshot()
-    if (snapshot.snapshotSequence <= 0) return
+    if (snapshot.snapshotSequence <= 0) return undefined
 
     this.latestSnapshotSequence = Math.max(this.latestSnapshotSequence, snapshot.snapshotSequence)
     const firstUpdate = snapshot.updates.values().next().value as TopologySceneNodeVisualStateUpdate | undefined
     const diagnostic: DeviceStatesBatchDiagnostic = {
-      correlationId: 'internal-state-replay',
+      correlationId,
       snapshotSequence: snapshot.snapshotSequence,
       sourceRevision: firstUpdate?.sourceRevision ?? 0,
       processedAt: this.now(),
@@ -188,11 +217,86 @@ export class DeviceStatesUpdateCoordinator {
     this.pendingClearSequenceBySceneNodeId.forEach((_sequence, sceneNodeId) => {
       if (!replayTargets.has(sceneNodeId)) replayTargets.set(sceneNodeId, { kind: 'clear' })
     })
-    // 空重同步没有任何三维工作，不应占用有限诊断槽位或留下看似未完成的零目标记录。
-    if (replayTargets.size === 0) return
+    if (replayTargets.size === 0) return undefined
+
     diagnostic.unityTargetCount = replayTargets.size
     this.recordDiagnostic(diagnostic)
-    this.scheduleLatestUnitySnapshot(snapshot.snapshotSequence, replayTargets, diagnostic)
+    return {
+      snapshotSequence: snapshot.snapshotSequence,
+      generation: this.unityDispatchGeneration,
+      targets: replayTargets,
+      diagnostic,
+    }
+  }
+
+  /**
+   * 阻塞式重放只用于跨场景关键环节准备屏障。工作项数量受现有并发上限约束，
+   * 每个节点仍携带本地快照序号，期间到达的新快照可由 Unity 端序号门禁覆盖旧值。
+   */
+  private async dispatchUnityReplayImmediately(replay: {
+    snapshotSequence: number
+    generation: number
+    targets: ReadonlyMap<SceneNodeId, UnityNodeVisualStateOperation>
+    diagnostic: DeviceStatesBatchDiagnostic
+  }): Promise<boolean> {
+    let supported = false
+    try {
+      supported = this.unity.supportsNodeVisualState()
+    } catch {
+      supported = false
+    }
+    if (!supported) {
+      replay.diagnostic.unityUnavailable = true
+      replay.diagnostic.unityFailedCount = replay.targets.size
+      this.completeDiagnostic(replay.diagnostic)
+      return false
+    }
+
+    const targets = [...replay.targets]
+    let nextTargetIndex = 0
+    let allSucceeded = true
+    const workerCount = Math.min(this.maximumConcurrentUnityCommands, targets.length)
+    const workers = Array.from({ length: workerCount }, async () => {
+      while (!this.disposed && nextTargetIndex < targets.length) {
+        const target = targets[nextTargetIndex]
+        nextTargetIndex += 1
+        if (!target) continue
+        if (replay.generation !== this.unityDispatchGeneration) {
+          replay.diagnostic.unityStaleSkippedCount += 1
+          allSucceeded = false
+          continue
+        }
+
+        const [sceneNodeId, operation] = target
+        try {
+          const result = operation.kind === 'set'
+            ? await this.unity.setNodeVisualState(
+              sceneNodeId,
+              operation.state.visualState,
+              replay.snapshotSequence,
+              operation.state.statusUpdatedAt,
+              operation.state.sourceRevision,
+            )
+            : await this.unity.clearNodeVisualState(sceneNodeId, replay.snapshotSequence)
+          if (result.success) {
+            replay.diagnostic.unitySucceededCount += 1
+            if (operation.kind === 'clear' && this.pendingClearSequenceBySceneNodeId.get(sceneNodeId) === replay.snapshotSequence) {
+              this.pendingClearSequenceBySceneNodeId.delete(sceneNodeId)
+            }
+          } else {
+            replay.diagnostic.unityFailedCount += 1
+            allSucceeded = false
+          }
+        } catch {
+          replay.diagnostic.unityFailedCount += 1
+          allSucceeded = false
+        }
+      }
+    })
+    await Promise.all(workers)
+    if (this.disposed) return false
+    this.completeDiagnostic(replay.diagnostic)
+    return allSucceeded && replay.generation === this.unityDispatchGeneration
   }
 
   /**

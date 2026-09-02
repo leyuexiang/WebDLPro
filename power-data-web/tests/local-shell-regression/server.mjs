@@ -91,6 +91,8 @@ function createTestManifest() {
         actionId: gasResetActionId,
         title: '测试燃气场景重置',
         targetSceneId: 'gas-power',
+        // 夹具仍只验证第二层业务动作；显式视图模式避免旧清单格式被第二版校验器静默接受。
+        targetViewMode: 'business',
         targetTopologyId: 'topology.gas-power.detail',
         allowedParameters: [],
         unityAction: { type: 'resetScene' },
@@ -101,6 +103,8 @@ function createTestManifest() {
         actionId: windResetActionId,
         title: '测试风电场景重置',
         targetSceneId: 'wind-power',
+        // 风电同样保持业务拓扑视图，不创建与本轮无关的关键环节占位资源。
+        targetViewMode: 'business',
         targetTopologyId: 'topology.wind-power.overview',
         allowedParameters: [],
         unityAction: { type: 'resetScene' },

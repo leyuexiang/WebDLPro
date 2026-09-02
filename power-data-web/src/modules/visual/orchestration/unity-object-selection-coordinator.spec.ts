@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { SCENE_IDS, toNodeId, toSceneActivationId, toSceneId, toSceneNodeId, toTopologyId, toUnityRuntimeKey, toUnitySceneKey } from '@/config/scene-topology/identifiers'
+import { OVERVIEW_SCENE_ID, SCENE_IDS, toNodeId, toSceneActivationId, toSceneId, toSceneNodeId, toTopologyId, toUnityRuntimeKey, toUnitySceneKey } from '@/config/scene-topology/identifiers'
 import { TopologyRegistry } from '@/config/scene-topology/topology-registry'
 import type { SceneTopologyManifest } from '@/config/scene-topology/types'
 import { UnityObjectSelectionCoordinator } from '@/modules/visual/orchestration/unity-object-selection-coordinator'
@@ -266,6 +266,59 @@ describe('Unity 三维反向选择协调器', () => {
     expect(coordinator.resolve(selection)).toBeUndefined()
     expect(runtime.setSelection).toHaveBeenCalledTimes(1)
     expect(facade.submit).toHaveBeenCalledTimes(1)
+  })
+
+  it('无拓扑总览建筑按稳定编号解析目标场景默认拓扑，不创建二维选择', () => {
+    const overviewActivationId = toSceneActivationId('scene-activation.overview-1')
+    const facade = createFacade({
+      stableContext: { sceneId: OVERVIEW_SCENE_ID, actionId: null, contextRevision: 7 },
+      sceneActivationId: overviewActivationId,
+      topologyStatus: 'idle',
+    })
+    const runtime = createTopologyRuntime()
+    const coordinator = new UnityObjectSelectionCoordinator(createRegistry(), runtime, facade, { now: () => 0 })
+
+    for (const targetSceneId of SCENE_IDS) {
+      expect(coordinator.resolveOverviewBuilding({
+        messageId: `overview-building-select-${targetSceneId}`,
+        payload: {
+          sceneId: OVERVIEW_SCENE_ID,
+          sceneNodeId: `overview-building.${targetSceneId}`,
+          sceneActivationId: overviewActivationId,
+        },
+      })).toEqual({
+        sceneId: targetSceneId,
+        topologyId: toTopologyId(`topology.${targetSceneId}.overview`),
+        expectedContextRevision: 7,
+        correlationId: expect.stringMatching(/^unity-selection-/),
+      })
+    }
+
+    expect(runtime.setSelection).not.toHaveBeenCalled()
+    expect(facade.submit).not.toHaveBeenCalled()
+  })
+
+  it('总览建筑拒绝未知编号和旧物理实例', () => {
+    const overviewActivationId = toSceneActivationId('scene-activation.overview-2')
+    const facade = createFacade({
+      stableContext: { sceneId: OVERVIEW_SCENE_ID, actionId: null, contextRevision: 8 },
+      sceneActivationId: overviewActivationId,
+      topologyStatus: 'idle',
+    })
+    const coordinator = new UnityObjectSelectionCoordinator(createRegistry(), createTopologyRuntime(), facade, { now: () => 0 })
+
+    expect(coordinator.resolveOverviewBuilding({
+      messageId: 'overview-building-unknown',
+      payload: { sceneId: OVERVIEW_SCENE_ID, sceneNodeId: 'overview-building.unknown', sceneActivationId: overviewActivationId },
+    })).toBeUndefined()
+    expect(coordinator.resolveOverviewBuilding({
+      messageId: 'overview-building-stale',
+      payload: { sceneId: OVERVIEW_SCENE_ID, sceneNodeId: 'overview-building.gas-power', sceneActivationId: 'scene-activation.overview-old' },
+    })).toBeUndefined()
+    expect(facade.submit).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'diagnostic.record',
+      diagnostic: expect.objectContaining({ code: 'unity.overview-selection.activation.mismatch' }),
+    }))
   })
 
   it('设备映射未引用当前拓扑时保留诊断，不回退选择默认拓扑或标题相同节点', () => {

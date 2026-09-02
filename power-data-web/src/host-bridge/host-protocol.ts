@@ -1,10 +1,11 @@
 import { OVERVIEW_SCENE_ID, SCENE_IDS, isOverviewSceneId, isSceneId, isViewSceneId, validateStableIdentifier } from '@/config/scene-topology/identifiers'
-import type { ActionId, NodeId, OverviewSceneId, SceneId, SceneNodeId, SessionId, TopologyId, TransitionId, ViewSceneId } from '@/config/scene-topology/identifiers'
+import type { ActionId, NodeId, OverviewSceneId, ProcessDetailId, SceneId, SceneNodeId, SessionId, TopologyId, TransitionId, ViewSceneId } from '@/config/scene-topology/identifiers'
 import type { DeviceVisualStatus } from '@/config/scene-topology/types'
 
 /** 外层父页面与可视化子应用的固定通道；禁止与 Unity 内层通道混用。 */
 export const HOST_PROTOCOL_CHANNEL = 'power-scene-topology-shell' as const
-export const HOST_PROTOCOL_VERSION = 1 as const
+/** 第二版显式区分沙盘、业务拓扑与无拓扑关键环节，第一版父页面会在握手前被拒绝。 */
+export const HOST_PROTOCOL_VERSION = 2 as const
 
 /** 协议中的所有容量上限集中声明，窗口桥不得自行扩大数组、缓存或消息大小。 */
 export const HOST_PROTOCOL_LIMITS = Object.freeze({
@@ -30,6 +31,7 @@ export const HOST_COMMAND_TYPES = [
   'system.init',
   'view.open',
   'workflow.trigger',
+  'process-detail.playback',
   'device.states.update',
   'state.get',
   'system.dispose',
@@ -42,6 +44,7 @@ export const HOST_COMMAND_TYPES = [
 export const HOST_DISPATCHABLE_COMMAND_TYPES = [
   'view.open',
   'workflow.trigger',
+  'process-detail.playback',
   'device.states.update',
   'state.get',
   'system.dispose',
@@ -98,6 +101,12 @@ export interface WorkflowTriggerPayload {
   expectedContextRevision?: number
 }
 
+/** 关键环节播放开关只携带受控布尔值和可选上下文版本，不暴露 Unity 方法或资源路径。 */
+export interface ProcessDetailPlaybackPayload {
+  playing: boolean
+  expectedContextRevision?: number
+}
+
 /** 父页面节点状态更新中的单条四态记录；真实设备编号只存在于平台内部。 */
 export interface DeviceStateUpdateItem {
   nodeId: NodeId
@@ -123,6 +132,7 @@ export type HostCommandMessage =
   | HostMessageEnvelope<'system.init', SystemInitPayload>
   | HostMessageEnvelope<'view.open', ViewOpenPayload>
   | HostMessageEnvelope<'workflow.trigger', WorkflowTriggerPayload>
+  | HostMessageEnvelope<'process-detail.playback', ProcessDetailPlaybackPayload>
   | HostMessageEnvelope<'device.states.update', DeviceStatesUpdatePayload>
   | HostMessageEnvelope<'state.get', StateGetPayload>
   | HostMessageEnvelope<'system.dispose', SystemDisposePayload>
@@ -134,9 +144,25 @@ type HostVisualizationContextBase = {
   status: 'initializing' | 'ready' | 'error' | 'released'
 }
 
-export type BusinessHostVisualizationContext = HostVisualizationContextBase & { sceneId: SceneId; topologyId: TopologyId }
-export type OverviewHostVisualizationContext = HostVisualizationContextBase & { sceneId: OverviewSceneId; topologyId?: never }
-export type HostVisualizationContext = BusinessHostVisualizationContext | OverviewHostVisualizationContext
+export type BusinessHostVisualizationContext = HostVisualizationContextBase & {
+  viewMode: 'business'
+  sceneId: SceneId
+  topologyId: TopologyId
+  processDetailId?: never
+}
+export type ProcessDetailHostVisualizationContext = HostVisualizationContextBase & {
+  viewMode: 'process-detail'
+  sceneId: SceneId
+  topologyId?: never
+  processDetailId: ProcessDetailId
+}
+export type OverviewHostVisualizationContext = HostVisualizationContextBase & {
+  viewMode: 'overview'
+  sceneId: OverviewSceneId
+  topologyId?: never
+  processDetailId?: never
+}
+export type HostVisualizationContext = BusinessHostVisualizationContext | ProcessDetailHostVisualizationContext | OverviewHostVisualizationContext
 
 /** 首版错误码与协议规范一一对应；调用方不能将 Error.message 原样回传。 */
 export type HostProtocolErrorCode =
@@ -206,8 +232,9 @@ export type ViewChangedPayload = {
   contextRevision: number
   transitionId?: TransitionId
 } & (
-  | { sceneId: SceneId; topologyId: TopologyId }
-  | { sceneId: OverviewSceneId; topologyId?: never }
+  | { viewMode: 'business'; sceneId: SceneId; topologyId: TopologyId; processDetailId?: never }
+  | { viewMode: 'process-detail'; sceneId: SceneId; topologyId?: never; processDetailId: ProcessDetailId }
+  | { viewMode: 'overview'; sceneId: OverviewSceneId; topologyId?: never; processDetailId?: never }
 )
 
 /** 节点双击事件只公开当前结构清单中的稳定节点编号。 */
@@ -311,6 +338,7 @@ export function validateHostCommandPayload(candidate: HostCommandEnvelopeCandida
     (envelope.type === 'system.init' && isSystemInitPayload(envelope.payload)) ||
     (envelope.type === 'view.open' && isViewOpenPayload(envelope.payload)) ||
     (envelope.type === 'workflow.trigger' && isWorkflowTriggerPayload(envelope.payload)) ||
+    (envelope.type === 'process-detail.playback' && isProcessDetailPlaybackPayload(envelope.payload)) ||
     (envelope.type === 'device.states.update' && isDeviceStatesUpdatePayload(envelope.payload)) ||
     (envelope.type === 'state.get' && isStateGetPayload(envelope.payload)) ||
     (envelope.type === 'system.dispose' && isSystemDisposePayload(envelope.payload))
@@ -438,7 +466,12 @@ export function isBusinessViewOpenPayload(value: ViewOpenPayload): value is Busi
 
 /** 在已校验稳定上下文中收窄业务分支，平台总览不会进入业务事件和状态投影。 */
 export function isBusinessHostVisualizationContext(value: HostVisualizationContext): value is BusinessHostVisualizationContext {
-  return isSceneId(value.sceneId)
+  return value.viewMode === 'business'
+}
+
+/** 第三层守卫让事件发送器和状态投影在类型层禁止访问 topologyId。 */
+export function isProcessDetailHostVisualizationContext(value: HostVisualizationContext): value is ProcessDetailHostVisualizationContext {
+  return value.viewMode === 'process-detail'
 }
 
 /** 动作参数使用一层标量字典，避免父页面构造深层对象绕过动作白名单。 */
@@ -511,8 +544,8 @@ function isCommandResultPayload(value: unknown): value is CommandResultPayload {
 
 /** 视图变更必须使用已提交的业务或平台总览上下文形态。 */
 function isViewChangedPayload(value: unknown): value is ViewChangedPayload {
-  if (!isRecord(value) || !hasOnlyOwnKeys(value, ['sceneId', 'topologyId', 'actionId', 'contextRevision', 'transitionId'])) return false
-  if (!isHostViewTarget(value) || value.actionId === undefined || !isNonNegativeInteger(value.contextRevision)) return false
+  if (!isRecord(value) || !hasOnlyOwnKeys(value, ['viewMode', 'sceneId', 'topologyId', 'processDetailId', 'actionId', 'contextRevision', 'transitionId'])) return false
+  if (!isHostStableView(value) || value.actionId === undefined || !isNonNegativeInteger(value.contextRevision)) return false
   return value.transitionId === undefined || isStableIdentifier(value.transitionId)
 }
 
@@ -538,9 +571,34 @@ function isSystemErrorPayload(value: unknown): value is SystemErrorPayload {
 
 /** 稳定上下文必须精确满足业务或平台总览形态，平台总览不能残留 topologyId 属性。 */
 function isHostVisualizationContext(value: unknown): value is HostVisualizationContext {
-  if (!isRecord(value) || !hasOnlyOwnKeys(value, ['sceneId', 'topologyId', 'actionId', 'contextRevision', 'status'])) return false
-  if (!isHostViewTarget(value) || value.actionId === undefined || !isNonNegativeInteger(value.contextRevision)) return false
+  if (!isRecord(value) || !hasOnlyOwnKeys(value, ['viewMode', 'sceneId', 'topologyId', 'processDetailId', 'actionId', 'contextRevision', 'status'])) return false
+  if (!isHostStableView(value) || value.actionId === undefined || !isNonNegativeInteger(value.contextRevision)) return false
   return ['initializing', 'ready', 'error', 'released'].includes(String(value.status))
+}
+
+/** 播放载荷严格限制为开关和稳定上下文版本，避免按钮成为任意 Unity 调用旁路。 */
+function isProcessDetailPlaybackPayload(value: unknown): value is ProcessDetailPlaybackPayload {
+  return isRecord(value)
+    && hasOnlyOwnKeys(value, ['playing', 'expectedContextRevision'])
+    && typeof value.playing === 'boolean'
+    && (value.expectedContextRevision === undefined || isNonNegativeInteger(value.expectedContextRevision))
+}
+
+/**
+ * 稳定视图按 viewMode（视图模式）严格判别字段：业务必须有拓扑，第三层必须有环节，沙盘二者皆无。
+ * `hasOnlyOwnKeys` 在调用方阻断扩展字段，此处只执行互斥和稳定标识校验。
+ */
+function isHostStableView(value: UnknownRecord): boolean {
+  if (value.viewMode === 'overview') {
+    return isOverviewSceneId(value.sceneId) && !Object.hasOwn(value, 'topologyId') && !Object.hasOwn(value, 'processDetailId')
+      && value.actionId === null
+  }
+  if (value.viewMode === 'business') {
+    return isSceneId(value.sceneId) && isStableIdentifier(value.topologyId) && !Object.hasOwn(value, 'processDetailId')
+      && (value.actionId === null || isStableIdentifier(value.actionId))
+  }
+  return value.viewMode === 'process-detail' && isSceneId(value.sceneId) && !Object.hasOwn(value, 'topologyId')
+    && isStableIdentifier(value.processDetailId) && isStableIdentifier(value.actionId)
 }
 
 /** 错误校验只允许规范列出的代码与阶段，且可选关联字段都必须是稳定标识。 */

@@ -47,6 +47,7 @@ public sealed class WaiKeHeBingGasVolumeController : MonoBehaviour
     [SerializeField] private ParticleSystem _redParticleOverlay;
 
     private bool _isPlaying;
+    private bool _playbackAllowed = true;
     private MaterialPropertyBlock _propertyBlock;
 
     /// <summary>
@@ -70,14 +71,51 @@ public sealed class WaiKeHeBingGasVolumeController : MonoBehaviour
 
     public void Play()
     {
+        if (!_playbackAllowed)
+        {
+            Pause();
+            return;
+        }
+
         _isPlaying = true;
         SetParticlePlayback(true);
+        ApplyMaterialProperties();
     }
 
     public void Pause()
     {
         _isPlaying = false;
         SetParticlePlayback(false);
+        // 立即把材质属性块中的流速写为零，不能等待下一次强度设置，否则体积 Shader 仍会继续按 _Time 流动。
+        ApplyMaterialProperties();
+    }
+
+    /// <summary>
+    /// 设置是否允许按序列化自动播放基线运行。该入口可在包装根对象激活前调用，
+    /// 保证首次显示为故障时体积流速和粒子叠加层均已停止。
+    /// </summary>
+    public void SetPlaybackAllowed(bool allowed)
+    {
+        _playbackAllowed = allowed;
+        if (!isActiveAndEnabled)
+        {
+            _isPlaying = _playOnEnable && _playbackAllowed;
+            if (!allowed)
+            {
+                SetParticlePlayback(false);
+                ApplyMaterialProperties();
+            }
+            return;
+        }
+
+        if (_playOnEnable && allowed)
+        {
+            Play();
+        }
+        else
+        {
+            Pause();
+        }
     }
 
     public void SetIntensity(float intensity)
@@ -88,7 +126,7 @@ public sealed class WaiKeHeBingGasVolumeController : MonoBehaviour
 
     private void OnEnable()
     {
-        _isPlaying = _playOnEnable;
+        _isPlaying = _playOnEnable && _playbackAllowed;
         SetParticlePlayback(_isPlaying);
         ApplyMaterialProperties();
     }

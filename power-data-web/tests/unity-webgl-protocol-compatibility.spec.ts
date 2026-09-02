@@ -31,11 +31,11 @@ const temporaryDirectories: string[] = []
  */
 function createValidMetadata(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    schemaVersion: 5,
+    schemaVersion: 9,
     unityReleaseId: 'unity-release-test',
     channel: 'power3d-unity',
-    protocolVersion: 1,
-    commandCapabilities: ['init', 'resize', 'switchScene', 'enterProcessStep', 'resetScene', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
+    protocolVersion: 2,
+    commandCapabilities: ['init', 'resize', 'switchScene', 'enterProcessStep', 'moveCameraToPose', 'enterProcessDetail', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
     eventCapabilities: ['ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'selectionCleared', 'disposed'],
     sceneChangedSchemaVersion: 2,
     sceneChangedRequiredFields: ['requestId', 'sceneId', 'transitionId', 'sceneActivationId', 'success'],
@@ -46,6 +46,15 @@ function createValidMetadata(overrides: Record<string, unknown> = {}): Record<st
     setNodeVisualStateRequiredFields: ['sceneNodeId', 'visualState', 'snapshotSequence', 'statusUpdatedAt', 'sourceRevision'],
     clearNodeVisualStateSchemaVersion: 1,
     clearNodeVisualStateRequiredFields: ['sceneNodeId', 'snapshotSequence'],
+    // Unity 对准备、提交、取消准备、兼容进入和退出第三层共用一个结构版本；
+    // 夹具与实际 WebGL 元数据同形，确保门禁真实覆盖两阶段事务。
+    processDetailCommandSchemaVersion: 2,
+    enterProcessDetailRequiredFields: ['sceneId', 'processId', 'stepId', 'processDetailId', 'transitionId'],
+    prepareProcessDetailRequiredFields: ['sceneId', 'processId', 'stepId', 'processDetailId', 'transitionId'],
+    commitProcessDetailRequiredFields: ['sceneId', 'processDetailId', 'transitionId'],
+    abortProcessDetailRequiredFields: ['sceneId', 'processDetailId', 'transitionId'],
+    exitProcessDetailRequiredFields: ['sceneId', 'processDetailId', 'transitionId'],
+    setProcessDetailPlaybackRequiredFields: ['sceneId', 'processDetailId', 'playing'],
     ...overrides,
   }
 }
@@ -99,7 +108,7 @@ describe('Unity 网页图形协议兼容性门禁', () => {
 
   it('元数据缺少三维动态状态清除能力或快照序号时明确阻断发布', async () => {
     const missingCapabilityDirectory = await createTemporaryUnityBuild(createValidMetadata({
-      commandCapabilities: ['init', 'resize', 'switchScene', 'enterProcessStep', 'resetScene', 'focusNode', 'clearSelection', 'setNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
+      commandCapabilities: ['init', 'resize', 'switchScene', 'enterProcessStep', 'moveCameraToPose', 'enterProcessDetail', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'focusNode', 'clearSelection', 'setNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
     }))
     const missingFieldDirectory = await createTemporaryUnityBuild(createValidMetadata({
       clearNodeVisualStateRequiredFields: ['sceneNodeId'],
@@ -110,13 +119,72 @@ describe('Unity 网页图形协议兼容性门禁', () => {
     await expect(ensureUnityBuildSupportsSceneActivation(missingFieldDirectory, 'unity-release-test')).rejects.toThrow('snapshotSequence')
   })
 
+  it('元数据缺少命名镜头定位能力时明确阻断发布', async () => {
+    const directory = await createTemporaryUnityBuild(createValidMetadata({
+      commandCapabilities: ['init', 'resize', 'switchScene', 'enterProcessStep', 'enterProcessDetail', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
+    }))
+    temporaryDirectories.push(directory)
+
+    await expect(ensureUnityBuildSupportsSceneActivation(directory, 'unity-release-test')).rejects.toThrow('moveCameraToPose')
+  })
+
   it('元数据缺少清除三维交互描边能力时明确阻断发布', async () => {
     const directory = await createTemporaryUnityBuild(createValidMetadata({
-      commandCapabilities: ['init', 'resize', 'switchScene', 'enterProcessStep', 'resetScene', 'focusNode', 'setNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
+      commandCapabilities: ['init', 'resize', 'switchScene', 'enterProcessStep', 'moveCameraToPose', 'enterProcessDetail', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'focusNode', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
     }))
     temporaryDirectories.push(directory)
 
     await expect(ensureUnityBuildSupportsSceneActivation(directory, 'unity-release-test')).rejects.toThrow('clearSelection')
+  })
+
+  it('元数据缺少第三层两阶段命令时明确阻断发布', async () => {
+    const missingCommandDirectory = await createTemporaryUnityBuild(createValidMetadata({
+      commandCapabilities: ['init', 'resize', 'switchScene', 'enterProcessStep', 'moveCameraToPose', 'enterProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
+    }))
+    const missingCommitCommandDirectory = await createTemporaryUnityBuild(createValidMetadata({
+      commandCapabilities: ['init', 'resize', 'switchScene', 'enterProcessStep', 'moveCameraToPose', 'enterProcessDetail', 'prepareProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
+    }))
+    const missingAbortCommandDirectory = await createTemporaryUnityBuild(createValidMetadata({
+      commandCapabilities: ['init', 'resize', 'switchScene', 'enterProcessStep', 'moveCameraToPose', 'enterProcessDetail', 'prepareProcessDetail', 'commitProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
+    }))
+    temporaryDirectories.push(missingCommandDirectory, missingCommitCommandDirectory, missingAbortCommandDirectory)
+
+    await expect(ensureUnityBuildSupportsSceneActivation(missingCommandDirectory, 'unity-release-test')).rejects.toThrow('prepareProcessDetail')
+    await expect(ensureUnityBuildSupportsSceneActivation(missingCommitCommandDirectory, 'unity-release-test')).rejects.toThrow('commitProcessDetail')
+    await expect(ensureUnityBuildSupportsSceneActivation(missingAbortCommandDirectory, 'unity-release-test')).rejects.toThrow('abortProcessDetail')
+  })
+
+  it('元数据缺少两阶段事务稳定编号或代际字段时明确阻断发布', async () => {
+    const missingPrepareTransitionDirectory = await createTemporaryUnityBuild(createValidMetadata({
+      prepareProcessDetailRequiredFields: ['sceneId', 'processId', 'stepId', 'processDetailId'],
+    }))
+    const missingCommitTransitionDirectory = await createTemporaryUnityBuild(createValidMetadata({
+      commitProcessDetailRequiredFields: ['sceneId', 'processDetailId'],
+    }))
+    const missingAbortDetailDirectory = await createTemporaryUnityBuild(createValidMetadata({
+      abortProcessDetailRequiredFields: ['sceneId', 'transitionId'],
+    }))
+    temporaryDirectories.push(missingPrepareTransitionDirectory, missingCommitTransitionDirectory, missingAbortDetailDirectory)
+
+    await expect(ensureUnityBuildSupportsSceneActivation(missingPrepareTransitionDirectory, 'unity-release-test')).rejects.toThrow('transitionId')
+    await expect(ensureUnityBuildSupportsSceneActivation(missingCommitTransitionDirectory, 'unity-release-test')).rejects.toThrow('transitionId')
+    await expect(ensureUnityBuildSupportsSceneActivation(missingAbortDetailDirectory, 'unity-release-test')).rejects.toThrow('processDetailId')
+  })
+
+  it('元数据缺少第三层原子事务结构版本时明确阻断发布', async () => {
+    const directory = await createTemporaryUnityBuild(createValidMetadata({
+      processDetailCommandSchemaVersion: 0,
+    }))
+    temporaryDirectories.push(directory)
+
+    await expect(ensureUnityBuildSupportsSceneActivation(directory, 'unity-release-test')).rejects.toThrow('结构版本')
+  })
+
+  it('第一版 Unity 元数据不能连接第二版关键环节包', async () => {
+    const directory = await createTemporaryUnityBuild(createValidMetadata({ protocolVersion: 1 }))
+    temporaryDirectories.push(directory)
+
+    await expect(ensureUnityBuildSupportsSceneActivation(directory, 'unity-release-test')).rejects.toThrow('协议版本')
   })
 
   it('元数据缺少三维对象选中或选择清除事件时明确阻断发布', async () => {

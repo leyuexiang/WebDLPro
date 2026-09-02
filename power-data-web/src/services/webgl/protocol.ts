@@ -3,7 +3,8 @@ import type { ViewSceneId } from '@/config/scene-topology/identifiers'
 
 /** 网页图形通信的固定通道与协议版本；业务模块不能覆盖这些安全边界。 */
 export const WEBGL_PROTOCOL_CHANNEL = 'power3d-unity' as const
-export const WEBGL_PROTOCOL_VERSION = 1 as const
+/** 第二版增加独立关键环节进入/退出，旧版运行时不能协商或误读第三层状态。 */
+export const WEBGL_PROTOCOL_VERSION = 2 as const
 
 /**
  * 前端可下发的命令白名单。
@@ -14,6 +15,13 @@ export const WEBGL_COMMAND_TYPES = [
   'resize',
   'switchScene',
   'enterProcessStep',
+  'moveCameraToPose',
+  'prepareProcessDetail',
+  'commitProcessDetail',
+  'abortProcessDetail',
+  'enterProcessDetail',
+  'exitProcessDetail',
+  'setProcessDetailPlayback',
   'resetScene',
   'focusNode',
   'clearSelection',
@@ -88,6 +96,51 @@ export interface WebglEnterProcessStepPayload {
   stepId: string
   unitId?: string
   isolate: boolean
+}
+
+/** 独立镜头定位只允许稳定镜头点标识，不能携带坐标、旋转、流程或模型视觉参数。 */
+export interface WebglMoveCameraToPosePayload {
+  cameraPoseId: string
+}
+
+/**
+ * 第三层进入命令只携带目录中已交叉验证的业务标识；资源和相机位由 Unity 本地目录解析，
+ * 防止网页端注入资源地址、模型层级或相机参数。
+ */
+export interface WebglEnterProcessDetailPayload {
+  sceneId: string
+  processId: string
+  stepId: string
+  processDetailId: string
+  /**
+   * 进入事务标识用于让 Unity 拒绝旧进入与旧清理命令。
+   * 它不是模型、资源或相机标识，因而不能被 Unity 用来推导任何运行时对象。
+   */
+  transitionId: string
+}
+
+/** 准备阶段与兼容进入命令共享严格字段，但只允许隐藏加载、状态重放和远端位置校验。 */
+export type WebglPrepareProcessDetailPayload = WebglEnterProcessDetailPayload
+
+/** 提交和取消只引用已经准备的候选，不允许网页补传资源、相机或模型参数。 */
+export type WebglCommitProcessDetailPayload = WebglExitProcessDetailPayload
+export type WebglAbortProcessDetailPayload = WebglExitProcessDetailPayload
+
+/** 退出只绑定当前业务场景和活动关键环节，Unity 据此拒绝迟到或错资源的清理请求。 */
+export interface WebglExitProcessDetailPayload {
+  sceneId: string
+  processDetailId: string
+  /** 与进入命令使用同一事务门，确保迟到的进入结果只能释放自己的资源实例。 */
+  transitionId: string
+}
+
+/**
+ * 独立播放命令只绑定当前活动关键环节和明确开关，不携带设备状态、资源地址或相机参数。
+ */
+export interface WebglSetProcessDetailPlaybackPayload {
+  sceneId: string
+  processDetailId: string
+  playing: boolean
 }
 
 /**
@@ -303,6 +356,63 @@ export function isWebglEnterProcessStepPayload(value: unknown): value is WebglEn
   )
 }
 
+export function isWebglMoveCameraToPosePayload(value: unknown): value is WebglMoveCameraToPosePayload {
+  if (!value || typeof value !== 'object') return false
+
+  const candidate = value as Record<string, unknown>
+  const keys = Object.keys(candidate)
+  return keys.length === 1 && keys[0] === 'cameraPoseId' && isBoundedStableIdentifier(candidate.cameraPoseId)
+}
+
+/** 进入载荷严格只允许五个稳定字段，旧流程隔离、过滤和聚焦字段一律不能混入第三层。 */
+export function isWebglEnterProcessDetailPayload(value: unknown): value is WebglEnterProcessDetailPayload {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  const allowedKeys = new Set(['sceneId', 'processId', 'stepId', 'processDetailId', 'transitionId'])
+  return isSceneId(candidate.sceneId)
+    && isBoundedStableIdentifier(candidate.processId)
+    && isBoundedStableIdentifier(candidate.stepId)
+    && isBoundedStableIdentifier(candidate.processDetailId)
+    && isBoundedStableIdentifier(candidate.transitionId)
+    && Object.keys(candidate).every((key) => allowedKeys.has(key))
+}
+
+/** 新两阶段准备命令复用第三层完整目录字段守卫，避免与兼容组合入口产生字段漂移。 */
+export function isWebglPrepareProcessDetailPayload(value: unknown): value is WebglPrepareProcessDetailPayload {
+  return isWebglEnterProcessDetailPayload(value)
+}
+
+/** 退出载荷不得携带 topologyId、相机或资源字段，确保返回事务完全由已登记活动实例恢复。 */
+export function isWebglExitProcessDetailPayload(value: unknown): value is WebglExitProcessDetailPayload {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  const allowedKeys = new Set(['sceneId', 'processDetailId', 'transitionId'])
+  return isSceneId(candidate.sceneId)
+    && isBoundedStableIdentifier(candidate.processDetailId)
+    && isBoundedStableIdentifier(candidate.transitionId)
+    && Object.keys(candidate).every((key) => allowedKeys.has(key))
+}
+
+/** 提交与取消均只能命中同一事务准备出的候选，因此复用退出载荷的三字段白名单。 */
+export function isWebglCommitProcessDetailPayload(value: unknown): value is WebglCommitProcessDetailPayload {
+  return isWebglExitProcessDetailPayload(value)
+}
+
+export function isWebglAbortProcessDetailPayload(value: unknown): value is WebglAbortProcessDetailPayload {
+  return isWebglExitProcessDetailPayload(value)
+}
+
+/** 播放载荷只允许场景、关键环节和播放开关三个字段，避免状态命令再次承担动态控制职责。 */
+export function isWebglSetProcessDetailPlaybackPayload(value: unknown): value is WebglSetProcessDetailPlaybackPayload {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  const allowedKeys = new Set(['sceneId', 'processDetailId', 'playing'])
+  return isSceneId(candidate.sceneId)
+    && isBoundedStableIdentifier(candidate.processDetailId)
+    && typeof candidate.playing === 'boolean'
+    && Object.keys(candidate).every((key) => allowedKeys.has(key))
+}
+
 /** 验证聚焦载荷的三维节点、选择标识和隔离开关，缺失字段不能进入 Unity 幂等执行链。 */
 export function isWebglFocusNodePayload(value: unknown): value is WebglFocusNodePayload {
   if (!value || typeof value !== 'object') return false
@@ -394,8 +504,8 @@ export function isWebglSceneChangedPayload(value: unknown): value is WebglSceneC
 }
 
 /**
- * 对象选中事件必须提供固定目录内的场景标识、稳定三维节点标识与物理激活标识；缺失、混入旧字段
- * 或误传二维节点标识的事件不允许联动二维拓扑和详情。
+ * 对象选中事件必须提供已登记的业务或总览场景标识、稳定三维节点/总览建筑标识与物理激活标识；缺失、混入旧字段
+ * 或误传二维节点标识的事件不允许进入后续协调器。总览分支不会创建拓扑选择，而是单独解析建筑下钻意图。
  * 此处不保留旧 `nodeId`（二维节点标识）兼容分支，避免旧 Unity 构建在未完成协议升级时被误解释为三维选择。
  */
 export function isWebglObjectSelectedPayload(value: unknown): value is WebglObjectSelectedPayload {
@@ -404,7 +514,7 @@ export function isWebglObjectSelectedPayload(value: unknown): value is WebglObje
   // 协议升级后只接受这三个字段。拒绝对象名称、场景状态、层级路径、旧二维字段和任意扩展字段，
   // 避免旧构建或不可信子页面把未经映射的数据带入诊断、状态仓库或外层事件。
   const allowedKeys = new Set(['sceneId', 'sceneNodeId', 'sceneActivationId'])
-  return isSceneId(candidate.sceneId) &&
+  return isViewSceneId(candidate.sceneId) &&
     isBoundedIdentifier(candidate.sceneNodeId) &&
     validateStableIdentifier(candidate.sceneNodeId).length === 0 &&
     isBoundedIdentifier(candidate.sceneActivationId) &&
@@ -441,6 +551,11 @@ export function parseExactOrigin(value: string): string | null {
 /** 所有跨窗口稳定标识限定长度，避免异常页面用超长字符串放大待确认表和诊断日志。 */
 function isBoundedIdentifier(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.length <= 128
+}
+
+/** 业务标识同时满足长度和统一稳定格式，不能以资源文件名或路径跨越协议边界。 */
+function isBoundedStableIdentifier(value: unknown): value is string {
+  return isBoundedIdentifier(value) && validateStableIdentifier(value).length === 0
 }
 
 /**

@@ -42,7 +42,6 @@ Material:
     m_Ints: []
     m_Floats:
     - _BumpScale: 1
-    - _Opacity: 1
     - _FlowContrast: 1.15
     - _FlowIntensity: 1.8
     - _FlowSpeed: 0.75
@@ -51,9 +50,11 @@ Material:
     - _Metallic: 0.76
     - _MetallicGlossMapEnabled: 0
     - _NormalMapEnabled: 0
+    - _Opacity: 1
     - _Smoothness: 0.5
     - _Spiral: 0.16
     m_Colors:
     - _BaseColor: {r: 0.035, g: 0.05, b: 0.055, a: 1}
-    - _FlowColor: {r: 0, g: 0.55, b: 1.5, a: 1}
+    - _FlowColor: {r: 1.5, g: 0, b: 0.059959892, a: 1}
+    - _FlowDirectionOS: {r: 1, g: 0, b: 0, a: 0}
   m_BuildTextureStacks: []

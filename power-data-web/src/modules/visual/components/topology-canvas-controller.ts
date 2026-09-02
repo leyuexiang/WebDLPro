@@ -15,5 +15,12 @@ export interface TopologyCanvasController {
   setNodeStatuses(statuses: ReadonlyMap<ProcessNodeId, TopologyDeviceStatus>): void
   getViewState(): CanvasTopologyViewState | undefined
   restoreViewState(state: CanvasTopologyViewState): void
+  /** 将当前拓扑完整适配并居中到可见区域，不修改拓扑定义、选择或设备状态。 */
+  resetView(): void
+  /**
+   * 暂停时保留同一个画布实例及其视口缓存，只停止输入、尺寸观察和重绘；恢复时继续使用原实例。
+   * 该能力用于第一层和第三层全屏三维模式，禁止调用方通过卸载组件模拟暂停。
+   */
+  setSuspended(suspended: boolean): void
   dispose(): void
 }

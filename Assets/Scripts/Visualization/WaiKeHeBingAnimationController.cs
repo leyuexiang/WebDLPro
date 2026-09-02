@@ -32,6 +32,7 @@ public sealed class WaiKeHeBingAnimationController : MonoBehaviour
     [SerializeField, Range(0.05f, 0.95f)] private float _rightShellOpacity = 0.28f;
 
     private bool _isPlaying;
+    private bool _playbackAllowed = true;
     private MaterialPropertyBlock _rightShellPropertyBlock;
 
     /// <summary>
@@ -53,7 +54,7 @@ public sealed class WaiKeHeBingAnimationController : MonoBehaviour
     /// </summary>
     public void Play()
     {
-        _isPlaying = true;
+        _isPlaying = _playbackAllowed;
     }
 
     /// <summary>
@@ -62,6 +63,16 @@ public sealed class WaiKeHeBingAnimationController : MonoBehaviour
     public void Pause()
     {
         _isPlaying = false;
+    }
+
+    /// <summary>
+    /// 设置当前实例是否允许按序列化的自动播放基线运行。该入口可在根对象激活前调用，
+    /// 因而故障状态不会等到首个 Update 才停止旋转；恢复时也不会强行启动原本关闭自动播放的实例。
+    /// </summary>
+    public void SetPlaybackAllowed(bool allowed)
+    {
+        _playbackAllowed = allowed;
+        _isPlaying = isActiveAndEnabled && _playOnEnable && _playbackAllowed;
     }
 
     /// <summary>
@@ -75,7 +86,7 @@ public sealed class WaiKeHeBingAnimationController : MonoBehaviour
 
     private void OnEnable()
     {
-        _isPlaying = _playOnEnable;
+        _isPlaying = _playOnEnable && _playbackAllowed;
         ApplyRightShellOpacity();
     }
 

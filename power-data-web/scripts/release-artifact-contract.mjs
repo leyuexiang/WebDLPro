@@ -15,10 +15,16 @@ const allowedDeliveryRootEntries = new Set([
   'artifact-integrity.json', 'shell', 'unity',
 ])
 const requiredUnityCommandCapabilities = Object.freeze([
-  'init', 'resize', 'switchScene', 'enterProcessStep', 'resetScene', 'focusNode', 'clearSelection',
+  'init', 'resize', 'switchScene', 'enterProcessStep', 'moveCameraToPose', 'enterProcessDetail', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'focusNode', 'clearSelection',
   'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose',
 ])
-// 结构版本5开始把三维反向选择和空白清除能力写入版本化元数据；旧结构版本4仍允许作为历史回滚包读取。
+const requiredEnterProcessDetailFields = Object.freeze(['sceneId', 'processId', 'stepId', 'processDetailId', 'transitionId'])
+const requiredPrepareProcessDetailFields = Object.freeze(['sceneId', 'processId', 'stepId', 'processDetailId', 'transitionId'])
+const requiredCommitProcessDetailFields = Object.freeze(['sceneId', 'processDetailId', 'transitionId'])
+const requiredAbortProcessDetailFields = Object.freeze(['sceneId', 'processDetailId', 'transitionId'])
+const requiredExitProcessDetailFields = Object.freeze(['sceneId', 'processDetailId', 'transitionId'])
+const requiredSetProcessDetailPlaybackFields = Object.freeze(['sceneId', 'processDetailId', 'playing'])
+// 结构版本9在第三层事务基础上增加独立命名镜头点能力；旧构建不得绕过镜头按钮发布门禁。
 const requiredUnityEventCapabilities = Object.freeze([
   'ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'selectionCleared', 'disposed',
 ])
@@ -207,6 +213,20 @@ export async function validateReleaseArtifact(rootDirectory) {
   if (releaseManifest.deploymentMode !== expectedDeploymentMode) issues.push('发布摘要的部署模式与包类型不一致。')
   const expectedEntryMode = isLocalTest ? 'local-bootstrap-host' : 'platform-direct-shell-redirect'
   if (releaseManifest.deployment?.entryMode !== expectedEntryMode) issues.push('发布摘要的入口模式与包类型不一致。')
+  /*
+   * Unity 大资源不能套用普通版本化文件的长期不可变缓存。这里校验摘要中的固定策略和全部受控目录，
+   * 使遗漏任一目录、重新开启离线数据缓存或把 no-store 改成长缓存都会在发布目录落盘前失败。
+   */
+  const cachePolicy = releaseManifest.cachePolicy ?? {}
+  const requiredUnityNoStorePaths = ['unity/Build/', 'unity/SceneBundles/', 'unity/ProcessDetailBundles/']
+  const declaredUnityNoStorePaths = Array.isArray(cachePolicy.unityLargeResourcePaths)
+    ? new Set(cachePolicy.unityLargeResourcePaths)
+    : new Set()
+  if (cachePolicy.unityWebGLDataCaching !== false ||
+      cachePolicy.unityLargeResources !== 'no-store' ||
+      requiredUnityNoStorePaths.some((resourcePath) => !declaredUnityNoStorePaths.has(resourcePath))) {
+    issues.push('发布摘要必须关闭 Unity 网页图形离线数据缓存，并声明主播放器、场景资源包和关键环节资源使用 no-store（禁止存储）。')
+  }
   if (releaseManifest.deployment?.addressMode !== 'runtime-self-origin' && releaseManifest.deployment?.publicEntryUrl !== `${releaseManifest.deployment?.publicOrigin}/`) {
     issues.push('发布摘要的公开根入口与浏览器公开来源不一致。')
   }
@@ -228,6 +248,13 @@ export async function validateReleaseArtifact(rootDirectory) {
   const hasSelfTestPage = await exists(path.join(rootDirectory, 'self-test.html'))
   if (Boolean(releaseManifest.selfTestIncluded) !== hasSelfTestPage) issues.push('发布摘要的自测页声明与目录不一致。')
   if (!isLocalTest && hasSelfTestPage) issues.push('合作方联调包和正式包禁止包含内部自测页。')
+  /**
+   * 播放/停止网页演示控件已经退出交付契约；播放能力仍由既有 Unity 交互和受控协议保留。
+   * 摘要继续携带旧开关会让平台误以为壳提供按钮，因此三类新包都必须删除该过期字段。
+   */
+  if (Object.hasOwn(releaseManifest, 'playbackControlsIncluded')) {
+    issues.push('发布摘要不得再声明已废弃的关键环节网页播放控件。')
+  }
   if (await exists(path.join(rootDirectory, 'scene-topology-base-manifest.json'))) {
     issues.push('发布包不得携带已废弃的基础清单；三类包只允许一份场景拓扑结构清单。')
   }
@@ -247,6 +274,31 @@ export async function validateReleaseArtifact(rootDirectory) {
     if (new Set(sourceNodeIds).size !== sourceNodeIds.length) issues.push('结构清单的来源节点标识必须在资源内全局唯一。')
     if (topologyManifest.manifestVersion !== releaseManifest.manifestVersion) issues.push('结构清单版本与发布摘要不一致。')
     if (topologyManifest.unityBuildId !== releaseManifest.unityReleaseId) issues.push('Unity 构建标识在结构清单与发布摘要中不一致。')
+    const processDetails = Array.isArray(topologyManifest.processDetails) ? topologyManifest.processDetails : []
+    const gasTurbineDetail = processDetails.find((detail) => detail?.processDetailId === 'process-detail.gas-power.gas-turbine')
+    const gasTurbineAction = Array.isArray(topologyManifest.actions)
+      ? topologyManifest.actions.find((action) => action?.actionId === 'action.gas-power.gas-turbine')
+      : undefined
+    const gasMapping = Array.isArray(topologyManifest.unitySceneMappings)
+      ? topologyManifest.unitySceneMappings.find((mapping) => mapping?.sceneId === 'gas-power')
+      : undefined
+    if (processDetails.length !== 1 || !gasTurbineDetail ||
+        gasTurbineDetail.sceneId !== 'gas-power' || gasTurbineDetail.processId !== 'gas-power-generation' ||
+        gasTurbineDetail.stepId !== 'gas-turbine' ||
+        gasTurbineDetail.resourceId !== 'process-detail-resource.gas-power.gas-turbine' ||
+        gasTurbineDetail.cameraPoseId !== 'camera-pose.gas-power.gas-turbine' ||
+        gasTurbineDetail.stateNodeId !== 'gas-turbine') {
+      issues.push('结构清单必须且只能发布燃气轮机这一项独立第三层目录。')
+    }
+    if (!gasTurbineAction || gasTurbineAction.targetViewMode !== 'process-detail' ||
+        gasTurbineAction.processDetailId !== 'process-detail.gas-power.gas-turbine' ||
+        Object.prototype.hasOwnProperty.call(gasTurbineAction, 'targetTopologyId') ||
+        gasTurbineAction.unityAction?.type !== 'enterProcessDetail') {
+      issues.push('燃气轮机动作必须进入无拓扑的独立第三层，不能回退为旧流程步骤。')
+    }
+    if (gasMapping?.processSteps?.some((step) => step?.stepId === 'gas-turbine')) {
+      issues.push('燃气 Unity 正式流程步骤清单不得继续发布旧 gas-turbine 过滤步骤。')
+    }
     const sourceTopology = Array.isArray(topologyManifest.topologies)
       ? topologyManifest.topologies.find((topology) => topology?.topologyId === releaseManifest.nodeProtocolPolicy?.sourceTopologyId)
       : undefined
@@ -266,15 +318,69 @@ export async function validateReleaseArtifact(rootDirectory) {
   if (unityProtocolMetadata) {
     const capabilities = new Set(Array.isArray(unityProtocolMetadata.commandCapabilities) ? unityProtocolMetadata.commandCapabilities : [])
     const eventCapabilities = new Set(Array.isArray(unityProtocolMetadata.eventCapabilities) ? unityProtocolMetadata.eventCapabilities : [])
-    const isSupportedSchema = unityProtocolMetadata.schemaVersion === 4 || unityProtocolMetadata.schemaVersion === 5
-    const missingEventsInCurrentSchema = unityProtocolMetadata.schemaVersion === 5 &&
-      requiredUnityEventCapabilities.some((capability) => !eventCapabilities.has(capability))
-    if (!isSupportedSchema || unityProtocolMetadata.channel !== 'power3d-unity' ||
-      unityProtocolMetadata.protocolVersion !== 1 || unityProtocolMetadata.unityReleaseId !== releaseManifest.unityReleaseId ||
+    const missingEvents = requiredUnityEventCapabilities.some((capability) => !eventCapabilities.has(capability))
+    const enterProcessDetailFields = new Set(Array.isArray(unityProtocolMetadata.enterProcessDetailRequiredFields)
+      ? unityProtocolMetadata.enterProcessDetailRequiredFields
+      : [])
+    const prepareProcessDetailFields = new Set(Array.isArray(unityProtocolMetadata.prepareProcessDetailRequiredFields)
+      ? unityProtocolMetadata.prepareProcessDetailRequiredFields
+      : [])
+    const commitProcessDetailFields = new Set(Array.isArray(unityProtocolMetadata.commitProcessDetailRequiredFields)
+      ? unityProtocolMetadata.commitProcessDetailRequiredFields
+      : [])
+    const abortProcessDetailFields = new Set(Array.isArray(unityProtocolMetadata.abortProcessDetailRequiredFields)
+      ? unityProtocolMetadata.abortProcessDetailRequiredFields
+      : [])
+    const exitProcessDetailFields = new Set(Array.isArray(unityProtocolMetadata.exitProcessDetailRequiredFields)
+      ? unityProtocolMetadata.exitProcessDetailRequiredFields
+      : [])
+    const playbackFields = new Set(Array.isArray(unityProtocolMetadata.setProcessDetailPlaybackRequiredFields)
+      ? unityProtocolMetadata.setProcessDetailPlaybackRequiredFields
+      : [])
+    const missingEnterProcessDetailFields = requiredEnterProcessDetailFields.some((field) => !enterProcessDetailFields.has(field))
+    const missingPrepareProcessDetailFields = requiredPrepareProcessDetailFields.some((field) => !prepareProcessDetailFields.has(field))
+    const missingCommitProcessDetailFields = requiredCommitProcessDetailFields.some((field) => !commitProcessDetailFields.has(field))
+    const missingAbortProcessDetailFields = requiredAbortProcessDetailFields.some((field) => !abortProcessDetailFields.has(field))
+    const missingExitProcessDetailFields = requiredExitProcessDetailFields.some((field) => !exitProcessDetailFields.has(field))
+    const missingPlaybackFields = requiredSetProcessDetailPlaybackFields.some((field) => !playbackFields.has(field))
+    if (unityProtocolMetadata.schemaVersion !== 9 || unityProtocolMetadata.channel !== 'power3d-unity' ||
+      unityProtocolMetadata.protocolVersion !== 2 || unityProtocolMetadata.unityReleaseId !== releaseManifest.unityReleaseId ||
+      unityProtocolMetadata.processDetailCommandSchemaVersion !== 2 ||
       requiredUnityCommandCapabilities.some((capability) => !capabilities.has(capability)) ||
-      missingEventsInCurrentSchema) {
+      missingEvents || missingEnterProcessDetailFields || missingPrepareProcessDetailFields ||
+      missingCommitProcessDetailFields || missingAbortProcessDetailFields || missingExitProcessDetailFields || missingPlaybackFields) {
       issues.push('Unity 协议能力文件的发布标识、结构版本或必需命令与发布摘要不一致。')
     }
+
+    /*
+     * 元数据只是声明，浏览器真正收到的 ready 能力来自 Unity 输出的 index.html 桥接脚本。
+     * 两者必须同时包含同一组命令；若只改 JSON 而漏改 .jslib/模板，静态门禁会通过但运行时握手必然失败。
+     * 兼容测试夹具允许没有 index.html，但真实交付包一旦包含该入口就必须逐项核对能力字符串。
+     */
+    const unityEntryPath = path.join(rootDirectory, 'unity', 'index.html')
+    if (await exists(unityEntryPath)) {
+      const unityEntrySource = await readFile(unityEntryPath, 'utf8')
+      const missingBridgeCapabilities = requiredUnityCommandCapabilities.filter((capability) => (
+        !unityEntrySource.includes(`'${capability}'`) && !unityEntrySource.includes(`\"${capability}\"`)
+      ))
+      if (missingBridgeCapabilities.length > 0) {
+        issues.push(`Unity 实际网页桥接未声明必需命令：${missingBridgeCapabilities.join('、')}。`)
+      }
+    }
+  }
+
+  /** 外层和 Unity 必须同时锁定第二版；第一版父页面不能把第三层无拓扑状态误读为业务视图。 */
+  if (releaseManifest.protocolVersions?.host !== 2 || releaseManifest.protocolVersions?.unity !== 2) {
+    issues.push('发布摘要必须声明外层与 Unity 均使用第二版协议。')
+  }
+
+  /**
+   * 外层握手保持15秒短预算，只有 Unity 与初始稳定视图拥有120秒预算。
+   * 不能只声明一个含义模糊的总启动超时，否则平台无法按第二版协议正确分段计时。
+   */
+  if (releaseManifest.runtimeTimeouts?.outerReadyMilliseconds !== 15_000 ||
+      releaseManifest.runtimeTimeouts?.unityAndInitialViewMilliseconds !== 120_000) {
+    issues.push('发布摘要必须声明外层就绪15秒、Unity与初始稳定视图120秒的分阶段超时。')
   }
 
   if (releaseManifest.platformArtifactPatchingAllowed !== false) issues.push('发布摘要必须明确禁止平台修改构建产物。')
@@ -285,8 +391,10 @@ export async function validateReleaseArtifact(rootDirectory) {
   }
   if (!releaseManifest.includedCapabilities?.includes('node-events') ||
       !releaseManifest.includedCapabilities?.includes('node-states') ||
-      !releaseManifest.includedCapabilities?.includes('node-scene-mapping')) {
-    issues.push('发布摘要必须声明节点事件、节点状态和节点到三维映射能力。')
+      !releaseManifest.includedCapabilities?.includes('node-scene-mapping') ||
+      !releaseManifest.includedCapabilities?.includes('process-detail')) {
+    // “节点到三维映射能力”作为固定诊断短语保留，便于发布流水线和既有联调检查精确识别能力缺失。
+    issues.push('发布摘要必须声明节点事件、节点状态、节点到三维映射能力和独立第三层能力。')
   }
   if (releaseManifest.includedCapabilities?.includes('device-mapping') ||
       releaseManifest.excludedCapabilities?.includes('node-events') ||
@@ -359,6 +467,7 @@ export async function validateReleaseArtifact(rootDirectory) {
     const files = await listReleaseFiles(rootDirectory)
     let reportedUnexpectedPath = false
     let reportedInternalPath = false
+    let reportedLegacyPlaybackControls = false
     for (const filePath of files) {
       const relativePath = normalizeRelativePath(rootDirectory, filePath)
       const rootEntry = relativePath.split('/')[0]
@@ -372,12 +481,20 @@ export async function validateReleaseArtifact(rootDirectory) {
       }
       if (!textExtensions.has(path.extname(relativePath).toLowerCase()) || relativePath === integrityFileName) continue
       const content = await readFile(filePath, 'utf8')
-      // Unity 官方 loader（加载器）内含面向本地开发的错误提示词，不代表发布配置指向本机；
-      // 仅对我方生成的入口、说明、摘要和服务脚本执行本机地址门禁，避免误伤不可改写的 Unity 运行资源。
-      if (!relativePath.startsWith('unity/') && loopbackAddressPattern.test(content)) issues.push(`正式交付文本仍包含本机地址：${relativePath}`)
+      // 旧播放控件带有稳定数据标记；只扫描壳文本即可阻止历史按钮回流，无需读取 Unity 大资源或匹配中文文案。
+      if (!reportedLegacyPlaybackControls && relativePath.startsWith('shell/') && content.includes('data-partner-playback-controls')) {
+        issues.push('协议壳不得携带已废弃的关键环节网页播放控件。')
+        reportedLegacyPlaybackControls = true
+      }
+      /*
+       * 第三方前端依赖可能内置“未配置主机时回退本机”的通用库文案，它不是本包部署配置且不可原位修改。
+       * 本机地址门禁只扫描我方生成、会被联调人员读取或执行的根级入口、说明、摘要、清单和服务脚本；
+       * Unity 官方加载器和供应商代码继续由完整性摘要保护，避免误把依赖默认值判成实际部署地址。
+       */
+      const shouldScanDeploymentAddress = !relativePath.includes('/') || relativePath === 'shell/index.html'
+      if (shouldScanDeploymentAddress && loopbackAddressPattern.test(content)) issues.push(`正式交付文本仍包含本机地址：${relativePath}`)
       if (internalTestMarkerPattern.test(content)) issues.push(`正式交付文本仍包含内部自测内容：${relativePath}`)
     }
-
     const serverSource = await readFile(path.join(rootDirectory, 'server.mjs'), 'utf8').catch(() => '')
     if (isRuntimeSelfOrigin) {
       if (!serverSource.includes("const addressMode = \"runtime-self-origin\"") ||

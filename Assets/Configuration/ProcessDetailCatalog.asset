@@ -1,0 +1,40 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b76574babf5194e47864ab4809b25e89, type: 3}
+  m_Name: ProcessDetailCatalog
+  m_EditorClassIdentifier: 
+  _entries:
+  - _sceneId: gas-power
+    _processId: gas-power-generation
+    _stepId: gas-turbine
+    _processDetailId: process-detail.gas-power.gas-turbine
+    _resourceId: process-detail-resource.gas-power.gas-turbine
+    _cameraPoseId: camera-pose.gas-power.gas-turbine
+    _stateNodeIds:
+    - gas-turbine
+    _dynamicTargetIds:
+    - gas-turbine
+    _availability: 1
+    _editorPrefab: {fileID: 287525903796519437, guid: e0eb74baaa310fd43881afd7dc794df5,
+      type: 3}
+  - _sceneId: coal-power
+    _processId: coal-power-generation
+    _stepId: boiler
+    _processDetailId: process-detail.coal-power.boiler
+    _resourceId: process-detail-resource.coal-power.boiler
+    _cameraPoseId: camera-pose.coal-power.boiler
+    _stateNodeIds:
+    - node.coal-boiler
+    _dynamicTargetIds: []
+    _availability: 1
+    _editorPrefab: {fileID: 1942214797568138815, guid: 785dbb6a8c002ce4990d0014f6d62b02,
+      type: 3}

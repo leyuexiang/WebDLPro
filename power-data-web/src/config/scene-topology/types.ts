@@ -1,7 +1,10 @@
 import type {
   ActionId,
+  CameraPoseId,
   NodeId,
   ProcessId,
+  ProcessDetailId,
+  ProcessDetailResourceId,
   RouteId,
   SceneId,
   SceneNodeId,
@@ -35,6 +38,8 @@ export interface TopologyNodeDrilldownReference {
 export type UnityActionDefinition =
   | { type: 'none' }
   | { type: 'enterProcessStep'; processId: ProcessId; stepId: StepId; defaultUnitId?: string; isolate: boolean }
+  /** 第三层只下发目录中的稳定入口编号，资源、相机和模型绑定继续由 Unity 独立目录解析。 */
+  | { type: 'enterProcessDetail'; processDetailId: ProcessDetailId }
   | { type: 'focusNode'; sceneNodeId: SceneNodeId; isolate: boolean }
   | { type: 'resetScene' }
   | { type: 'setRouteFlow'; routeId: RouteId; enabled: boolean }
@@ -89,6 +94,20 @@ export interface TopologyNodeDefinition {
   doubleClickBehavior: DoubleClickBehavior
   /** 可选说明层入口；没有明确业务资料的节点必须省略，渲染器不得按标题猜测。 */
   drilldown?: TopologyNodeDrilldownReference
+}
+
+/**
+ * 第三层关键环节目录只登记跨端共同核对的稳定编号，不保存资源路径、模型名称或层级路径。
+ * 根级数组允许任意场景为零项或多项；当前发布只加入燃气轮机一项，运行时不得按数组位置推断语义。
+ */
+export interface ProcessDetailDefinition {
+  processDetailId: ProcessDetailId
+  sceneId: SceneId
+  processId: ProcessId
+  stepId: StepId
+  resourceId: ProcessDetailResourceId
+  cameraPoseId: CameraPoseId
+  stateNodeId: SceneNodeId
 }
 
 /** 说明节点只在单份内容内部唯一，不拥有正式节点标识、设备状态或三维映射。 */
@@ -212,17 +231,35 @@ export interface TopologyDefinition {
   filter?: TopologyFilterDefinition
 }
 
-/** 外部动作到场景、拓扑和 Unity 动作的唯一受控映射。 */
-export interface ActionDefinition {
+/** 动作公共字段；目标视图字段由可判别联合保证严格互斥。 */
+interface ActionDefinitionBase {
   actionId: ActionId
   title: string
   targetSceneId: SceneId
-  targetTopologyId: TopologyId
   allowedParameters: readonly string[]
   unityAction: UnityActionDefinition
   failurePolicy: 'keep-current-context' | 'commit-view-with-warning'
   configVersion: string
 }
+
+/** 第二层业务动作必须携带拓扑，不能携带关键环节编号。 */
+export type BusinessActionDefinition = ActionDefinitionBase & {
+  targetViewMode: 'business'
+  targetTopologyId: TopologyId
+  processDetailId?: never
+}
+
+/** 第三层动作必须携带关键环节编号，不能夹带旧过滤拓扑。 */
+export type ProcessDetailActionDefinition = ActionDefinitionBase & {
+  targetViewMode: 'process-detail'
+  targetTopologyId?: never
+  processDetailId: ProcessDetailId
+  unityAction: Extract<UnityActionDefinition, { type: 'enterProcessDetail' }>
+  failurePolicy: 'keep-current-context'
+}
+
+/** 外部动作到第二层业务视图或第三层关键环节的唯一受控映射。 */
+export type ActionDefinition = BusinessActionDefinition | ProcessDetailActionDefinition
 
 /**
  * 场景、拓扑、动作和 Unity 场景映射的原子发布单元。
@@ -236,6 +273,8 @@ export interface SceneTopologyManifest {
   topologies: readonly TopologyDefinition[]
   /** 说明内容不属于可切换拓扑集合，也不参与设备状态、动作或三维映射投影。 */
   drilldowns?: readonly TopologyDrilldownContent[]
+  /** 独立第三层资源目录；省略等价于零项，便于尚未交付第三层的场景保持空目录。 */
+  processDetails?: readonly ProcessDetailDefinition[]
   actions: readonly ActionDefinition[]
   unitySceneMappings: readonly UnitySceneMappingDefinition[]
 }

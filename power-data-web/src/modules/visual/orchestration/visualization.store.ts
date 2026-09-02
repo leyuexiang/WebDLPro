@@ -1,7 +1,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { isOverviewSceneId } from '@/config/scene-topology/identifiers'
-import type { ActionId, NodeId, OverviewSceneId, RouteId, SceneActivationId, SceneId, SceneNodeId, TopologyId, TransitionId, ViewSceneId } from '@/config/scene-topology/identifiers'
+import type { ActionId, NodeId, OverviewSceneId, ProcessDetailId, RouteId, SceneActivationId, SceneId, SceneNodeId, TopologyId, TransitionId, ViewSceneId } from '@/config/scene-topology/identifiers'
 
 /** 选择来源用于阻断二维单击、Unity 反向选择和外层事件之间的聚焦回环。 */
 export type VisualizationSelectionSource = 'topology' | 'unity' | 'external' | 'system'
@@ -32,13 +32,26 @@ type VisualizationStableContextBase = {
 
 export type BusinessVisualizationStableContext = VisualizationStableContextBase & { sceneId: SceneId; topologyId: TopologyId }
 export type OverviewVisualizationStableContext = VisualizationStableContextBase & { sceneId: OverviewSceneId; topologyId?: never }
-export type VisualizationStableContext = BusinessVisualizationStableContext | OverviewVisualizationStableContext
+/** 第三层只保存稳定环节编号，明确禁止 topologyId 进入无拓扑全屏状态。 */
+export type ProcessDetailVisualizationStableContext = VisualizationStableContextBase & {
+  sceneId: SceneId
+  topologyId?: never
+  processDetailId: ProcessDetailId
+}
+export type VisualizationStableContext = BusinessVisualizationStableContext | ProcessDetailVisualizationStableContext | OverviewVisualizationStableContext
 
 /** 在稳定上下文中收窄业务分支，只有该分支可进入拓扑清单与业务状态投影。 */
 export function isBusinessVisualizationStableContext(
   value: VisualizationStableContext,
 ): value is BusinessVisualizationStableContext {
-  return !isOverviewSceneId(value.sceneId)
+  return !isOverviewSceneId(value.sceneId) && 'topologyId' in value
+}
+
+/** 只有带关键环节编号且无拓扑的业务场景属于第三层。 */
+export function isProcessDetailVisualizationStableContext(
+  value: VisualizationStableContext,
+): value is ProcessDetailVisualizationStableContext {
+  return !isOverviewSceneId(value.sceneId) && 'processDetailId' in value
 }
 
 /** 有限诊断不保存异常对象或完整外部载荷，只保留稳定代码与关联标识。 */
@@ -62,6 +75,7 @@ export interface VisualizationTransitionSummary {
   transitionId: TransitionId
   sceneId: ViewSceneId
   topologyId: TopologyId | null
+  processDetailId?: ProcessDetailId | null
   actionId: ActionId | null
   previousContextRevision: number
   outcome: VisualizationTransitionOutcome
@@ -84,6 +98,7 @@ export const useVisualizationStore = defineStore('visualization', () => {
   const activeTransitionId = ref<TransitionId | null>(null)
   const targetSceneId = ref<ViewSceneId | null>(null)
   const targetTopologyId = ref<TopologyId | null>(null)
+  const targetProcessDetailId = ref<ProcessDetailId | null>(null)
   const targetActionId = ref<ActionId | null>(null)
   const runtimeStatus = ref<VisualizationRuntimeStatus>('idle')
   const unityStatus = ref<VisualizationSubsystemStatus>('idle')
@@ -115,12 +130,14 @@ export const useVisualizationStore = defineStore('visualization', () => {
     topologyId: TopologyId | null,
     actionId: ActionId | null,
     forceSceneSwitch = false,
+    processDetailId: ProcessDetailId | null = null,
   ): void {
     // 新事务抵达即记录旧事务为 superseded（已取代），不等待其迟到回调；后续回调会因事务标识不匹配被过滤。
     appendActiveTransitionSummary('superseded')
     activeTransitionId.value = transitionId
     targetSceneId.value = sceneId
     targetTopologyId.value = topologyId
+    targetProcessDetailId.value = processDetailId
     targetActionId.value = actionId
     runtimeStatus.value = forceSceneSwitch || stableContext.value?.sceneId !== sceneId ? 'switching' : 'preparing'
     topologyStatus.value = 'preparing'
@@ -157,14 +174,21 @@ export const useVisualizationStore = defineStore('visualization', () => {
     topologyId: TopologyId | null,
     actionId: ActionId | null,
     nextSceneActivationId: SceneActivationId | null = sceneActivationId.value,
+    processDetailId: ProcessDetailId | null = null,
   ): boolean {
     if (activeTransitionId.value !== transitionId) return false
-    if (!isOverviewSceneId(sceneId) && topologyId === null) return false
+    const targetsOverview = isOverviewSceneId(sceneId)
+    const targetsProcessDetail = !targetsOverview && topologyId === null && processDetailId !== null
+    const targetsBusiness = !targetsOverview && topologyId !== null && processDetailId === null
+    if (!targetsOverview && !targetsProcessDetail && !targetsBusiness) return false
+    if (targetsOverview && (topologyId !== null || processDetailId !== null)) return false
 
     appendActiveTransitionSummary('completed')
     const nextContextRevision = (stableContext.value?.contextRevision ?? 0) + 1
-    if (isOverviewSceneId(sceneId)) {
+    if (targetsOverview) {
       stableContext.value = { sceneId, actionId: null, contextRevision: nextContextRevision }
+    } else if (targetsProcessDetail) {
+      stableContext.value = { sceneId, processDetailId, actionId, contextRevision: nextContextRevision }
     } else {
       // 业务分支已在入口拒绝空拓扑，保证稳定业务上下文永远同时拥有场景和拓扑。
       stableContext.value = { sceneId, topologyId: topologyId!, actionId, contextRevision: nextContextRevision }
@@ -173,13 +197,14 @@ export const useVisualizationStore = defineStore('visualization', () => {
     activeTransitionId.value = null
     targetSceneId.value = null
     targetTopologyId.value = null
+    targetProcessDetailId.value = null
     targetActionId.value = null
     runtimeStatus.value = 'ready'
     unityStatus.value = 'ready'
-    topologyStatus.value = isOverviewSceneId(sceneId) ? 'idle' : 'ready'
+    topologyStatus.value = targetsOverview || targetsProcessDetail ? 'idle' : 'ready'
     sceneLoadProgress.value = null
-    if (isOverviewSceneId(sceneId)) {
-      // 平台总览提交时同步清空旧业务选择；Canvas 与视口仍由拓扑运行时保留挂载。
+    if (targetsOverview) {
+      // 平台总览提交时清空选择；第三层必须保留进入前选择，供返回第二层原样恢复。
       selectedNodeIds.value = []
       selectedRouteIds.value = []
       selectedSceneNodeId.value = null
@@ -207,13 +232,15 @@ export const useVisualizationStore = defineStore('visualization', () => {
     activeTransitionId.value = null
     targetSceneId.value = null
     targetTopologyId.value = null
+    targetProcessDetailId.value = null
     targetActionId.value = null
     runtimeStatus.value = stableContext.value ? 'ready' : 'error'
     sceneLoadProgress.value = null
     if (stableContext.value) {
       // 失败后恢复上一个稳定视图；平台总览保持拓扑空闲，业务场景恢复同一 Canvas 就绪态。
       unityStatus.value = 'ready'
-      topologyStatus.value = isOverviewSceneId(stableContext.value.sceneId) ? 'idle' : 'ready'
+      const stableWithoutTopology = isOverviewSceneId(stableContext.value.sceneId) || isProcessDetailVisualizationStableContext(stableContext.value)
+      topologyStatus.value = stableWithoutTopology ? 'idle' : 'ready'
       if (isOverviewSceneId(stableContext.value.sceneId)) {
         selectedNodeIds.value = []
         selectedRouteIds.value = []
@@ -242,6 +269,7 @@ export const useVisualizationStore = defineStore('visualization', () => {
     activeTransitionId.value = null
     targetSceneId.value = null
     targetTopologyId.value = null
+    targetProcessDetailId.value = null
     targetActionId.value = null
     runtimeStatus.value = 'error'
     unityStatus.value = 'failed'
@@ -292,6 +320,7 @@ export const useVisualizationStore = defineStore('visualization', () => {
       transitionId: activeTransitionId.value,
       sceneId: targetSceneId.value,
       topologyId: targetTopologyId.value,
+      processDetailId: targetProcessDetailId.value,
       actionId: targetActionId.value,
       previousContextRevision: stableContext.value?.contextRevision ?? 0,
       outcome,
@@ -311,6 +340,7 @@ export const useVisualizationStore = defineStore('visualization', () => {
     activeTransitionId.value = null
     targetSceneId.value = null
     targetTopologyId.value = null
+    targetProcessDetailId.value = null
     targetActionId.value = null
     runtimeStatus.value = 'released'
     unityStatus.value = 'disposed'
@@ -331,6 +361,7 @@ export const useVisualizationStore = defineStore('visualization', () => {
     activeTransitionId,
     targetSceneId,
     targetTopologyId,
+    targetProcessDetailId,
     targetActionId,
     runtimeStatus,
     unityStatus,

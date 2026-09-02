@@ -37,7 +37,8 @@ function createCommand<TType extends HostCommandMessage['type']>(
 ): Extract<HostCommandMessage, { type: TType }> {
   return {
     channel: 'power-scene-topology-shell',
-    version: 1,
+    // 第二版协议才能表达无拓扑的第三层关键环节稳定状态。
+    version: 2,
     instanceId: 'visual-shell-01',
     sessionId: toSessionId('session-test-01'),
     messageId: `parent-${type.replaceAll('.', '-')}-01`,

@@ -4,7 +4,8 @@ import { validateHostCommandMessage, validateHostEventMessage } from '@/host-bri
 
 const baseEnvelope = {
   channel: 'power-scene-topology-shell' as const,
-  version: 1 as const,
+  // 节点状态仍属于第二层能力，但必须通过第二版外层信封，避免旧父页面误读第三层状态。
+  version: 2 as const,
   instanceId: 'shell-node-contract',
   sessionId: toSessionId('session.node-contract'),
   timestamp: 1_725_000_000_000,

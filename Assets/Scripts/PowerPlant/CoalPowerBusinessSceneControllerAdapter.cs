@@ -8,11 +8,12 @@ using WebDLPro.Unity.SceneRuntime;
 /// 将燃煤场景中的 PowerPlantProcessController 接入九场景统一接口。
 /// 适配器只转发已声明的稳定流程和节点标识，不从模型名称、层级路径或二维标题推断映射。
 /// </summary>
-public sealed class CoalPowerBusinessSceneControllerAdapter : IBusinessSceneController
+public sealed class CoalPowerBusinessSceneControllerAdapter : IBusinessSceneController, IBusinessSceneNamedCameraPoseController
 {
     private const string CoalPowerSceneId = "coal-power";
 
     private readonly PowerPlantProcessController _controller;
+    private readonly BusinessSceneNamedCameraPoseRegistry _cameraPoseRegistry;
     private readonly BusinessSceneResourceScope _resourceScope = new BusinessSceneResourceScope();
     private bool _released;
 
@@ -39,13 +40,26 @@ public sealed class CoalPowerBusinessSceneControllerAdapter : IBusinessSceneCont
                                 BusinessSceneCapability.ClearNodeVisualState;
             }
 
+            if (_cameraPoseRegistry != null)
+            {
+                capabilities |= BusinessSceneCapability.MoveCameraToPose;
+            }
+
             return capabilities;
         }
     }
 
     public CoalPowerBusinessSceneControllerAdapter(PowerPlantProcessController controller)
+        : this(controller, null)
+    {
+    }
+
+    public CoalPowerBusinessSceneControllerAdapter(
+        PowerPlantProcessController controller,
+        BusinessSceneNamedCameraPoseRegistry cameraPoseRegistry)
     {
         _controller = controller;
+        _cameraPoseRegistry = cameraPoseRegistry;
         if (_controller != null)
         {
             // 运行时材质和高亮组件由控制器创建；场景卸载前主动释放，避免连续切换时短时叠加。
@@ -93,6 +107,21 @@ public sealed class CoalPowerBusinessSceneControllerAdapter : IBusinessSceneCont
         return success
             ? BusinessSceneCommandResult.Completed(message)
             : BusinessSceneCommandResult.Failed("invalid-process-step", message);
+    }
+
+    /// <summary>
+    /// 播放独立命名镜头点动画。燃煤场景当前只预留组件与协议接口，未登记点位时返回明确错误。
+    /// </summary>
+    public BusinessSceneCommandResult MoveCameraToPose(string cameraPoseId)
+    {
+        if (!TryUseController(out BusinessSceneCommandResult unavailable))
+        {
+            return unavailable;
+        }
+
+        return _cameraPoseRegistry != null
+            ? _cameraPoseRegistry.MoveCameraToPose(cameraPoseId)
+            : BusinessSceneCommandResult.Unsupported(BusinessSceneCapability.MoveCameraToPose);
     }
 
     /// <summary>节点选择更新显隐和描边；是否自动聚焦由场景控制器的统一选中开关决定。</summary>
@@ -222,16 +251,27 @@ public sealed class CoalPowerBusinessSceneControllerAdapter : IBusinessSceneCont
         }
 
         GameObject[] roots = scene.GetRootGameObjects();
+        PowerPlantProcessController controller = null;
+        BusinessSceneNamedCameraPoseRegistry cameraPoseRegistry = null;
         for (int rootIndex = 0; rootIndex < roots.Length; rootIndex++)
         {
-            PowerPlantProcessController controller = roots[rootIndex].GetComponentInChildren<PowerPlantProcessController>(true);
-            if (controller != null && string.Equals(controller.ConfiguredProcessId, "coal-power-generation", StringComparison.Ordinal))
+            if (controller == null)
             {
-                return new CoalPowerBusinessSceneControllerAdapter(controller);
+                PowerPlantProcessController candidate = roots[rootIndex].GetComponentInChildren<PowerPlantProcessController>(true);
+                if (candidate != null && string.Equals(candidate.ConfiguredProcessId, "coal-power-generation", StringComparison.Ordinal))
+                {
+                    controller = candidate;
+                }
+            }
+            if (cameraPoseRegistry == null)
+            {
+                cameraPoseRegistry = roots[rootIndex].GetComponentInChildren<BusinessSceneNamedCameraPoseRegistry>(true);
             }
         }
 
-        return null;
+        return controller != null
+            ? new CoalPowerBusinessSceneControllerAdapter(controller, cameraPoseRegistry)
+            : null;
     }
 
     private bool TryUseController(out BusinessSceneCommandResult failure)

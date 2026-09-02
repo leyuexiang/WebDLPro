@@ -4,6 +4,7 @@ import type {
   HostCommandType,
   HostDispatchableCommandType,
   HostProtocolError,
+  ProcessDetailPlaybackPayload,
   ViewOpenPayload,
   WorkflowTriggerPayload,
 } from '@/host-bridge/host-protocol'
@@ -25,6 +26,11 @@ export type HostDispatchableDomainCommand =
       type: 'workflow.trigger'
       correlationId: string
       payload: WorkflowTriggerPayload
+    }
+  | {
+      type: 'process-detail.playback'
+      correlationId: string
+      payload: ProcessDetailPlaybackPayload
     }
   | {
       type: 'device.states.update'
@@ -105,6 +111,8 @@ export class HostCommandDispatcher {
         return this.submitDomainCommand({ type: 'view.open', correlationId: command.messageId, payload: command.payload })
       case 'workflow.trigger':
         return this.submitDomainCommand({ type: 'workflow.trigger', correlationId: command.messageId, payload: command.payload })
+      case 'process-detail.playback':
+        return this.submitDomainCommand({ type: 'process-detail.playback', correlationId: command.messageId, payload: command.payload })
       case 'device.states.update':
         return this.submitDomainCommand({ type: 'device.states.update', correlationId: command.messageId, payload: command.payload })
     }
@@ -160,6 +168,6 @@ function isDispatchableCommand(type: HostCommandType): type is HostDispatchableC
 
 /** 只有会修改或派生稳定视图上下文的命令才携带乐观并发版本。 */
 function readExpectedContextRevision(command: HostCommandMessage): number | undefined {
-  if (command.type === 'view.open' || command.type === 'workflow.trigger') return command.payload.expectedContextRevision
+  if (command.type === 'view.open' || command.type === 'workflow.trigger' || command.type === 'process-detail.playback') return command.payload.expectedContextRevision
   return undefined
 }

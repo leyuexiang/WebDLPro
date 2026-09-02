@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { toRuntimeKey } from '@/config/process/identifiers'
 import type { WebglRuntimeRegistration } from '@/config/process/types'
 import { WEBGL_PROTOCOL_CHANNEL, WEBGL_PROTOCOL_VERSION, type WebglMessageEnvelope, type WebglObjectSelectedPayload, type WebglSelectionClearedPayload } from './protocol'
-import { WebglRuntimeConnector } from './runtime-connector'
+import { WEBGL_HANDSHAKE_TIMEOUT_MS, WebglRuntimeConnector } from './runtime-connector'
 
 /**
  * 连接器测试使用最小伪窗口，不依赖浏览器或真实 iframe。
@@ -166,9 +166,9 @@ describe('网页图形受控连接器', () => {
     connector.startListening()
     connector.attachChildWindow(initialWindow as unknown as WindowProxy)
 
-    vi.advanceTimersByTime(10_000)
+    vi.advanceTimersByTime(WEBGL_HANDSHAKE_TIMEOUT_MS)
     connector.attachChildWindow(navigatedUnityWindow as unknown as WindowProxy)
-    vi.advanceTimersByTime(5_000)
+    vi.advanceTimersByTime(1)
 
     expect(statuses).toEqual(['handshaking', 'failed'])
   })

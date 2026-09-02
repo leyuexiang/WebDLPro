@@ -7,7 +7,7 @@ import type { HostCommandMessage } from '@/host-bridge/host-protocol'
 function createStateGetCommand(messageId = 'parent-command-01'): HostCommandMessage {
   return {
     channel: 'power-scene-topology-shell',
-    version: 1,
+    version: 2,
     instanceId: 'visual-shell-01',
     sessionId: toSessionId('session-test-01'),
     messageId,
@@ -21,7 +21,7 @@ function createStateGetCommand(messageId = 'parent-command-01'): HostCommandMess
 function createViewOpenCommand(messageId = 'parent-view-open-timeout'): HostCommandMessage {
   return {
     channel: 'power-scene-topology-shell',
-    version: 1,
+    version: 2,
     instanceId: 'visual-shell-01',
     sessionId: toSessionId('session-test-01'),
     messageId,
@@ -38,7 +38,7 @@ function createViewOpenCommand(messageId = 'parent-view-open-timeout'): HostComm
 function createDeviceStatesUpdateCommand(messageId: string, sourceRevision = 1): HostCommandMessage {
   return {
     channel: 'power-scene-topology-shell',
-    version: 1,
+    version: 2,
     instanceId: 'visual-shell-01',
     sessionId: toSessionId('session-test-01'),
     messageId,

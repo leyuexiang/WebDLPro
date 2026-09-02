@@ -236,6 +236,8 @@ describe('场景拓扑节点协议清单校验', () => {
         actionId,
         title: '燃气复位',
         targetSceneId: toSceneId('gas-power'),
+        // 该夹具验证第二层旧动作仍遵守新版显式视图模式契约。
+        targetViewMode: 'business',
         targetTopologyId: toTopologyId('topology.gas-power.overview'),
         allowedParameters: [],
         unityAction: { type: 'resetScene' },

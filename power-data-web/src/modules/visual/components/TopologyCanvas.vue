@@ -53,6 +53,7 @@ let lastPointerY = 0
 let pointerDownX = 0
 let pointerDownY = 0
 let hasMovedSincePointerDown = false
+let suspended = false
 /** 无运行时状态时复用空快照，避免每次同步创建临时 Map（映射）。 */
 const emptyNodeStatuses: ReadonlyMap<ProcessNodeId, TopologyDeviceStatus> = new Map()
 /** 节点索引仅在拓扑引用变化时重建，悬浮和键盘移动不会反复扫描24个燃气节点。 */
@@ -83,6 +84,7 @@ function updateTooltipAnchor(clientX: number, clientY: number, bounds: DOMRect):
  * 因而绝不能与高频选择、状态或容器尺寸变化共用同一个观察器。
  */
 function syncTopologyDefinition(): void {
+  if (suspended) return
   updateCoordinator?.updateTopology(props.topology)
   // 新拓扑不能保留旧节点提示或键盘焦点；若当前选择仍存在，则用它作为新的键盘起点。
   hoveredNodeId.value = null
@@ -94,11 +96,13 @@ function syncTopologyDefinition(): void {
  * 这保证单击节点不会触发全图重建，后续设备状态增量也可沿用同一分离边界。
  */
 function syncSelection(): void {
+  if (suspended) return
   updateCoordinator?.updateSelection(props.selectedNodeIds, props.selectedRouteIds)
 }
 
 /** 节点状态与选择、配置分离观察；状态批次会被适配器合并至单个动画帧。 */
 function syncNodeStatuses(): void {
+  if (suspended) return
   updateCoordinator?.updateNodeStatuses(props.nodeStatuses ?? emptyNodeStatuses)
 }
 
@@ -107,11 +111,13 @@ function syncNodeStatuses(): void {
  * 使退出全屏后无法回到原位置。适配器会同步放大图元、节点标题、层级标题、连线文字和避让边界。
  */
 function syncPresentationScale(): void {
+  if (suspended) return
   adapter?.setPresentationScale(props.fullscreen ? 2 : 1)
 }
 
 /** 容器变化时只调整当前画布尺寸；适配器会合并多次回调为一帧重绘。 */
 function handleResize(entries: readonly ResizeObserverEntry[]): void {
+  if (suspended) return
   const entry = entries[0]
 
   if (entry && updateCoordinator) {
@@ -172,6 +178,12 @@ function changeZoom(delta: number): void {
 function resetZoom(): void {
   if (!adapter) return
   zoomLevel.value = adapter.resetZoom()
+}
+
+/** 受控端口与画布内按钮复用同一重置逻辑，避免两条视口计算路径产生不同居中结果。 */
+function resetView(): void {
+  if (suspended) return
+  resetZoom()
 }
 
 /**
@@ -240,7 +252,33 @@ function setSelection(nodeIds: readonly ProcessNodeId[], routeIds: readonly Rout
  * 它只传入只读节点状态快照，不修改拓扑配置、选择或当前缩放平移，适配器会继续按帧合并重绘。
  */
 function setNodeStatuses(statuses: ReadonlyMap<ProcessNodeId, TopologyDeviceStatus>): void {
+  if (suspended) return
   updateCoordinator?.updateNodeStatuses(statuses)
+}
+
+/**
+ * 保留适配器、拓扑缓存和原生 Canvas，只断开尺寸观察并阻止后续增量重绘。
+ * 恢复时重新观察同一容器并以当前尺寸刷新一次，不创建新的适配器或 Canvas。
+ */
+function setSuspended(nextSuspended: boolean): void {
+  if (suspended === nextSuspended) return
+  suspended = nextSuspended
+  const container = containerElement.value
+
+  if (suspended) {
+    resizeObserver?.disconnect()
+    isPanning.value = false
+    hoveredNodeId.value = null
+    return
+  }
+
+  if (!container || !resizeObserver || !adapter || !updateCoordinator) return
+  resizeObserver.observe(container)
+  updateCoordinator.updateContainerSize(container.clientWidth, container.clientHeight)
+  syncPresentationScale()
+  syncTopologyDefinition()
+  syncSelection()
+  syncNodeStatuses()
 }
 
 /**
@@ -388,6 +426,8 @@ defineExpose<TopologyCanvasController>({
   setNodeStatuses,
   getViewState,
   restoreViewState,
+  resetView,
+  setSuspended,
   dispose,
 })
 </script>

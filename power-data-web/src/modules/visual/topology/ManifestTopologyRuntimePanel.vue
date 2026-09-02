@@ -15,8 +15,8 @@ import { visualizationRuntimeHostKey } from '@/modules/visual/runtime/visualizat
 
 const props = defineProps<{
   registry: TopologyRegistry
-  /** 仅在当前场景—拓扑事务完成稳定提交后显示下钻按钮。 */
-  drilldownEnabled?: boolean
+  /** 第三层稳定态停用画布；运行时对象与有限视口快照继续保留，供返回第二层原样恢复。 */
+  suspended?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -99,11 +99,6 @@ async function createTopologyRuntime(): Promise<void> {
 /** 向组合根提供已就绪运行时；未准备完成时返回 undefined，桥接层必须等待而不能绕过单画布端口。 */
 function getTopologyRuntime(): TopologyRuntime | undefined {
   return topologyRuntime
-}
-
-/** 说明内容只从当前原子注册表按内容键和拓扑版本读取，不发起网络请求或扫描节点标题。 */
-function resolveDrilldownContent(contentKey: string, version: string) {
-  return props.registry.getDrilldownContent(contentKey, version)
 }
 
 /**
@@ -228,9 +223,8 @@ defineExpose({ getTopologyRuntime })
     :topology="displayedTopology"
     :selected-node-ids="selectedNodeIds"
     :selected-route-ids="selectedRouteIds"
+    :suspended="props.suspended"
     :node-statuses="nodeStatuses"
-    :resolve-drilldown-content="resolveDrilldownContent"
-    :drilldown-enabled="props.drilldownEnabled"
     @select-node="handleSelectNode"
     @clear-selection="handleClearSelection"
     @double-click-node="handleDoubleClickNode"

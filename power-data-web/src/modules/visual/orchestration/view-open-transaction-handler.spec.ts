@@ -72,6 +72,7 @@ function createManifest(): SceneTopologyManifest {
         actionId: windOpenActionId,
         title: '风电总览动作',
         targetSceneId: toSceneId('wind-power'),
+        targetViewMode: 'business',
         targetTopologyId: windOverviewTopologyId,
         allowedParameters: [],
         unityAction: { type: 'none' },
@@ -82,6 +83,7 @@ function createManifest(): SceneTopologyManifest {
         actionId: windResetActionId,
         title: '风电重置动作',
         targetSceneId: toSceneId('wind-power'),
+        targetViewMode: 'business',
         targetTopologyId: windDetailTopologyId,
         allowedParameters: ['unit-id'],
         // resetScene（重置场景）不引用设备、流程或路径，适合验证可选动作的通用事务顺序。
@@ -654,7 +656,7 @@ describe('view.open 原子切换事务', () => {
     const warningManifest: SceneTopologyManifest = {
       ...manifest,
       // 此夹具仅验证失败策略，不代表任何正式风电流程或参数映射。
-      actions: manifest.actions.map((action) => action.actionId === windResetActionId
+      actions: manifest.actions.map((action) => action.actionId === windResetActionId && action.targetViewMode === 'business'
         ? { ...action, failurePolicy: 'commit-view-with-warning' as const }
         : action),
     }
@@ -701,7 +703,7 @@ describe('view.open 原子切换事务', () => {
     const manifest = createManifest()
     const warningManifest: SceneTopologyManifest = {
       ...manifest,
-      actions: manifest.actions.map((action) => action.actionId === windResetActionId
+      actions: manifest.actions.map((action) => action.actionId === windResetActionId && action.targetViewMode === 'business'
         ? { ...action, failurePolicy: 'commit-view-with-warning' as const }
         : action),
     }

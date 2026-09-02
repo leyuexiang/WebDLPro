@@ -31,18 +31,24 @@ public sealed class CoalPowerVisualStateTestPanel : MonoBehaviour
         "电力送出"
     };
 
+    // 顺序与 CoalPower 场景属性面板中的一图元一模型绑定保持一致；测试面板只使用稳定节点标识，
+    // 不通过模型名称或层级路径推断设备，从而与网页拓扑和 Unity 反向选择使用同一份映射语义。
     private static readonly string[] NodeIds =
     {
+        "node.coal-feeder",
         "node.coal-boiler",
         "node.coal-steam-turbine",
-        "node.coal-generator"
+        "node.coal-generator",
+        "node.coal-precipitator"
     };
 
     private static readonly string[] NodeLabels =
     {
+        "给煤机",
         "锅炉",
         "汽轮机",
-        "发电机"
+        "发电机",
+        "除尘器"
     };
 
     [SerializeField] private PowerPlantProcessController _processController;

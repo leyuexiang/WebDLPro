@@ -81,6 +81,12 @@ export class TopologyDeviceStateCache {
   private readonly sceneNodeStatusesBySceneId = new Map<SceneId, Map<SceneNodeId, DeviceVisualStatus>>()
   private activeTopologyId: TopologyId | undefined
   private activeSceneId: SceneId | undefined
+  /**
+   * 第三层只允许当前独立资源接收自身登记的状态节点。
+   * 该筛选与二维活动拓扑彻底分离：进入关键环节后拓扑可以暂停，实时状态仍可持续投影到唯一模型；
+   * 未设置时表示第二层业务场景，需要按场景投影全部显式登记的三维节点。
+   */
+  private activeSceneNodeIdFilter: SceneNodeId | undefined
   private snapshotSequence = 0
   private disposed = false
 
@@ -97,11 +103,19 @@ export class TopologyDeviceStateCache {
     this.maximumSceneSnapshots = normalizeCapacity(options.maximumSceneSnapshots, 8)
   }
 
-  /** 激活上下文只决定本次返回和派生缓存保护范围，不会创建场景、画布或 Unity（统一引擎）对象。 */
-  public setActiveContext(sceneId: SceneId | undefined, topologyId: TopologyId | undefined): void {
+  /**
+   * 激活上下文只决定本次返回和派生缓存保护范围，不会创建场景、画布或 Unity（统一引擎）对象。
+   * `sceneNodeIdFilter` 仅供第三层独立模型使用，必须来自已经校验的清单状态节点，不能由模型名或页面参数推断。
+   */
+  public setActiveContext(
+    sceneId: SceneId | undefined,
+    topologyId: TopologyId | undefined,
+    sceneNodeIdFilter?: SceneNodeId,
+  ): void {
     if (this.disposed) return
     this.activeSceneId = sceneId
     this.activeTopologyId = topologyId
+    this.activeSceneNodeIdFilter = sceneId ? sceneNodeIdFilter : undefined
   }
 
   /**
@@ -159,6 +173,7 @@ export class TopologyDeviceStateCache {
       return new Map(cached)
     }
 
+    // 按指定场景查询始终返回完整派生结果；第三层筛选只影响“当前活动投影”，不能污染缓存的通用查询接口。
     const hydrated = this.buildSceneProjection(this.latestStateByNodeId, sceneId).statuses
     this.touchSceneSnapshot(sceneId, hydrated)
     return new Map(hydrated)
@@ -181,13 +196,16 @@ export class TopologyDeviceStateCache {
   public getActiveSceneNodeStateSnapshot(): {
     snapshotSequence: number
     updates: ReadonlyMap<SceneNodeId, TopologySceneNodeVisualStateUpdate>
+    /** 第三层返回自身受控节点，协调器据此不会把其他设备的历史清除命令投给独立模型。 */
+    sceneNodeIdFilter?: SceneNodeId
   } {
     if (this.disposed || !this.activeSceneId || this.snapshotSequence <= 0) {
-      return { snapshotSequence: this.snapshotSequence, updates: new Map() }
+      return { snapshotSequence: this.snapshotSequence, updates: new Map(), ...(this.activeSceneNodeIdFilter ? { sceneNodeIdFilter: this.activeSceneNodeIdFilter } : {}) }
     }
     return {
       snapshotSequence: this.snapshotSequence,
-      updates: this.buildSceneProjection(this.latestStateByNodeId, this.activeSceneId).updates,
+      updates: this.buildSceneProjection(this.latestStateByNodeId, this.activeSceneId, this.activeSceneNodeIdFilter).updates,
+      ...(this.activeSceneNodeIdFilter ? { sceneNodeIdFilter: this.activeSceneNodeIdFilter } : {}),
     }
   }
 
@@ -200,6 +218,7 @@ export class TopologyDeviceStateCache {
     this.sceneNodeStatusesBySceneId.clear()
     this.activeSceneId = undefined
     this.activeTopologyId = undefined
+    this.activeSceneNodeIdFilter = undefined
   }
 
   /** 单次遍历归一完整快照；同一节点重复出现时 Map（映射）无条件以数组最后一项覆盖。 */
@@ -237,13 +256,13 @@ export class TopologyDeviceStateCache {
     }
 
     const previousActiveSceneStatuses = this.activeSceneId
-      ? this.buildSceneProjection(this.latestStateByNodeId, this.activeSceneId).statuses
+      ? this.buildSceneProjection(this.latestStateByNodeId, this.activeSceneId, this.activeSceneNodeIdFilter).statuses
       : new Map<SceneNodeId, DeviceVisualStatus>()
     const activeTopologyNodeStatuses = this.activeTopologyId
       ? this.buildTopologyProjection(nextStateByNodeId, this.activeTopologyId)
       : new Map<NodeId, DeviceVisualStatus>()
     const activeSceneProjection = this.activeSceneId
-      ? this.buildSceneProjection(nextStateByNodeId, this.activeSceneId)
+      ? this.buildSceneProjection(nextStateByNodeId, this.activeSceneId, this.activeSceneNodeIdFilter)
       : { statuses: new Map<SceneNodeId, DeviceVisualStatus>(), updates: new Map<SceneNodeId, TopologySceneNodeVisualStateUpdate>() }
     const clearedActiveSceneNodeIds: SceneNodeId[] = []
     for (const sceneNodeId of previousActiveSceneStatuses.keys()) {
@@ -295,6 +314,7 @@ export class TopologyDeviceStateCache {
   private buildSceneProjection(
     states: ReadonlyMap<NodeId, CachedNodeState>,
     sceneId: SceneId,
+    sceneNodeIdFilter?: SceneNodeId,
   ): {
     statuses: Map<SceneNodeId, DeviceVisualStatus>
     updates: Map<SceneNodeId, TopologySceneNodeVisualStateUpdate>
@@ -305,7 +325,7 @@ export class TopologyDeviceStateCache {
     for (const [nodeId, state] of states) {
       const projection = this.registry.getNodeStateProjection(nodeId)
       if (!projection || projection.sceneId !== sceneId) continue
-      this.appendSceneTargets(projection, state, statuses, updates)
+      this.appendSceneTargets(projection, state, statuses, updates, sceneNodeIdFilter)
     }
 
     return { statuses, updates }
@@ -317,8 +337,11 @@ export class TopologyDeviceStateCache {
     state: CachedNodeState,
     statuses: Map<SceneNodeId, DeviceVisualStatus>,
     updates: Map<SceneNodeId, TopologySceneNodeVisualStateUpdate>,
+    sceneNodeIdFilter: SceneNodeId | undefined,
   ): void {
     for (const sceneNodeId of projection.sceneNodeIds) {
+      // 第三层只接收目录中明确登记的状态节点，禁止把同一业务场景的其他设备状态扩散到独立模型。
+      if (sceneNodeIdFilter && sceneNodeId !== sceneNodeIdFilter) continue
       statuses.set(sceneNodeId, state.deviceStatus)
       updates.set(sceneNodeId, {
         visualState: state.deviceStatus,

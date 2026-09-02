@@ -2,6 +2,7 @@ import { isOverviewSceneId } from '@/config/scene-topology/identifiers'
 import type {
   ActionId,
   NodeId,
+  ProcessDetailId,
   RouteId,
   SceneActivationId,
   SceneNodeId,
@@ -9,6 +10,7 @@ import type {
   TransitionId,
   ViewSceneId,
 } from '@/config/scene-topology/identifiers'
+import { isProcessDetailVisualizationStableContext } from '@/modules/visual/orchestration/visualization.store'
 import type {
   VisualizationDiagnostic,
   VisualizationSceneLoadProgress,
@@ -31,6 +33,7 @@ export type VisualizationDomainCommand =
       transitionId: TransitionId
       sceneId: ViewSceneId
       topologyId: TopologyId | null
+      processDetailId?: ProcessDetailId | null
       actionId: ActionId | null
       expectedContextRevision?: number
       /** 补偿恢复时即使逻辑稳定场景相同，也必须要求 Unity 重新确认物理场景。 */
@@ -50,6 +53,7 @@ export type VisualizationDomainCommand =
       transitionId: TransitionId
       sceneId: ViewSceneId
       topologyId: TopologyId | null
+      processDetailId?: ProcessDetailId | null
       actionId: ActionId | null
       /** 真实 Unity 场景实例标识；同场景拓扑切换沿用上一个稳定上下文的值。 */
       sceneActivationId?: SceneActivationId | null
@@ -113,6 +117,7 @@ export interface VisualizationCoordinatorStatePort {
   readonly activeTransitionId: TransitionId | null
   readonly targetSceneId: ViewSceneId | null
   readonly targetTopologyId: TopologyId | null
+  readonly targetProcessDetailId?: ProcessDetailId | null
   readonly targetActionId: ActionId | null
   readonly runtimeStatus: VisualizationRuntimeStatus
   readonly unityStatus: VisualizationSubsystemStatus
@@ -130,6 +135,7 @@ export interface VisualizationCoordinatorStatePort {
     topologyId: TopologyId | null,
     actionId: ActionId | null,
     forceSceneSwitch?: boolean,
+    processDetailId?: ProcessDetailId | null,
   ): void
   setUnityStatus(status: VisualizationSubsystemStatus): void
   setTopologyStatus(status: VisualizationSubsystemStatus): void
@@ -140,6 +146,7 @@ export interface VisualizationCoordinatorStatePort {
     topologyId: TopologyId | null,
     actionId: ActionId | null,
     sceneActivationId?: SceneActivationId | null,
+    processDetailId?: ProcessDetailId | null,
   ): boolean
   failTransition(
     transitionId: TransitionId,
@@ -166,6 +173,7 @@ export interface VisualizationCoordinatorSnapshot {
   activeTransitionId: TransitionId | null
   targetSceneId: ViewSceneId | null
   targetTopologyId: TopologyId | null
+  targetProcessDetailId?: ProcessDetailId | null
   targetActionId: ActionId | null
   runtimeStatus: VisualizationRuntimeStatus
   unityStatus: VisualizationSubsystemStatus
@@ -230,6 +238,7 @@ export class VisualizationCoordinator {
       activeTransitionId: this.state.activeTransitionId,
       targetSceneId: this.state.targetSceneId,
       targetTopologyId: this.state.targetTopologyId,
+      targetProcessDetailId: this.state.targetProcessDetailId ?? null,
       targetActionId: this.state.targetActionId,
       runtimeStatus: this.state.runtimeStatus,
       unityStatus: this.state.unityStatus,
@@ -256,14 +265,18 @@ export class VisualizationCoordinator {
       return this.rejected('context.revision.conflict', 'validation', '调用方期望的上下文版本与当前稳定版本不一致。', true)
     }
     const targetsOverview = isOverviewSceneId(command.sceneId)
-    if ((targetsOverview && (command.topologyId !== null || command.actionId !== null)) || (!targetsOverview && command.topologyId === null)) {
-      return this.rejected('transition.target.mismatch', 'validation', '业务场景与平台总览的拓扑、动作目标形态不一致。', true)
+    const processDetailId = command.processDetailId ?? null
+    const targetsProcessDetail = !targetsOverview && command.topologyId === null && processDetailId !== null && command.actionId !== null
+    const targetsBusiness = !targetsOverview && command.topologyId !== null && processDetailId === null
+    if ((targetsOverview && (command.topologyId !== null || processDetailId !== null || command.actionId !== null)) || (!targetsOverview && !targetsProcessDetail && !targetsBusiness)) {
+      return this.rejected('transition.target.mismatch', 'validation', '沙盘、业务拓扑与关键环节的目标字段不满足互斥契约。', true)
     }
 
     if (
       this.state.activeTransitionId === command.transitionId &&
       this.state.targetSceneId === command.sceneId &&
       this.state.targetTopologyId === command.topologyId &&
+      (this.state.targetProcessDetailId ?? null) === processDetailId &&
       this.state.targetActionId === command.actionId
     ) {
       return { status: 'ignored', reason: 'idempotent' }
@@ -277,6 +290,7 @@ export class VisualizationCoordinator {
       command.topologyId,
       command.actionId,
       command.forceSceneSwitch,
+      processDetailId,
     )
 
     // 首次进入或跨场景切换必须重新等待 Unity 就绪；同场景事务保留当前 Unity ready 状态。
@@ -345,17 +359,19 @@ export class VisualizationCoordinator {
     if (
       command.sceneId !== this.state.targetSceneId ||
       command.topologyId !== this.state.targetTopologyId ||
+      (command.processDetailId ?? null) !== (this.state.targetProcessDetailId ?? null) ||
       command.actionId !== this.state.targetActionId
     ) {
       return this.rejected('transition.target.mismatch', 'transition', '提交目标与当前事务准备目标不一致。', true)
     }
     const targetsOverview = isOverviewSceneId(command.sceneId)
-    const topologyReady = targetsOverview
+    const targetsProcessDetail = !targetsOverview && (command.processDetailId ?? null) !== null
+    const topologyReady = targetsOverview || targetsProcessDetail
       ? this.state.topologyStatus === 'idle'
       : this.state.topologyStatus === 'ready'
     if (this.state.unityStatus !== 'ready' || !topologyReady) {
-      return this.rejected('transition.subsystems.not-ready', 'transition', targetsOverview
-        ? 'Unity 尚未就绪或拓扑尚未进入空闲态，不能提交平台总览。'
+      return this.rejected('transition.subsystems.not-ready', 'transition', targetsOverview || targetsProcessDetail
+        ? 'Unity 尚未就绪或拓扑尚未进入空闲态，不能提交无拓扑稳定视图。'
         : 'Unity 与拓扑尚未同时就绪，不能提交稳定上下文。', true)
     }
 
@@ -365,6 +381,7 @@ export class VisualizationCoordinator {
       command.topologyId,
       command.actionId,
       command.sceneActivationId,
+      command.processDetailId ?? null,
     )
     if (!committed) return { status: 'ignored', reason: 'stale-transition' }
 
@@ -401,7 +418,7 @@ export class VisualizationCoordinator {
 
   /** 选择只在稳定可操作状态写入；切换遮罩期间的点击事件不会污染旧稳定上下文。 */
   private replaceSelection(command: Extract<VisualizationDomainCommand, { type: 'selection.replace' }>): VisualizationCoordinatorResult {
-    if (this.state.runtimeStatus !== 'ready' || !this.state.stableContext || isOverviewSceneId(this.state.stableContext.sceneId)) {
+    if (this.state.runtimeStatus !== 'ready' || !this.state.stableContext || isOverviewSceneId(this.state.stableContext.sceneId) || isProcessDetailVisualizationStableContext(this.state.stableContext)) {
       return this.rejected('runtime.not-ready', 'selection', '当前业务拓扑尚未进入稳定可操作状态。', true)
     }
 

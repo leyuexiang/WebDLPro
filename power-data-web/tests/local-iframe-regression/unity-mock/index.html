@@ -44,7 +44,8 @@
      * 并对 init、resize、dispose 使用原始 messageId 作为 requestId 回执。
      */
     const channel = 'power3d-unity';
-    const version = 1;
+    // 与正式内层协议第二版保持一致，确保命名镜头和关键环节命令走真实版本门禁。
+    const version = 2;
     const query = new URLSearchParams(window.location.search);
     const parentOrigin = query.get('parentOrigin');
     const instanceId = query.get('instanceId');
@@ -63,7 +64,7 @@
     const failedNodeVisualState = query.get('failNodeVisualState');
     // 本地夹具与正式内层协议同步声明全部受控动作；模拟页只回传结构化结果，
     // 不伪造任何场景节点、材质或路径资源，从而不会把夹具误当成九场景业务实现。
-    const commandCapabilities = ['init', 'resize', 'switchScene', 'enterProcessStep', 'resetScene', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'];
+    const commandCapabilities = ['init', 'resize', 'switchScene', 'enterProcessStep', 'moveCameraToPose', 'enterProcessDetail', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'];
     const eventCapabilities = ['ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'selectionCleared', 'disposed'];
     const message = document.querySelector('#message');
     let disposed = false;
@@ -162,6 +163,10 @@
         return isIdentifier(payload?.processId) && isIdentifier(payload?.stepId) &&
           (payload?.unitId === undefined || isIdentifier(payload.unitId)) && typeof payload?.isolate === 'boolean';
       }
+      // 命名镜头定位只能携带唯一稳定标识；夹具与正式协议同样拒绝坐标、旋转和额外字段。
+      if (type === 'moveCameraToPose') {
+        return Object.keys(payload ?? {}).length === 1 && isIdentifier(payload?.cameraPoseId);
+      }
       // 与正式 Unity 桥接一致：聚焦必须携带 selectionId（选择标识），本地夹具不接受旧载荷静默降级。
       if (type === 'focusNode') {
         return isIdentifier(payload?.sceneNodeId) && isIdentifier(payload?.selectionId) && typeof payload?.isolate === 'boolean';
@@ -172,6 +177,18 @@
         const hasValidSourceRevision = Number.isSafeInteger(payload?.sourceRevision) && payload.sourceRevision >= 0;
         return isIdentifier(payload?.sceneNodeId) && isVisualState(payload?.visualState) &&
           isStatusUpdatedAt(payload?.statusUpdatedAt) && hasValidSnapshotSequence && hasValidSourceRevision;
+      }
+      // 关键环节准备和兼容进入携带完整目录定位；提交、取消准备和退出只使用已准备候选的稳定标识。
+      if (type === 'prepareProcessDetail' || type === 'enterProcessDetail') {
+        return isIdentifier(payload?.sceneId) && isIdentifier(payload?.processId) && isIdentifier(payload?.stepId) &&
+          isIdentifier(payload?.processDetailId) && isIdentifier(payload?.transitionId);
+      }
+      if (type === 'commitProcessDetail' || type === 'abortProcessDetail' || type === 'exitProcessDetail') {
+        return isIdentifier(payload?.sceneId) && isIdentifier(payload?.processDetailId) && isIdentifier(payload?.transitionId);
+      }
+      // 播放状态是独立受控命令，不从设备视觉状态或第三层事务阶段推导。
+      if (type === 'setProcessDetailPlayback') {
+        return isIdentifier(payload?.sceneId) && isIdentifier(payload?.processDetailId) && typeof payload?.playing === 'boolean';
       }
       // 清除动态状态必须携带与设置命令相同的受控三维节点标识和正整数本地快照序号。
       // 缺少该分支会让夹具错误宣称支持清除能力，却在完整快照设备消失时拒绝合法命令。
@@ -216,7 +233,7 @@
       } else if (data.type === 'resize') {
         message.textContent = `已同步尺寸：${data.payload?.width || 0} × ${data.payload?.height || 0}`;
         post('commandResult', { requestId: data.messageId, success: true, message: '尺寸已同步。' });
-      } else if (['enterProcessStep', 'resetScene', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility'].includes(data.type)) {
+      } else if (['enterProcessStep', 'moveCameraToPose', 'enterProcessDetail', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility'].includes(data.type)) {
         if (!isValidActionPayload(data.type, data.payload)) {
           post('commandResult', { requestId: data.messageId, success: false, errorCode: 'action-payload-invalid', message: '动作载荷缺少合法稳定标识或固定状态。' });
           return;

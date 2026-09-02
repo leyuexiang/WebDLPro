@@ -8,7 +8,7 @@ import type { VisualizationCoordinatorSnapshot } from '@/modules/visual/orchestr
  */
 type VisualizationTransitionOverlaySource = Pick<
   VisualizationCoordinatorSnapshot,
-  'activeTransitionId' | 'targetSceneId' | 'targetTopologyId' | 'runtimeStatus'
+  'activeTransitionId' | 'targetSceneId' | 'targetTopologyId' | 'targetProcessDetailId' | 'runtimeStatus'
 >
 
 /** 壳层渲染所需的脱敏遮罩模型；不携带进度或业务目标，避免把伪实时反馈展示给用户。 */
@@ -31,8 +31,8 @@ export function getVisualizationTransitionOverlayState(
   const hasActiveTarget = source.activeTransitionId !== null
     && source.targetSceneId !== null
     && (isOverviewSceneId(source.targetSceneId)
-      ? source.targetTopologyId === null
-      : source.targetTopologyId !== null)
+      ? source.targetTopologyId === null && !source.targetProcessDetailId
+      : (source.targetTopologyId !== null) !== Boolean(source.targetProcessDetailId))
 
   if (!hasActiveTarget || !isTransitioningStatus(source.runtimeStatus)) {
     return { visible: false }

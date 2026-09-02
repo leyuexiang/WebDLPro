@@ -31,6 +31,16 @@ namespace WebDLPro.Unity.Tests
         private bool _bridgeLogSubscribed;
 
         /// <summary>
+        /// 测试运行期间关闭 Bootstrap 本地自动进入总览辅助器，确保各用例仍完全控制自己的场景事务。
+        /// 普通用户从 Bootstrap 点击播放时不设置该门禁，辅助器会按设计进入总览。
+        /// </summary>
+        [SetUp]
+        public void 抑制Bootstrap本地自动跳转()
+        {
+            BootstrapOverviewAutoEnterTest.SuppressForAutomatedTests = true;
+        }
+
+        /// <summary>
         /// 验证燃煤真实成功路径、失败恢复和单活动场景约束。
         /// 燃气和燃煤场景均由正式组合适配器初始化；空场景由占位控制器返回内容未交付，
         /// 失败结果必须保留原始请求标识、报告结构化失败并恢复到燃煤场景。
@@ -668,8 +678,11 @@ namespace WebDLPro.Unity.Tests
                 () => HasNotice("sceneChanged", "request.bridge.process-node-registration.scene", "transition.bridge.process-node-registration"),
                 "燃气场景未在流程节点登记验证前完成加载。");
 
+            // gas-turbine 已迁移为独立第三层关键环节，只能由 enterProcessDetail 进入，
+            // 不得再作为旧 enterProcessStep 流程步骤下发；其状态视觉、独立播放控制及返回链路
+            // 由本文件“燃气轮机第三层状态视觉与独立播放命令完全解耦”专项用例覆盖。
             // gas-network 尚无独立场景节点登记，必须明确拒绝，不能为满足测试而借用进气或总览节点。
-            string[] publishedStepIds = { "overview", "inlet-duct", "gas-turbine", "hrsg", "steam-turbine", "generator", "grid-output" };
+            string[] publishedStepIds = { "overview", "inlet-duct", "hrsg", "steam-turbine", "generator", "grid-output" };
             for (int stepIndex = 0; stepIndex < publishedStepIds.Length; stepIndex++)
             {
                 string stepId = publishedStepIds[stepIndex];
@@ -694,7 +707,7 @@ namespace WebDLPro.Unity.Tests
         /// <summary>
         /// 通过正式启动场景、统一桥接和燃煤真实控制器验证完整业务链。
         /// 用例只使用燃煤场景属性面板中显式登记的流程与三维节点标识，依次覆盖流程步骤、选择描边、
-        /// 选择清除、上下文半透明、三设备四态、复位和未交付路径能力，避免只验证“场景能加载”却遗漏核心交互。
+        /// 选择清除、上下文半透明、五个一对一设备节点的四态、复位和未交付路径能力，避免只验证“场景能加载”却遗漏核心交互。
         /// </summary>
         [UnityTest]
         public IEnumerator 燃煤真实场景通过桥接完成流程节点四态显隐与复位()
@@ -792,9 +805,16 @@ namespace WebDLPro.Unity.Tests
             Assert.That(HasBridgeLogFragmentForRequest(showRequestId, "\"success\":true"), Is.True);
             Assert.That(CountRuntimeContextMaterials(), Is.LessThan(materialCountAfterFade), "燃煤锅炉恢复显示后未释放该节点的运行时上下文材质。");
 
-            // 三个已登记设备分别应用固定四态，再以更大的本地快照序号清除，验证映射和撤销路径均可用。
-            string[] visualNodeIds = { "node.coal-boiler", "node.coal-steam-turbine", "node.coal-generator" };
-            string[] visualStates = { "alarm", "fault", "offline" };
+            // 五个一图元一模型节点分别应用固定四态，再以更大的本地快照序号清除，验证映射和撤销路径均可用。
+            string[] visualNodeIds =
+            {
+                "node.coal-feeder",
+                "node.coal-boiler",
+                "node.coal-steam-turbine",
+                "node.coal-generator",
+                "node.coal-precipitator"
+            };
+            string[] visualStates = { "alarm", "fault", "offline", "alarm", "fault" };
             for (int nodeIndex = 0; nodeIndex < visualNodeIds.Length; nodeIndex++)
             {
                 string nodeId = visualNodeIds[nodeIndex];
@@ -841,12 +861,264 @@ namespace WebDLPro.Unity.Tests
         }
 
         /// <summary>
+        /// 使用正式 Bootstrap、燃气场景和第二版桥接命令验证第三层完整运行链路。
+        /// 故障状态先于模型加载写入缓存，但只影响视觉；独立播放命令负责停止和恢复旋转、粒子与气流，
+        /// 退出仍恢复二层业务根节点和进入前镜头并销毁独立实例。
+        /// </summary>
+        [UnityTest]
+        public IEnumerator 燃气轮机第三层状态视觉与独立播放命令完全解耦()
+        {
+            yield return LoadBootstrap();
+            yield return LoadGasPower("transition.playmode.process-detail.gas");
+            _bridgeManager = FindBridgeManager();
+            Assert.That(_bridgeManager, Is.Not.Null, "Bootstrap 未创建常驻 Unity 桥接管理器。");
+            SubscribeBridgeOutboundLogs();
+
+            Scene gasScene = SceneManager.GetSceneByPath(GasPowerScenePath);
+            Assert.That(gasScene.IsValid() && gasScene.isLoaded, Is.True);
+            GameObject[] gasRoots = gasScene.GetRootGameObjects();
+            GameObject businessRoot = System.Array.Find(gasRoots, root => root.name == "场景");
+            GameObject cameraRoot = System.Array.Find(gasRoots, root => root.name == "Main Camera");
+            Assert.That(businessRoot, Is.Not.Null);
+            Assert.That(cameraRoot, Is.Not.Null);
+            Vector3 returnCameraPosition = cameraRoot.transform.position;
+            Quaternion returnCameraRotation = cameraRoot.transform.rotation;
+
+            const string faultRequestId = "request.bridge.process-detail.prefault";
+            InvokeBridgeMethod(
+                "ReceiveFromParent",
+                CreateBridgeCommandMessage(
+                    "setNodeVisualState",
+                    "{\"sceneNodeId\":\"gas-turbine\",\"visualState\":\"fault\",\"snapshotSequence\":1,\"statusUpdatedAt\":\"2026-08-30T10:00:00.000Z\",\"sourceRevision\":1}",
+                    faultRequestId));
+            yield return WaitForCompletion(
+                () => HasNotice("commandResult", faultRequestId, string.Empty),
+                "燃气轮机预置故障状态未返回命令结果。");
+            Assert.That(HasBridgeLogFragmentForRequest(faultRequestId, "\"success\":true"), Is.True);
+
+            const string prepareRequestId = "request.bridge.process-detail.prepare";
+            const string enterTransitionId = "transition.bridge.process-detail.enter";
+            InvokeBridgeMethod(
+                "ReceiveFromParent",
+                CreateBridgeCommandMessage(
+                    "prepareProcessDetail",
+                    "{\"sceneId\":\"gas-power\",\"processId\":\"gas-power-generation\",\"stepId\":\"gas-turbine\",\"processDetailId\":\"process-detail.gas-power.gas-turbine\",\"transitionId\":\"transition.bridge.process-detail.enter\"}",
+                    prepareRequestId));
+            yield return WaitForCompletion(
+                () => HasNotice("commandResult", prepareRequestId, enterTransitionId),
+                "燃气轮机第三层准备未在时限内完成。");
+            Assert.That(HasBridgeLogFragmentForRequest(prepareRequestId, "\"success\":true"), Is.True);
+
+            ProcessDetailDeviceBinding binding = FindProcessDetailBinding(gasScene);
+            Assert.That(binding, Is.Not.Null, "准备成功后缺少隐藏的燃气轮机候选实例。");
+            Assert.That(binding.gameObject.activeInHierarchy, Is.False, "准备阶段不得提前显示关键环节模型。");
+            Assert.That(businessRoot.activeSelf, Is.True, "准备阶段必须保持二层业务资源活动。");
+            Assert.That(Vector3.Distance(cameraRoot.transform.position, returnCameraPosition), Is.LessThan(0.01f));
+            Assert.That(Quaternion.Angle(cameraRoot.transform.rotation, returnCameraRotation), Is.LessThan(0.05f));
+
+            // 布局准备失败时网页可取消候选；取消不得移动相机、阻断二层交互或影响稳定视图。
+            const string abortRequestId = "request.bridge.process-detail.abort";
+            InvokeBridgeMethod(
+                "ReceiveFromParent",
+                CreateBridgeCommandMessage(
+                    "abortProcessDetail",
+                    "{\"sceneId\":\"gas-power\",\"processDetailId\":\"process-detail.gas-power.gas-turbine\",\"transitionId\":\"transition.bridge.process-detail.enter\"}",
+                    abortRequestId));
+            yield return WaitForCompletion(
+                () => HasNotice("commandResult", abortRequestId, enterTransitionId),
+                "关键环节取消准备未返回命令结果。");
+            Assert.That(HasBridgeLogFragmentForRequest(abortRequestId, "\"success\":true"), Is.True);
+            yield return WaitForCompletion(
+                () => FindProcessDetailBinding(gasScene) == null,
+                "取消准备后候选实例未释放。");
+            Assert.That(Vector3.Distance(cameraRoot.transform.position, returnCameraPosition), Is.LessThan(0.01f));
+
+            const string retryPrepareRequestId = "request.bridge.process-detail.prepare.retry";
+            InvokeBridgeMethod(
+                "ReceiveFromParent",
+                CreateBridgeCommandMessage(
+                    "prepareProcessDetail",
+                    "{\"sceneId\":\"gas-power\",\"processId\":\"gas-power-generation\",\"stepId\":\"gas-turbine\",\"processDetailId\":\"process-detail.gas-power.gas-turbine\",\"transitionId\":\"transition.bridge.process-detail.enter\"}",
+                    retryPrepareRequestId));
+            yield return WaitForCompletion(
+                () => HasNotice("commandResult", retryPrepareRequestId, enterTransitionId),
+                "取消后的关键环节重新准备未完成。");
+            binding = FindProcessDetailBinding(gasScene);
+            Assert.That(binding, Is.Not.Null);
+            Assert.That(binding.gameObject.activeInHierarchy, Is.False);
+
+            const string commitRequestId = "request.bridge.process-detail.commit";
+            InvokeBridgeMethod(
+                "ReceiveFromParent",
+                CreateBridgeCommandMessage(
+                    "commitProcessDetail",
+                    "{\"sceneId\":\"gas-power\",\"processDetailId\":\"process-detail.gas-power.gas-turbine\",\"transitionId\":\"transition.bridge.process-detail.enter\"}",
+                    commitRequestId));
+            yield return WaitForCompletion(
+                () => HasNotice("commandResult", commitRequestId, enterTransitionId),
+                "燃气轮机第三层提交未返回命令结果。");
+            Assert.That(HasBridgeLogFragmentForRequest(commitRequestId, "\"success\":true"), Is.True);
+            Assert.That(binding.gameObject.activeInHierarchy, Is.True);
+            Assert.That(businessRoot.activeSelf, Is.True, "第三层活动期间二层业务资源必须保持活动。");
+            MonoBehaviour processController = FindBehaviourInScene(gasScene, "PowerPlantProcessController");
+            Assert.That(processController, Is.Not.Null);
+            Assert.That(processController.enabled, Is.True, "第三层不得停用二层控制器及其状态更新。");
+            PropertyInfo interactionsBlockedProperty = processController.GetType().GetProperty("InteractionsBlocked");
+            Assert.That(interactionsBlockedProperty, Is.Not.Null);
+            Assert.That(interactionsBlockedProperty.GetValue(processController), Is.EqualTo(true), "第三层提交后必须只阻断二层本地点击交互。");
+            AssertProcessDetailPlaybackAllowed(binding.gameObject, true);
+
+            // 同场景直接切换通过第二个准备事务替换活动实例，不返回二层、不恢复业务相机。
+            ProcessDetailDeviceBinding previousBinding = binding;
+            const string switchTransitionId = "transition.bridge.process-detail.direct-switch";
+            const string switchPrepareRequestId = "request.bridge.process-detail.direct-switch.prepare";
+            InvokeBridgeMethod(
+                "ReceiveFromParent",
+                CreateBridgeCommandMessage(
+                    "prepareProcessDetail",
+                    "{\"sceneId\":\"gas-power\",\"processId\":\"gas-power-generation\",\"stepId\":\"gas-turbine\",\"processDetailId\":\"process-detail.gas-power.gas-turbine\",\"transitionId\":\"transition.bridge.process-detail.direct-switch\"}",
+                    switchPrepareRequestId));
+            yield return WaitForCompletion(
+                () => HasNotice("commandResult", switchPrepareRequestId, switchTransitionId),
+                "同场景关键环节切换准备未完成。");
+            Assert.That(previousBinding.gameObject.activeInHierarchy, Is.True, "新候选准备期间旧活动环节必须继续显示。");
+
+            const string switchCommitRequestId = "request.bridge.process-detail.direct-switch.commit";
+            InvokeBridgeMethod(
+                "ReceiveFromParent",
+                CreateBridgeCommandMessage(
+                    "commitProcessDetail",
+                    "{\"sceneId\":\"gas-power\",\"processDetailId\":\"process-detail.gas-power.gas-turbine\",\"transitionId\":\"transition.bridge.process-detail.direct-switch\"}",
+                    switchCommitRequestId));
+            yield return WaitForCompletion(
+                () => HasNotice("commandResult", switchCommitRequestId, switchTransitionId),
+                "同场景关键环节直接提交未完成。");
+            yield return null;
+            binding = FindProcessDetailBinding(gasScene);
+            Assert.That(binding, Is.Not.Null);
+            Assert.That(binding, Is.Not.SameAs(previousBinding), "直接切换必须提交新候选并释放旧实例。");
+            Assert.That(binding.gameObject.activeInHierarchy, Is.True);
+            Assert.That(businessRoot.activeSelf, Is.True);
+
+            const string stopRequestId = "request.bridge.process-detail.stop";
+            InvokeBridgeMethod(
+                "ReceiveFromParent",
+                CreateBridgeCommandMessage(
+                    "setProcessDetailPlayback",
+                    "{\"sceneId\":\"gas-power\",\"processDetailId\":\"process-detail.gas-power.gas-turbine\",\"playing\":false}",
+                    stopRequestId));
+            yield return WaitForCompletion(
+                () => HasNotice("commandResult", stopRequestId, string.Empty),
+                "燃气轮机独立停止命令未返回结果。");
+            Assert.That(HasBridgeLogFragmentForRequest(stopRequestId, "\"success\":true"), Is.True);
+            AssertProcessDetailPlaybackAllowed(binding.gameObject, false);
+            ParticleSystem[] particles = binding.GetComponentsInChildren<ParticleSystem>(true);
+            for (int particleIndex = 0; particleIndex < particles.Length; particleIndex++)
+            {
+                Assert.That(particles[particleIndex].isPlaying, Is.False, $"独立停止后粒子仍在播放：{particles[particleIndex].name}");
+                Assert.That(particles[particleIndex].particleCount, Is.EqualTo(0), $"独立停止后粒子未清空：{particles[particleIndex].name}");
+            }
+
+            yield return WaitForCompletion(
+                () => Vector3.Distance(cameraRoot.transform.position, binding.CameraPose.position) < 0.01f &&
+                      Quaternion.Angle(cameraRoot.transform.rotation, binding.CameraPose.rotation) < 0.05f,
+                "第三层相机未移动到显式观察位。");
+
+            // 第三层期间必须由 Unity 侧再做一次硬隔离，不能仅依赖网页遮罩：即使旧命令迟到、
+            // 被重放或直接从桥接注入，也不得触发二层的流程过滤、聚焦描边、选择清除、显隐或复位。
+            // 这些命令被拒绝后，独立模型、当前播放许可和显式相机位都必须保持不变。
+            string[] blockedCommandTypes =
+            {
+                "enterProcessStep",
+                "focusNode",
+                "clearSelection",
+                "setNodeVisibility",
+                "resetScene"
+            };
+            string[] blockedPayloads =
+            {
+                "{\"processId\":\"gas-power-generation\",\"stepId\":\"inlet-duct\",\"unitId\":\"1\",\"isolate\":true}",
+                "{\"sceneNodeId\":\"gas-turbine\",\"isolate\":true,\"selectionId\":\"selection.process-detail.blocked\"}",
+                "{}",
+                "{\"sceneNodeId\":\"gas-turbine\",\"enabled\":false}",
+                "{}"
+            };
+            for (int commandIndex = 0; commandIndex < blockedCommandTypes.Length; commandIndex++)
+            {
+                string commandType = blockedCommandTypes[commandIndex];
+                string requestId = $"request.bridge.process-detail.blocked.{commandType}";
+                InvokeBridgeMethod(
+                    "ReceiveFromParent",
+                    CreateBridgeCommandMessage(commandType, blockedPayloads[commandIndex], requestId));
+                yield return WaitForCompletion(
+                    () => HasNotice("commandResult", requestId, string.Empty),
+                    $"第三层旧命令 {commandType} 未返回结构化拒绝结果。");
+                Assert.That(
+                    HasBridgeLogFragmentForRequest(requestId, "\"errorCode\":\"process-detail-interaction-blocked\""),
+                    Is.True,
+                    $"第三层旧命令 {commandType} 未被隔离门拒绝。");
+            }
+            Assert.That(binding.gameObject.activeInHierarchy, Is.True, "旧二层命令不得卸载或隐藏第三层独立模型。");
+            Assert.That(
+                Vector3.Distance(cameraRoot.transform.position, binding.CameraPose.position) < 0.01f &&
+                Quaternion.Angle(cameraRoot.transform.rotation, binding.CameraPose.rotation) < 0.05f,
+                Is.True,
+                "旧二层命令被拒绝后不得改写第三层显式相机位。");
+
+            const string normalRequestId = "request.bridge.process-detail.normal";
+            InvokeBridgeMethod(
+                "ReceiveFromParent",
+                CreateBridgeCommandMessage(
+                    "setNodeVisualState",
+                    "{\"sceneNodeId\":\"gas-turbine\",\"visualState\":\"normal\",\"snapshotSequence\":2,\"statusUpdatedAt\":\"2026-08-30T10:00:01.000Z\",\"sourceRevision\":2}",
+                    normalRequestId));
+            yield return WaitForCompletion(
+                () => HasNotice("commandResult", normalRequestId, string.Empty),
+                "燃气轮机故障解除未返回命令结果。");
+            Assert.That(HasBridgeLogFragmentForRequest(normalRequestId, "\"success\":true"), Is.True);
+            AssertProcessDetailPlaybackAllowed(binding.gameObject, false);
+
+            const string playRequestId = "request.bridge.process-detail.play";
+            InvokeBridgeMethod(
+                "ReceiveFromParent",
+                CreateBridgeCommandMessage(
+                    "setProcessDetailPlayback",
+                    "{\"sceneId\":\"gas-power\",\"processDetailId\":\"process-detail.gas-power.gas-turbine\",\"playing\":true}",
+                    playRequestId));
+            yield return WaitForCompletion(
+                () => HasNotice("commandResult", playRequestId, string.Empty),
+                "燃气轮机独立播放命令未返回结果。");
+            Assert.That(HasBridgeLogFragmentForRequest(playRequestId, "\"success\":true"), Is.True);
+            AssertProcessDetailPlaybackAllowed(binding.gameObject, true);
+
+            const string exitRequestId = "request.bridge.process-detail.exit";
+            InvokeBridgeMethod(
+                "ReceiveFromParent",
+                CreateBridgeCommandMessage(
+                    "exitProcessDetail",
+                    "{\"sceneId\":\"gas-power\",\"processDetailId\":\"process-detail.gas-power.gas-turbine\",\"transitionId\":\"transition.bridge.process-detail.exit\"}",
+                    exitRequestId));
+            yield return WaitForCompletion(
+                () => HasNotice("commandResult", exitRequestId, "transition.bridge.process-detail.exit"),
+                "燃气轮机第三层退出未返回命令结果。");
+            Assert.That(HasBridgeLogFragmentForRequest(exitRequestId, "\"success\":true"), Is.True);
+            yield return WaitForCompletion(
+                () => FindProcessDetailBinding(gasScene) == null &&
+                      Vector3.Distance(cameraRoot.transform.position, returnCameraPosition) < 0.01f &&
+                      Quaternion.Angle(cameraRoot.transform.rotation, returnCameraRotation) < 0.05f,
+                "退出后未销毁第三层实例或恢复进入前业务镜头。");
+            Assert.That(businessRoot.activeSelf, Is.True, "退出后燃气二层业务资源必须继续保持活动。");
+            Assert.That(interactionsBlockedProperty.GetValue(processController), Is.EqualTo(false), "退出后必须恢复二层本地点击交互。");
+        }
+
+        /// <summary>
         /// 每个播放模式用例结束后都显式释放常驻根对象和附加业务场景。
         /// 卸载按场景路径逐项执行且限制为当前任务创建的九个目录路径，避免误动测试框架或用户场景。
         /// </summary>
         [UnityTearDown]
         public IEnumerator 释放常驻协调器和测试加载的业务场景()
         {
+            BootstrapOverviewAutoEnterTest.SuppressForAutomatedTests = false;
             if (_coordinator != null)
             {
                 _coordinator.DisposeRuntime();
@@ -1044,6 +1316,81 @@ namespace WebDLPro.Unity.Tests
             _coordinator = Object.FindFirstObjectByType<MultiSceneCoordinator>();
             Assert.That(_coordinator, Is.Not.Null, "Bootstrap 未创建多场景协调器。");
             Assert.That(_coordinator.State, Is.Not.EqualTo(MultiSceneCoordinatorState.Failed));
+        }
+
+        /// <summary>在指定场景内按精确类型名查找默认程序集组件，避免测试程序集建立反向编译依赖。</summary>
+        private static MonoBehaviour FindBehaviourInScene(Scene scene, string typeName)
+        {
+            if (!scene.IsValid() || !scene.isLoaded)
+            {
+                return null;
+            }
+            GameObject[] roots = scene.GetRootGameObjects();
+            for (int rootIndex = 0; rootIndex < roots.Length; rootIndex++)
+            {
+                MonoBehaviour[] behaviours = roots[rootIndex].GetComponentsInChildren<MonoBehaviour>(true);
+                for (int behaviourIndex = 0; behaviourIndex < behaviours.Length; behaviourIndex++)
+                {
+                    MonoBehaviour behaviour = behaviours[behaviourIndex];
+                    if (behaviour != null && behaviour.GetType().Name == typeName)
+                    {
+                        return behaviour;
+                    }
+                }
+            }
+            return null;
+        }
+
+        /// <summary>在指定已加载场景内查找唯一的第三层包装绑定器，不使用全局名称查询。</summary>
+        private static ProcessDetailDeviceBinding FindProcessDetailBinding(Scene scene)
+        {
+            if (!scene.IsValid() || !scene.isLoaded)
+            {
+                return null;
+            }
+
+            GameObject[] roots = scene.GetRootGameObjects();
+            for (int rootIndex = 0; rootIndex < roots.Length; rootIndex++)
+            {
+                ProcessDetailDeviceBinding binding = roots[rootIndex].GetComponentInChildren<ProcessDetailDeviceBinding>(true);
+                if (binding != null)
+                {
+                    return binding;
+                }
+            }
+            return null;
+        }
+
+        /// <summary>读取三个具体控制器的受控播放许可，确保适配器同时覆盖旋转、粒子和气流体积。</summary>
+        private static void AssertProcessDetailPlaybackAllowed(GameObject detailRoot, bool expected)
+        {
+            string[] controllerTypeNames =
+            {
+                "WaiKeHeBingAnimationController",
+                "WaiKeHeBingGasFlowEffectController",
+                "WaiKeHeBingGasVolumeController"
+            };
+            MonoBehaviour[] behaviours = detailRoot.GetComponentsInChildren<MonoBehaviour>(true);
+            for (int typeIndex = 0; typeIndex < controllerTypeNames.Length; typeIndex++)
+            {
+                MonoBehaviour resolved = null;
+                for (int behaviourIndex = 0; behaviourIndex < behaviours.Length; behaviourIndex++)
+                {
+                    MonoBehaviour behaviour = behaviours[behaviourIndex];
+                    if (behaviour != null && behaviour.GetType().Name == controllerTypeNames[typeIndex])
+                    {
+                        resolved = behaviour;
+                        break;
+                    }
+                }
+
+                Assert.That(resolved, Is.Not.Null, $"第三层实例缺少动态控制器：{controllerTypeNames[typeIndex]}");
+                FieldInfo playbackAllowed = resolved.GetType().GetField(
+                    "_playbackAllowed",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.That(playbackAllowed, Is.Not.Null, $"动态控制器缺少播放许可字段：{controllerTypeNames[typeIndex]}");
+                Assert.That(playbackAllowed.GetValue(resolved), Is.EqualTo(expected));
+            }
         }
 
         /// <summary>默认程序集中的桥接器按精确类型名查找；测试只获得 MonoBehaviour 引用，不跨程序集编译依赖业务实现。</summary>
@@ -1254,19 +1601,19 @@ namespace WebDLPro.Unity.Tests
         private static string CreateSceneSwitchMessage(string sceneId, string transitionId, string requestId, bool forceReload = false)
         {
             string forceReloadJson = forceReload ? "true" : "false";
-            return $"{{\"channel\":\"power3d-unity\",\"version\":1,\"instanceId\":\"local-demo-001\",\"messageId\":\"{requestId}\",\"type\":\"switchScene\",\"payload\":{{\"sceneId\":\"{sceneId}\",\"transitionId\":\"{transitionId}\",\"sceneMappingVersion\":\"unpublished\",\"forceReload\":{forceReloadJson}}},\"timestamp\":1}}";
+            return $"{{\"channel\":\"power3d-unity\",\"version\":{WebGlProtocolContract.ProtocolVersion},\"instanceId\":\"local-demo-001\",\"messageId\":\"{requestId}\",\"type\":\"switchScene\",\"payload\":{{\"sceneId\":\"{sceneId}\",\"transitionId\":\"{transitionId}\",\"sceneMappingVersion\":\"unpublished\",\"forceReload\":{forceReloadJson}}},\"timestamp\":1}}";
         }
 
         /// <summary>构造幂等释放命令；重复释放仍应得到 disposed 回执，但不能重新订阅或恢复场景回调。</summary>
         private static string CreateDisposeMessage(string requestId)
         {
-            return $"{{\"channel\":\"power3d-unity\",\"version\":1,\"instanceId\":\"local-demo-001\",\"messageId\":\"{requestId}\",\"type\":\"dispose\",\"payload\":{{}},\"timestamp\":1}}";
+            return $"{{\"channel\":\"power3d-unity\",\"version\":{WebGlProtocolContract.ProtocolVersion},\"instanceId\":\"local-demo-001\",\"messageId\":\"{requestId}\",\"type\":\"dispose\",\"payload\":{{}},\"timestamp\":1}}";
         }
 
         /// <summary>构造当前桥接白名单内的最小动作命令；测试负载为固定 JSON，不接受或拼接外部输入。</summary>
         private static string CreateBridgeCommandMessage(string commandType, string payloadJson, string requestId)
         {
-            return $"{{\"channel\":\"power3d-unity\",\"version\":1,\"instanceId\":\"local-demo-001\",\"messageId\":\"{requestId}\",\"type\":\"{commandType}\",\"payload\":{payloadJson},\"timestamp\":1}}";
+            return $"{{\"channel\":\"power3d-unity\",\"version\":{WebGlProtocolContract.ProtocolVersion},\"instanceId\":\"local-demo-001\",\"messageId\":\"{requestId}\",\"type\":\"{commandType}\",\"payload\":{payloadJson},\"timestamp\":1}}";
         }
 
         /// <summary>终态只允许场景成功事件或结构化命令结果，进度与 ack 不能提前结束切换等待。</summary>

@@ -7,9 +7,9 @@ import { HOST_EVENT_TYPES, type HostCommandMessage, type HostCommandType, type H
 import type { HostBridge } from '@/host-bridge/host-bridge'
 import type { VisualizationCoordinatorFacade } from '@/modules/visual/orchestration/visualization-coordinator-facade'
 import type { TopologyNodeDoubleClickIntent } from '@/modules/visual/topology/topology-node-interaction'
-import type { SceneObjectSelectionIntent } from '@/modules/visual/orchestration/unity-object-selection-coordinator'
+import type { OverviewBuildingSelectionIntent, SceneObjectSelectionIntent } from '@/modules/visual/orchestration/unity-object-selection-coordinator'
 import type { SceneActivationId } from '@/config/scene-topology/identifiers'
-import { isBusinessVisualizationStableContext } from '@/modules/visual/orchestration/visualization.store'
+import { isBusinessVisualizationStableContext, isProcessDetailVisualizationStableContext } from '@/modules/visual/orchestration/visualization.store'
 import type { BusinessViewOpenPayload, OverviewViewOpenPayload, ViewOpenPayload } from '@/host-bridge/host-protocol'
 
 /**
@@ -28,6 +28,16 @@ export interface HostViewOpenPort {
 /** 同场景流程动作端口与打开视图端口独立声明，未安装时不会向父页面暴露 `workflow.trigger` 能力。 */
 export interface HostWorkflowTriggerPort {
   submit(command: Extract<HostDispatchableDomainCommand, { type: 'workflow.trigger' }>): Promise<HostCommandExecutionResult>
+  /**
+   * 流程触发同样可能等待独立资源加载，外层超时时必须撤销其事务提交权。
+   * 该接口保持可选，兼容尚未实现第三层的旧流程路由；正式关键环节路由会转发到专用处理器。
+   */
+  cancelTimedOutCommand?(correlationId: string): void
+}
+
+/** 播放端口只接收已校验的开关意图；当前活动场景和关键环节由处理器从稳定上下文锁定。 */
+export interface HostProcessDetailPlaybackPort {
+  submit(command: Extract<HostDispatchableDomainCommand, { type: 'process-detail.playback' }>): Promise<HostCommandExecutionResult>
 }
 
 /** 设备状态端口只接收协议已验证的批量意图；实际二维、三维与诊断处理属于任务-038协调器。 */
@@ -37,6 +47,14 @@ export interface HostDeviceStatesUpdatePort {
   resynchronizeLatestSnapshot?(sceneActivationId?: SceneActivationId): void
   /** 组合根释放时清空有限状态诊断，不保留外层关联标识。 */
   dispose(): void
+}
+
+/**
+ * 外层组合根在 Unity 完成前即可启动；该只读回调只负责等待唯一内层运行时准备结果。
+ * 默认立即成功以兼容已在构造前完成运行时准备的调用方和既有单元测试。
+ */
+export interface HostRuntimeCompositionOptions {
+  waitForInnerRuntimeReady?: () => Promise<boolean>
 }
 
 /**
@@ -84,12 +102,16 @@ export class HostRuntimeComposition implements HostCommandCoordinatorPort {
     private readonly workflowTrigger?: HostWorkflowTriggerPort,
     /** 批量状态协调器仅在唯一拓扑运行时与 Unity 状态端口均就绪时注入。 */
     private readonly deviceStatesUpdate?: HostDeviceStatesUpdatePort,
+    /** 关键环节播放控制复用已安装的第三层事务处理器，不创建第二个 Unity 通道。 */
+    private readonly processDetailPlayback?: HostProcessDetailPlaybackPort,
+    private readonly options: HostRuntimeCompositionOptions = {},
   ) {
     this.eventSender = new HostEventSender(bridge)
     this.dispatcher = new HostCommandDispatcher(facade, this, {
       commandCapabilities: [
         ...BASE_INSTALLED_COMMAND_CAPABILITIES,
         ...(workflowTrigger ? ['workflow.trigger' as const] : []),
+        ...(processDetailPlayback ? ['process-detail.playback' as const] : []),
         ...(deviceStatesUpdate ? ['device.states.update' as const] : []),
       ],
     })
@@ -188,6 +210,35 @@ export class HostRuntimeComposition implements HostCommandCoordinatorPort {
   }
 
   /**
+   * 总览建筑点击属于内部视图导航，不属于业务拓扑节点选择。
+   * 组合根复核当前仍是同一总览修订后，复用既有 view.open 原子事务；成功后才发布无 replyTo 的稳定视图变更。
+   */
+  public async openOverviewBuilding(selection: OverviewBuildingSelectionIntent): Promise<boolean> {
+    if (this.disposed || !this.handshake.isInitialized()) return false
+    const context = this.getReadyContext()
+    if (
+      !context ||
+      context.viewMode !== 'overview' ||
+      context.contextRevision !== selection.expectedContextRevision
+    ) return false
+
+    const result = await this.viewOpen.submit({
+      type: 'view.open',
+      correlationId: selection.correlationId,
+      payload: {
+        sceneId: selection.sceneId,
+        topologyId: selection.topologyId,
+        expectedContextRevision: selection.expectedContextRevision,
+      },
+    })
+    if (this.disposed || !result.success) return false
+
+    this.resynchronizeLatestBusinessSnapshot()
+    this.reportCommittedView(result.transitionId)
+    return true
+  }
+
+  /**
    * 仅由 HostCommandDispatcher 回调的领域命令端口。
    * 当前安装 `view.open`、可选流程动作与可选批量状态协调器；未声明的状态命令在分派器能力门禁前已被拒绝，此处仍保留防御性失败，
    * 防止未来组合错误绕过能力白名单。
@@ -195,6 +246,7 @@ export class HostRuntimeComposition implements HostCommandCoordinatorPort {
   public async submit(command: HostDispatchableDomainCommand): Promise<HostCommandExecutionResult> {
     if (command.type === 'view.open') return this.viewOpen.submit(command)
     if (command.type === 'workflow.trigger' && this.workflowTrigger) return this.workflowTrigger.submit(command)
+    if (command.type === 'process-detail.playback' && this.processDetailPlayback) return this.processDetailPlayback.submit(command)
     if (command.type === 'device.states.update' && this.deviceStatesUpdate) return this.deviceStatesUpdate.submit(command)
     return this.failure('protocol.capability.undeclared', 'validation', '当前发布版本未安装该外层业务命令能力。', true)
   }
@@ -237,6 +289,7 @@ export class HostRuntimeComposition implements HostCommandCoordinatorPort {
    */
   private cancelTimedOutDomainTransaction(command: HostCommandMessage): void {
     this.viewOpen.cancelTimedOutCommand?.(command.messageId)
+    if (command.type === 'workflow.trigger') this.workflowTrigger?.cancelTimedOutCommand?.(command.messageId)
   }
 
   /**
@@ -261,6 +314,30 @@ export class HostRuntimeComposition implements HostCommandCoordinatorPort {
 
   /** 将 system.init 的初始目标转换为与普通 view.open 完全相同的原子事务，避免产生第二套场景切换流程。 */
   private async initializeView(command: Extract<HostCommandMessage, { type: 'system.init' }>): Promise<HostInitializationResult> {
+    /*
+     * system.ready 只说明清单摘要、能力声明和外层消息通道已经可用，不再等待 Unity。
+     * 早到的唯一 system.init 在这里等待内层运行时，成功确认仍必须晚于真实场景与拓扑稳定提交。
+     */
+    const waitForInnerRuntimeReady = this.options.waitForInnerRuntimeReady ?? (async () => true)
+    let innerRuntimeReady = false
+    try {
+      innerRuntimeReady = await waitForInnerRuntimeReady()
+    } catch {
+      // 屏障接口不得向外层传播实现异常；统一投影为可恢复的运行时启动失败。
+      innerRuntimeReady = false
+    }
+    if (!innerRuntimeReady) {
+      return {
+        success: false,
+        error: this.createError(
+          'runtime.startup.timeout',
+          'handshake',
+          'Unity 三维运行时未能在120秒内完成准备，初始视图尚未提交。',
+          true,
+        ),
+      }
+    }
+
     const payload: ViewOpenPayload = 'topologyId' in command.payload
       ? {
           sceneId: command.payload.sceneId,
@@ -322,6 +399,7 @@ export class HostRuntimeComposition implements HostCommandCoordinatorPort {
 
     if (isBusinessVisualizationStableContext(stableContext)) {
       return {
+        viewMode: 'business',
         sceneId: stableContext.sceneId,
         topologyId: stableContext.topologyId,
         actionId: stableContext.actionId,
@@ -329,7 +407,18 @@ export class HostRuntimeComposition implements HostCommandCoordinatorPort {
         status: 'ready',
       }
     }
+    if (isProcessDetailVisualizationStableContext(stableContext)) {
+      return {
+        viewMode: 'process-detail',
+        sceneId: stableContext.sceneId,
+        processDetailId: stableContext.processDetailId,
+        actionId: stableContext.actionId,
+        contextRevision: stableContext.contextRevision,
+        status: 'ready',
+      }
+    }
     return {
+      viewMode: 'overview',
       sceneId: stableContext.sceneId,
       actionId: null,
       contextRevision: stableContext.contextRevision,

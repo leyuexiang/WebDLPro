@@ -155,6 +155,7 @@ describe('外层内嵌框架协议', () => {
       ...createCommandEnvelope('state.snapshot', {
         manifestVersion: '2026.08.04.1',
         context: {
+          viewMode: 'business',
           sceneId: 'gas-power',
           topologyId: 'gas-power.overview',
           actionId: null,
@@ -204,6 +205,7 @@ describe('外层内嵌框架协议', () => {
 
   it('逐类型接受八类受控子应用事件', () => {
     const stableContext = {
+      viewMode: 'business',
       sceneId: 'gas-power',
       topologyId: 'gas-power.overview',
       actionId: null,
@@ -215,6 +217,7 @@ describe('外层内嵌框架协议', () => {
       ['system.ack', { success: true, context: stableContext }, 'parent-init-01'],
       ['command.result', { success: false, status: 'failed', error: undeclaredCapabilityError }, 'parent-command-01'],
       ['view.changed', {
+        viewMode: stableContext.viewMode,
         sceneId: stableContext.sceneId,
         topologyId: stableContext.topologyId,
         actionId: stableContext.actionId,
@@ -241,8 +244,9 @@ describe('外层内嵌框架协议', () => {
     })).status).toBe('invalid')
     expect(validateHostCommandMessage(createCommandEnvelope('view.open', { sceneId: 'gas-power' })).status).toBe('invalid')
 
-    const overviewContext = { sceneId: 'overview', actionId: null, contextRevision: 5, status: 'ready' }
+    const overviewContext = { viewMode: 'overview', sceneId: 'overview', actionId: null, contextRevision: 5, status: 'ready' } as const
     const changed = createEventEnvelope('view.changed', {
+      viewMode: 'overview',
       sceneId: 'overview',
       actionId: null,
       contextRevision: 5,
@@ -261,7 +265,7 @@ describe('外层内嵌框架协议', () => {
     const validEnvelope = createCommandEnvelope('state.get', {})
     const invalidEnvelopes = [
       { ...validEnvelope, channel: 'power3d-unity' },
-      { ...validEnvelope, version: 2 },
+      { ...validEnvelope, version: 1 },
       { ...validEnvelope, instanceId: 'Visual Shell' },
       { ...validEnvelope, sessionId: '' },
       { ...validEnvelope, messageId: 'message/with-path' },

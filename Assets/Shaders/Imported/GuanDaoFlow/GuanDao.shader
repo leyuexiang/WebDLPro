@@ -40,11 +40,19 @@ Shader "LYDS/GuanDao"
 				float cosineValue;
 				sincos(angle, sineValue, cosineValue);
 				float2 centeredUV = uv - 0.5;
-				return float2(
-					centeredUV.x * cosineValue - centeredUV.y * sineValue,
-					centeredUV.x * sineValue + centeredUV.y * cosineValue) + 0.5;
-			}
-			ENDHLSL
+					return float2(
+						centeredUV.x * cosineValue - centeredUV.y * sineValue,
+						centeredUV.x * sineValue + centeredUV.y * cosineValue) + 0.5;
+				}
+
+				// 合并自定义 MaskUV 与 Unity 材质面板的 Tiling(XY)、Offset(ZW)，然后沿用原有中心旋转逻辑。
+				// 统一入口保证前向、阴影、深度、烘焙和二维通道使用完全一致的 UV 计算。
+				float2 TransformPipeUV(float2 uv, float2 maskUV, float4 textureST, float rotationDegrees)
+				{
+					float2 transformedUV = uv * maskUV * textureST.xy + textureST.zw;
+					return RotatePipeUV(transformedUV, rotationDegrees);
+				}
+				ENDHLSL
 
 		
 		Pass
@@ -95,8 +103,10 @@ Shader "LYDS/GuanDao"
 			sampler2D _Texture;
 			sampler2D _Texture2;
 			CBUFFER_START( UnityPerMaterial )
-			float4 _Color;
-			float2 _Speed;
+				float4 _Color;
+				float4 _Texture_ST;
+				float4 _Texture2_ST;
+				float2 _Speed;
 			float2 _MaskUV;
 			float _ColorS;
 			float4 _Color2;
@@ -203,10 +213,10 @@ Shader "LYDS/GuanDao"
 
 				float3 temp_cast_0 = (0.2).xxx;
 				
-					float2 uv06 = RotatePipeUV(IN.ase_texcoord7.xy * _MaskUV, _UVRotation);
+					float2 uv06 = TransformPipeUV(IN.ase_texcoord7.xy, _MaskUV, _Texture_ST, _UVRotation);
 				float2 panner8 = ( _FlowSpeed * _Time.y * _Speed + uv06);
 				float4 tex2DNode1 = tex2D( _Texture, panner8 );
-					float2 uv015 = RotatePipeUV(IN.ase_texcoord7.xy * _MaskUV2, _UVRotation);
+					float2 uv015 = TransformPipeUV(IN.ase_texcoord7.xy, _MaskUV2, _Texture2_ST, _UVRotation);
 				float2 panner17 = ( _FlowSpeed * _Time.y * _Speed2 + uv015);
 				float4 tex2DNode13 = tex2D( _Texture2, panner17 );
 				float3 desaturateInitialColor22 = ( _Color2 * tex2DNode13.r * _Color2S ).rgb;
@@ -326,8 +336,10 @@ Shader "LYDS/GuanDao"
 			sampler2D _Texture2;
 			sampler2D _Texture;
 			CBUFFER_START( UnityPerMaterial )
-			float4 _Color;
-			float2 _Speed;
+				float4 _Color;
+				float4 _Texture_ST;
+				float4 _Texture2_ST;
+				float2 _Speed;
 			float2 _MaskUV;
 			float _ColorS;
 			float4 _Color2;
@@ -393,10 +405,10 @@ Shader "LYDS/GuanDao"
 			{
 				UNITY_SETUP_INSTANCE_ID( IN );
 
-					float2 uv015 = RotatePipeUV(IN.ase_texcoord7.xy * _MaskUV2, _UVRotation);
+					float2 uv015 = TransformPipeUV(IN.ase_texcoord7.xy, _MaskUV2, _Texture2_ST, _UVRotation);
 				float2 panner17 = ( _FlowSpeed * _Time.y * _Speed2 + uv015);
 				float4 tex2DNode13 = tex2D( _Texture2, panner17 );
-					float2 uv06 = RotatePipeUV(IN.ase_texcoord7.xy * _MaskUV, _UVRotation);
+					float2 uv06 = TransformPipeUV(IN.ase_texcoord7.xy, _MaskUV, _Texture_ST, _UVRotation);
 				float2 panner8 = ( _FlowSpeed * _Time.y * _Speed + uv06);
 				float4 tex2DNode1 = tex2D( _Texture, panner8 );
 				float smoothstepResult11 = smoothstep( 0.23 , 1.01 , tex2DNode1.r);
@@ -452,8 +464,10 @@ Shader "LYDS/GuanDao"
 			sampler2D _Texture2;
 			sampler2D _Texture;
 			CBUFFER_START( UnityPerMaterial )
-			float4 _Color;
-			float2 _Speed;
+				float4 _Color;
+				float4 _Texture_ST;
+				float4 _Texture2_ST;
+				float2 _Speed;
 			float2 _MaskUV;
 			float _ColorS;
 			float4 _Color2;
@@ -517,10 +531,10 @@ Shader "LYDS/GuanDao"
 				UNITY_SETUP_INSTANCE_ID(IN);
 				UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX( IN );
 
-					float2 uv015 = RotatePipeUV(IN.ase_texcoord.xy * _MaskUV2, _UVRotation);
+					float2 uv015 = TransformPipeUV(IN.ase_texcoord.xy, _MaskUV2, _Texture2_ST, _UVRotation);
 				float2 panner17 = ( _FlowSpeed * _Time.y * _Speed2 + uv015);
 				float4 tex2DNode13 = tex2D( _Texture2, panner17 );
-					float2 uv06 = RotatePipeUV(IN.ase_texcoord.xy * _MaskUV, _UVRotation);
+					float2 uv06 = TransformPipeUV(IN.ase_texcoord.xy, _MaskUV, _Texture_ST, _UVRotation);
 				float2 panner8 = ( _FlowSpeed * _Time.y * _Speed + uv06);
 				float4 tex2DNode1 = tex2D( _Texture, panner8 );
 				float smoothstepResult11 = smoothstep( 0.23 , 1.01 , tex2DNode1.r);
@@ -574,8 +588,10 @@ Shader "LYDS/GuanDao"
 			sampler2D _Texture;
 			sampler2D _Texture2;
 			CBUFFER_START( UnityPerMaterial )
-			float4 _Color;
-			float2 _Speed;
+				float4 _Color;
+				float4 _Texture_ST;
+				float4 _Texture2_ST;
+				float2 _Speed;
 			float2 _MaskUV;
 			float _ColorS;
 			float4 _Color2;
@@ -646,10 +662,10 @@ Shader "LYDS/GuanDao"
 
 				float3 temp_cast_0 = (0.2).xxx;
 				
-					float2 uv06 = RotatePipeUV(IN.ase_texcoord.xy * _MaskUV, _UVRotation);
+					float2 uv06 = TransformPipeUV(IN.ase_texcoord.xy, _MaskUV, _Texture_ST, _UVRotation);
 				float2 panner8 = ( _FlowSpeed * _Time.y * _Speed + uv06);
 				float4 tex2DNode1 = tex2D( _Texture, panner8 );
-					float2 uv015 = RotatePipeUV(IN.ase_texcoord.xy * _MaskUV2, _UVRotation);
+					float2 uv015 = TransformPipeUV(IN.ase_texcoord.xy, _MaskUV2, _Texture2_ST, _UVRotation);
 				float2 panner17 = ( _FlowSpeed * _Time.y * _Speed2 + uv015);
 				float4 tex2DNode13 = tex2D( _Texture2, panner17 );
 				float3 desaturateInitialColor22 = ( _Color2 * tex2DNode13.r * _Color2S ).rgb;
@@ -717,8 +733,10 @@ Shader "LYDS/GuanDao"
 			sampler2D _Texture2;
 			sampler2D _Texture;
 			CBUFFER_START( UnityPerMaterial )
-			float4 _Color;
-			float2 _Speed;
+				float4 _Color;
+				float4 _Texture_ST;
+				float4 _Texture2_ST;
+				float2 _Speed;
 			float2 _MaskUV;
 			float _ColorS;
 			float4 _Color2;
@@ -780,10 +798,10 @@ Shader "LYDS/GuanDao"
 			{
 				float3 temp_cast_0 = (0.2).xxx;
 				
-					float2 uv015 = RotatePipeUV(IN.ase_texcoord.xy * _MaskUV2, _UVRotation);
+					float2 uv015 = TransformPipeUV(IN.ase_texcoord.xy, _MaskUV2, _Texture2_ST, _UVRotation);
 				float2 panner17 = ( _FlowSpeed * _Time.y * _Speed2 + uv015);
 				float4 tex2DNode13 = tex2D( _Texture2, panner17 );
-					float2 uv06 = RotatePipeUV(IN.ase_texcoord.xy * _MaskUV, _UVRotation);
+					float2 uv06 = TransformPipeUV(IN.ase_texcoord.xy, _MaskUV, _Texture_ST, _UVRotation);
 				float2 panner8 = ( _FlowSpeed * _Time.y * _Speed + uv06);
 				float4 tex2DNode1 = tex2D( _Texture, panner8 );
 				float smoothstepResult11 = smoothstep( 0.23 , 1.01 , tex2DNode1.r);

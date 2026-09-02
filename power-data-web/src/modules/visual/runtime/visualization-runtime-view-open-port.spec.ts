@@ -1,5 +1,17 @@
 import { describe, expect, it, vi } from 'vitest'
-import { toActionId, toProcessId, toSceneActivationId, toSceneId, toSceneNodeId, toStepId, toTransitionId } from '@/config/scene-topology/identifiers'
+import {
+  toActionId,
+  toCameraPoseId,
+  toProcessDetailId,
+  toProcessDetailResourceId,
+  toProcessId,
+  toSceneActivationId,
+  toSceneId,
+  toSceneNodeId,
+  toStepId,
+  toTransitionId,
+} from '@/config/scene-topology/identifiers'
+import type { ProcessDetailDefinition } from '@/config/scene-topology/types'
 import { VisualizationRuntimeViewOpenPort } from '@/modules/visual/runtime/visualization-runtime-view-open-port'
 import type { VisualizationRuntimeHostController } from '@/modules/visual/runtime/visualization-runtime-host'
 
@@ -94,6 +106,55 @@ describe('view.open Unity 运行时端口', () => {
       sceneNodeId: toSceneNodeId('scene-node.gas-turbine'),
       selectionId: transitionId,
       isolate: false,
+    })
+  })
+
+  it('第三层准备、提交、取消和退出都携带同一事务标识', async () => {
+    const runtime = createRuntime()
+    const port = new VisualizationRuntimeViewOpenPort(runtime)
+    const transitionId = toTransitionId('transition.gas-turbine.detail.01')
+    const detail: ProcessDetailDefinition = {
+      sceneId: toSceneId('gas-power'),
+      processId: toProcessId('gas-power-generation'),
+      stepId: toStepId('gas-turbine'),
+      processDetailId: toProcessDetailId('process-detail.gas-power.gas-turbine'),
+      resourceId: toProcessDetailResourceId('process-detail-resource.gas-power.gas-turbine'),
+      cameraPoseId: toCameraPoseId('camera-pose.gas-power.gas-turbine'),
+      stateNodeId: toSceneNodeId('gas-turbine'),
+    }
+
+    await expect(port.prepareProcessDetail(detail, transitionId)).resolves.toEqual({ success: true })
+    await expect(port.commitProcessDetail(detail.sceneId, detail.processDetailId, transitionId)).resolves.toEqual({ success: true })
+    await expect(port.abortProcessDetail(detail.sceneId, detail.processDetailId, transitionId)).resolves.toEqual({ success: true })
+    await expect(port.setProcessDetailPlayback(detail.sceneId, detail.processDetailId, false)).resolves.toEqual({ success: true })
+    await expect(port.exitProcessDetail(detail.sceneId, detail.processDetailId, transitionId)).resolves.toEqual({ success: true })
+
+    expect(runtime.sendCommandAndWait).toHaveBeenNthCalledWith(1, 'prepareProcessDetail', {
+      sceneId: detail.sceneId,
+      processId: detail.processId,
+      stepId: detail.stepId,
+      processDetailId: detail.processDetailId,
+      transitionId,
+    })
+    expect(runtime.sendCommandAndWait).toHaveBeenNthCalledWith(2, 'commitProcessDetail', {
+      sceneId: detail.sceneId,
+      processDetailId: detail.processDetailId,
+      transitionId,
+    })
+    expect(runtime.sendCommandAndWait).toHaveBeenNthCalledWith(3, 'abortProcessDetail', {
+      sceneId: detail.sceneId,
+      processDetailId: detail.processDetailId,
+      transitionId,
+    })
+    expect(runtime.sendCommandAndWait).toHaveBeenNthCalledWith(4, 'setProcessDetailPlayback', {
+      sceneId: detail.sceneId,
+      processDetailId: detail.processDetailId,
+      playing: false,
+    })
+    expect(runtime.sendCommandAndWait).toHaveBeenNthCalledWith(5, 'exitProcessDetail', {
+      sceneId: detail.sceneId,
+      processDetailId: detail.processDetailId,
+      transitionId,
     })
   })
 })

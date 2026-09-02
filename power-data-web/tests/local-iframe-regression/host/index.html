@@ -57,7 +57,7 @@
       resourceDigest: 'sha256:local-mock-v1',
       // 与 Unity 桥接白名单一致；夹具仅验证协议和关联，不以这些能力推断真实场景资源存在。
       // clearSelection（清除选择）必须参与握手覆盖校验，避免模拟页遗漏能力却让回归继续执行。
-      commandCapabilities: ['init', 'resize', 'switchScene', 'enterProcessStep', 'resetScene', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
+      commandCapabilities: ['init', 'resize', 'switchScene', 'enterProcessStep', 'enterProcessDetail', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
       eventCapabilities: ['ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'selectionCleared', 'disposed']
     };
     const frameContainer = document.querySelector('#frame-container');

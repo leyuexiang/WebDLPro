@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using HighlightPlus;
+using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
@@ -12,7 +13,7 @@ using WebDLPro.Unity.SceneRuntime;
 /// 外部平台只传递流程、步骤、机组和路由标识；模型名称、显隐集合、材质与描边策略全部保留在 Unity 内。
 /// </summary>
 [DisallowMultipleComponent]
-public sealed class PowerPlantProcessController : MonoBehaviour
+public sealed class PowerPlantProcessController : MonoBehaviour, IBusinessSceneInteractionGate
 {
     private const string GasPowerGenerationProcessId = "gas-power-generation";
     private const string OverviewStepId = "overview";
@@ -26,6 +27,8 @@ public sealed class PowerPlantProcessController : MonoBehaviour
     private static readonly int VisualStateOpacityPropertyId = Shader.PropertyToID("_Opacity");
     // 左键拖拽与设备单击共用同一输入通道；超过该屏幕位移阈值后只视为相机平移，不再触发设备选择。
     private const float PointerSelectionDragThreshold = 6f;
+    // 自动生成的盒碰撞体各轴至少保留该尺寸，避免平面或线状渲染器产生零厚度而无法被射线命中。
+    private const float GeneratedSelectionColliderMinimumSize = 0.01f;
     // 填充与描边共用 0 到 1 的正弦脉冲曲线；故障使用相位差，让首次显示就处于高可见段。
     private const float PulseAngularFrequencyMultiplier = Mathf.PI * 2f;
     private const float FaultFillPulsePhaseOffset = Mathf.PI * 0.5f;
@@ -156,6 +159,8 @@ public sealed class PowerPlantProcessController : MonoBehaviour
     [SerializeField] private MonoBehaviour _priorityPointerConsumerBehaviour;
     [Tooltip("统一控制拓扑节点选中和 Unity 鼠标选中的镜头行为。关闭时仍保留青色描边与二维拓扑联动，但不移动相机。")]
     [SerializeField] private bool _focusOnSelection = true;
+    [Tooltip("是否在场景启动时立即应用历史总览上下文半透明。第二层业务场景应关闭，仅在收到明确流程或聚焦命令后再改变模型视觉。")]
+    [SerializeField] private bool _applyInitialOverviewContext = true;
     [SerializeField] private Material _contextFadeMaterial;
     [SerializeField, Range(0.05f, 0.95f)] private float _contextOpacity = 0.22f;
     [SerializeField] private GameObject[] _groundObjects = Array.Empty<GameObject>();
@@ -212,6 +217,8 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         GameObject gridOutput)
     {
         _configuredProcessId = GasPowerGenerationProcessId;
+        // 燃气业务场景属于第二层，启动时必须保留场景资产原始材质，不自动套用历史总览半透明。
+        _applyInitialOverviewContext = false;
         _sceneRoot = sceneRoot;
         _interactionCamera = interactionCamera;
         _contextFadeMaterial = contextFadeMaterial;
@@ -257,15 +264,14 @@ public sealed class PowerPlantProcessController : MonoBehaviour
     // 单独缓存这些对象的初始状态，使关键环节隐藏后仍能在总览或重置时准确恢复。
     private readonly Dictionary<GameObject, bool> _overviewOnlyInitialActiveStates =
         new Dictionary<GameObject, bool>();
-    // 三维节点目标由属性面板显式登记。带碰撞体的模型继续走物理射线；无碰撞体模型只在鼠标单击时
-    // 扫描此初始化缓存，避免为大模型运行时创建高成本 MeshCollider（网格碰撞体）或逐帧遍历层级。
+    // 三维节点目标由属性面板显式登记。运行时若目标层级完全没有 Collider（碰撞组件），
+    // 控制器会在目标根对象生成贴合全部子渲染器的 BoxCollider（盒碰撞体）；已有碰撞体始终保持原配置。
     private readonly Dictionary<GameObject, string> _selectionNodeByObject = new Dictionary<GameObject, string>();
-    private readonly List<SceneNodeRendererPickTarget> _selectionRendererTargets = new List<SceneNodeRendererPickTarget>();
-    // 当前流程步骤允许鼠标命中的渲染器缓存。进入关键环节时只保留 visibleNodeIds（可见节点标识）对应目标，
-    // 避免每次点击重新遍历全场景；总览时恢复全部显式登记节点。
-    private readonly List<SceneNodeRendererPickTarget> _activeSelectionRendererTargets =
-        new List<SceneNodeRendererPickTarget>();
+    // 已登记且至少包含一个有效目标的节点标识。流程切换只更新可选标识集合，不重新扫描模型层级。
+    private readonly HashSet<string> _configuredSelectionNodeIds = new HashSet<string>(StringComparer.Ordinal);
     private readonly HashSet<string> _selectableSceneNodeIds = new HashSet<string>(StringComparer.Ordinal);
+    // 只记录控制器运行时自动创建的盒碰撞体；场景原有的 MeshCollider（网格碰撞体）及其它碰撞体不进入此集合。
+    private readonly List<BoxCollider> _generatedSelectionBoxColliders = new List<BoxCollider>();
     private readonly Dictionary<Renderer, ActiveContextFadeMaterials> _activeContextFades = new Dictionary<Renderer, ActiveContextFadeMaterials>();
     // 广告牌文字使用 TextMeshProUGUI（文本组件），底层由 CanvasRenderer（画布渲染器）绘制，
     // 不属于 Renderer（模型渲染器）层级。这里缓存每个图形组件进入上下文透明前的颜色，
@@ -324,6 +330,7 @@ public sealed class PowerPlantProcessController : MonoBehaviour
     private PowerPlantFreeCameraController _freeCameraController;
     // 接口只在场景绑定缓存阶段解析一次；鼠标点击热路径不再执行 GetComponent 或类型扫描。
     private IBusinessScenePointerConsumer _priorityPointerConsumer;
+    private bool _interactionsBlocked;
     private BusinessSceneVisualStateRegistry _visualStateRegistry;
 
     private bool _runtimeResourcesReleased;
@@ -391,10 +398,26 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         InitializeVisualStateRegistry();
         EnsureHighlightEffects();
 
-        // 场景首次加载即按总览步骤应用视觉层级，避免模型在等待网页重复发送 overview 前全部保持不透明。
-        if (TryResolveStep(OverviewStepId, AllUnitsId, out List<string> overviewVisibleNodeIds, out _))
+        // 是否在启动时应用历史总览视觉由场景资产显式配置，避免运行时根据 sceneId 或模型名称推断层级职责。
+        // 第二层场景关闭该开关后保留资产原始材质；明确的流程、聚焦和重置命令仍沿用既有兼容逻辑。
+        if (_applyInitialOverviewContext &&
+            TryResolveStep(OverviewStepId, AllUnitsId, out List<string> overviewVisibleNodeIds, out _))
         {
             ShowAllSceneModels(overviewVisibleNodeIds);
+        }
+    }
+
+    public bool InteractionsBlocked => _interactionsBlocked;
+
+    /// <summary>
+    /// 第三层提交后只阻断本地三维点击，不停用控制器；设备四态、材质脉冲和描边脉冲仍持续更新。
+    /// </summary>
+    public void SetInteractionsBlocked(bool blocked)
+    {
+        _interactionsBlocked = blocked;
+        if (blocked)
+        {
+            _pointerWasDragged = false;
         }
     }
 
@@ -405,7 +428,10 @@ public sealed class PowerPlantProcessController : MonoBehaviour
             return;
         }
 
-        HandlePointerSelection();
+        if (!_interactionsBlocked)
+        {
+            HandlePointerSelection();
+        }
         UpdateVisualStateFillPulse();
         UpdateHighlightOutlinePulse();
     }
@@ -537,8 +563,18 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         _pipelineFlowObjectSet.Clear();
         _pipelineFlowMaterials.Clear();
         _selectionNodeByObject.Clear();
-        _activeSelectionRendererTargets.Clear();
+        _configuredSelectionNodeIds.Clear();
         _selectableSceneNodeIds.Clear();
+        // 自动碰撞体只服务当前控制器的运行时点击。释放场景时逐个销毁，绝不改动场景资产自带碰撞组件。
+        for (int colliderIndex = 0; colliderIndex < _generatedSelectionBoxColliders.Count; colliderIndex++)
+        {
+            BoxCollider generatedCollider = _generatedSelectionBoxColliders[colliderIndex];
+            if (generatedCollider != null)
+            {
+                Destroy(generatedCollider);
+            }
+        }
+        _generatedSelectionBoxColliders.Clear();
         _initialRootActiveStates.Clear();
         _overviewOnlyInitialActiveStates.Clear();
         _groundObjectSet.Clear();
@@ -688,9 +724,9 @@ public sealed class PowerPlantProcessController : MonoBehaviour
     }
 
     /// <summary>
-    /// 取消当前拓扑节点驱动的三维交互描边。
-    /// 该操作故意不清除告警描边、不改变显隐，也不修改当前流程上下文；
-    /// 它只撤销由 ApplyProcessHighlightForNode 产生的交互选择视觉效果。
+    /// 取消当前拓扑节点驱动的三维交互描边和聚焦上下文。
+    /// 聚焦时其他模型会被替换为上下文半透明材质，因此取消选择必须先恢复全部上下文材质，
+    /// 再清理选择对象和停止镜头补间，避免半透明运行时材质残留在渲染器上。
     /// </summary>
     public bool TryClearSelection(out string message)
     {
@@ -703,12 +739,14 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         ClearProcessHighlight();
         _activeInteractionNodeId = null;
         _selectionFocusObjects.Clear();
+        // 聚焦上下文由点击选择建立；取消选择后恢复进入聚焦前的全部材质基线。
+        RestoreAllContextFades();
         // 取消选择不会复位镜头；只停止尚未完成的自动补间，让当前画面停留在用户已看到的位置。
         if (_freeCameraController != null)
         {
             _freeCameraController.CancelFocus();
         }
-        message = "已清除三维交互选择描边。";
+        message = "已清除三维交互选择描边并恢复模型材质。";
         return true;
     }
 
@@ -1252,7 +1290,12 @@ public sealed class PowerPlantProcessController : MonoBehaviour
                 for (int rendererIndex = 0; rendererIndex < renderers.Length; rendererIndex++)
                 {
                     Renderer renderer = renderers[rendererIndex];
-                    if (renderer != null)
+                    /*
+                     * 燃气场景的设备根对象包含 TMP（文本网格专业版）标签。标签图集材质没有设备模型
+                     * 使用的基础颜色属性，既不能参与状态材质替换，也不应随设备告警闪烁；只排除明确
+                     * 挂载文本组件的渲染器，其他网格仍逐项进入下方严格的颜色属性与归属校验。
+                     */
+                    if (renderer != null && renderer.GetComponent<TMP_Text>() == null)
                     {
                         _visualStateRendererSet.Add(renderer);
                     }
@@ -1329,8 +1372,7 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         _unitIdsByAlias.Clear();
         _unitIdBindingsValid = true;
         _selectionNodeByObject.Clear();
-        _selectionRendererTargets.Clear();
-        _activeSelectionRendererTargets.Clear();
+        _configuredSelectionNodeIds.Clear();
         _selectableSceneNodeIds.Clear();
         _initialRootActiveStates.Clear();
         _groundObjectSet.Clear();
@@ -1401,10 +1443,6 @@ public sealed class PowerPlantProcessController : MonoBehaviour
 
         CachePipelineFlowMaterials();
 
-        // 同一渲染器若被两个业务节点重复配置，则该目标存在歧义，不能依数组顺序猜测归属。
-        // 字典仅在初始化阶段使用；值为缓存列表下标，冲突时把原项清空并永久标记为歧义。
-        Dictionary<Renderer, int> rendererTargetIndex = new Dictionary<Renderer, int>();
-        HashSet<Renderer> ambiguousSelectionRenderers = new HashSet<Renderer>();
         for (int nodeIndex = 0; nodeIndex < _nodes.Length; nodeIndex++)
         {
             SceneNodeBinding node = _nodes[nodeIndex];
@@ -1428,36 +1466,22 @@ public sealed class PowerPlantProcessController : MonoBehaviour
                     continue;
                 }
 
-                // 所有交互目标都登记到显式对象索引：已有碰撞体时可从命中子层级向上精确解析；
-                // 没有碰撞体时则由下方缓存的可见渲染器包围盒提供低成本后备命中。
+                // 目标到节点的映射只接受属性面板显式配置。射线命中子级碰撞体后会沿父级回溯到该根对象，
+                // 因此已有 MeshCollider（网格碰撞体）或其它碰撞体无需复制到目标根节点。
                 _selectionNodeByObject[target] = node.Id;
-                Renderer[] renderers = target.GetComponentsInChildren<Renderer>(true);
-                for (int rendererIndex = 0; rendererIndex < renderers.Length; rendererIndex++)
+                _configuredSelectionNodeIds.Add(node.Id);
+
+                // 编辑模式下配置工具也会调用本方法，必须只在运行时补碰撞体，避免污染场景和预制体资产。
+                // 只要目标层级已经存在任意 Collider（碰撞组件），就完全尊重其类型、形状、启用状态和触发器配置。
+                if (!Application.isPlaying || target.GetComponentInChildren<Collider>(true) != null)
                 {
-                    Renderer renderer = renderers[rendererIndex];
-                    if (renderer == null || ambiguousSelectionRenderers.Contains(renderer))
-                    {
-                        continue;
-                    }
-
-                    if (rendererTargetIndex.TryGetValue(renderer, out int existingIndex))
-                    {
-                        SceneNodeRendererPickTarget existingTarget = _selectionRendererTargets[existingIndex];
-                        if (string.Equals(existingTarget.SceneNodeId, node.Id, StringComparison.Ordinal))
-                        {
-                            continue;
-                        }
-
-                        // default（默认空项）会被命中工具直接跳过；保留下标可避免删除导致后续索引整体移动。
-                        _selectionRendererTargets[existingIndex] = default;
-                        rendererTargetIndex.Remove(renderer);
-                        ambiguousSelectionRenderers.Add(renderer);
-                        continue;
-                    }
-
-                    rendererTargetIndex.Add(renderer, _selectionRendererTargets.Count);
-                    _selectionRendererTargets.Add(new SceneNodeRendererPickTarget(node.Id, target, renderer));
+                    continue;
                 }
+
+                Renderer[] renderers = target.GetComponentsInChildren<Renderer>(true);
+                BoxCollider generatedCollider = target.AddComponent<BoxCollider>();
+                FitGeneratedSelectionBoxCollider(generatedCollider, target.transform, renderers);
+                _generatedSelectionBoxColliders.Add(generatedCollider);
             }
         }
 
@@ -1468,52 +1492,97 @@ public sealed class PowerPlantProcessController : MonoBehaviour
     }
 
     /// <summary>
-    /// 总览允许选择所有已由场景绑定登记的节点；列表引用初始化缓存，不重新扫描场景层级。
+    /// 将自动生成的盒碰撞体包住目标层级内全部渲染器。
+    /// Renderer.localBounds（渲染器局部包围盒）的八个角点会转换到目标根对象局部空间，
+    /// 因而能够正确处理子模型的位置、旋转和缩放；该计算仅在场景初始化时执行一次。
+    /// </summary>
+    private static void FitGeneratedSelectionBoxCollider(
+        BoxCollider generatedCollider,
+        Transform targetRoot,
+        Renderer[] renderers)
+    {
+        if (generatedCollider == null || targetRoot == null || renderers == null || renderers.Length == 0)
+        {
+            return;
+        }
+
+        Bounds combinedBounds = default;
+        bool hasBounds = false;
+        for (int rendererIndex = 0; rendererIndex < renderers.Length; rendererIndex++)
+        {
+            Renderer renderer = renderers[rendererIndex];
+            if (renderer == null)
+            {
+                continue;
+            }
+
+            Bounds rendererBounds = renderer.localBounds;
+            Vector3 minimum = rendererBounds.min;
+            Vector3 maximum = rendererBounds.max;
+            Matrix4x4 rendererToTarget = targetRoot.worldToLocalMatrix * renderer.transform.localToWorldMatrix;
+
+            EncapsulateSelectionColliderPoint(rendererToTarget.MultiplyPoint3x4(new Vector3(minimum.x, minimum.y, minimum.z)), ref combinedBounds, ref hasBounds);
+            EncapsulateSelectionColliderPoint(rendererToTarget.MultiplyPoint3x4(new Vector3(minimum.x, minimum.y, maximum.z)), ref combinedBounds, ref hasBounds);
+            EncapsulateSelectionColliderPoint(rendererToTarget.MultiplyPoint3x4(new Vector3(minimum.x, maximum.y, minimum.z)), ref combinedBounds, ref hasBounds);
+            EncapsulateSelectionColliderPoint(rendererToTarget.MultiplyPoint3x4(new Vector3(minimum.x, maximum.y, maximum.z)), ref combinedBounds, ref hasBounds);
+            EncapsulateSelectionColliderPoint(rendererToTarget.MultiplyPoint3x4(new Vector3(maximum.x, minimum.y, minimum.z)), ref combinedBounds, ref hasBounds);
+            EncapsulateSelectionColliderPoint(rendererToTarget.MultiplyPoint3x4(new Vector3(maximum.x, minimum.y, maximum.z)), ref combinedBounds, ref hasBounds);
+            EncapsulateSelectionColliderPoint(rendererToTarget.MultiplyPoint3x4(new Vector3(maximum.x, maximum.y, minimum.z)), ref combinedBounds, ref hasBounds);
+            EncapsulateSelectionColliderPoint(rendererToTarget.MultiplyPoint3x4(new Vector3(maximum.x, maximum.y, maximum.z)), ref combinedBounds, ref hasBounds);
+        }
+
+        if (!hasBounds)
+        {
+            return;
+        }
+
+        Vector3 colliderSize = combinedBounds.size;
+        colliderSize.x = Mathf.Max(colliderSize.x, GeneratedSelectionColliderMinimumSize);
+        colliderSize.y = Mathf.Max(colliderSize.y, GeneratedSelectionColliderMinimumSize);
+        colliderSize.z = Mathf.Max(colliderSize.z, GeneratedSelectionColliderMinimumSize);
+        generatedCollider.center = combinedBounds.center;
+        generatedCollider.size = colliderSize;
+    }
+
+    /// <summary>把一个目标局部空间角点并入自动盒碰撞体范围，首个有效点负责初始化包围盒。</summary>
+    private static void EncapsulateSelectionColliderPoint(
+        Vector3 point,
+        ref Bounds combinedBounds,
+        ref bool hasBounds)
+    {
+        if (!hasBounds)
+        {
+            combinedBounds = new Bounds(point, Vector3.zero);
+            hasBounds = true;
+            return;
+        }
+
+        combinedBounds.Encapsulate(point);
+    }
+
+    /// <summary>
+    /// 总览允许选择所有已由场景绑定登记且包含有效目标的节点；只复制初始化索引，不扫描模型层级。
     /// </summary>
     private void SetActiveSelectionTargetsForOverview()
     {
         _selectableSceneNodeIds.Clear();
-        _activeSelectionRendererTargets.Clear();
-        for (int targetIndex = 0; targetIndex < _selectionRendererTargets.Count; targetIndex++)
+        foreach (string sceneNodeId in _configuredSelectionNodeIds)
         {
-            SceneNodeRendererPickTarget target = _selectionRendererTargets[targetIndex];
-            if (string.IsNullOrWhiteSpace(target.SceneNodeId) || target.RootObject == null || target.Renderer == null)
-            {
-                continue;
-            }
-
-            _selectableSceneNodeIds.Add(target.SceneNodeId);
-            _activeSelectionRendererTargets.Add(target);
+            _selectableSceneNodeIds.Add(sceneNodeId);
         }
     }
 
-    /// <summary>
-    /// 关键环节只允许选择当前组态图可见节点对应的模型。
-    /// 渲染器目标已在场景初始化时缓存，此处只按节点标识过滤，避免切换步骤时重复遍历模型层级。
-    /// </summary>
+    /// <summary>关键环节只允许选择当前组态图可见节点对应的模型。</summary>
     private void SetActiveSelectionTargetsForProcess(IReadOnlyList<string> visibleNodeIds)
     {
         _selectableSceneNodeIds.Clear();
-        _activeSelectionRendererTargets.Clear();
         for (int nodeIndex = 0; nodeIndex < visibleNodeIds.Count; nodeIndex++)
         {
             string sceneNodeId = visibleNodeIds[nodeIndex];
-            if (!string.IsNullOrWhiteSpace(sceneNodeId))
+            if (!string.IsNullOrWhiteSpace(sceneNodeId) && _configuredSelectionNodeIds.Contains(sceneNodeId))
             {
                 _selectableSceneNodeIds.Add(sceneNodeId);
             }
-        }
-
-        for (int targetIndex = 0; targetIndex < _selectionRendererTargets.Count; targetIndex++)
-        {
-            SceneNodeRendererPickTarget target = _selectionRendererTargets[targetIndex];
-            if (target.RootObject == null || target.Renderer == null ||
-                !_selectableSceneNodeIds.Contains(target.SceneNodeId))
-            {
-                continue;
-            }
-
-            _activeSelectionRendererTargets.Add(target);
         }
     }
 
@@ -2080,6 +2149,8 @@ public sealed class PowerPlantProcessController : MonoBehaviour
         ClearProcessHighlight();
         _activeInteractionNodeId = null;
         _selectionFocusObjects.Clear();
+        // 空白点击必须撤销聚焦上下文创建的运行时半透明材质，恢复所有 Renderer 的原始材质基线。
+        RestoreAllContextFades();
         if (_freeCameraController != null)
         {
             _freeCameraController.CancelFocus();
@@ -2100,43 +2171,30 @@ public sealed class PowerPlantProcessController : MonoBehaviour
     }
 
     /// <summary>
-    /// 先使用 Unity 物理射线保持现有燃气场景的精确碰撞体验；若首个碰撞对象没有业务映射，
-    /// 其距离会成为渲染器后备命中的遮挡上限。只有属性面板已登记的节点渲染器才参与后备检测。
+    /// 所有已登记目标都必须通过 Unity 物理射线命中：场景已有碰撞体按原形状检测，
+    /// 完全没有碰撞组件的目标已在初始化阶段自动补充 BoxCollider（盒碰撞体）。
+    /// 未映射对象或当前流程不可选对象会保留真实遮挡语义，不再使用渲染器包围盒穿透选择。
     /// </summary>
     private bool TryResolvePointerSelection(Ray ray, out string sceneNodeId, out GameObject rootObject)
     {
         sceneNodeId = null;
         rootObject = null;
-        float rendererMaximumDistance = float.PositiveInfinity;
-        if (Physics.Raycast(ray, out RaycastHit hit))
+        if (!Physics.Raycast(ray, out RaycastHit hit))
         {
-            GameObject configuredTarget = FindConfiguredSelectionTarget(hit.collider.transform);
-            if (configuredTarget != null && _selectionNodeByObject.TryGetValue(configuredTarget, out string hitSceneNodeId))
-            {
-                if (IsSceneNodeSelectable(hitSceneNodeId))
-                {
-                    sceneNodeId = hitSceneNodeId;
-                    rootObject = configuredTarget;
-                    return true;
-                }
-
-                // 当前步骤之外的已登记模型仍属于真实遮挡物，但不能作为可选目标。
-                rendererMaximumDistance = hit.distance;
-            }
-            else
-            {
-                // 未映射碰撞体仍是真实遮挡物，后备包围盒不能穿过它选择后方设备。
-                rendererMaximumDistance = hit.distance;
-            }
+            return false;
         }
 
-        return SceneNodeRendererPicker.TryPick(
-            ray,
-            _activeSelectionRendererTargets,
-            rendererMaximumDistance,
-            out sceneNodeId,
-            out rootObject,
-            out _);
+        GameObject configuredTarget = FindConfiguredSelectionTarget(hit.collider.transform);
+        if (configuredTarget == null ||
+            !_selectionNodeByObject.TryGetValue(configuredTarget, out string hitSceneNodeId) ||
+            !IsSceneNodeSelectable(hitSceneNodeId))
+        {
+            return false;
+        }
+
+        sceneNodeId = hitSceneNodeId;
+        rootObject = configuredTarget;
+        return true;
     }
 
     /// <summary>
@@ -2944,8 +3002,9 @@ public sealed class PowerPlantProcessController : MonoBehaviour
     }
 
     /// <summary>
-    /// 仅供燃气历史配置菜单迁移样例场景使用的默认步骤数组。
-    /// 该数组会写回 GasPower.unity；运行时读取的仍是场景序列化结果，燃煤场景不会调用此方法。
+    /// 仅供燃气历史配置菜单迁移样例场景使用的第二层默认步骤数组。
+    /// 燃气轮机已由独立第三层目录发布，因此这里禁止重新生成 gas-turbine 旧步骤；
+    /// 运行时读取的仍是场景序列化结果，燃煤场景不会调用此方法。
     /// </summary>
     private static SceneProcessStepBinding[] CreateGasProcessStepBindings()
     {
@@ -2960,7 +3019,6 @@ public sealed class PowerPlantProcessController : MonoBehaviour
                 "inlet-duct"),
             CreateProcessStep("inlet-duct", "1", new[] { "inlet-duct", "gas-turbine" }, "inlet-duct"),
             CreateProcessStep("inlet-duct", "2", new[] { "inlet-duct", "gas-turbine" }, "inlet-duct"),
-            CreateProcessStep("gas-turbine", AllUnitsId, new[] { "gas-turbine" }, "gas-turbine"),
             CreateProcessStep("hrsg", AllUnitsId, new[] { "hrsg" }, "hrsg"),
             CreateProcessStep("steam-turbine", AllUnitsId, new[] { "steam-turbine" }, "steam-turbine"),
             CreateProcessStep(

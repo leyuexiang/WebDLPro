@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Runtime.InteropServices;
@@ -262,6 +263,10 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         public string requestId;
         public string processId;
         public string stepId;
+        // cameraPoseId 只引用当前业务场景已登记的命名镜头点，禁止网页传入位置、旋转或层级路径。
+        public string cameraPoseId;
+        // processDetailId 只表示已发布关键环节，不允许网页传入资源编号、相机位或 Unity 对象路径。
+        public string processDetailId;
         public string unitId;
         public string nodeId;
         // sceneNodeId 是 Unity 场景映射中的稳定三维节点标识；nodeId 仅用于下行旧命令兼容，
@@ -293,6 +298,8 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         public bool success;
         public bool isolate;
         public bool enabled;
+        // 关键环节播放开关由独立命令显式下发；设备四态处理器不得读取或改写该字段。
+        public bool playing;
         public float width;
         public float height;
         public float progress;
@@ -398,6 +405,12 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
 #endif
     }
 
+    /// <summary>验证固定协议字段是否在原始负载中显式出现，避免 JsonUtility 对缺失布尔值采用默认 false。</summary>
+    private static bool HasJsonField(string messageJson, string fieldName)
+    {
+        return messageJson.IndexOf($"\"{fieldName}\"", StringComparison.Ordinal) >= 0;
+    }
+
     /// <summary>
     /// 由 .jslib 的 SendMessage 调用。方法名不可修改，否则浏览器桥接层无法将消息送入 Unity。
     /// 先校验协议与实例标识，再根据类型执行业务操作，避免外部页面的无关消息影响场景。
@@ -427,6 +440,11 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
             string.IsNullOrWhiteSpace(message.type))
         {
             Debug.LogWarning("[UnityIframeBridge] 已拒绝不符合协议或实例标识的消息。");
+            return;
+        }
+        if (message.type == "setProcessDetailPlayback" && !HasJsonField(messageJson, "playing"))
+        {
+            SendCommandResult(message, false, "process-detail-playback-payload-invalid", "关键环节播放命令必须显式提供播放开关。");
             return;
         }
 
@@ -461,6 +479,27 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
                 break;
             case "enterProcessStep":
                 HandleEnterProcessStep(message);
+                break;
+            case "moveCameraToPose":
+                HandleMoveCameraToPose(message);
+                break;
+            case "prepareProcessDetail":
+                HandlePrepareProcessDetail(message);
+                break;
+            case "commitProcessDetail":
+                HandleCommitProcessDetail(message);
+                break;
+            case "abortProcessDetail":
+                HandleAbortProcessDetail(message);
+                break;
+            case "enterProcessDetail":
+                HandleEnterProcessDetail(message);
+                break;
+            case "exitProcessDetail":
+                HandleExitProcessDetail(message);
+                break;
+            case "setProcessDetailPlayback":
+                HandleSetProcessDetailPlayback(message);
                 break;
             case "resetScene":
                 HandleResetScene(message);
@@ -747,6 +786,316 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         bool isolate = payload == null || payload.isolate;
         BusinessSceneCommandResult result = controller.EnterProcessStep(processId, stepId, unitId, isolate);
         SendSceneCommandResult(message, result);
+    }
+
+    /// <summary>
+    /// 将稳定镜头点标识交给当前业务场景。该命令与 enterProcessStep 完全分离，
+    /// 不携带流程、显隐、描边或状态参数，也不允许网页传入 Unity 坐标。
+    /// </summary>
+    private void HandleMoveCameraToPose(BridgeMessage message)
+    {
+        BridgePayload payload = message.payload;
+        if (!SceneActionProtocolValidator.IsValidCameraPoseId(payload?.cameraPoseId))
+        {
+            SendCommandResult(message, false, "camera-pose-payload-invalid", "镜头定位命令缺少合法镜头点标识。");
+            return;
+        }
+        if (!TryGetSceneController(message, BusinessSceneCapability.MoveCameraToPose, out IBusinessSceneController controller))
+        {
+            return;
+        }
+        if (!(controller is IBusinessSceneNamedCameraPoseController cameraPoseController))
+        {
+            SendCommandResult(message, false, "capability-not-implemented", "当前业务场景未实现命名镜头点能力。");
+            return;
+        }
+
+        SendSceneCommandResult(message, cameraPoseController.MoveCameraToPose(payload.cameraPoseId));
+    }
+
+    /// <summary>准备命令只生成隐藏候选；网页完成拓扑暂停和全屏布局后必须再发送提交命令。</summary>
+    private void HandlePrepareProcessDetail(BridgeMessage message)
+    {
+        BridgePayload payload = message.payload;
+        if (!SceneActionProtocolValidator.IsValidProcessDetail(
+                payload?.sceneId, payload?.processId, payload?.stepId, payload?.processDetailId, payload?.transitionId))
+        {
+            SendCommandResult(message, false, "process-detail-prepare-payload-invalid", "关键环节准备命令缺少合法业务映射或事务标识。");
+            return;
+        }
+        if (!TryGetProcessDetailController(message, payload.sceneId, out IBusinessSceneProcessDetailController controller))
+        {
+            return;
+        }
+        StartCoroutine(RunPrepareProcessDetail(message, controller));
+    }
+
+    private IEnumerator RunPrepareProcessDetail(BridgeMessage message, IBusinessSceneProcessDetailController controller)
+    {
+        BridgePayload payload = message.payload;
+        BusinessSceneCommandResult result = default;
+        bool completed = false;
+        IEnumerator preparing;
+        try
+        {
+            preparing = controller.PrepareProcessDetailAsync(
+                payload.sceneId, payload.processId, payload.stepId, payload.processDetailId, payload.transitionId,
+                value =>
+                {
+                    if (!completed)
+                    {
+                        completed = true;
+                        result = value;
+                    }
+                });
+        }
+        catch (Exception)
+        {
+            SendCommandResult(message, false, "process-detail-prepare-failed", "关键环节准备流程启动失败。");
+            yield break;
+        }
+        if (preparing == null)
+        {
+            SendCommandResult(message, false, "process-detail-prepare-failed", "关键环节准备流程不可用。");
+            yield break;
+        }
+
+        bool iterationFailed = false;
+        try
+        {
+            while (true)
+            {
+                bool hasNext;
+                object current = null;
+                try
+                {
+                    hasNext = preparing.MoveNext();
+                    if (hasNext)
+                    {
+                        current = preparing.Current;
+                    }
+                }
+                catch (Exception)
+                {
+                    hasNext = false;
+                    iterationFailed = true;
+                }
+                if (!hasNext)
+                {
+                    break;
+                }
+                yield return current;
+            }
+        }
+        finally
+        {
+            (preparing as IDisposable)?.Dispose();
+        }
+        if (iterationFailed || !completed)
+        {
+            SendCommandResult(message, false, "process-detail-prepare-failed", "关键环节准备流程未完成。");
+            yield break;
+        }
+        SendSceneCommandResult(message, result);
+    }
+
+    private void HandleCommitProcessDetail(BridgeMessage message)
+    {
+        BridgePayload payload = message.payload;
+        if (!SceneActionProtocolValidator.IsValidProcessDetailExit(payload?.sceneId, payload?.processDetailId, payload?.transitionId))
+        {
+            SendCommandResult(message, false, "process-detail-commit-payload-invalid", "关键环节提交命令缺少合法场景、环节或事务标识。");
+            return;
+        }
+        if (!TryGetProcessDetailController(message, payload.sceneId, out IBusinessSceneProcessDetailController controller))
+        {
+            return;
+        }
+        SendSceneCommandResult(message, controller.CommitPreparedProcessDetail(payload.sceneId, payload.processDetailId, payload.transitionId));
+    }
+
+    private void HandleAbortProcessDetail(BridgeMessage message)
+    {
+        BridgePayload payload = message.payload;
+        if (!SceneActionProtocolValidator.IsValidProcessDetailExit(payload?.sceneId, payload?.processDetailId, payload?.transitionId))
+        {
+            SendCommandResult(message, false, "process-detail-abort-payload-invalid", "关键环节取消命令缺少合法场景、环节或事务标识。");
+            return;
+        }
+        if (!TryGetProcessDetailController(message, payload.sceneId, out IBusinessSceneProcessDetailController controller))
+        {
+            return;
+        }
+        SendSceneCommandResult(message, controller.AbortPreparedProcessDetail(payload.sceneId, payload.processDetailId, payload.transitionId));
+    }
+
+    /// <summary>
+    /// 第三层进入是兼容组合命令。新网页应使用 prepareProcessDetail → commitProcessDetail，
+    /// 该入口仍依次执行两个阶段以兼容当前已发布调用方。
+    /// </summary>
+    private void HandleEnterProcessDetail(BridgeMessage message)
+    {
+        BridgePayload payload = message.payload;
+        if (!SceneActionProtocolValidator.IsValidProcessDetail(
+                payload?.sceneId,
+                payload?.processId,
+                payload?.stepId,
+                payload?.processDetailId,
+                payload?.transitionId))
+        {
+            SendCommandResult(message, false, "process-detail-payload-invalid", "关键环节进入命令缺少合法场景、流程、步骤、环节或事务标识。");
+            return;
+        }
+        if (!TryGetProcessDetailController(message, payload.sceneId, out IBusinessSceneProcessDetailController controller))
+        {
+            return;
+        }
+
+        StartCoroutine(RunEnterProcessDetail(message, controller));
+    }
+
+    private IEnumerator RunEnterProcessDetail(
+        BridgeMessage message,
+        IBusinessSceneProcessDetailController controller)
+    {
+        BridgePayload payload = message.payload;
+        BusinessSceneCommandResult result = default;
+        bool completed = false;
+        IEnumerator entering;
+        try
+        {
+            entering = controller.EnterProcessDetailAsync(
+                payload.sceneId,
+                payload.processId,
+                payload.stepId,
+                payload.processDetailId,
+                payload.transitionId,
+                value =>
+                {
+                    if (!completed)
+                    {
+                        completed = true;
+                        result = value;
+                    }
+                });
+        }
+        catch (Exception)
+        {
+            SendCommandResult(message, false, "process-detail-enter-failed", "关键环节进入流程启动失败。");
+            yield break;
+        }
+
+        if (entering == null)
+        {
+            SendCommandResult(message, false, "process-detail-enter-failed", "关键环节进入流程不可用。");
+            yield break;
+        }
+
+        bool iterationFailed = false;
+        try
+        {
+            while (true)
+            {
+                bool hasNext;
+                object current = null;
+                try
+                {
+                    hasNext = entering.MoveNext();
+                    if (hasNext)
+                    {
+                        current = entering.Current;
+                    }
+                }
+                catch (Exception)
+                {
+                    hasNext = false;
+                    iterationFailed = true;
+                }
+
+                if (!hasNext)
+                {
+                    break;
+                }
+                yield return current;
+            }
+        }
+        finally
+        {
+            (entering as IDisposable)?.Dispose();
+        }
+
+        if (iterationFailed || !completed)
+        {
+            SendCommandResult(message, false, "process-detail-enter-failed", "关键环节进入流程未完成。");
+            yield break;
+        }
+
+        SendSceneCommandResult(message, result);
+    }
+
+    /// <summary>退出只允许当前业务场景、活动关键环节和事务标识，迟到或错环节命令由场景协调器明确隔离。</summary>
+    private void HandleExitProcessDetail(BridgeMessage message)
+    {
+        BridgePayload payload = message.payload;
+        if (!SceneActionProtocolValidator.IsValidProcessDetailExit(payload?.sceneId, payload?.processDetailId, payload?.transitionId))
+        {
+            SendCommandResult(message, false, "process-detail-exit-payload-invalid", "关键环节退出命令缺少合法场景、环节或事务标识。");
+            return;
+        }
+        if (!TryGetProcessDetailController(message, payload.sceneId, out IBusinessSceneProcessDetailController controller))
+        {
+            return;
+        }
+
+        SendSceneCommandResult(message, controller.ExitProcessDetail(payload.sceneId, payload.processDetailId, payload.transitionId));
+    }
+
+    /// <summary>
+    /// 播放命令只控制当前活动关键环节的动画、粒子和气流，不读取设备状态，也不触发进入或退出事务。
+    /// </summary>
+    private void HandleSetProcessDetailPlayback(BridgeMessage message)
+    {
+        BridgePayload payload = message.payload;
+        if (!SceneActionProtocolValidator.IsValidProcessDetailPlayback(payload?.sceneId, payload?.processDetailId))
+        {
+            SendCommandResult(message, false, "process-detail-playback-payload-invalid", "关键环节播放命令缺少合法场景或环节标识。");
+            return;
+        }
+        if (!TryGetProcessDetailController(message, payload.sceneId, out IBusinessSceneProcessDetailController controller))
+        {
+            return;
+        }
+
+        SendSceneCommandResult(
+            message,
+            controller.SetProcessDetailPlayback(payload.sceneId, payload.processDetailId, payload.playing));
+    }
+
+    private bool TryGetProcessDetailController(
+        BridgeMessage message,
+        string expectedSceneId,
+        out IBusinessSceneProcessDetailController processDetailController)
+    {
+        TryBindSceneController();
+        processDetailController = null;
+        if (_sceneController == null)
+        {
+            SendCommandResult(message, false, "controller-unavailable", "当前没有已初始化的业务场景控制器。");
+            return false;
+        }
+        if (!string.Equals(_sceneController.SceneId, expectedSceneId, StringComparison.Ordinal))
+        {
+            SendCommandResult(message, false, "process-detail-scene-mismatch", "关键环节命令不属于当前活动业务场景。");
+            return false;
+        }
+        if (!(_sceneController is IBusinessSceneProcessDetailController resolved))
+        {
+            SendCommandResult(message, false, "process-detail-unsupported", "当前业务场景未声明第三层关键环节能力。");
+            return false;
+        }
+
+        processDetailController = resolved;
+        return true;
     }
 
     private void HandleResetScene(BridgeMessage message)

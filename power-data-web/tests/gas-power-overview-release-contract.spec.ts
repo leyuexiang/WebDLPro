@@ -15,85 +15,7 @@ import { validateSceneTopologyManifest } from '../src/config/scene-topology/vali
  * 避免使用与真实发布脚本分离的手写夹具而产生误报。
  */
 describe('燃气总览发布契约', () => {
-  /*
-   * 下列顺序逐项对应《通用拓扑图参考0810_AI友好版》第3.1至3.3节。
-   * 不能只断言数量：节点或连线被同数量的错误标识替换时，数量断言仍会误通过，
-   * 而正式页面会展示不属于当前关键环节的设备或隐藏资料明确要求保留的孤立节点。
-   */
-  const expectedFlowDefinitions = {
-    'topology.gas-power.gas-turbine': {
-      nodeIds: [
-        'scada-security-gateway', 'operator-station', 'gas-network', 'plant-engineering-station', 'plant-data-station',
-        'inlet-duct', 'generator', 'auxiliary-plc', 'grid-output',
-        'fuel-gas-pressure-valve', 'fuel-gas-electric-actuator', 'hrsg-drum-level-sensor', 'steam-main-control-valve',
-        'generator-outlet-breaker', 'condensate-pump-vfd', 'fuel-gas-leak-detector',
-      ],
-      edgeIds: [
-        'route.dcs-core-to-scada', 'route.dcs-core-to-operator', 'route.dcs-core-to-engineering', 'route.dcs-core-to-performance',
-        'route.dcs-core-to-markvie', 'route.dcs-core-to-generator', 'route.dcs-core-to-auxiliary', 'route.dcs-core-to-sil',
-        'route.markvie-to-pressure-valve', 'route.markvie-to-actuator', 'route.generator-to-outlet-breaker',
-        'route.auxiliary-to-vfd', 'route.sil-to-leak-detector',
-      ],
-      allowedOrphans: ['hrsg-drum-level-sensor', 'steam-main-control-valve'],
-    },
-    'topology.gas-power.hrsg': {
-      nodeIds: [
-        'scada-security-gateway', 'operator-station', 'gas-network', 'plant-engineering-station', 'plant-data-station', 'hrsg',
-        'fuel-gas-pressure-valve', 'fuel-gas-electric-actuator', 'hrsg-drum-level-sensor', 'steam-main-control-valve',
-        'generator-outlet-breaker', 'condensate-pump-vfd', 'fuel-gas-leak-detector',
-      ],
-      edgeIds: [
-        'route.dcs-core-to-scada', 'route.dcs-core-to-operator', 'route.dcs-core-to-engineering', 'route.dcs-core-to-performance',
-        'route.dcs-core-to-hrsg', 'route.hrsg-to-temperature-transmitter',
-      ],
-      allowedOrphans: [
-        'fuel-gas-pressure-valve', 'fuel-gas-electric-actuator', 'steam-main-control-valve',
-        'generator-outlet-breaker', 'condensate-pump-vfd', 'fuel-gas-leak-detector',
-      ],
-    },
-    'topology.gas-power.steam-turbine': {
-      nodeIds: [
-        'scada-security-gateway', 'operator-station', 'gas-network', 'plant-engineering-station', 'plant-data-station',
-        'steam-turbine', 'generator', 'auxiliary-plc',
-        'fuel-gas-pressure-valve', 'fuel-gas-electric-actuator', 'hrsg-drum-level-sensor', 'steam-main-control-valve',
-        'generator-outlet-breaker', 'condensate-pump-vfd', 'fuel-gas-leak-detector',
-      ],
-      edgeIds: [
-        'route.dcs-core-to-scada', 'route.dcs-core-to-operator', 'route.dcs-core-to-engineering', 'route.dcs-core-to-performance',
-        'route.dcs-core-to-steam', 'route.dcs-core-to-generator', 'route.dcs-core-to-auxiliary',
-        'route.steam-to-main-control-valve', 'route.generator-to-outlet-breaker', 'route.auxiliary-to-vfd',
-      ],
-      allowedOrphans: [
-        'fuel-gas-pressure-valve', 'fuel-gas-electric-actuator', 'hrsg-drum-level-sensor', 'fuel-gas-leak-detector',
-      ],
-    },
-  } as const
-
-  it('关键环节严格复用资料规定的节点和已核验连线集合', async () => {
-    const manifest = await createGasOnlyManifest('flow-filter-contract-test')
-    const overview = manifest.topologies.find((candidate) => candidate.topologyId === 'topology.gas-power.overview')
-    const overviewPositionByNodeId = new Map(overview?.nodes.map((node) => [node.nodeId, { x: node.x, y: node.y }]))
-    expect(overview?.nodes).toHaveLength(23)
-    expect(overview?.edges).toHaveLength(22)
-
-    for (const [topologyId, expected] of Object.entries(expectedFlowDefinitions)) {
-      const topology = manifest.topologies.find((candidate) => candidate.topologyId === topologyId)
-      expect(topology?.filter).toBeDefined()
-      expect(topology?.nodes).toHaveLength(0)
-      expect(topology?.edges).toHaveLength(0)
-      // 顺序也是资料事实：画布按总图层级投影时必须保持子表的层级与列内顺序。
-      expect(topology?.filter?.visibleNodeIds).toEqual(expected.nodeIds)
-      // 子表没有独立连线，所有连线必须是总图已核验连接的精确子集，不得按工艺常识补造。
-      expect(topology?.filter?.visibleEdgeIds).toEqual(expected.edgeIds)
-      expect(topology?.filter?.allowedOrphanNodeIds ?? []).toEqual(expected.allowedOrphans)
-      // 子图不再维护独立坐标表；每个可见节点必须与总图位置完全相同，切换时才不会跳位或漂移层级。
-      for (const override of topology?.filter?.nodeLayoutOverrides ?? []) {
-        expect({ x: override.x, y: override.y }).toEqual(overviewPositionByNodeId.get(override.nodeId))
-      }
-    }
-  })
-
-  it('总览显式发布三组重点区域，关键环节不继承区域框', async () => {
+  it('总览显式发布三组重点区域，且新版不发布过滤拓扑', async () => {
     const manifest = await createGasOnlyManifest('focus-region-contract-test')
     const overview = manifest.topologies.find((candidate) => candidate.topologyId === 'topology.gas-power.overview')
     expect(overview?.focusRegions).toEqual([
@@ -116,7 +38,14 @@ describe('燃气总览发布契约', () => {
         label: '蒸汽轮机控制区域',
       },
     ])
-    expect(manifest.topologies.filter((topology) => topology.filter !== undefined).every((topology) => topology.focusRegions === undefined)).toBe(true)
+    /**
+     * 关键流程已下线，不能只隐藏导航按钮；正式清单也必须仅保留总览，避免外部协议通过
+     * topologyId（拓扑标识）访问未发布的过滤视图。
+     */
+    const gasTopologies = manifest.topologies.filter((topology) => topology.sceneId === 'gas-power')
+    expect(gasTopologies).toHaveLength(1)
+    expect(gasTopologies[0]?.topologyId).toBe('topology.gas-power.overview')
+    expect(gasTopologies.every((topology) => topology.filter === undefined)).toBe(true)
     expect(validateSceneTopologyManifest(manifest)).toEqual([])
   })
 
@@ -128,6 +57,31 @@ describe('燃气总览发布契约', () => {
     expect(serverSource).toContain("console.log('燃气服务已启动。请使用下面列出的地址访问：')")
     expect(serverSource).not.toContain('公开访问地址：${hostOrigin}/')
     expect(serverSource).not.toContain('__RUNTIME_SELF_ORIGIN__')
+  })
+
+  it('本地测试入口清理同源旧缓存且壳资源不写入长期磁盘缓存', () => {
+    const localServerSource = createStaticServer('local-test')
+    const partnerServerSource = createStaticServer('partner-integration')
+
+    /**
+     * 多个不可变测试包可能复用同一回环来源。根入口必须先清理该来源遗留的浏览器缓存，
+     * 否则旧包写入的损坏模块会在新包启动前触发 ERR_CACHE_READ_FAILURE（缓存读取失败）。
+     */
+    expect(localServerSource).toContain('const packageType = "local-test"')
+    expect(localServerSource).toContain("requestUrl.pathname === '/self-test.html'")
+    expect(localServerSource).toContain("headers['clear-site-data'] = '\"cache\"'")
+    expect(partnerServerSource).toContain('const resetLocalBrowserCache = false')
+    expect(partnerServerSource).not.toContain('self-test.html')
+
+    /**
+     * 本地壳体积较小且会频繁重建，使用 no-store（禁止存储）可直接绕开损坏的磁盘缓存；
+     * Unity 播放器和场景大资源也必须 no-store，避免长期 HTTP 缓存与 Unity 资源占用叠加。
+     */
+    expect(localServerSource).toContain("const isLocalShellAsset = packageType === 'local-test'")
+    expect(localServerSource).toContain("if (isLocalShellAsset) return 'no-store'")
+    expect(localServerSource).toContain("const isUnityLargeAsset = relativePath.startsWith('unity/Build/')")
+    expect(localServerSource).toContain("if (isUnityLargeAsset) return 'no-store'")
+    expect(partnerServerSource).toContain('const packageType = "partner-integration"')
   })
 
   it('总览23个源节点全部按 nodeId 上报且结构清单不预置平台设备事实', async () => {
@@ -142,10 +96,8 @@ describe('燃气总览发布契约', () => {
     expect(Object.prototype.hasOwnProperty.call(manifest, 'platformBindingCount')).toBe(false)
     expect(validateSceneTopologyManifest(manifest)).toEqual([])
 
-    // 三个流程视图没有本地节点，只引用总览；平台只能绑定总览源节点，不能为流程视图重复生成设备关系。
-    const filteredTopologies = manifest.topologies.filter((topology) => topology.filter !== undefined)
-    expect(filteredTopologies).toHaveLength(3)
-    expect(filteredTopologies.every((topology) => topology.nodes.length === 0 && topology.filter?.sourceTopologyId === overview?.topologyId)).toBe(true)
+    // 新版只发布总览，所有节点状态、二维选择和三维映射均以这一份来源数据为准。
+    expect(manifest.topologies.filter((topology) => topology.sceneId === 'gas-power')).toEqual([overview])
   })
 
   it('总览按钮只通过已登记动作恢复 Unity 总览和完整拓扑', async () => {
@@ -157,6 +109,7 @@ describe('燃气总览发布契约', () => {
 
     expect(overviewAction).toMatchObject({
       targetSceneId: 'gas-power',
+      targetViewMode: 'business',
       targetTopologyId: 'topology.gas-power.overview',
       failurePolicy: 'keep-current-context',
       unityAction: {
@@ -174,10 +127,36 @@ describe('燃气总览发布契约', () => {
     })
 
     // 外层必须走 workflow.trigger（工作流触发）事务，禁止退回只切二维拓扑的 view.open（打开视图）命令。
-    expect(hostPage).toContain("triggerWorkflow('action.gas-power.overview')")
+    expect(hostPage).toContain('data-action-id="action.gas-power.overview"')
+    expect(hostPage).toContain("button.addEventListener('click', () => triggerWorkflow")
     expect(hostPage).not.toContain("actionId: null,\n              expectedContextRevision")
     // 成功文案还必须核对视图变更携带的动作标识，不能让同名二维总图误报为三维已经复位。
     expect(hostPage).toContain("message.payload?.actionId === 'action.gas-power.overview'")
+  })
+
+  it('只发布燃气轮机一个独立第三层目录和无拓扑动作', async () => {
+    const manifest = await createGasOnlyManifest('single-gas-turbine-detail-contract')
+    const detailAction = manifest.actions.find((action) => action.actionId === 'action.gas-power.gas-turbine')
+
+    expect(manifest.processDetails).toEqual([{
+      sceneId: 'gas-power',
+      processId: 'gas-power-generation',
+      stepId: 'gas-turbine',
+      processDetailId: 'process-detail.gas-power.gas-turbine',
+      resourceId: 'process-detail-resource.gas-power.gas-turbine',
+      cameraPoseId: 'camera-pose.gas-power.gas-turbine',
+      stateNodeId: 'gas-turbine',
+    }])
+    expect(detailAction).toEqual(expect.objectContaining({
+      targetSceneId: 'gas-power',
+      targetViewMode: 'process-detail',
+      processDetailId: 'process-detail.gas-power.gas-turbine',
+      unityAction: { type: 'enterProcessDetail', processDetailId: 'process-detail.gas-power.gas-turbine' },
+    }))
+    expect(detailAction).not.toHaveProperty('targetTopologyId')
+    expect(JSON.stringify(detailAction)).not.toContain('enterProcessStep')
+    expect(manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'gas-power')?.processSteps)
+      .not.toContainEqual(expect.objectContaining({ stepId: 'gas-turbine' }))
   })
 
   it('本地根入口保留自动初始化，独立服务根入口将平台直接导航到协议壳', () => {
@@ -203,12 +182,42 @@ describe('燃气总览发布契约', () => {
     }
     expect(() => createHostPage('invalid-entry-contract-test', 'unknown-package')).toThrow('未知包类型')
 
-    // 内部自测页必须继续保留四项动作和稳定状态回归所需的消息处理逻辑。
-    expect(selfTestPage).toContain('外部流程触发测试')
+    // 内部自测页从沙盘开始，关键环节稳定后通过受控协议提供播放/停止按钮；不得用设备四态伪装动态控制。
+    expect(selfTestPage).toContain('燃气轮机单环节全链路自测')
+    expect(selfTestPage).toContain("sceneId: 'overview'")
+    expect(selfTestPage).toContain('data-command="overview" disabled>沙盘</button>')
+    expect(selfTestPage).toContain('data-action-id="action.gas-power.overview"')
     expect(selfTestPage).toContain('data-action-id="action.gas-power.gas-turbine"')
-    expect(selfTestPage).toContain('data-overview-command')
-    expect(selfTestPage).toContain("triggerWorkflow('action.gas-power.overview')")
+    expect(selfTestPage).toContain('disabled>燃气</button>')
+    expect(selfTestPage).toContain('disabled>关键环节</button>')
+    expect(selfTestPage).toContain('data-playback="play"')
+    expect(selfTestPage).toContain('data-playback="stop"')
+    expect(selfTestPage).toContain("process-detail.playback")
+    expect(selfTestPage).not.toContain("items: [{ nodeId: 'inlet-duct', deviceStatus")
+    expect(selfTestPage).not.toContain('data-device-status=')
+    expect(selfTestPage).not.toContain('燃气轮机动态已停止。')
+    expect(selfTestPage).not.toContain('燃气轮机动态已开始播放。')
+    expect(selfTestPage).toContain('按钮仅通过外层受控协议操作当前三维模型')
+    expect(selfTestPage).toContain('message.payload.topologyId === undefined')
     expect(selfTestPage).toContain('test-status')
+    expect(selfTestPage).not.toContain('data-device-status="alarm"')
+    expect(selfTestPage).not.toContain('data-device-status="offline"')
+    expect(selfTestPage).not.toContain('快速重复进入两次')
+    expect(selfTestPage).not.toContain('data-command="rapid-enter"')
+    expect(selfTestPage).not.toContain('data-command="snapshot"')
+    expect(selfTestPage).not.toContain('test-events')
+    expect(selfTestPage).not.toMatch(/action\.gas-power\.(hrsg|steam-turbine)/)
+    expect(selfTestPage).not.toContain('action.coal-power')
+    expect(selfTestPage).toContain('const version = 2')
+    expect(selfTestPage).not.toContain('const version = 1')
+
+    // system.ack 只是初始化已受理，同一 replyTo 随后必须允许提交首个稳定 view.changed；
+    // 将它提前写入已完成集合会把沙盘首帧误报为迟到结果并永久禁用测试按钮。
+    const systemAcknowledgementHandler = selfTestPage.match(
+      /if \(message\.type === 'system\.ack'[\s\S]*?(?=\n\s*if \(\(message\.type === 'system\.ack')/,
+    )?.[0]
+    expect(systemAcknowledgementHandler).toBeDefined()
+    expect(systemAcknowledgementHandler).not.toContain('completedMessageIds.add')
   })
 
   it('平台构建默认不交付自测页，内部验证必须显式启用', () => {
@@ -221,7 +230,8 @@ describe('燃气总览发布契约', () => {
   it('默认 Unity 基线与当前可发布协议基线保持一致', () => {
     // 此断言只锁定发布器的默认标识，避免已归档目录变更后无参数构建仍指向不存在的旧基线。
     // 目录可读性、标识一致性和命令能力由真实发布流程的 Unity 协议门禁负责校验，不在单元测试依赖构建产物。
-    expect(readReleaseConfiguration([]).unityReleaseId).toBe('power-scenes-unity-local-20260820-003')
+    // 默认发布输入已切换到通过结构版本8、关键环节命令版本2门禁的 Unity 网页图形基线。
+    expect(readReleaseConfiguration([]).unityReleaseId).toBe('three-layer-unity-demo-20260831-2300')
   })
 
   it('合作方联调包显式区分监听地址与三层公开来源', () => {
@@ -275,6 +285,15 @@ describe('燃气总览发布契约', () => {
       '--public-origin', 'http://visual.example.com', '--platform-parent-origin', 'http://platform.example.com',
       '--unity-parent-origin', 'http://visual.example.com', '--unity-entry-url', 'http://visual.example.com/unity/index.html',
     ])).toThrow('不得只监听本机回环地址')
+  })
+
+  it('已废弃的关键环节网页播放控件开关不得继续用于打包', () => {
+    // 播放能力仍保留在 Unity 与受控协议中；发布器拒绝旧网页按钮开关，避免历史联调命令静默生成不同界面。
+    expect(() => readReleaseConfiguration([
+      '--package-type', 'partner-integration',
+      '--listen-host', '0.0.0.0',
+      '--include-playback-controls', 'true',
+    ])).toThrow('包含未知选项')
   })
 
   it('生产环境示例不会把燃气结构清单重新指向平台接口', () => {

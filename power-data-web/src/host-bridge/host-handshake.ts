@@ -3,6 +3,7 @@ import type { HostBridge } from '@/host-bridge/host-bridge'
 import {
   HOST_COMMAND_TYPES,
   HOST_EVENT_TYPES,
+  HOST_PROTOCOL_VERSION,
   type HostCommandMessage,
   type HostCommandType,
   type HostEventType,
@@ -10,7 +11,10 @@ import {
   type HostVisualizationContext,
 } from '@/host-bridge/host-protocol'
 
-/** 初始化握手最多等待 15 秒；超时只进入可见等待态，仍允许后续首次合法初始化。 */
+/**
+ * 外层就绪后最多等待父页面 15 秒发送初始化；该短门限不包含 Unity 启动时间。
+ * 初始化命令一旦到达便取消本计时器，后续 Unity 与首个稳定视图由独立 120 秒屏障负责。
+ */
 export const HOST_INITIALIZATION_TIMEOUT_MS = 15_000
 
 /** 握手状态只描述外层协议，不混入 Unity、画布或场景切换内部状态。 */
@@ -61,7 +65,7 @@ export class HostHandshake {
     private readonly timer: HandshakeTimer = globalThis,
   ) {}
 
-  /** 发送 ready 并开始 15 秒等待；重复调用不会重复发送或叠加计时器。 */
+  /** 发送 ready 并开始 15 秒等待父页面初始化；重复调用不会重复发送或叠加计时器。 */
   public start(): void {
     if (this.status !== 'idle') return
     this.transitionTo('awaiting-init')
@@ -95,7 +99,17 @@ export class HostHandshake {
   public async handle(command: HostCommandMessage): Promise<boolean> {
     if (this.status === 'disposed') return false
     if (command.type !== 'system.init') return this.isInitialized()
-    if (this.status === 'initializing') return false
+    if (this.status === 'initializing') {
+      /*
+       * 初始化等待 Unity 时只允许一条在途命令。后续 init 不覆盖、不排队，也不能静默丢弃；
+       * 立即返回关联失败确认和系统错误，让平台能够保留首条事务并明确处理重复请求。
+       */
+      this.reportInitializationFailure(command.messageId, {
+        success: false,
+        error: createHandshakeError('protocol.capacity.exceeded', '已有初始化请求正在处理，当前会话只允许一条初始化命令在途。', true),
+      })
+      return false
+    }
 
     if (command.payload.expectedManifestVersion && command.payload.expectedManifestVersion !== this.metadata.manifestVersion) {
       this.reportInitializationFailure(command.messageId, {
@@ -161,7 +175,7 @@ export class HostHandshake {
     const context = this.bridge.getContext()
     return {
       channel: 'power-scene-topology-shell',
-      version: 1,
+      version: HOST_PROTOCOL_VERSION,
       instanceId: context.instanceId,
       sessionId: context.sessionId,
       messageId: `shell-${type.replaceAll('.', '-')}-${this.messageSequence}`,
@@ -172,7 +186,7 @@ export class HostHandshake {
     } as Extract<import('@/host-bridge/host-protocol').HostEventMessage, { type: TType }>
   }
 
-  /** 启动失败或初始化失败后重新进入一个受上限的 15 秒等待周期。 */
+  /** 启动失败或初始化失败后重新进入一个受上限的 15 秒父页面等待周期。 */
   private restartInitializationTimer(): void {
     this.clearInitializationTimer()
     this.initializationTimer = this.timer.setTimeout(() => {

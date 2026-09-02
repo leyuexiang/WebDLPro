@@ -12,8 +12,8 @@ export class WorkflowTriggerTransactionRouter {
   public constructor(
     private readonly registry: TopologyRegistry,
     private readonly coordinator: VisualizationCoordinatorFacade,
-    private readonly sameScene: Pick<WorkflowTriggerTransactionHandler, 'submit'>,
-    private readonly crossScene: Pick<WorkflowTriggerTransactionHandler, 'submit'>,
+    private readonly sameScene: Pick<WorkflowTriggerTransactionHandler, 'submit'> & Partial<Pick<WorkflowTriggerTransactionHandler, 'cancelTimedOutCommand'>>,
+    private readonly crossScene: Pick<WorkflowTriggerTransactionHandler, 'submit'> & Partial<Pick<WorkflowTriggerTransactionHandler, 'cancelTimedOutCommand'>>,
   ) {}
 
   /** 当前没有稳定上下文或动作未登记时交给同场景处理器返回统一受控错误，不在路由层复制错误构造。 */
@@ -22,5 +22,14 @@ export class WorkflowTriggerTransactionRouter {
     const currentSceneId = this.coordinator.getSnapshot().stableContext?.sceneId
     if (!action || !currentSceneId || action.targetSceneId === currentSceneId) return this.sameScene.submit(command)
     return this.crossScene.submit(command)
+  }
+
+  /**
+   * 超时清理必须沿着与 submit 相同的两条处理器路径传播。
+   * 两个处理器内部均按关联标识做常数时间查找；向二者广播不会根据动作标题或当前场景猜测原事务去向。
+   */
+  public cancelTimedOutCommand(correlationId: string): void {
+    this.sameScene.cancelTimedOutCommand?.(correlationId)
+    this.crossScene.cancelTimedOutCommand?.(correlationId)
   }
 }

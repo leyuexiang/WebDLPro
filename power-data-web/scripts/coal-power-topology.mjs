@@ -5,7 +5,6 @@
  * 来源节点、连线标识，不复制节点事实。该模块不保存平台设备编号，也不根据 Unity
  * 对象名称、坐标或中文标题推导三维映射。
  */
-import { createCoalPowerDrilldowns } from './topology-drilldowns.mjs'
 
 /**
  * 燃煤总图的五个展示层级。层级颜色和坐标只属于二维呈现，不代表设备权限或数据流向。
@@ -104,11 +103,13 @@ const coalPowerEdges = Object.freeze([
   Object.freeze({ edgeId: 'route.coal.sis-to-esd', fromNodeId: 'system.sis-safety-controller', toNodeId: 'asset.esd-emergency-actuator', title: 'SIS 安全仪表控制器至 ESD 紧急停车执行器', lineColor: coalPowerEdgeColors.orange, lineStyle: 'solid' }),
 ])
 
-/** 资料已确认的二维节点到 Unity 三维节点映射；SIS 没有独立模型，必须省略。 */
+/** 当前只发布已确认一图元一模型的五对二维节点与 Unity 场景节点映射。 */
 const coalPowerSceneNodeMappings = Object.freeze([
+  Object.freeze({ nodeId: 'asset.coal-mill-actuator', sceneNodeId: 'node.coal-feeder' }),
   Object.freeze({ nodeId: 'system.boiler-dcs', sceneNodeId: 'node.coal-boiler' }),
   Object.freeze({ nodeId: 'system.steam-turbine-dcs', sceneNodeId: 'node.coal-steam-turbine' }),
   Object.freeze({ nodeId: 'system.generator-excitation-controller', sceneNodeId: 'node.coal-generator' }),
+  Object.freeze({ nodeId: 'system.coal-handling-ash-plc', sceneNodeId: 'node.coal-precipitator' }),
 ])
 
 /**
@@ -151,90 +152,20 @@ const coalPowerFocusRegions = Object.freeze([
   }),
 ])
 
-/** Unity 属性面板中已经保存并通过场景测试的流程步骤。 */
+/**
+ * 新版燃煤只保留总览；燃烧、汽水循环和发电输出等旧流程子图已按产品决策下线。
+ * 三维仍使用总览步骤完成初始化与复位，不再暴露旧子图步骤作为外部动作。
+ */
 const coalPowerProcessSteps = Object.freeze([
   Object.freeze({ processId: 'coal-power-generation', stepId: 'overview' }),
-  Object.freeze({ processId: 'coal-power-generation', stepId: 'combustion' }),
-  Object.freeze({ processId: 'coal-power-generation', stepId: 'water-steam-cycle' }),
-  Object.freeze({ processId: 'coal-power-generation', stepId: 'power-output' }),
 ])
 
 /**
- * 三个关键流程只保存资料规定的节点和边标识；过滤视图不声明孤立节点豁免，因为每个可见节点
- * 都至少连接一条同图边。顺序与资料子表一致，供画布稳定投影和契约测试复用。
- */
-const coalPowerFlowViews = Object.freeze([
-  Object.freeze({
-    topologyId: 'topology.coal-power.combustion',
-    title: '燃烧系统',
-    visibleNodeIds: Object.freeze([
-      'system.unit-operator-station', 'system.monitor-core-switch-primary', 'system.monitor-core-switch-standby',
-      'system.auxiliary-operator-station', 'system.sis-performance-station', 'system.boiler-dcs',
-      'system.sis-safety-controller', 'asset.coal-mill-actuator', 'asset.induced-draft-fan-vfd',
-      'asset.furnace-pressure-transmitter', 'asset.esd-emergency-actuator',
-    ]),
-    visibleEdgeIds: Object.freeze([
-      'route.coal.monitor-primary-to-operator', 'route.coal.monitor-primary-to-sis-performance',
-      'route.coal.monitor-primary-to-standby', 'route.coal.monitor-standby-to-auxiliary-operator',
-      'route.coal.monitor-primary-to-boiler-dcs', 'route.coal.monitor-standby-to-sis',
-      'route.coal.boiler-dcs-to-coal-mill', 'route.coal.boiler-dcs-to-fan-vfd',
-      'route.coal.boiler-dcs-to-furnace-pressure', 'route.coal.sis-to-esd',
-    ]),
-  }),
-  Object.freeze({
-    topologyId: 'topology.coal-power.water-steam-cycle',
-    title: '汽水循环系统',
-    visibleNodeIds: Object.freeze([
-      'system.unit-operator-station', 'system.monitor-core-switch-primary', 'system.monitor-core-switch-standby',
-      'system.auxiliary-operator-station', 'system.sis-performance-station', 'system.steam-turbine-dcs',
-      'system.sis-safety-controller', 'asset.steam-turbine-valve-actuator', 'asset.esd-emergency-actuator',
-    ]),
-    visibleEdgeIds: Object.freeze([
-      'route.coal.monitor-primary-to-operator', 'route.coal.monitor-primary-to-sis-performance',
-      'route.coal.monitor-primary-to-standby', 'route.coal.monitor-standby-to-auxiliary-operator',
-      'route.coal.monitor-primary-to-steam-turbine-dcs', 'route.coal.monitor-standby-to-sis',
-      'route.coal.steam-turbine-dcs-to-valve', 'route.coal.sis-to-esd',
-    ]),
-  }),
-  Object.freeze({
-    topologyId: 'topology.coal-power.power-output',
-    title: '发电输出',
-    visibleNodeIds: Object.freeze([
-      'system.unit-operator-station', 'system.monitor-core-switch-primary', 'system.monitor-core-switch-standby',
-      'system.auxiliary-operator-station', 'system.sis-performance-station', 'system.steam-turbine-dcs',
-      'system.generator-excitation-controller', 'system.sis-safety-controller', 'asset.steam-turbine-valve-actuator',
-      'asset.generator-protection-device', 'asset.esd-emergency-actuator',
-    ]),
-    visibleEdgeIds: Object.freeze([
-      'route.coal.monitor-primary-to-operator', 'route.coal.monitor-primary-to-sis-performance',
-      'route.coal.monitor-primary-to-standby', 'route.coal.monitor-standby-to-auxiliary-operator',
-      'route.coal.monitor-primary-to-steam-turbine-dcs', 'route.coal.monitor-primary-to-generator-excitation',
-      'route.coal.monitor-standby-to-sis', 'route.coal.steam-turbine-dcs-to-valve',
-      'route.coal.generator-excitation-to-protection', 'route.coal.sis-to-esd',
-    ]),
-  }),
-])
-
-/** 模块加载时建立一次 O(n) 索引，所有流程过滤都复用它，避免每次切换重复扫描 27 个节点。 */
-const coalPowerNodesById = new Map(coalPowerNodes.map((node) => [node.nodeId, node]))
-
-/** 对来源总图索引进行 O(1) 查找，再为每个过滤视图投影坐标。 */
-function createCoalPowerLayoutOverrides(visibleNodeIds) {
-  return visibleNodeIds.map((nodeId) => {
-    const node = coalPowerNodesById.get(nodeId)
-    if (!node) throw new Error(`燃煤流程引用了总图不存在的节点：${nodeId}`)
-    return { nodeId, x: node.x, y: node.y }
-  })
-}
-
-/**
- * 将燃煤唯一来源总图和三个过滤视图转换为远程结构清单格式。
+ * 将燃煤唯一来源总图转换为远程结构清单格式。
  * 来源节点统一以 offline（离线）作为初始状态，平台后续只按 nodeId 推送状态快照。
  */
 export function createCoalPowerTopologies(manifestVersion) {
   const sceneNodeIdByNodeId = new Map(coalPowerSceneNodeMappings.map((mapping) => [mapping.nodeId, mapping.sceneNodeId]))
-  // 入口引用只由同版本正式说明资源反向建立一次，禁止按中文标题或上下级连线猜测可下钻节点。
-  const drilldownBySourceNodeId = new Map(createCoalPowerDrilldowns(manifestVersion).map((content) => [content.sourceNodeId, content.contentKey]))
   const overview = {
     topologyId: 'topology.coal-power.overview',
     sceneId: 'coal-power',
@@ -244,9 +175,6 @@ export function createCoalPowerTopologies(manifestVersion) {
     nodes: coalPowerNodes.map((node) => ({
       ...node,
       ...(sceneNodeIdByNodeId.has(node.nodeId) ? { sceneNodeId: sceneNodeIdByNodeId.get(node.nodeId) } : {}),
-      ...(drilldownBySourceNodeId.has(node.nodeId) ? {
-        drilldown: { enabled: true, contentKey: drilldownBySourceNodeId.get(node.nodeId), trigger: 'button' },
-      } : {}),
       deviceStatus: 'offline',
       doubleClickBehavior: 'emit-node',
     })),
@@ -258,37 +186,20 @@ export function createCoalPowerTopologies(manifestVersion) {
     })),
   }
 
-  const flowTopologies = coalPowerFlowViews.map((view) => ({
-    topologyId: view.topologyId,
-    sceneId: 'coal-power',
-    title: view.title,
-    configVersion: manifestVersion,
-    // 过滤视图不复制节点、边或层级；运行时由 sourceTopologyId（来源总图）派生实际图元。
-    nodes: [],
-    edges: [],
-    filter: {
-      sourceTopologyId: overview.topologyId,
-      visibleNodeIds: [...view.visibleNodeIds],
-      visibleEdgeIds: [...view.visibleEdgeIds],
-      nodeLayoutOverrides: createCoalPowerLayoutOverrides(view.visibleNodeIds),
-    },
-  }))
-
-  return [overview, ...flowTopologies]
+  // 新 JSON 图纸完整承载总览，不再生成旧版流程过滤拓扑或其坐标投影。
+  return [overview]
 }
 
-/** 为燃煤四个受控流程动作生成同版本配置；外部只需使用 actionId。 */
+/** 新版只公开总览动作；流程子图和下钻能力均不再进入外部白名单。 */
 export function createCoalPowerActions(manifestVersion) {
   const actions = [
     ['overview', '总览', 'topology.coal-power.overview'],
-    ['combustion', '燃烧系统', 'topology.coal-power.combustion'],
-    ['water-steam-cycle', '汽水循环系统', 'topology.coal-power.water-steam-cycle'],
-    ['power-output', '发电输出', 'topology.coal-power.power-output'],
   ]
   return actions.map(([stepId, title, targetTopologyId]) => ({
     actionId: `action.coal-power.${stepId}`,
     title: `进入燃煤${title}`,
     targetSceneId: 'coal-power',
+    targetViewMode: 'business',
     targetTopologyId,
     allowedParameters: [],
     unityAction: { type: 'enterProcessStep', processId: 'coal-power-generation', stepId, defaultUnitId: 'all', isolate: true },
@@ -300,7 +211,6 @@ export function createCoalPowerActions(manifestVersion) {
 export {
   coalPowerEdgeColors,
   coalPowerEdges,
-  coalPowerFlowViews,
   coalPowerFocusRegions,
   coalPowerLayers,
   coalPowerNodes,

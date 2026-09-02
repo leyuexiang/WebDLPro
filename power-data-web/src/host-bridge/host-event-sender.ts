@@ -2,6 +2,8 @@ import type { TransitionId } from '@/config/scene-topology/identifiers'
 import type { TopologyNodeDoubleClickIntent } from '@/modules/visual/topology/topology-node-interaction'
 import {
   isBusinessHostVisualizationContext,
+  isProcessDetailHostVisualizationContext,
+  HOST_PROTOCOL_VERSION,
   isHostEventMessage,
   type CommandResultPayload,
   type HostEventMessage,
@@ -106,13 +108,24 @@ export class HostEventSender {
 
     const payload = isBusinessHostVisualizationContext(context)
       ? {
+          viewMode: context.viewMode,
           sceneId: context.sceneId,
           topologyId: context.topologyId,
           actionId: context.actionId,
           contextRevision: context.contextRevision,
           ...(transitionId !== undefined ? { transitionId } : {}),
         }
-      : {
+      : isProcessDetailHostVisualizationContext(context)
+        ? {
+          viewMode: context.viewMode,
+          sceneId: context.sceneId,
+          processDetailId: context.processDetailId,
+          actionId: context.actionId,
+          contextRevision: context.contextRevision,
+          ...(transitionId !== undefined ? { transitionId } : {}),
+        }
+        : {
+          viewMode: context.viewMode,
           sceneId: context.sceneId,
           actionId: context.actionId,
           contextRevision: context.contextRevision,
@@ -154,13 +167,24 @@ export class HostEventSender {
   public sendStateSnapshot(replyTo: string, payload: StateSnapshotPayload): boolean {
     const context = isBusinessHostVisualizationContext(payload.context)
       ? {
+          viewMode: payload.context.viewMode,
           sceneId: payload.context.sceneId,
           topologyId: payload.context.topologyId,
           actionId: payload.context.actionId,
           contextRevision: payload.context.contextRevision,
           status: payload.context.status,
         }
-      : {
+      : isProcessDetailHostVisualizationContext(payload.context)
+        ? {
+          viewMode: payload.context.viewMode,
+          sceneId: payload.context.sceneId,
+          processDetailId: payload.context.processDetailId,
+          actionId: payload.context.actionId,
+          contextRevision: payload.context.contextRevision,
+          status: payload.context.status,
+        }
+        : {
+          viewMode: payload.context.viewMode,
           sceneId: payload.context.sceneId,
           actionId: payload.context.actionId,
           contextRevision: payload.context.contextRevision,
@@ -197,7 +221,7 @@ export class HostEventSender {
     const context = this.transport.getContext()
     const event = {
       channel: 'power-scene-topology-shell',
-      version: 1,
+      version: HOST_PROTOCOL_VERSION,
       instanceId: context.instanceId,
       sessionId: context.sessionId,
       messageId,

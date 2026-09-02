@@ -54,6 +54,7 @@ public sealed class WaiKeHeBingGasFlowEffectController : MonoBehaviour
     [SerializeField, Range(0f, 0.2f)] private float _sectionPadding = 0.08f;
 
     private bool _isPlaying;
+    private bool _playbackAllowed = true;
     private ParticleSystem.Particle[] _particleBuffer;
 
     /// <summary>
@@ -107,6 +108,12 @@ public sealed class WaiKeHeBingGasFlowEffectController : MonoBehaviour
     /// </summary>
     public void Play()
     {
+        if (!_playbackAllowed)
+        {
+            Stop();
+            return;
+        }
+
         _isPlaying = true;
         SetParticlePlayback(true);
     }
@@ -118,6 +125,33 @@ public sealed class WaiKeHeBingGasFlowEffectController : MonoBehaviour
     {
         _isPlaying = false;
         SetParticlePlayback(false);
+    }
+
+    /// <summary>
+    /// 设置是否允许按序列化自动播放基线运行。隐藏实例可先写入该许可，激活时不会产生一帧粒子闪现；
+    /// 故障解除后仅恢复原本配置为自动播放的粒子系统，重复调用保持幂等。
+    /// </summary>
+    public void SetPlaybackAllowed(bool allowed)
+    {
+        _playbackAllowed = allowed;
+        if (!isActiveAndEnabled)
+        {
+            _isPlaying = _playOnEnable && _playbackAllowed;
+            if (!allowed)
+            {
+                SetParticlePlayback(false);
+            }
+            return;
+        }
+
+        if (_playOnEnable && allowed)
+        {
+            Play();
+        }
+        else
+        {
+            Stop();
+        }
     }
 
     /// <summary>
@@ -136,7 +170,7 @@ public sealed class WaiKeHeBingGasFlowEffectController : MonoBehaviour
 
     private void OnEnable()
     {
-        _isPlaying = _playOnEnable;
+        _isPlaying = _playOnEnable && _playbackAllowed;
         SetParticlePlayback(_isPlaying);
     }
 
@@ -152,6 +186,9 @@ public sealed class WaiKeHeBingGasFlowEffectController : MonoBehaviour
 
     private void LateUpdate()
     {
+        if (!_isPlaying)
+            return;
+
         ConstrainCrossSection(
             _blueInternalFlowConstraint,
             _blueSectionCenter,

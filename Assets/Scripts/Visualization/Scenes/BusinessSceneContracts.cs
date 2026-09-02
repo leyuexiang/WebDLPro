@@ -21,7 +21,9 @@ namespace WebDLPro.Unity.SceneRuntime
         SetNodeVisibility = 1 << 7,
         ClearSelection = 1 << 8,
         // 清除设备动态状态与 Normal 四态语义不同：前者恢复模型登记时的基础材质颜色，后者是平台明确下发的正常态。
-        ClearNodeVisualState = 1 << 9
+        ClearNodeVisualState = 1 << 9,
+        // 命名镜头点只移动相机，不触发流程、模型显隐、描边或状态变化。
+        MoveCameraToPose = 1 << 10
     }
 
     /// <summary>设备视觉状态固定为四态，禁止场景控制器自行扩展不可互通的字符串枚举。</summary>

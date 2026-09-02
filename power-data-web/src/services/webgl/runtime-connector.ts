@@ -4,6 +4,13 @@ import {
   WEBGL_PROTOCOL_CHANNEL,
   isWebglEventType,
   isWebglEnterProcessStepPayload,
+  isWebglMoveCameraToPosePayload,
+  isWebglEnterProcessDetailPayload,
+  isWebglPrepareProcessDetailPayload,
+  isWebglCommitProcessDetailPayload,
+  isWebglAbortProcessDetailPayload,
+  isWebglExitProcessDetailPayload,
+  isWebglSetProcessDetailPlaybackPayload,
   isWebglMessageEnvelope,
   isWebglObjectSelectedPayload,
   isWebglSelectionClearedPayload,
@@ -75,7 +82,9 @@ interface PendingCommand {
 
 const COMMAND_TIMEOUT_MS = 10_000
 const SCENE_SWITCH_RESULT_TIMEOUT_MS = 30_000
-const HANDSHAKE_TIMEOUT_MS = 15_000
+// Unity 网页图形包可能需要较长时间下载、解压和创建图形上下文，因此内层握手独立使用120秒；
+// 该时限不属于外层 system.ready（系统就绪）阶段，也不能延后外层握手。
+export const WEBGL_HANDSHAKE_TIMEOUT_MS = 120_000
 const MAX_PENDING_COMMANDS = 64
 const MAX_REJECTION_LOGS = 50
 /**
@@ -85,6 +94,15 @@ const MAX_REJECTION_LOGS = 50
 const IDEMPOTENT_COMMANDS = new Set<WebglCommandType>([
   'init',
   'resize',
+  // 两阶段命令均由 Unity 使用 transitionId（事务标识）幂等；重发仍沿用同一消息标识。
+  'prepareProcessDetail',
+  'commitProcessDetail',
+  'abortProcessDetail',
+  // 兼容进入和退出仍保留，供旧构建与迟到活动实例清理使用。
+  'enterProcessDetail',
+  'exitProcessDetail',
+  // 播放命令按目标布尔状态幂等，回执丢失时可沿用同一消息标识安全重发。
+  'setProcessDetailPlayback',
   'resetScene',
   'focusNode',
   'clearSelection',
@@ -125,7 +143,7 @@ export class WebglRuntimeConnector {
   }
 
   /**
-   * 绑定当前 iframe 的 contentWindow（内容窗口）。首次绑定才开始 15 秒握手时限；
+   * 绑定当前 iframe 的 contentWindow（内容窗口）。首次绑定才开始 120 秒握手时限；
    * iframe 从 about:blank（初始空白页）导航到 Unity 页面后，宿主会在 load（加载完成）事件中再次调用本方法。
    * 重新绑定只替换严格校验所使用的窗口代理，不延长既有握手期限，既避免初始空白页的代理与实际 Unity
    * 页面消息来源不一致，也避免异常页面借由反复导航无限延长连接等待时间。
@@ -141,7 +159,7 @@ export class WebglRuntimeConnector {
       this.clearHandshakeTimeout()
       this.handshakeTimeoutHandle = setTimeout(() => {
         this.fail('网页图形运行时握手超时。')
-      }, HANDSHAKE_TIMEOUT_MS)
+      }, WEBGL_HANDSHAKE_TIMEOUT_MS)
       return
     }
 
@@ -648,6 +666,20 @@ function isValidWebglCommandPayload(command: WebglCommandType, payload: unknown)
       return isWebglSwitchScenePayload(payload)
     case 'enterProcessStep':
       return isWebglEnterProcessStepPayload(payload)
+    case 'moveCameraToPose':
+      return isWebglMoveCameraToPosePayload(payload)
+    case 'prepareProcessDetail':
+      return isWebglPrepareProcessDetailPayload(payload)
+    case 'commitProcessDetail':
+      return isWebglCommitProcessDetailPayload(payload)
+    case 'abortProcessDetail':
+      return isWebglAbortProcessDetailPayload(payload)
+    case 'enterProcessDetail':
+      return isWebglEnterProcessDetailPayload(payload)
+    case 'exitProcessDetail':
+      return isWebglExitProcessDetailPayload(payload)
+    case 'setProcessDetailPlayback':
+      return isWebglSetProcessDetailPlaybackPayload(payload)
     case 'focusNode':
       return isWebglFocusNodePayload(payload)
     case 'setNodeVisualState':
@@ -670,6 +702,20 @@ function getWebglCommandPayloadError(command: WebglCommandType): string {
       return '场景切换命令缺少合法场景标识、事务标识或映射版本。'
     case 'enterProcessStep':
       return '流程命令缺少合法流程、步骤、机组或隔离标识。'
+    case 'moveCameraToPose':
+      return '镜头定位命令缺少合法镜头点标识。'
+    case 'prepareProcessDetail':
+      return '关键环节准备命令缺少合法场景、流程、步骤、环节或事务标识。'
+    case 'commitProcessDetail':
+      return '关键环节提交命令缺少合法场景、环节或事务标识。'
+    case 'abortProcessDetail':
+      return '关键环节取消命令缺少合法场景、环节或事务标识。'
+    case 'enterProcessDetail':
+      return '关键环节进入命令缺少合法场景、流程、步骤或环节标识。'
+    case 'exitProcessDetail':
+      return '关键环节退出命令缺少合法场景或环节标识。'
+    case 'setProcessDetailPlayback':
+      return '关键环节播放命令缺少合法场景、环节标识或播放开关。'
     case 'focusNode':
       return '聚焦命令缺少合法三维节点标识、选择标识或隔离开关。'
     case 'setNodeVisualState':

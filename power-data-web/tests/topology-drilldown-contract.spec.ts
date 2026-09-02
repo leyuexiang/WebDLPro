@@ -4,137 +4,72 @@ import {
   createConfiguredPowerScenesManifest,
   createGasOnlyManifest,
 } from '../scripts/build-gas-power-smoke-release.mjs'
-import { toNodeId, toTopologyId } from '../src/config/scene-topology/identifiers'
 import { TopologyRegistry } from '../src/config/scene-topology/topology-registry'
 import { validateSceneTopologyManifest } from '../src/config/scene-topology/validator'
 
-const expectedGasContents = {
-  'gas.mark-vie': ['inlet-duct', 2],
-  'gas.hrsg-dcs': ['hrsg', 1],
-  'gas.steam-turbine': ['steam-turbine', 1],
-  'gas.generator-excitation': ['generator', 1],
-  'gas.auxiliary-plc': ['auxiliary-plc', 1],
-  'gas.safety-sil': ['grid-output', 1],
-} as const
-
-const expectedCoalContents = {
-  'coal.boiler-dcs': ['system.boiler-dcs', 3],
-  'coal.steam-turbine-dcs': ['system.steam-turbine-dcs', 1],
-  'coal.generator-excitation': ['system.generator-excitation-controller', 1],
-  'coal.desulfurization-plc': ['system.desulfurization-plc', 1],
-  'coal.denitrification-plc': ['system.denitrification-plc', 1],
-  'coal.coal-ash-plc': ['system.coal-handling-ash-plc', 1],
-  'coal.sis': ['system.sis-safety-controller', 1],
-} as const
-
-/** 下钻契约直接核对发布器产出的正式清单，避免测试夹具和燃气/燃煤业务源分叉。 */
-describe('燃气与燃煤拓扑下钻发布契约', () => {
-  it('登记十三个入口和十六条真实分支，单分支只声明三个语义节点', async () => {
+/**
+ * 本文件保留原测试文件名，避免外部测试脚本失效；但契约已由“下钻可用”调整为“下钻彻底不发布”。
+ * 不能仅靠页面不显示入口，因为清单中的历史下钻内容仍可能被注册表或外部消息直接访问。
+ */
+describe('燃气与燃煤拓扑无下钻发布契约', () => {
+  it('两个专项清单只发布总览，且不携带下钻内容或节点下钻引用', async () => {
     const [gasManifest, coalManifest] = await Promise.all([
-      createGasOnlyManifest('drilldown-gas-contract'),
-      createCoalPowerManifest('drilldown-coal-contract'),
+      createGasOnlyManifest('no-drilldown-gas-contract'),
+      createCoalPowerManifest('no-drilldown-coal-contract'),
     ])
 
-    for (const [manifest, sceneId, expected] of [
-      [gasManifest, 'gas-power', expectedGasContents],
-      [coalManifest, 'coal-power', expectedCoalContents],
+    for (const [manifest, overviewTopologyId, expectedActionIds] of [
+      [gasManifest, 'topology.gas-power.overview', ['action.gas-power.overview', 'action.gas-power.gas-turbine']],
+      [coalManifest, 'topology.coal-power.overview', ['action.coal-power.overview']],
     ] as const) {
-      const contents = manifest.drilldowns ?? []
-      expect(contents.map((content) => content.contentKey)).toEqual(Object.keys(expected))
-      const overview = manifest.topologies.find((topology) => topology.sceneId === sceneId && topology.topologyId.endsWith('.overview'))
-      const referenceByNodeId = new Map(overview?.nodes.flatMap((node) => node.drilldown
-        ? [[node.nodeId, node.drilldown.contentKey] as const]
-        : []))
-
-      for (const [contentKey, [sourceNodeId, branchCount]] of Object.entries(expected)) {
-        const content = contents.find((candidate) => candidate.contentKey === contentKey)
-        expect(content?.sourceNodeId).toBe(sourceNodeId)
-        expect(content?.nodes.filter((node) => node.kind === 'logic')).toHaveLength(branchCount)
-        expect(content?.nodes.filter((node) => node.kind === 'boundary')).toHaveLength(branchCount)
-        expect(content?.edges).toHaveLength(branchCount * 2)
-        // 每个说明节点都必须携带正式图标登记键，避免回退为纯文字节点或动态图片路径。
-        expect(content?.nodes.every((node) => typeof node.iconKey === 'string' && node.iconKey.length > 0)).toBe(true)
-        expect(referenceByNodeId.get(sourceNodeId)).toBe(contentKey)
-        if (branchCount === 1) {
-          expect(content?.nodes).toHaveLength(3)
-          expect(content?.duplicateSingleBranch).toBe(true)
-        } else {
-          expect(content?.duplicateSingleBranch).toBeUndefined()
-        }
-      }
-
+      /** 空数组明确表达能力已下线，并让注册表与外部消费者保持一致。 */
+      expect(manifest.drilldowns).toEqual([])
+      const sceneId = overviewTopologyId.startsWith('topology.gas-power') ? 'gas-power' : 'coal-power'
+      const targetTopologies = manifest.topologies.filter((topology) => topology.sceneId === sceneId)
+      expect(targetTopologies).toHaveLength(1)
+      expect(targetTopologies[0]?.topologyId).toBe(overviewTopologyId)
+      expect(targetTopologies[0]?.filter).toBeUndefined()
+      expect(targetTopologies[0]?.nodes.every((node) => node.drilldown === undefined)).toBe(true)
+      expect(manifest.actions.map((action) => action.actionId)).toEqual(expectedActionIds)
       expect(validateSceneTopologyManifest(manifest)).toEqual([])
     }
-
-    // 资料明确没有为电除尘器建立现场节点关系，正式内容不得靠名称或下钻节点清单补造它。
-    expect(JSON.stringify([...(gasManifest.drilldowns ?? []), ...(coalManifest.drilldowns ?? [])])).not.toContain('电除尘器')
   })
 
-  it('关键环节投影复用总览的同一内容键，说明节点不进入正式拓扑和三维映射', async () => {
-    const manifest = await createConfiguredPowerScenesManifest('drilldown-registry-contract')
+  it('联合清单不再注册历史下钻键，也不发布流程子图及相关动作', async () => {
+    const manifest = await createConfiguredPowerScenesManifest('no-drilldown-registry-contract')
     const result = TopologyRegistry.create(manifest)
     expect(result.status).toBe('ready')
     if (result.status !== 'ready') return
 
-    const gasOverview = result.registry.getTopology(toTopologyId('topology.gas-power.overview'))
-    const gasFlow = result.registry.getTopology(toTopologyId('topology.gas-power.gas-turbine'))
-    const coalOverview = result.registry.getTopology(toTopologyId('topology.coal-power.overview'))
-    const coalFlow = result.registry.getTopology(toTopologyId('topology.coal-power.combustion'))
-    expect(gasFlow?.nodes.find((node) => node.nodeId === 'inlet-duct')?.drilldown)
-      .toEqual(gasOverview?.nodes.find((node) => node.nodeId === 'inlet-duct')?.drilldown)
-    expect(coalFlow?.nodes.find((node) => node.nodeId === 'system.boiler-dcs')?.drilldown)
-      .toEqual(coalOverview?.nodes.find((node) => node.nodeId === 'system.boiler-dcs')?.drilldown)
+    expect(manifest.drilldowns).toEqual([])
+    expect(manifest.topologies
+      .filter((topology) => topology.sceneId === 'gas-power' || topology.sceneId === 'coal-power')
+      .map((topology) => topology.topologyId)).toEqual([
+      'topology.gas-power.overview',
+      'topology.coal-power.overview',
+    ])
+    expect(manifest.topologies.every((topology) => topology.filter === undefined)).toBe(true)
+    expect(manifest.actions.map((action) => action.actionId)).toEqual([
+      'action.gas-power.overview',
+      'action.gas-power.gas-turbine',
+      'action.coal-power.overview',
+    ])
 
-    const lookup = result.registry.getDrilldownContent('gas.mark-vie', manifest.manifestVersion)
-    expect(lookup.status).toBe('ready')
-    expect(result.registry.getDrilldownContent('gas.mark-vie', 'outdated-version').status).toBe('version-mismatch')
-    expect(result.registry.getDrilldownContent('gas.unknown', manifest.manifestVersion).status).toBe('missing')
-    // 固定九场景总览加上燃气、燃煤各三个关键环节，共十五张正式可切换拓扑；说明内容不增加该数量。
-    expect(manifest.topologies).toHaveLength(15)
-    expect(manifest.actions).toHaveLength(8)
+    // 历史键只能返回缺失，不能为了兼容旧页面保留隐藏说明内容。
+    expect(result.registry.getDrilldownContent('gas.mark-vie', manifest.manifestVersion).status).toBe('missing')
+    expect(result.registry.getDrilldownContent('coal.boiler-dcs', manifest.manifestVersion).status).toBe('missing')
 
-    const formalNodeIds = new Set(manifest.topologies.flatMap((topology) => topology.nodes.map((node) => String(node.nodeId))))
-    const sceneNodeIds = new Set(manifest.unitySceneMappings.flatMap((mapping) => mapping.sceneNodeIds.map(String)))
-    for (const content of manifest.drilldowns ?? []) {
-      for (const node of content.nodes) {
-        expect(formalNodeIds.has(node.id)).toBe(false)
-        expect(sceneNodeIds.has(node.id)).toBe(false)
-        expect(node).not.toHaveProperty('deviceStatus')
-        expect(node).not.toHaveProperty('sceneNodeId')
-      }
-      expect(result.registry.getNodeStateProjection(toNodeId(content.nodes[0]!.id))).toBeUndefined()
-    }
-  })
-
-  it('拒绝旧版本、断裂连线、多个来源节点和说明节点业务字段泄漏', async () => {
-    const manifest = await createGasOnlyManifest('drilldown-invalid-contract')
-
-    const oldVersion = structuredClone(manifest)
-    oldVersion.drilldowns[0].version = 'old-version'
-    expect(validateSceneTopologyManifest(oldVersion).map((issue) => issue.code)).toContain('drilldown.version')
-
-    const brokenEdge = structuredClone(manifest)
-    brokenEdge.drilldowns[0].edges[0].toId = 'logic.missing'
-    expect(validateSceneTopologyManifest(brokenEdge).map((issue) => issue.code)).toContain('drilldown.edge-node-reference')
-
-    const multipleSources = structuredClone(manifest)
-    multipleSources.drilldowns[0].nodes[1].kind = 'source'
-    expect(validateSceneTopologyManifest(multipleSources).map((issue) => issue.code)).toContain('drilldown.source-count')
-
-    const leakedBusinessField = structuredClone(manifest)
-    ;(leakedBusinessField.drilldowns[0].nodes[1] as Record<string, unknown>).deviceStatus = 'normal'
-    expect(validateSceneTopologyManifest(leakedBusinessField).map((issue) => issue.code)).toContain('drilldown.node-business-field')
-
-    const missingIconKey = structuredClone(manifest)
-    delete (missingIconKey.drilldowns[0].nodes[1] as Record<string, unknown>).iconKey
-    expect(validateSceneTopologyManifest(missingIconKey).map((issue) => issue.code)).toContain('drilldown.node-icon-key')
-
-    const unregisteredIconKey = structuredClone(manifest)
-    ;(unregisteredIconKey.drilldowns[0].nodes[1] as Record<string, unknown>).iconKey = 'unregistered-icon'
-    expect(validateSceneTopologyManifest(unregisteredIconKey).map((issue) => issue.code)).toContain('drilldown.node-icon-key')
-
-    const missingContent = structuredClone(manifest)
-    missingContent.drilldowns.splice(0, 1)
-    expect(validateSceneTopologyManifest(missingContent).map((issue) => issue.code)).toContain('drilldown.content-missing')
+    /**
+     * 逐个检查正式拓扑、动作和 Unity 流程步骤集合，避免用字符串搜索误把合法的 sceneNodeId
+     * 或业务连线标识当成历史流程入口。
+     */
+    expect(manifest.scenes
+      .filter((scene) => scene.sceneId === 'gas-power' || scene.sceneId === 'coal-power')
+      .flatMap((scene) => scene.topologyIds))
+      .not.toContainEqual(expect.stringMatching(/gas-turbine|hrsg|steam-turbine|combustion|water-steam-cycle|power-output/))
+    expect(manifest.actions.filter((action) => action.targetViewMode === 'business').map((action) => action.targetTopologyId))
+      .not.toContainEqual(expect.stringMatching(/gas-turbine|hrsg|steam-turbine|combustion|water-steam-cycle|power-output/))
+    expect(manifest.unitySceneMappings.flatMap((mapping) => mapping.processSteps.map((step) => step.stepId)))
+      .not.toContainEqual(expect.stringMatching(/gas-turbine|hrsg|steam-turbine|combustion|water-steam-cycle|power-output/))
   })
 })
