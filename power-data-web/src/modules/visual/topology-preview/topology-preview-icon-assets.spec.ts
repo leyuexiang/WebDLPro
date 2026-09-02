@@ -9,6 +9,10 @@ import {
   getGasTopologyPreviewIconPath,
   loadGasTopologyPreviewData,
 } from './gas-topology-preview-data'
+import { GAS_TOPOLOGY_RUNTIME_BINDINGS } from './gas-topology-runtime-bindings'
+import type { TopologyDeviceStatus } from '@/config/process/types'
+
+const DEVICE_STATUSES: readonly TopologyDeviceStatus[] = ['normal', 'alarm', 'fault', 'offline']
 
 /** 读取新版 JSON 的图片图元，验证每个图元都被显式替换为本地 WebP 动图。 */
 function readImagePenIds(relativePath: string): string[] {
@@ -45,6 +49,17 @@ describe('新版拓扑动态图标素材契约', () => {
       }
     } finally {
       globalThis.fetch = originalFetch
+    }
+  })
+
+  it('燃气运行时绑定图元的四态动图均使用精确映射且文件存在', () => {
+    for (const { penId } of GAS_TOPOLOGY_RUNTIME_BINDINGS) {
+      const statePaths = DEVICE_STATUSES.map((status) => getGasTopologyPreviewIconPath(penId, status))
+      expect(new Set(statePaths).size).toBe(DEVICE_STATUSES.length)
+      for (const [index, relativePath] of statePaths.entries()) {
+        expect(relativePath).toMatch(new RegExp(`^icons/${DEVICE_STATUSES[index]}/[a-z0-9_]+\\.webp$`))
+        expect(existsSync(resolve(process.cwd(), 'public/topology/gas-json-preview', relativePath as string))).toBe(true)
+      }
     }
   })
 

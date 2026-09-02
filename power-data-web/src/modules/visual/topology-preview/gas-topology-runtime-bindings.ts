@@ -76,14 +76,12 @@ export function createGasTopologyRuntimeBindingIndex(): {
   return { nodeIdByPenId, penIdsByNodeId }
 }
 
-/** 四态颜色与原拓扑语义一致，只作为新版动态图片旁的轻量状态标记，不改变原图纸布局。 */
+/** 四态中文标签供悬浮提示复用；画布视觉状态由对应的四组动态图直接表达。 */
 export const GAS_TOPOLOGY_STATUS_PRESENTATION: Readonly<Record<TopologyDeviceStatus, {
   readonly label: string
-  readonly color: string
-  readonly filter: string
 }>> = Object.freeze({
-  normal: { label: '正常', color: '#22c55e', filter: 'none' },
-  alarm: { label: '告警', color: '#f59e0b', filter: 'drop-shadow(0 0 5px #f59e0b)' },
-  fault: { label: '故障', color: '#ef4444', filter: 'drop-shadow(0 0 6px #ef4444)' },
-  offline: { label: '离线', color: '#94a3b8', filter: 'grayscale(1) opacity(0.55)' },
+  normal: { label: '正常' },
+  alarm: { label: '告警' },
+  fault: { label: '故障' },
+  offline: { label: '离线' },
 })

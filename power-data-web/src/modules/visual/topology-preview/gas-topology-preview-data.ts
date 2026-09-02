@@ -1,4 +1,5 @@
 import type { Meta2dData, Pen } from '@meta2d/core'
+import type { TopologyDeviceStatus } from '@/config/process/types'
 import { applyGasTopologySelectionPolicy } from './gas-topology-selection'
 
 /**
@@ -6,7 +7,7 @@ import { applyGasTopologySelectionPolicy } from './gas-topology-selection'
  *（带动画的 PNG 图片）版本的五分之一。映射键使用 JSON 图元 penId（图元标识），避免多个
  * 语义不同的图元共用一个远程图片地址时发生误替换；未列入映射的图片仍保留原始地址供诊断。
  */
-const LOCAL_IMAGE_PATH_BY_PEN_ID = new Map<string, string>([
+const NORMAL_IMAGE_PATH_BY_PEN_ID = new Map<string, string>([
   // 企业边界和工业非军事区边界使用两项独立图元编号，不按相同图片地址自动合并。
   ['2b71305', 'icons/normal/firewall.webp'], ['388a6870', 'icons/normal/firewall.webp'],
   ['ae2d950', 'icons/normal/server.webp'],
@@ -37,9 +38,37 @@ const LOCAL_IMAGE_PATH_BY_PEN_ID = new Map<string, string>([
   ['782a7b2e', 'icons/normal/dcs.webp'],
 ])
 
-/** 供正式运行画布和契约测试复用同一份显式图元素材路径，未知图元不会返回猜测结果。 */
-export function getGasTopologyPreviewIconPath(penId: string): string | undefined {
-  return LOCAL_IMAGE_PATH_BY_PEN_ID.get(penId)
+/**
+ * 四态目录与外层状态协议保持一一对应；文件名沿用已核验的正常态英文资源名。
+ * 图元类型仍由上面的 penId（图元标识）精确映射决定，运行时不会按标题、坐标或文件名猜测设备类型。
+ */
+const ICON_DIRECTORY_BY_STATUS: Readonly<Record<TopologyDeviceStatus, string>> = Object.freeze({
+  normal: 'normal',
+  alarm: 'alarm',
+  fault: 'fault',
+  offline: 'offline',
+})
+
+/**
+ * 供预览加载、正式运行画布和契约测试复用同一份四态素材路径。
+ * 未登记图元返回 undefined（未定义值），避免误用其他设备动图；状态切换只替换目录，不改变已确认的设备类型。
+ */
+export function getGasTopologyPreviewIconPath(
+  penId: string,
+  status: TopologyDeviceStatus = 'normal',
+): string | undefined {
+  const normalPath = NORMAL_IMAGE_PATH_BY_PEN_ID.get(penId)
+  if (!normalPath) return undefined
+  return normalPath.replace('/normal/', `/${ICON_DIRECTORY_BY_STATUS[status]}/`)
+}
+
+/** 将已确认的四态相对路径转换为部署环境可访问的绝对资源地址。 */
+export function getGasTopologyStatusIconUrl(
+  penId: string,
+  status: TopologyDeviceStatus,
+): string | undefined {
+  const relativePath = getGasTopologyPreviewIconPath(penId, status)
+  return relativePath ? getGasTopologyPreviewPublicAssetUrl(relativePath) : undefined
 }
 
 /**

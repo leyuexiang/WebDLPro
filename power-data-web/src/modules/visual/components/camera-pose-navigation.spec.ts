@@ -35,4 +35,15 @@ describe('燃气与燃煤命名镜头按钮映射', () => {
     expect(getCameraPoseNavigationButtons(toSceneId('wind-power'))).toEqual([])
     expect(getCameraPoseNavigationButtons(undefined)).toEqual([])
   })
+
+  it('十二个镜头步骤均提供独立且非空的临时说明', () => {
+    const descriptions = [
+      ...getCameraPoseNavigationButtons(toSceneId('gas-power')),
+      ...getCameraPoseNavigationButtons(toSceneId('coal-power')),
+    ].map(({ description }) => description)
+
+    expect(descriptions).toHaveLength(12)
+    expect(descriptions.every((description) => description.trim().length > 0)).toBe(true)
+    expect(new Set(descriptions).size).toBe(12)
+  })
 })

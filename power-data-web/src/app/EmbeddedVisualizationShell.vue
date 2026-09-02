@@ -18,6 +18,7 @@ import { HostRuntimeComposition } from '@/host-bridge/host-runtime-composition'
 import { HostRuntimeReadinessGate } from '@/host-bridge/host-runtime-readiness-gate'
 import { HOST_PROTOCOL_VERSION } from '@/host-bridge/host-protocol'
 import ProcessScenePanel from '@/modules/visual/components/ProcessScenePanel.vue'
+import CameraPoseInformationBubble from '@/modules/visual/components/CameraPoseInformationBubble.vue'
 import {
   getCameraPoseNavigationButtons,
   type CameraPoseNavigationButton,
@@ -198,6 +199,11 @@ const cameraPoseButtons = computed(() => {
 const activeCameraPoseId = ref<string | null>(null)
 /** 最新在途镜头点用于轻量反馈；不同按钮仍可连续点击，以满足后一次命令接管未完成插值。 */
 const pendingCameraPoseId = ref<string | null>(null)
+/**
+ * 气泡内容与镜头回执状态分离：步骤按钮一经合法点击就立即展示说明，后续点击其他步骤只替换当前内容。
+ * 用户主动关闭只经气泡右上角按钮；Unity、拓扑和页面其他区域的点击不会改写此引用。
+ */
+const displayedCameraPoseButton = ref<CameraPoseNavigationButton | null>(null)
 /** 单调请求序号阻止先发命令的迟到回执覆盖后发命令的按钮状态，不保存无界请求历史。 */
 let cameraPoseRequestSequence = 0
 
@@ -249,6 +255,8 @@ async function moveCameraToPose(button: CameraPoseNavigationButton): Promise<voi
   const requestSequence = ++cameraPoseRequestSequence
   const contextRevision = context.contextRevision
   const sceneId = context.sceneId
+  // 说明气泡不等待 Unity 镜头插值回执；连续点击会同步替换标题和说明，避免视觉反馈滞后。
+  displayedCameraPoseButton.value = button
   pendingCameraPoseId.value = button.cameraPoseId
 
   const result = await runtime.sendCommandAndWait('moveCameraToPose', { cameraPoseId: button.cameraPoseId })
@@ -272,11 +280,17 @@ async function moveCameraToPose(button: CameraPoseNavigationButton): Promise<voi
   console.warn('[命名镜头定位]', '三维运行时未确认本次镜头定位。')
 }
 
-/** 切换稳定视图时立即使旧请求失效，并清空只属于上一业务视图的按钮反馈。 */
+/** 关闭按钮是同一稳定业务视图内唯一主动关闭入口，不修改镜头定位的成功态或在途状态。 */
+function closeCameraPoseInformation(): void {
+  displayedCameraPoseButton.value = null
+}
+
+/** 切换稳定视图时立即使旧请求失效，并清空只属于上一业务视图的按钮反馈和说明。 */
 watch(() => visualizationStore.stableContext?.contextRevision, () => {
   cameraPoseRequestSequence += 1
   activeCameraPoseId.value = null
   pendingCameraPoseId.value = null
+  displayedCameraPoseButton.value = null
 })
 /**
  * 壳层只向用户显示有限、脱敏的中文状态；部署地址、错误码、关联标识、外部消息和 Unity 原始错误均不进入界面。
@@ -722,6 +736,17 @@ onBeforeUnmount(() => {
         >
           <ProcessScenePanel :result="sceneBaseline" />
           <!--
+            说明气泡与 Unity 视口共用场景尺寸变量，高度固定为视口三分之一；
+            它是非模态内容，只能通过自身右上角按钮关闭，步骤按钮负责替换当前说明。
+          -->
+          <CameraPoseInformationBubble
+            v-if="displayedCameraPoseButton && cameraPoseControlsVisible"
+            id="camera-pose-information-bubble"
+            :title="displayedCameraPoseButton.label"
+            :description="displayedCameraPoseButton.description"
+            @close="closeCameraPoseInformation"
+          />
+          <!--
             临时步骤导航只发送独立命名镜头命令，不触发流程步骤，不改变模型显隐、选择、描边或设备状态。
             六个按钮来自当前稳定业务场景的固定映射，禁止把页面输入直接作为 cameraPoseId（镜头点标识）。
           -->
@@ -738,6 +763,8 @@ onBeforeUnmount(() => {
                   :disabled="!cameraPoseNavigationAvailable"
                   :aria-pressed="activeCameraPoseId === button.cameraPoseId"
                   :aria-busy="pendingCameraPoseId === button.cameraPoseId ? 'true' : 'false'"
+                  aria-controls="camera-pose-information-bubble"
+                  :aria-expanded="displayedCameraPoseButton?.cameraPoseId === button.cameraPoseId"
                   :title="cameraPoseNavigationAvailable ? button.label : '当前三维运行时不支持命名镜头定位'"
                   @click="moveCameraToPose(button)"
                 >

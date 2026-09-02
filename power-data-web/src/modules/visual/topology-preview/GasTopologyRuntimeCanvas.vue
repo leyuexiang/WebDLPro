@@ -1,16 +1,15 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
-import { LockState, Meta2d, type Meta2dData, type Pen } from '@meta2d/core'
+import { LockState, Meta2d, type Pen } from '@meta2d/core'
 import type { ProcessNodeId, RouteId } from '@/config/process/identifiers'
 import type { TopologyDefinition, TopologyDeviceStatus } from '@/config/process/types'
 import type { CanvasTopologyViewState } from '@/services/topology/canvas-topology-adapter'
 import type { TopologyCanvasController } from '@/modules/visual/components/topology-canvas-controller'
-import { loadGasTopologyPreviewData } from './gas-topology-preview-data'
+import { getGasTopologyStatusIconUrl, loadGasTopologyPreviewData } from './gas-topology-preview-data'
 import { getGasTopologyTooltipContent, type GasTopologyTooltipContent } from './gas-topology-tooltip'
 import {
   createGasTopologyRuntimeBindingIndex,
   GAS_TOPOLOGY_RUNTIME_BINDINGS,
-  GAS_TOPOLOGY_STATUS_PRESENTATION,
 } from './gas-topology-runtime-bindings'
 import GasTopologyLayerFilter from './GasTopologyLayerFilter.vue'
 import {
@@ -51,8 +50,6 @@ interface SourceLinePresentation {
   readonly lineWidth: number
 }
 
-const STATUS_PEN_ID_PREFIX = 'gas-runtime-status-'
-const STATUS_PEN_SIZE = 14
 const bindingIndex = createGasTopologyRuntimeBindingIndex()
 const canvasHost = ref<HTMLElement | null>(null)
 const canvasRoot = ref<HTMLElement | null>(null)
@@ -92,6 +89,8 @@ let pendingViewState: CanvasTopologyViewState | undefined
 let disposed = false
 const requestController = new AbortController()
 const sourceLinePresentationById = new Map<string, SourceLinePresentation>()
+/** 记录每个图片图元最后提交的状态，只更新状态差异项，避免重复解码同一批动态图。 */
+const appliedStatusByPenId = new Map<string, TopologyDeviceStatus>()
 let highlightedLineIds: ReadonlySet<string> = new Set()
 
 /** 状态快照未覆盖的节点回退到正式清单基线，保持原运行时“缺失即离线”的完整快照语义。 */
@@ -100,100 +99,29 @@ function getEffectiveNodeStatus(nodeId: ProcessNodeId): TopologyDeviceStatus {
 }
 
 /**
- * 将组合图元子节点的相对坐标换算为文档世界坐标。
- *
- * 新版燃气拓扑把监控设备保存为 combine（组合图元），其子图元的 x/y/width/height
- * 都是相对父级比例；状态点属于独立顶层图元，若直接使用子节点坐标会落到文档原点，
- * 进而污染 Meta2D 的 fitView（适应画布）边界。这里沿 parentId 逐级累乘父级尺寸，
- * 只计算一次并在状态点创建时复用，不改写源 JSON 图元。
+ * 将状态直接投影为设备自身的四态动态图，不再创建圆点或其他叠加图元。
+ * 同一业务节点可绑定多个视觉图元；循环只遍历固定绑定表，并利用状态缓存跳过未变化项，最后统一重绘一次。
  */
-function resolvePenWorldRect(
-  pen: Pen,
-  penById: ReadonlyMap<string, Pen>,
-  visiting = new Set<string>(),
-): { x: number; y: number; width: number; height: number } | undefined {
-  if (!pen.id || ![pen.x, pen.y, pen.width, pen.height].every((value) => typeof value === 'number' && Number.isFinite(value))) return undefined
-  if (visiting.has(pen.id)) return undefined
-  visiting.add(pen.id)
-  const parent = pen.parentId ? penById.get(pen.parentId) : undefined
-  if (!parent) {
-    visiting.delete(pen.id)
-    return { x: pen.x!, y: pen.y!, width: pen.width!, height: pen.height! }
-  }
-  const parentRect = resolvePenWorldRect(parent, penById, visiting)
-  visiting.delete(pen.id)
-  if (!parentRect) return undefined
-  return {
-    x: parentRect.x + pen.x! * parentRect.width,
-    y: parentRect.y + pen.y! * parentRect.height,
-    width: pen.width! * parentRect.width,
-    height: pen.height! * parentRect.height,
-  }
-}
-
-/**
- * 每个已绑定图片旁只增加一个禁用命中的状态点。状态点追加在原始图元之后，不改写JSON中的
- * 坐标、尺寸、文字或层级，也不会进入选择、悬浮和业务事件链路。
- */
-function appendRuntimeStatusPens(data: Meta2dData): void {
-  const penById = new Map(
-    data.pens.filter((pen): pen is Pen & { id: string } => Boolean(pen.id)).map((pen) => [pen.id, pen]),
-  )
-  for (const binding of GAS_TOPOLOGY_RUNTIME_BINDINGS) {
-    const sourcePen = penById.get(binding.penId)
-    const sourceRect = sourcePen ? resolvePenWorldRect(sourcePen, penById) : undefined
-    if (!sourceRect) continue
-
-    const status = getEffectiveNodeStatus(binding.nodeId)
-    const presentation = GAS_TOPOLOGY_STATUS_PRESENTATION[status]
-    data.pens.push({
-      id: `${STATUS_PEN_ID_PREFIX}${binding.penId}`,
-      name: 'circle',
-      x: sourceRect.x + sourceRect.width * 0.58,
-      y: sourceRect.y + Math.max(1, sourceRect.height * 0.04),
-      width: STATUS_PEN_SIZE,
-      height: STATUS_PEN_SIZE,
-      background: presentation.color,
-      color: '#ffffff',
-      lineWidth: 2,
-      locked: LockState.Disable,
-    })
-  }
-}
-
-/** 一批状态默认只触发一次最终渲染；组合事务可延后到选择高亮完成后统一重绘。 */
 function applyRuntimeStatuses(render = true): void {
   if (!meta2d || loadingState.value !== 'ready' || suspended || !readUsableTopologyViewportSize(canvasHost.value)) return
 
   for (const binding of GAS_TOPOLOGY_RUNTIME_BINDINGS) {
     const nodeAvailable = activeNodeById.value.has(binding.nodeId)
-    const status = getEffectiveNodeStatus(binding.nodeId)
-    const presentation = GAS_TOPOLOGY_STATUS_PRESENTATION[status]
+    // 未进入当前正式拓扑的登记图元保持正常预览态，不能继承上一套拓扑的历史状态。
+    const status = nodeAvailable ? getEffectiveNodeStatus(binding.nodeId) : 'normal'
+    if (appliedStatusByPenId.get(binding.penId) === status) continue
+    const image = getGasTopologyStatusIconUrl(binding.penId, status)
+    if (!image) continue
     meta2d.setValue({
       id: binding.penId,
-      filter: nodeAvailable ? presentation.filter : 'none',
+      image,
     }, { render: false, doEvent: false, history: false })
-    meta2d.setValue({
-      id: `${STATUS_PEN_ID_PREFIX}${binding.penId}`,
-      // 状态点必须与其来源图片共用最终可见性：图层筛选隐藏设备后，后续状态快照
-      // 不能重新显示孤立圆点。这里直接读取 Meta2D 已同步的 visible，避免重新扫描
-      // 图层规则或重新打开 JSON 数据。
-      visible: nodeAvailable && isBindingVisible(binding.penId),
-      background: presentation.color,
-    }, { render: false, doEvent: false, history: false })
+    appliedStatusByPenId.set(binding.penId, status)
   }
   if (render) meta2d.render()
 }
 
-/**
- * 图层筛选通过 Meta2D 的 setVisible（设置显隐）接口同步计算态；状态更新只读取该结果，
- * 从而让显隐、悬浮命中和状态叠加始终以同一来源图元为准。
- */
-function isBindingVisible(penId: string): boolean {
-  return meta2d?.find(penId)?.[0]?.visible !== false
-}
-
-/** 将筛选结果投影到当前唯一画布，状态点也随绑定设备所在区域同步隐藏。 */
+/** 将筛选结果投影到当前唯一画布；状态已经由来源图片表达，无需维护额外叠加图元。 */
 function applyLayerFilterSelection(): void {
   if (!meta2d || loadingState.value !== 'ready') return
   const pens = meta2d.store.data.pens
@@ -210,8 +138,7 @@ function applyLayerFilterSelection(): void {
     meta2d.setVisible(pen, pen.visible !== false, false)
   }
   activeTooltipPen.value = null
-  // 筛选后先无重绘地同步状态点，再由选择高亮统一提交一次 render（重绘）。
-  applyRuntimeStatuses(false)
+  // 状态图片与来源图元共用同一个显隐字段，筛选后只需由选择高亮统一提交一次 render（重绘）。
   applyRuntimeSelection(props.selectedNodeIds)
 }
 
@@ -491,13 +418,7 @@ onMounted(async () => {
         })
       }
     }
-    appendRuntimeStatusPens(data)
-    const completeLayerBindingIndex = new Map(sourceLayerBindingIndex)
-    for (const binding of GAS_TOPOLOGY_RUNTIME_BINDINGS) {
-      const tags = sourceLayerBindingIndex.get(binding.penId)
-      if (tags) completeLayerBindingIndex.set(`${STATUS_PEN_ID_PREFIX}${binding.penId}`, tags)
-    }
-    layerBindingIndex.value = completeLayerBindingIndex
+    layerBindingIndex.value = sourceLayerBindingIndex
     visibilityRuleIndex.value = createGasTopologyVisibilityRuleIndex(data.pens, layerBindingIndex.value)
     applyGasTopologyLayerVisibility(data.pens, layerBindingIndex.value, selectedFilterIds.value, visibilityRuleIndex.value)
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
