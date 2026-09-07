@@ -3,78 +3,32 @@ using UnityEngine.Scripting;
 using WebDLPro.Unity.SceneRuntime;
 
 /// <summary>
-/// 燃气轮机第三层动态目标适配器。它统一控制零件旋转、六套粒子与蓝红气流体积。
-/// 播放许可只由独立关键环节命令修改，设备正常、告警、故障和离线状态均不会隐式启停动态效果。
+/// 燃气轮机第三层动态目标适配器。它通过统一控制器控制零件旋转、粒子、气流体积和电线流动。
+/// 播放许可由关键环节状态绑定器驱动：故障停止，其他状态或没有状态数据时播放。
 /// </summary>
 [Preserve]
 [DisallowMultipleComponent]
-public sealed class GasTurbineProcessDetailDynamicAdapter : MonoBehaviour, IProcessDetailDynamicTarget
+public sealed class GasTurbineProcessDetailDynamicAdapter : ProcessDetailDynamicTargetBase
 {
-    [SerializeField] private WaiKeHeBingAnimationController _animationController;
-    [SerializeField] private WaiKeHeBingGasFlowEffectController _gasFlowController;
-    [SerializeField] private WaiKeHeBingGasVolumeController _gasVolumeController;
-
-    private bool _hasAppliedPlayback;
-    private bool _playing = true;
-    private bool _released;
+    [SerializeField] private WaiKeHeBingMasterController _masterController;
 
     /// <summary>
-    /// 直接设置三个动态控制器的播放许可。停止时旋转保持当前角度，粒子立即停止并清空，气流速度归零；
-    /// 恢复时从当前旋转角度继续，并按各控制器既有配置重新启动粒子和气流。重复命令不会重复创建运行资源。
+    /// 正常、告警、离线和无状态时完整播放；故障时由燃机控制器保留其专用蓝色前端粒子例外。
     /// </summary>
-    public void SetPlayback(bool playing)
+    protected override void ApplyPlayback(bool playing, bool faultStop)
     {
-        if (_released || _animationController == null || _gasFlowController == null || _gasVolumeController == null)
+        if (_masterController != null)
         {
-            return;
+            _masterController.SetPlaying(playing, faultStop);
         }
-        if (_hasAppliedPlayback && _playing == playing)
-        {
-            return;
-        }
-
-        _hasAppliedPlayback = true;
-        _playing = playing;
-        _animationController.SetPlaybackAllowed(playing);
-        _gasFlowController.SetPlaybackAllowed(playing);
-        _gasVolumeController.SetPlaybackAllowed(playing);
-    }
-
-    /// <summary>退出第三层前强制停止全部动态目标，但不关闭包装根对象，销毁与资源释放由统一句柄执行。</summary>
-    public void StopForRelease()
-    {
-        if (_released)
-        {
-            return;
-        }
-
-        SetPlayback(false);
-    }
-
-    public void Release()
-    {
-        if (_released)
-        {
-            return;
-        }
-
-        StopForRelease();
-        _released = true;
     }
 
 #if UNITY_EDITOR
-    /// <summary>仅供第三层包装预制体生成器保存三个显式控制器引用。</summary>
-    public void ConfigureForEditor(
-        WaiKeHeBingAnimationController animationController,
-        WaiKeHeBingGasFlowEffectController gasFlowController,
-        WaiKeHeBingGasVolumeController gasVolumeController)
+    /// <summary>仅供第三层包装预制体生成器保存统一动态控制器引用。</summary>
+    public void ConfigureForEditor(WaiKeHeBingMasterController masterController)
     {
-        _animationController = animationController;
-        _gasFlowController = gasFlowController;
-        _gasVolumeController = gasVolumeController;
-        _hasAppliedPlayback = false;
-        _playing = true;
-        _released = false;
+        _masterController = masterController;
+        ResetPlaybackStateForEditor();
     }
 #endif
 }

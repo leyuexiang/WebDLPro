@@ -60,7 +60,7 @@ export class VisualizationRuntimeViewOpenPort implements ViewOpenUnityPort, Proc
           isolate: action.isolate,
         })
       case 'enterProcessDetail':
-        // 第三层需要完整目录项并由独立事务控制拓扑暂停；旧 view.open 动作执行器不能降级拼装该命令。
+        // 第三层需要完整目录项并由独立事务切换公共拓扑数据上下文；旧 view.open 动作执行器不能降级拼装该命令。
         return { success: false, errorCode: 'action.execute.failed' }
       case 'focusNode':
         // view.open（视图打开）事务本身已是唯一稳定值；显式转换为不同品牌的选择标识，
@@ -91,7 +91,7 @@ export class VisualizationRuntimeViewOpenPort implements ViewOpenUnityPort, Proc
     })
   }
 
-  /** 第二阶段只引用同一事务候选；网页完成拓扑暂停及全屏布局后才允许调用。 */
+  /** 第二阶段只引用同一事务候选；网页完成公共拓扑换源及双区布局后才允许调用。 */
   public async commitProcessDetail(
     sceneId: SceneId,
     processDetailId: ProcessDetailId,

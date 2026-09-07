@@ -15,7 +15,7 @@ import { visualizationRuntimeHostKey } from '@/modules/visual/runtime/visualizat
 
 const props = defineProps<{
   registry: TopologyRegistry
-  /** 第三层稳定态停用画布；运行时对象与有限视口快照继续保留，供返回第二层原样恢复。 */
+  /** 平台总览隐藏二维区域时停用画布；第三层关键环节保持二维拓扑可见并切换独立数据上下文。 */
   suspended?: boolean
 }>()
 

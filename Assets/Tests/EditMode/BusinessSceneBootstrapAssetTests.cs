@@ -504,6 +504,12 @@ namespace WebDLPro.Unity.Tests
                     Assert.That(resolved, Is.True, error);
                     Assert.That(controller.SceneId, Is.EqualTo(entry.SceneId));
                     Assert.That(controller.Capabilities, Is.EqualTo(entry.DeclaredCapabilities));
+                    if (SceneIds[index] == "gas-power" || SceneIds[index] == "coal-power")
+                    {
+                        // 两个已开放关键环节目录的发电场景都必须实现第三层执行接口；
+                        // 仅有清单和资源而缺少该接口时，打包后会在 Unity 桥接层返回 process-detail-unsupported。
+                        Assert.That(controller, Is.AssignableTo<IBusinessSceneProcessDetailController>(), ScenePaths[index]);
+                    }
 
                     if (SceneIds[index] != "gas-power" && SceneIds[index] != "coal-power")
                     {

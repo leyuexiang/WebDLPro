@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
+  calculateDirectoryResourceDigest,
   validateReleaseArtifact,
   writeReleaseArtifactIntegrity,
 } from '../scripts/release-artifact-contract.mjs'
@@ -40,6 +41,16 @@ function createTopologyManifest() {
       unityAction: { type: 'enterProcessDetail', processDetailId: 'process-detail.gas-power.gas-turbine' },
       failurePolicy: 'keep-current-context',
       configVersion: 'gas-power-smoke.artifact-contract',
+    }, {
+      actionId: 'action.coal-power.boiler',
+      title: '进入燃煤锅炉关键环节',
+      targetSceneId: 'coal-power',
+      targetViewMode: 'process-detail',
+      processDetailId: 'process-detail.coal-power.boiler',
+      allowedParameters: [],
+      unityAction: { type: 'enterProcessDetail', processDetailId: 'process-detail.coal-power.boiler' },
+      failurePolicy: 'keep-current-context',
+      configVersion: 'gas-power-smoke.artifact-contract',
     }],
     processDetails: [{
       sceneId: 'gas-power',
@@ -49,12 +60,26 @@ function createTopologyManifest() {
       resourceId: 'process-detail-resource.gas-power.gas-turbine',
       cameraPoseId: 'camera-pose.gas-power.gas-turbine',
       stateNodeId: 'gas-turbine',
+    }, {
+      sceneId: 'coal-power',
+      processId: 'coal-power-generation',
+      stepId: 'boiler',
+      processDetailId: 'process-detail.coal-power.boiler',
+      resourceId: 'process-detail-resource.coal-power.boiler',
+      cameraPoseId: 'camera-pose.coal-power.boiler',
+      stateNodeId: 'node.coal-boiler',
     }],
     unitySceneMappings: [{
       sceneId: 'gas-power',
       mappingVersion: 'mapping.gas-power.1',
       processSteps: [{ processId: 'gas-power-generation', stepId: 'overview' }],
       sceneNodeIds: ['gas-turbine'],
+      routeIds: [],
+    }, {
+      sceneId: 'coal-power',
+      mappingVersion: 'mapping.coal-power.1',
+      processSteps: [{ processId: 'coal-power-generation', stepId: 'overview' }],
+      sceneNodeIds: ['node.coal-boiler'],
       routeIds: [],
     }],
   }
@@ -65,6 +90,10 @@ function createReleaseManifest() {
     releaseId: 'artifact-contract-release',
     manifestVersion: 'gas-power-smoke.artifact-contract',
     unityReleaseId: 'unity-contract',
+    runtimeIdentity: {
+      buildId: 'unity-contract',
+      resourceDigest: `sha256:${'0'.repeat(64)}`,
+    },
     packageType: 'partner-integration',
     deploymentMode: 'independent-service-iframe',
     platformArtifactPatchingAllowed: false,
@@ -112,12 +141,12 @@ async function createArtifact() {
   writeFileSync(path.join(root, 'scene-topology-manifest.json'), `${JSON.stringify(createTopologyManifest(), null, 2)}\n`, 'utf8')
   mkdirSync(path.join(root, 'unity'))
   writeFileSync(path.join(root, 'unity', 'webgl-protocol-capabilities.json'), `${JSON.stringify({
-    schemaVersion: 9,
+    schemaVersion: 10,
     channel: 'power3d-unity',
     protocolVersion: 2,
     unityReleaseId: 'unity-contract',
     commandCapabilities: [
-      'init', 'resize', 'switchScene', 'enterProcessStep', 'moveCameraToPose', 'enterProcessDetail', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'focusNode', 'clearSelection',
+      'init', 'resize', 'switchScene', 'enterProcessStep', 'moveCameraToPose', 'enterProcessDetail', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'resetCamera', 'focusNode', 'clearSelection',
       'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose',
     ],
     eventCapabilities: ['ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'selectionCleared', 'disposed'],
@@ -129,6 +158,17 @@ async function createArtifact() {
     exitProcessDetailRequiredFields: ['sceneId', 'processDetailId', 'transitionId'],
     setProcessDetailPlaybackRequiredFields: ['sceneId', 'processDetailId', 'playing'],
   }, null, 2)}\n`, 'utf8')
+  const unityResourceDigest = await calculateDirectoryResourceDigest(path.join(root, 'unity'))
+  const releaseManifest = createReleaseManifest()
+  releaseManifest.runtimeIdentity.resourceDigest = unityResourceDigest
+  writeFileSync(path.join(root, 'release-manifest.json'), `${JSON.stringify(releaseManifest, null, 2)}\n`, 'utf8')
+  // 协议壳必须编译进与 Unity 目录相同的身份值，模拟真实前端构建后的静态脚本。
+  mkdirSync(path.join(root, 'shell'), { recursive: true })
+  writeFileSync(
+    path.join(root, 'shell', 'index.js'),
+    `const buildId = "unity-contract"; const resourceDigest = "${unityResourceDigest}";\n`,
+    'utf8',
+  )
   // 内容安全策略必须记录实际平台、Unity和清单来源；这里用最小静态服务文本模拟构建产物。
   writeFileSync(path.join(root, 'server.mjs'), 'frame-ancestors http://platform.example.com; frame-src http://visual.example.com; connect-src http://platform.example.com\n', 'utf8')
   writeFileSync(path.join(root, 'index.html'), `<!doctype html>
@@ -291,6 +331,24 @@ describe('发布产物输出标准', () => {
 
       expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
         expect.stringContaining('同源 scene-topology-manifest.json'),
+      ]))
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('即使重写完整性清单，Unity 内容变化仍会被运行时资源摘要阻断', async () => {
+    const root = await createArtifact()
+    try {
+      const metadataPath = path.join(root, 'unity', 'webgl-protocol-capabilities.json')
+      const metadata = JSON.parse(readFileSync(metadataPath, 'utf8'))
+      metadata.diagnosticMarker = 'changed-after-shell-build'
+      writeFileSync(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`, 'utf8')
+      // 模拟有人重新生成普通完整性清单以掩盖修改；运行时身份仍应绑定最初用于编译壳的 Unity 目录摘要。
+      await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
+
+      expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
+        expect.stringContaining('运行时资源摘要与发布目录中的 Unity 实际文件不一致'),
       ]))
     } finally {
       rmSync(root, { recursive: true, force: true })

@@ -5,6 +5,7 @@ import type { TopologyDefinition, TopologyDeviceStatus } from '@/config/process/
 import { CanvasTopologyAdapter, type CanvasTopologyViewState } from '@/services/topology/canvas-topology-adapter'
 import { TopologyCanvasUpdateCoordinator } from '@/modules/visual/components/topology-canvas-update-coordinator'
 import type { TopologyCanvasController } from '@/modules/visual/components/topology-canvas-controller'
+import TopologyFullscreenButton from '@/modules/visual/topology-preview/TopologyFullscreenButton.vue'
 
 const props = defineProps<{
   topology: TopologyDefinition
@@ -434,6 +435,7 @@ defineExpose<TopologyCanvasController>({
 
 <template>
   <div ref="containerElement" :class="['topology-canvas', { 'topology-canvas--fullscreen': props.fullscreen }]">
+    <TopologyFullscreenButton :target="containerElement" />
     <canvas
       ref="canvasElement"
       :class="{ 'topology-canvas__surface--panning': isPanning }"
@@ -582,6 +584,14 @@ defineExpose<TopologyCanvasController>({
 .topology-canvas--fullscreen {
   block-size: 100%;
   min-block-size: 0;
+}
+
+/** 公共全屏按钮以根容器为全屏元素时，旧版拓扑也保持无边框满视口展示。 */
+.topology-canvas:fullscreen {
+  block-size: 100%;
+  min-block-size: 0;
+  border: 0;
+  border-radius: 0;
 }
 
 /* 缩放工具栏悬浮于画布内，不参与文档流，也不改变固定容器尺寸。 */

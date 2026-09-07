@@ -330,7 +330,7 @@ namespace WebDLPro.Unity.Tests
         }
 
         [Test]
-        public void 燃煤锅炉占位包装使用远端相机且不登记播放目标()
+        public void 燃煤锅炉包装登记统一播放目标并预留排除列表()
         {
             ProcessDetailCatalog catalog = AssetDatabase.LoadAssetAtPath<ProcessDetailCatalog>(CatalogPath);
             GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(CoalPrefabPath);
@@ -346,21 +346,58 @@ namespace WebDLPro.Unity.Tests
             Assert.That(entry.ProcessId, Is.EqualTo("coal-power-generation"));
             Assert.That(entry.StepId, Is.EqualTo("boiler"));
             Assert.That(entry.StateNodeId, Is.EqualTo("node.coal-boiler"));
-            Assert.That(entry.DynamicTargetIds, Is.Empty, "占位模型尚未接入播放/停止目标。");
-            Assert.That(binding.DynamicTargetIds, Is.Empty);
+            Assert.That(entry.DynamicTargetIds, Is.EqualTo(new[] { "node.coal-boiler" }));
+            Assert.That(binding.DynamicTargetIds, Is.EqualTo(new[] { "node.coal-boiler" }));
             Assert.That(binding.DisplayAnchor.localPosition.x, Is.EqualTo(10000f).Within(0.001f));
             Assert.That(
                 Vector3.Distance(binding.CameraPose.localPosition, binding.DisplayAnchor.localPosition),
                 Is.InRange(20f, 500f));
 
+            MonoBehaviour dynamicAdapter = FindBehaviour(prefab, "CoalBoilerProcessDetailDynamicAdapter");
+            SerializedObject serializedAdapter = new SerializedObject(dynamicAdapter);
+            Assert.That(serializedAdapter.FindProperty("_controlledEffects")?.arraySize, Is.GreaterThan(0));
+            Assert.That(serializedAdapter.FindProperty("_excludedEffects")?.arraySize, Is.EqualTo(0));
+
             MonoBehaviour valveController = FindBehaviour(prefab, "ControlValveEffectController");
             SerializedObject serializedValve = new SerializedObject(valveController);
-            Assert.That(serializedValve.FindProperty("_playOnEnable")?.boolValue, Is.False);
-            Assert.That(serializedValve.FindProperty("_loopDemo")?.boolValue, Is.False);
+            Assert.That(serializedValve.FindProperty("_playOnEnable")?.boolValue, Is.True);
+            Assert.That(serializedValve.FindProperty("_loopDemo")?.boolValue, Is.True);
         }
 
         [Test]
-        public void 设备四态不再改变动态播放且独立命令可幂等停止恢复()
+        public void 燃煤设备状态驱动全部受控特效且只有故障停播()
+        {
+            GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(CoalPrefabPath);
+            ProcessDetailCatalog catalog = AssetDatabase.LoadAssetAtPath<ProcessDetailCatalog>(CatalogPath);
+            Assert.That(
+                catalog.TryGet("coal-power", "process-detail.coal-power.boiler", out ProcessDetailCatalogEntry coalEntry),
+                Is.True);
+            GameObject instance = Object.Instantiate(prefab);
+            instance.SetActive(false);
+            try
+            {
+                ProcessDetailDeviceBinding binding = instance.GetComponent<ProcessDetailDeviceBinding>();
+                Assert.That(binding.ValidateBinding(coalEntry).Success, Is.True);
+
+                Assert.That(binding.PrepareForActivation(true, BusinessSceneNodeVisualState.Fault).Success, Is.True);
+                AssertControlValvePlaybackAllowed(instance, false);
+                Assert.That(binding.ApplyVisualState(BusinessSceneNodeVisualState.Alarm).Success, Is.True);
+                AssertControlValvePlaybackAllowed(instance, true);
+                Assert.That(binding.ApplyVisualState(BusinessSceneNodeVisualState.Offline).Success, Is.True);
+                AssertControlValvePlaybackAllowed(instance, true);
+                Assert.That(binding.ApplyVisualState(BusinessSceneNodeVisualState.Normal).Success, Is.True);
+                AssertControlValvePlaybackAllowed(instance, true);
+                Assert.That(binding.ClearVisualState().Success, Is.True);
+                AssertControlValvePlaybackAllowed(instance, true);
+            }
+            finally
+            {
+                Object.DestroyImmediate(instance);
+            }
+        }
+
+        [Test]
+        public void 设备状态驱动动态播放且历史命令不能覆盖状态()
         {
             GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(GasPrefabPath);
             ProcessDetailCatalog catalog = AssetDatabase.LoadAssetAtPath<ProcessDetailCatalog>(CatalogPath);
@@ -374,21 +411,23 @@ namespace WebDLPro.Unity.Tests
                 ProcessDetailDeviceBinding binding = instance.GetComponent<ProcessDetailDeviceBinding>();
                 Assert.That(binding.ValidateBinding(gasEntry).Success, Is.True);
 
-                // 故障只改变材质视觉；包装首次激活时仍保持预制体默认播放许可。
+                // 故障状态必须在实例首次显示前停止全部动态效果。
                 Assert.That(binding.PrepareForActivation(true, BusinessSceneNodeVisualState.Fault).Success, Is.True);
+                AssertPlaybackAllowed(instance, false);
+
+                Assert.That(binding.SetPlayback(true).Success, Is.True);
+                AssertPlaybackAllowed(instance, false);
+                Assert.That(binding.ApplyVisualState(BusinessSceneNodeVisualState.Normal).Success, Is.True);
+                AssertPlaybackAllowed(instance, true);
+                Assert.That(binding.ClearVisualState().Success, Is.True);
                 AssertPlaybackAllowed(instance, true);
 
                 Assert.That(binding.SetPlayback(false).Success, Is.True);
-                AssertPlaybackAllowed(instance, false);
-                Assert.That(binding.ApplyVisualState(BusinessSceneNodeVisualState.Normal).Success, Is.True);
-                Assert.That(binding.ClearVisualState().Success, Is.True);
-                AssertPlaybackAllowed(instance, false);
-
-                Assert.That(binding.SetPlayback(true).Success, Is.True);
-                Assert.That(binding.SetPlayback(true).Success, Is.True);
+                AssertPlaybackAllowed(instance, true);
+                Assert.That(binding.SetPlayback(false).Success, Is.True);
                 AssertPlaybackAllowed(instance, true);
                 Assert.That(binding.ApplyVisualState(BusinessSceneNodeVisualState.Fault).Success, Is.True);
-                AssertPlaybackAllowed(instance, true);
+                AssertPlaybackAllowed(instance, false);
             }
             finally
             {
@@ -486,17 +525,23 @@ namespace WebDLPro.Unity.Tests
         {
             string[] controllerNames =
             {
-                "WaiKeHeBingAnimationController",
-                "WaiKeHeBingGasFlowEffectController",
-                "WaiKeHeBingGasVolumeController"
+                "WaiKeHeBingMasterController"
             };
             for (int index = 0; index < controllerNames.Length; index++)
             {
                 MonoBehaviour controller = FindBehaviour(root, controllerNames[index]);
-                FieldInfo field = controller.GetType().GetField("_playbackAllowed", BindingFlags.Instance | BindingFlags.NonPublic);
-                Assert.That(field, Is.Not.Null, $"{controllerNames[index]} 缺少受控播放许可字段。");
+                FieldInfo field = controller.GetType().GetField("_isPlaying", BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.That(field, Is.Not.Null, $"{controllerNames[index]} 缺少动态播放状态字段。");
                 Assert.That(field.GetValue(controller), Is.EqualTo(expected), $"{controllerNames[index]} 播放许可错误。");
             }
+        }
+
+        private static void AssertControlValvePlaybackAllowed(GameObject root, bool expected)
+        {
+            MonoBehaviour controller = FindBehaviour(root, "ControlValveEffectController");
+            FieldInfo field = controller.GetType().GetField("_effectPlaying", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(field, Is.Not.Null, "ControlValveEffectController 缺少动态播放状态字段。");
+            Assert.That(field.GetValue(controller), Is.EqualTo(expected), "燃煤控制阀特效播放许可错误。");
         }
 
         private static MonoBehaviour FindBehaviour(GameObject root, string typeName)

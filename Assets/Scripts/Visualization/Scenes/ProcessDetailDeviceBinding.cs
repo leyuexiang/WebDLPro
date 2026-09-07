@@ -17,7 +17,7 @@ namespace WebDLPro.Unity.SceneRuntime
         [SerializeField] private string _processDetailId;
         [SerializeField] private string _resourceId;
         [SerializeField] private string _cameraPoseId;
-        // 每个状态节点与视觉适配器按索引一一对应；动态目标独立登记，播放命令不受四态影响。
+        // 每个状态节点与视觉适配器按索引一一对应；动态目标独立登记，但播放许可由状态重放结果驱动。
         [SerializeField] private string[] _stateNodeIds = Array.Empty<string>();
         [SerializeField] private string[] _dynamicTargetIds = Array.Empty<string>();
 
@@ -30,6 +30,8 @@ namespace WebDLPro.Unity.SceneRuntime
 
         private IProcessDetailDynamicTarget[] _dynamicTargets;
         private IProcessDetailVisualStateTarget[] _visualStateTargets;
+        private bool[] _hasVisualStates;
+        private BusinessSceneNodeVisualState[] _visualStates;
         private bool _released;
 
         public string ProcessDetailId => _processDetailId ?? string.Empty;
@@ -78,8 +80,8 @@ namespace WebDLPro.Unity.SceneRuntime
         }
 
         /// <summary>
-        /// 兼容旧单节点调用；实例未激活时仅应用最新视觉状态，播放基线保持预制体自身配置。
-        /// 通用协调器使用下面的多节点重放接口，设备四态不会隐式改变动画、粒子或气流。
+        /// 兼容旧单节点调用；实例未激活时仅应用最新视觉状态，并按故障状态设置动态播放许可。
+        /// 通用协调器使用下面的多节点重放接口；状态缺失按非故障处理，故障停止全部动态效果。
         /// </summary>
         public BusinessSceneCommandResult PrepareForActivation(bool hasVisualState, BusinessSceneNodeVisualState visualState)
         {
@@ -98,39 +100,75 @@ namespace WebDLPro.Unity.SceneRuntime
             return ClearVisualState(StateNodeId);
         }
 
-        /// <summary>按节点索引重放多设备状态，避免加载或状态热路径扫描模型层级。</summary>
+        /// <summary>
+        /// 按节点索引重放多设备状态，避免加载或状态热路径扫描模型层级。
+        /// 状态缺失按非故障处理，因此动态效果保持播放；任一已登记节点为故障时停止全部动态效果。
+        /// </summary>
         public BusinessSceneCommandResult PrepareForActivation(IReadOnlyDictionary<string, BusinessSceneNodeVisualState> visualStates)
         {
             for (int index = 0; index < _stateNodeIds.Length; index++)
             {
-                BusinessSceneCommandResult result = visualStates != null && visualStates.TryGetValue(_stateNodeIds[index], out BusinessSceneNodeVisualState visualState)
+                BusinessSceneNodeVisualState visualState = default;
+                bool hasState = visualStates != null;
+                if (hasState)
+                {
+                    hasState = visualStates.TryGetValue(_stateNodeIds[index], out visualState);
+                }
+                BusinessSceneCommandResult result = hasState
                     ? _visualStateTargets[index].ApplyVisualState(visualState)
                     : _visualStateTargets[index].ClearVisualState();
                 if (!result.Success)
                 {
                     return result;
                 }
+
+                _hasVisualStates[index] = hasState;
+                _visualStates[index] = visualState;
             }
+
+            ApplyDynamicPlaybackForCurrentStates();
             return BusinessSceneCommandResult.Completed("关键环节已在激活前应用最新视觉状态。");
         }
 
         public BusinessSceneCommandResult ApplyVisualState(string sceneNodeId, BusinessSceneNodeVisualState visualState)
         {
             int index = FindStateNodeIndex(sceneNodeId);
-            return !IsAvailable() || index < 0
-                ? BusinessSceneCommandResult.Failed("process-detail-instance-unavailable", "关键环节包装实例、节点或适配器不可用。")
-                : _visualStateTargets[index].ApplyVisualState(visualState);
+            if (!IsAvailable() || index < 0)
+            {
+                return BusinessSceneCommandResult.Failed("process-detail-instance-unavailable", "关键环节包装实例、节点或适配器不可用。");
+            }
+
+            BusinessSceneCommandResult result = _visualStateTargets[index].ApplyVisualState(visualState);
+            if (result.Success)
+            {
+                _hasVisualStates[index] = true;
+                _visualStates[index] = visualState;
+                ApplyDynamicPlaybackForCurrentStates();
+            }
+            return result;
         }
 
         public BusinessSceneCommandResult ClearVisualState(string sceneNodeId)
         {
             int index = FindStateNodeIndex(sceneNodeId);
-            return !IsAvailable() || index < 0
-                ? BusinessSceneCommandResult.Failed("process-detail-instance-unavailable", "关键环节包装实例、节点或适配器不可用。")
-                : _visualStateTargets[index].ClearVisualState();
+            if (!IsAvailable() || index < 0)
+            {
+                return BusinessSceneCommandResult.Failed("process-detail-instance-unavailable", "关键环节包装实例、节点或适配器不可用。");
+            }
+
+            BusinessSceneCommandResult result = _visualStateTargets[index].ClearVisualState();
+            if (result.Success)
+            {
+                _hasVisualStates[index] = false;
+                ApplyDynamicPlaybackForCurrentStates();
+            }
+            return result;
         }
 
-        /// <summary>独立设置当前包装实例的动态播放许可，不读取或修改设备视觉状态。</summary>
+        /// <summary>
+        /// 保留历史播放命令的兼容入口，但播放许可只由当前设备状态决定。
+        /// 参数不会覆盖状态结果，避免正常状态被旧命令错误停止或故障状态被旧命令错误启动。
+        /// </summary>
         public BusinessSceneCommandResult SetPlayback(bool playing)
         {
             if (!IsAvailable())
@@ -140,12 +178,8 @@ namespace WebDLPro.Unity.SceneRuntime
                     "关键环节包装实例或动态适配器不可用。" );
             }
 
-            for (int index = 0; index < _dynamicTargets.Length; index++)
-            {
-                _dynamicTargets[index].SetPlayback(playing);
-            }
-            return BusinessSceneCommandResult.Completed(
-                playing ? "关键环节动态效果已开始播放。" : "关键环节动态效果已停止。" );
+            ApplyDynamicPlaybackForCurrentStates();
+            return BusinessSceneCommandResult.Completed("关键环节动态效果已按当前设备状态更新。");
         }
 
         public void StopForRelease()
@@ -191,6 +225,8 @@ namespace WebDLPro.Unity.SceneRuntime
             }
             _dynamicTargets = new IProcessDetailDynamicTarget[_dynamicTargetBehaviours.Length];
             _visualStateTargets = new IProcessDetailVisualStateTarget[_visualStateTargetBehaviours.Length];
+            _hasVisualStates = new bool[_stateNodeIds.Length];
+            _visualStates = new BusinessSceneNodeVisualState[_stateNodeIds.Length];
             for (int index = 0; index < _dynamicTargets.Length; index++)
             {
                 _dynamicTargets[index] = _dynamicTargetBehaviours[index] as IProcessDetailDynamicTarget;
@@ -225,6 +261,29 @@ namespace WebDLPro.Unity.SceneRuntime
                 }
             }
             return -1;
+        }
+
+        /// <summary>
+        /// 根据已接收的节点状态统一控制动态目标：任一故障停止，全部非故障或无状态时播放。
+        /// 状态数组只在绑定初始化时分配，后续状态更新不创建临时集合。
+        /// </summary>
+        private void ApplyDynamicPlaybackForCurrentStates()
+        {
+            bool hasFault = false;
+            for (int index = 0; index < _hasVisualStates.Length; index++)
+            {
+                if (_hasVisualStates[index] && _visualStates[index] == BusinessSceneNodeVisualState.Fault)
+                {
+                    hasFault = true;
+                    break;
+                }
+            }
+
+            bool playing = !hasFault;
+            for (int index = 0; index < _dynamicTargets.Length; index++)
+            {
+                _dynamicTargets[index].SetPlayback(playing, hasFault);
+            }
         }
 
         private static bool IdentifiersMatch(IReadOnlyList<string> expected, string[] actual)

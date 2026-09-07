@@ -77,6 +77,8 @@ function createManifest(): SceneTopologyManifest {
         resourceId: toProcessDetailResourceId('process-detail-resource.gas-power.gas-turbine'),
         cameraPoseId: toCameraPoseId('camera-pose.gas-power.gas-turbine'),
         stateNodeId: toSceneNodeId('gas-turbine'),
+        // 该夹具显式登记上下文标识，验证事务不会把 processDetailId 当作隐式拓扑文件键。
+        topologyDataContextId: 'process-detail.gas-power.gas-turbine',
       },
       {
         sceneId: gasSceneId,
@@ -275,7 +277,8 @@ describe('关键环节原子事务', () => {
       actionId: detailActionId,
       contextRevision: 3,
     })
-    expect(topologyRuntime.getActiveTopology()).toBeUndefined()
+    // 新方案第三层保持同一业务拓扑画布，只切换数据上下文，不再清空活动拓扑。
+    expect(topologyRuntime.getActiveTopology()?.topologyId).toBe(gasTopologyId)
   })
 
   it('联调演示控件只控制当前稳定关键环节并复核上下文版本', async () => {
@@ -340,7 +343,8 @@ describe('关键环节原子事务', () => {
     )
     expect(unity.commitProcessDetail).toHaveBeenCalledWith(gasSceneId, processDetailId, toTransitionId('transition.process-detail.01'))
     expect(phaseOrder).toEqual(['准备候选', '提交全屏布局', '提交三维'])
-    expect(topologyRuntime.getActiveTopology()).toBeUndefined()
+    // 第三层稳定态仍保留所属第二层拓扑结构。
+    expect(topologyRuntime.getActiveTopology()?.topologyId).toBe(gasTopologyId)
     expect(store.stableContext).toEqual({
       sceneId: gasSceneId,
       processDetailId,
@@ -438,7 +442,7 @@ describe('关键环节原子事务', () => {
       secondProcessDetailId,
       toTransitionId('transition.process-detail.02'),
     )
-    expect(topologyRuntime.getActiveTopology()).toBeUndefined()
+    expect(topologyRuntime.getActiveTopology()?.topologyId).toBe(gasTopologyId)
     expect(store.stableContext).toMatchObject({
       sceneId: gasSceneId,
       processDetailId: secondProcessDetailId,

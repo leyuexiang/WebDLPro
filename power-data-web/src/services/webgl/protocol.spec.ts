@@ -6,6 +6,7 @@ import {
   isWebglSelectionClearedPayload,
   isWebglEnterProcessStepPayload,
   isWebglMoveCameraToPosePayload,
+  isWebglResetCameraPayload,
   isWebglEnterProcessDetailPayload,
   isWebglPrepareProcessDetailPayload,
   isWebglCommitProcessDetailPayload,
@@ -98,6 +99,8 @@ describe('网页图形协议', () => {
     expect(isWebglEnterProcessStepPayload({ processId: 'gas-power-generation', stepId: '', isolate: true })).toBe(false)
     expect(isWebglMoveCameraToPosePayload({ cameraPoseId: 'gas-power.camera.inlet' })).toBe(true)
     expect(isWebglMoveCameraToPosePayload({ cameraPoseId: '', position: [0, 0, 0] })).toBe(false)
+    expect(isWebglResetCameraPayload({})).toBe(true)
+    expect(isWebglResetCameraPayload({ position: [0, 0, 0] })).toBe(false)
 
     expect(isWebglFocusNodePayload({ sceneNodeId: 'node.gas-turbine', selectionId: 'selection.topology.01', isolate: true })).toBe(true)
     expect(isWebglFocusNodePayload({ sceneNodeId: 'node.gas-turbine', isolate: true })).toBe(false)

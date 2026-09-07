@@ -5,7 +5,7 @@ import { projectTopologyForCanvas } from '@/config/scene-topology/topology-canva
 import type { NodeId, RouteId } from '@/config/scene-topology/identifiers'
 import type { DeviceVisualStatus } from '@/config/scene-topology/types'
 import type { TopologyCanvasController } from '@/modules/visual/components/topology-canvas-controller'
-import type { TopologyCanvasPort, TopologyViewportState, TopologyViewState } from '@/modules/visual/topology/topology-runtime'
+import type { TopologyCanvasPort, TopologyDataContext, TopologyViewportState, TopologyViewState } from '@/modules/visual/topology/topology-runtime'
 
 /**
  * 正式场景拓扑运行时到既有单画布的受控适配端口。
@@ -30,6 +30,14 @@ export class ManifestTopologyCanvasPort implements TopologyCanvasPort {
     // 因而不会把同一拓扑再次视为新定义并重建节点索引与路径缓存。
     this.onTopologyProjected(projectedTopology)
     this.canvas.setTopology(projectedTopology)
+  }
+
+  /**
+   * 关键环节只更新当前 Meta2D 画布的数据源，不改变公共控制器、状态快照或事件监听。
+   * 通用 Canvas（画布）没有该入口时安全忽略，旧场景仍沿用原有清单投影。
+   */
+  public setTopologyDataContext(context: TopologyDataContext | undefined): void {
+    this.canvas.setTopologyDataContext?.(context)
   }
 
   /** 将运行时稳定标识转换为旧画布的品牌类型；值本身不变，避免通过字符串重组产生猜测映射。 */

@@ -18,7 +18,7 @@ const verifiedMappings = Object.freeze([
 ])
 
 describe('燃气与燃煤联合场景清单', () => {
-  it('在同一原子清单中装配两场景总览和唯一燃气轮机第三层', async () => {
+  it('在同一原子清单中装配两场景总览和两项已核验第三层', async () => {
     const manifest = await createConfiguredPowerScenesManifest('dual-selection-contract', 'coal-power')
 
     expect(validateSceneTopologyManifest(manifest)).toEqual([])
@@ -26,7 +26,7 @@ describe('燃气与燃煤联合场景清单', () => {
     expect(manifest.topologies.filter((topology) => topology.sceneId === 'gas-power')).toHaveLength(1)
     expect(manifest.topologies.filter((topology) => topology.sceneId === 'coal-power')).toHaveLength(1)
     expect(manifest.actions.filter((action) => action.targetSceneId === 'gas-power')).toHaveLength(2)
-    expect(manifest.actions.filter((action) => action.targetSceneId === 'coal-power')).toHaveLength(1)
+    expect(manifest.actions.filter((action) => action.targetSceneId === 'coal-power')).toHaveLength(2)
     // 新版产品范围取消流程子图和下钻；联合清单必须发布空的下钻集合，避免旧入口被协议直接调用。
     expect(manifest.drilldowns).toEqual([])
     expect(manifest.processDetails).toEqual([{
@@ -37,6 +37,16 @@ describe('燃气与燃煤联合场景清单', () => {
       resourceId: 'process-detail-resource.gas-power.gas-turbine',
       cameraPoseId: 'camera-pose.gas-power.gas-turbine',
       stateNodeId: 'gas-turbine',
+      topologyDataContextId: 'process-detail.gas-power.gas-turbine',
+    }, {
+      sceneId: 'coal-power',
+      processId: 'coal-power-generation',
+      stepId: 'boiler',
+      processDetailId: 'process-detail.coal-power.boiler',
+      resourceId: 'process-detail-resource.coal-power.boiler',
+      cameraPoseId: 'camera-pose.coal-power.boiler',
+      stateNodeId: 'node.coal-boiler',
+      topologyDataContextId: 'process-detail.coal-power.boiler',
     }])
 
     const gasOverview = manifest.topologies.find((topology) => topology.topologyId === 'topology.gas-power.overview')
@@ -104,7 +114,10 @@ describe('燃气与燃煤联合场景清单', () => {
         'action.gas-power.overview',
         'action.gas-power.gas-turbine',
       ])
-      expect(manifest.scenes.find((scene) => scene.sceneId === 'coal-power')?.supportedActionIds).toEqual(['action.coal-power.overview'])
+      expect(manifest.scenes.find((scene) => scene.sceneId === 'coal-power')?.supportedActionIds).toEqual([
+        'action.coal-power.overview',
+        'action.coal-power.boiler',
+      ])
     }
   })
 })

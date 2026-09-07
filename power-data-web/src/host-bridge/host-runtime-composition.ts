@@ -45,6 +45,10 @@ export interface HostDeviceStatesUpdatePort {
   submit(command: Extract<HostDispatchableDomainCommand, { type: 'device.states.update' }>): Promise<HostCommandExecutionResult>
   /** 场景重新激活后只重投影最新权威快照；旧测试替身可不实现该可选内部能力。 */
   resynchronizeLatestSnapshot?(sceneActivationId?: SceneActivationId): void
+  /** 沙盘重新激活后重放燃气、燃煤入口故障状态；旧测试替身可不实现。 */
+  resynchronizeLatestOverviewSnapshot?(sceneActivationId?: SceneActivationId): void
+  /** 离开沙盘时停止向旧沙盘实例发送入口状态。 */
+  setOverviewSceneActivation?(sceneActivationId?: SceneActivationId): void
   /** 组合根释放时清空有限状态诊断，不保留外层关联标识。 */
   dispose(): void
 }
@@ -441,8 +445,16 @@ export class HostRuntimeComposition implements HostCommandCoordinatorPort {
   /** 仅业务稳定上下文需要向 Unity 重投影；平台总览没有拓扑，不得把隐藏旧快照发送给内层运行时。 */
   private resynchronizeLatestBusinessSnapshot(): void {
     const snapshot = this.facade.getSnapshot()
-    if (!snapshot.stableContext || !isBusinessVisualizationStableContext(snapshot.stableContext)) return
-    this.deviceStatesUpdate?.resynchronizeLatestSnapshot?.(snapshot.sceneActivationId ?? undefined)
+    if (!snapshot.stableContext) return
+
+    if (isBusinessVisualizationStableContext(snapshot.stableContext) ||
+        isProcessDetailVisualizationStableContext(snapshot.stableContext)) {
+      this.deviceStatesUpdate?.setOverviewSceneActivation?.(undefined)
+      this.deviceStatesUpdate?.resynchronizeLatestSnapshot?.(snapshot.sceneActivationId ?? undefined)
+      return
+    }
+
+    this.deviceStatesUpdate?.resynchronizeLatestOverviewSnapshot?.(snapshot.sceneActivationId ?? undefined)
   }
 
   /** 统一创建协议许可的有限错误，任何捕获异常均不在此层读取、拼接或传出。 */

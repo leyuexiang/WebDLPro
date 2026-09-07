@@ -1,6 +1,6 @@
 import type { HostCommandExecutionResult } from '@/host-bridge/host-command-lifecycle'
 import type { HostDispatchableDomainCommand } from '@/host-bridge/host-command-dispatcher'
-import type { SceneActivationId, SceneNodeId } from '@/config/scene-topology/identifiers'
+import { toSceneNodeId, type SceneActivationId, type SceneNodeId } from '@/config/scene-topology/identifiers'
 import type { DeviceVisualStatus } from '@/config/scene-topology/types'
 import type { TopologyNodeStateApplyResult, TopologySceneNodeVisualStateUpdate } from '@/modules/visual/topology/topology-device-state-cache'
 import type { TopologyRuntime } from '@/modules/visual/topology/topology-runtime'
@@ -85,6 +85,20 @@ export class DeviceStatesUpdateCoordinator {
   private frameHandle: unknown | undefined
   private unityDispatchActive = false
   private latestSnapshotSequence = 0
+  /** 仅登记当前已确认的燃气、燃煤二层故障来源；未列入的节点不影响沙盘入口模型。 */
+  private readonly overviewFaultSourceNodeIds = new Map<string, readonly string[]>([
+    ['overview-building.gas-power', ['inlet-duct', 'hrsg', 'steam-turbine']],
+    ['overview-building.coal-power', [
+      'asset.coal-mill-actuator',
+      'system.boiler-dcs',
+      'system.steam-turbine-dcs',
+      'system.generator-excitation-controller',
+      'system.coal-handling-ash-plc',
+    ]],
+  ])
+  /** 保存最新两场景沙盘故障投影，切入沙盘时直接重放，不需要重新等待前端上报。 */
+  private readonly latestOverviewTargets = new Map<SceneNodeId, UnityNodeVisualStateOperation>()
+  private activeOverviewSceneActivationId: SceneActivationId | undefined
   /**
    * 每次确认物理场景激活标识变化时递增。快照序号只区分设备快照，不能区分同一快照在两个物理控制器实例上的投影；
    * 工作项必须同时匹配快照序号和本代次，才允许进入当前 Unity 控制器。
@@ -132,8 +146,12 @@ export class DeviceStatesUpdateCoordinator {
     }
 
     this.latestSnapshotSequence = topologyResult.snapshotSequence
+    this.updateLatestOverviewTargets(command, topologyResult)
     const diagnostic = this.createDiagnostic(command, startedAt, topologyResult)
     const unityTargets = this.createUnityTargets(topologyResult)
+    if (this.activeOverviewSceneActivationId) {
+      this.latestOverviewTargets.forEach((operation, sceneNodeId) => unityTargets.set(sceneNodeId, operation))
+    }
     // 目标数量必须取最终操作表：同一节点的设置/清除会去重，历史清除债务也会在这里合并。
     diagnostic.unityTargetCount = unityTargets.size
     this.recordDiagnostic(diagnostic)
@@ -157,6 +175,100 @@ export class DeviceStatesUpdateCoordinator {
     const replay = this.createLatestReplay(sceneActivationId, 'internal-state-replay')
     if (!replay) return
     this.scheduleLatestUnitySnapshot(replay.snapshotSequence, replay.targets, replay.diagnostic)
+  }
+
+  /** 设置当前沙盘物理实例；离开沙盘时传 undefined，防止旧入口状态继续写入新场景。 */
+  public setOverviewSceneActivation(sceneActivationId?: SceneActivationId): void {
+    if (sceneActivationId || !this.activeOverviewSceneActivationId) {
+      this.activeOverviewSceneActivationId = sceneActivationId
+      return
+    }
+
+    // 离开沙盘时立即使尚未发送的沙盘目标失效，防止它们迟到后进入业务二层控制器。
+    this.activeOverviewSceneActivationId = undefined
+    this.unityDispatchGeneration += 1
+    this.activeSceneActivationId = undefined
+    this.pendingClearSequenceBySceneNodeId.clear()
+    this.invalidatePendingBatchForSceneChange()
+  }
+
+  /** 切入沙盘后重放最近一次已提交的燃气、燃煤入口故障结果。 */
+  public resynchronizeLatestOverviewSnapshot(sceneActivationId?: SceneActivationId): void {
+    if (this.disposed || !sceneActivationId) return
+    this.activeOverviewSceneActivationId = sceneActivationId
+    if (sceneActivationId !== this.activeSceneActivationId) {
+      this.unityDispatchGeneration += 1
+      this.activeSceneActivationId = sceneActivationId
+      this.pendingClearSequenceBySceneNodeId.clear()
+      this.invalidatePendingBatchForSceneChange()
+    }
+    // 尚无设备快照时只登记沙盘活动实例；首份快照提交后会立即生成并发送两个入口状态。
+    if (this.latestSnapshotSequence <= 0) return
+    const diagnostic = this.createReplayDiagnostic('overview-state-replay')
+    this.recordDiagnostic(diagnostic)
+    // 复制目标映射，避免下一份状态快照更新原 Map（映射）时改写已经排队的旧批次。
+    this.scheduleLatestUnitySnapshot(this.latestSnapshotSequence, new Map(this.latestOverviewTargets), diagnostic)
+  }
+
+  /**
+   * 根据完整设备快照计算两个入口模型的故障状态；任一已登记设备故障即显示故障，否则清除。
+   * 该判断只遍历本批状态项和两个固定来源表，不扫描场景对象，也不创建运行时材质。
+   */
+  private updateLatestOverviewTargets(
+    command: Extract<HostDispatchableDomainCommand, { type: 'device.states.update' }>,
+    result: TopologyNodeStateApplyResult,
+  ): void {
+    const acceptedNodeIds = new Set(result.acceptedNodeIds)
+    const statusByNodeId = new Map<string, { deviceStatus: DeviceVisualStatus; statusUpdatedAt: string }>()
+    for (const item of command.payload.items) {
+      if (acceptedNodeIds.has(item.nodeId)) {
+        statusByNodeId.set(item.nodeId, item)
+      }
+    }
+
+    this.latestOverviewTargets.clear()
+    this.overviewFaultSourceNodeIds.forEach((sourceNodeIds, overviewBuildingId) => {
+      let faultState: { statusUpdatedAt: string } | undefined
+      for (const sourceNodeId of sourceNodeIds) {
+        const state = statusByNodeId.get(sourceNodeId)
+        if (state?.deviceStatus === 'fault') {
+          faultState = state
+          break
+        }
+      }
+
+      this.latestOverviewTargets.set(
+        toSceneNodeId(overviewBuildingId),
+        faultState
+          ? { kind: 'set', state: {
+            visualState: 'fault',
+            statusUpdatedAt: faultState.statusUpdatedAt,
+            sourceRevision: command.payload.sourceRevision,
+          } }
+          : { kind: 'clear' },
+      )
+    })
+  }
+
+  /** 生成总览重放所需的最小诊断对象，不把建筑状态加入外层业务回执。 */
+  private createReplayDiagnostic(correlationId: string): DeviceStatesBatchDiagnostic {
+    return {
+      correlationId,
+      snapshotSequence: this.latestSnapshotSequence,
+      sourceRevision: 0,
+      processedAt: this.now(),
+      elapsedMilliseconds: 0,
+      acceptedCount: 0,
+      outdatedCount: 0,
+      unmappedCount: 0,
+      invalidTimestampCount: 0,
+      unityTargetCount: this.latestOverviewTargets.size,
+      unitySucceededCount: 0,
+      unityFailedCount: 0,
+      unityStaleSkippedCount: 0,
+      unityUnavailable: false,
+      unityFrameMergedCount: 0,
+    }
   }
 
   /**
@@ -311,6 +423,8 @@ export class DeviceStatesUpdateCoordinator {
     this.pendingBatch = undefined
     this.activeSceneActivationId = undefined
     this.pendingClearSequenceBySceneNodeId.clear()
+    this.latestOverviewTargets.clear()
+    this.activeOverviewSceneActivationId = undefined
     this.diagnostics.length = 0
   }
 

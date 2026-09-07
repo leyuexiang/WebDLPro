@@ -21,16 +21,16 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '电力场景与拓扑嵌入模块' },
   },
   {
-    path: '/gas-topology-json-preview',
-    name: 'gas-topology-json-preview',
-    // 新拓扑只作为原始 JSON 的独立效果预览，不登记到正式场景清单，也不替换现有燃气拓扑。
-    component: () => import('@/modules/visual/topology-preview/GasTopologyJsonPreview.vue'),
-    meta: { title: '燃气拓扑图 JSON 预览' },
+    path: '/gas-v3-topology-json-preview',
+    name: 'gas-v3-topology-json-preview',
+    // 第三版使用独立数据和编号清单；第一版已存档并移除，正式总览与独立预览保持同一数据源。
+    component: () => import('@/modules/visual/topology-preview/GasV3TopologyJsonPreview.vue'),
+    meta: { title: '燃气 V3 拓扑图 JSON 预览' },
   },
   {
     path: '/coal-topology-json-preview',
     name: 'coal-topology-json-preview',
-    // 燃煤拓扑使用独立数据与资源目录，保留原燃煤/燃气正式入口及其回退能力。
+    // 燃煤拓扑使用独立数据与资源目录，不依赖已移除的第一版燃气预览。
     component: () => import('@/modules/visual/topology-preview/CoalTopologyJsonPreview.vue'),
     meta: { title: '燃煤拓扑图 JSON 预览' },
   },

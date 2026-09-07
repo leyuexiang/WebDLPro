@@ -88,11 +88,11 @@ namespace WebDLPro.Unity.SceneRuntime
     }
 
     /// <summary>
-    /// 包装预制体内的动态目标适配器。播放许可由独立命令控制，设备四态不得隐式改变动画、粒子或气流。
+    /// 包装预制体内的动态目标适配器。播放许可由关键环节状态绑定器驱动：故障停止，其他状态或状态缺失播放。
     /// </summary>
     public interface IProcessDetailDynamicTarget
     {
-        void SetPlayback(bool playing);
+        void SetPlayback(bool playing, bool faultStop);
         void StopForRelease();
         void Release();
     }

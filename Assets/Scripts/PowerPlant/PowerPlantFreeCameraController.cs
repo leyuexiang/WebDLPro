@@ -13,6 +13,8 @@ using WebDLPro.Unity.SceneRuntime;
 public sealed class PowerPlantFreeCameraController : MonoBehaviour, IBusinessSceneCameraSnapshotController
 {
     [Header("移动")]
+    [Tooltip("当前场景的手动镜头位移倍率；键盘移动、左键拖拽和滚轮推拉都会应用此倍率。其他场景保持 1 倍，超大场景可提高该值。")]
+    [SerializeField, Min(0.1f)] private float _sceneMovementMultiplier = 1f;
     [SerializeField, Min(0.1f)] private float _moveSpeed = 24f;
     [SerializeField, Min(1f)] private float _shiftMultiplier = 3f;
 
@@ -142,7 +144,7 @@ public sealed class PowerPlantFreeCameraController : MonoBehaviour, IBusinessSce
 
         if (hasPanInput)
         {
-            MoveByPointerDrag(lookDelta);
+            MoveByPointerDrag(lookDelta, _sceneMovementMultiplier);
         }
 
         if (hasLookInput)
@@ -155,12 +157,13 @@ public sealed class PowerPlantFreeCameraController : MonoBehaviour, IBusinessSce
 
         if (hasScrollInput)
         {
-            MoveAlongCameraCenter(scrollDelta);
+            MoveAlongCameraCenter(scrollDelta, _sceneMovementMultiplier);
         }
 
         if (hasMoveInput)
         {
-            float speed = _moveSpeed * (IsShiftPressed(keyboard) ? _shiftMultiplier : 1f);
+            float speed = _moveSpeed * _sceneMovementMultiplier *
+                (IsShiftPressed(keyboard) ? _shiftMultiplier : 1f);
             Vector3 forward = Vector3.ProjectOnPlane(transform.forward, Vector3.up).normalized;
             Vector3 right = Vector3.ProjectOnPlane(transform.right, Vector3.up).normalized;
             Vector3 worldMove = forward * localMove.z + right * localMove.x + Vector3.up * localMove.y;
@@ -325,11 +328,12 @@ public sealed class PowerPlantFreeCameraController : MonoBehaviour, IBusinessSce
     /// 鼠标横向位移映射到相机水平右轴，鼠标纵向位移映射到相机水平前后轴；
     /// 两个方向都会先投影到 Vector3.up 的垂直平面，避免相机俯仰角导致世界 Y 轴发生位移。
     /// </summary>
-    private void MoveByPointerDrag(Vector2 pointerDelta)
+    private void MoveByPointerDrag(Vector2 pointerDelta, float movementMultiplier)
     {
         Vector3 horizontalRight = Vector3.ProjectOnPlane(transform.right, Vector3.up).normalized;
         Vector3 horizontalForward = Vector3.ProjectOnPlane(transform.forward, Vector3.up).normalized;
-        Vector3 worldMove = (-horizontalRight * pointerDelta.x - horizontalForward * pointerDelta.y) * _panSensitivity;
+        Vector3 worldMove = (-horizontalRight * pointerDelta.x - horizontalForward * pointerDelta.y) *
+            (_panSensitivity * movementMultiplier);
         transform.position += worldMove;
     }
 
@@ -337,9 +341,9 @@ public sealed class PowerPlantFreeCameraController : MonoBehaviour, IBusinessSce
     /// 沿相机画面中心射线方向移动镜头，实现透视相机的推拉式缩放。
     /// 滚轮输入本身已是当前帧累计增量，因此不能再乘时间步长，否则不同帧率下手感会明显不一致。
     /// </summary>
-    private void MoveAlongCameraCenter(float scrollDelta)
+    private void MoveAlongCameraCenter(float scrollDelta, float movementMultiplier)
     {
-        float requestedDistance = scrollDelta * _scrollMoveSensitivity;
+        float requestedDistance = scrollDelta * _scrollMoveSensitivity * movementMultiplier;
         float moveDistance = Mathf.Clamp(
             requestedDistance,
             -_maxScrollMovePerFrame,

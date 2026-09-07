@@ -98,7 +98,7 @@ export interface TopologyNodeDefinition {
 
 /**
  * 第三层关键环节目录只登记跨端共同核对的稳定编号，不保存资源路径、模型名称或层级路径。
- * 根级数组允许任意场景为零项或多项；当前发布只加入燃气轮机一项，运行时不得按数组位置推断语义。
+ * 根级数组允许任意场景为零项或多项，运行时不得按数组位置、标题或资源名推断语义。
  */
 export interface ProcessDetailDefinition {
   processDetailId: ProcessDetailId
@@ -108,6 +108,8 @@ export interface ProcessDetailDefinition {
   resourceId: ProcessDetailResourceId
   cameraPoseId: CameraPoseId
   stateNodeId: SceneNodeId
+  /** 第三层专属 JSON 数据上下文；缺失时不允许前端猜测或复用其他关键环节文件。 */
+  topologyDataContextId?: string
 }
 
 /** 说明节点只在单份内容内部唯一，不拥有正式节点标识、设备状态或三维映射。 */

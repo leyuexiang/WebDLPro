@@ -5,6 +5,7 @@ import {
   isWebglEventType,
   isWebglEnterProcessStepPayload,
   isWebglMoveCameraToPosePayload,
+  isWebglResetCameraPayload,
   isWebglEnterProcessDetailPayload,
   isWebglPrepareProcessDetailPayload,
   isWebglCommitProcessDetailPayload,
@@ -104,6 +105,7 @@ const IDEMPOTENT_COMMANDS = new Set<WebglCommandType>([
   // 播放命令按目标布尔状态幂等，回执丢失时可沿用同一消息标识安全重发。
   'setProcessDetailPlayback',
   'resetScene',
+  'resetCamera',
   'focusNode',
   'clearSelection',
   'setNodeVisualState',
@@ -658,6 +660,7 @@ export class WebglRuntimeConnector {
 /**
  * 在创建待确认记录前校验场景动作载荷，避免无效稳定标识占用有限请求表。
  * init、resize、resetScene 和 dispose 的结构分别由握手、尺寸观察器或释放流程固定生成，
+ * resetCamera（相机复位）仍在此处严格校验空载荷，防止业务控件附带坐标或流程参数。
  * 此处只校验会被动作映射或交互层传入的场景相关命令。
  */
 function isValidWebglCommandPayload(command: WebglCommandType, payload: unknown): boolean {
@@ -668,6 +671,8 @@ function isValidWebglCommandPayload(command: WebglCommandType, payload: unknown)
       return isWebglEnterProcessStepPayload(payload)
     case 'moveCameraToPose':
       return isWebglMoveCameraToPosePayload(payload)
+    case 'resetCamera':
+      return isWebglResetCameraPayload(payload)
     case 'prepareProcessDetail':
       return isWebglPrepareProcessDetailPayload(payload)
     case 'commitProcessDetail':
@@ -704,6 +709,8 @@ function getWebglCommandPayloadError(command: WebglCommandType): string {
       return '流程命令缺少合法流程、步骤、机组或隔离标识。'
     case 'moveCameraToPose':
       return '镜头定位命令缺少合法镜头点标识。'
+    case 'resetCamera':
+      return '相机复位命令只允许空载荷。'
     case 'prepareProcessDetail':
       return '关键环节准备命令缺少合法场景、流程、步骤、环节或事务标识。'
     case 'commitProcessDetail':

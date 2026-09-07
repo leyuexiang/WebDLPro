@@ -69,32 +69,28 @@ public static class GasTurbineProcessDetailPrefabBuilder
             cameraPose.localPosition = RemoteDisplayPosition + CameraOffsetFromDisplay;
             cameraPose.localRotation = Quaternion.Euler(8.457968f, 86.63072f, -0.0002123377f);
 
-            WaiKeHeBingAnimationController animationController =
-                modelInstance.GetComponent<WaiKeHeBingAnimationController>();
-            WaiKeHeBingGasFlowEffectController gasFlowController =
-                modelInstance.GetComponent<WaiKeHeBingGasFlowEffectController>();
-            WaiKeHeBingGasVolumeController gasVolumeController =
-                modelInstance.GetComponent<WaiKeHeBingGasVolumeController>();
-            if (animationController == null || gasFlowController == null || gasVolumeController == null)
+            WaiKeHeBingMasterController masterController =
+                modelInstance.GetComponent<WaiKeHeBingMasterController>();
+            if (masterController == null)
             {
-                throw new InvalidOperationException("燃气轮机源预制体缺少三个已确认动态控制器。" );
+                throw new InvalidOperationException("燃气轮机源预制体缺少统一动态控制器。" );
             }
 
             GasTurbineProcessDetailDynamicAdapter dynamicAdapter =
                 host.AddComponent<GasTurbineProcessDetailDynamicAdapter>();
-            dynamicAdapter.ConfigureForEditor(animationController, gasFlowController, gasVolumeController);
+            dynamicAdapter.ConfigureForEditor(masterController);
 
             ProcessDetailStateVisualAdapter visualAdapter =
                 host.AddComponent<ProcessDetailStateVisualAdapter>();
             Renderer[] visualRenderers = CollectStateVisualRenderers(
                 modelInstance,
-                animationController,
-                gasVolumeController);
+                masterController);
             if (visualRenderers.Length == 0)
             {
                 throw new InvalidOperationException("燃气轮机包装未收集到可用于四态视觉的设备渲染器。" );
             }
             visualAdapter.ConfigureForEditor(
+                false,
                 visualRenderers,
                 visualConfig.AlarmColor,
                 visualConfig.FaultColor,
@@ -137,13 +133,12 @@ public static class GasTurbineProcessDetailPrefabBuilder
     /// </summary>
     private static Renderer[] CollectStateVisualRenderers(
         GameObject modelInstance,
-        WaiKeHeBingAnimationController animationController,
-        WaiKeHeBingGasVolumeController gasVolumeController)
+        WaiKeHeBingMasterController masterController)
     {
         HashSet<Renderer> excluded = new HashSet<Renderer>();
-        AddSerializedRendererArray(animationController, "_rightShellRenderers", excluded);
-        AddSerializedRenderer(gasVolumeController, "_blueVolumeRenderer", excluded);
-        AddSerializedRenderer(gasVolumeController, "_redVolumeRenderer", excluded);
+        AddSerializedRendererArray(masterController, "_rightShellRenderers", excluded);
+        AddSerializedRenderer(masterController, "_blueVolumeRenderer", excluded);
+        AddSerializedRenderer(masterController, "_redVolumeRenderer", excluded);
 
         int baseColorId = Shader.PropertyToID("_BaseColor");
         int alternateBaseColorId = Shader.PropertyToID("_BASE_COLOR");

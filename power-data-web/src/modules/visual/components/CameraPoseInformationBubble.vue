@@ -54,17 +54,17 @@ const emit = defineEmits<{
 <style scoped>
 /*
  * 气泡高度固定为 Unity 实际视口高度的三分之一；宽度使用原图宽高比反推。
- * 0.4730689588472514 = (613.868 / 432.543) / 3，避免依赖尚未普遍支持的 calc 除法语法。
- * 两个起始偏移与居中的 Unity 视口共用工作宽度和场景高度变量，宽屏留白不会造成错位。
+ * 父覆盖层以实际画布建立双轴查询容器，1cqh 是其高度的百分之一，原生全屏时自动重新求值。
+ * 宽度系数 47.30689588472514 = 100 × (613.868 / 432.543) / 3；位置始终对齐画布左上角，
+ * 不再引用外层壳的半屏高度或居中留白，避免全屏后气泡尺寸仍停留在普通态。
  */
 .camera-pose-information-bubble {
   position: absolute;
   z-index: 2;
-  inset-block-start: calc((100% - var(--scene-block-size)) / 2);
-  inset-inline-start: calc((100% - var(--visualization-work-inline-size)) / 2);
-  inline-size: calc(var(--scene-block-size) * 0.4730689588472514);
-  max-inline-size: var(--visualization-work-inline-size);
-  block-size: calc(var(--scene-block-size) / 3);
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  inline-size: 47.30689588472514cqh;
+  block-size: 33.33333333333333cqh;
   margin: 0;
   overflow: visible;
   color: #e6fbff;
@@ -130,7 +130,7 @@ const emit = defineEmits<{
   text-wrap: pretty;
 }
 
-/* 关闭按钮位于矢量框右上角内侧，不占用文档流，也不会改变气泡或 Unity 视口尺寸。 */
+/* 关闭按钮位于矢量框右上角内侧；尺寸同样读取实际画布高度，不占文档流、不改变运行时尺寸。 */
 .camera-pose-information-bubble__close {
   position: absolute;
   z-index: 1;
@@ -138,14 +138,14 @@ const emit = defineEmits<{
   inset-inline-end: 7.5%;
   display: grid;
   place-items: center;
-  inline-size: clamp(20px, calc(var(--scene-block-size) * 0.055), 30px);
-  block-size: clamp(20px, calc(var(--scene-block-size) * 0.055), 30px);
+  inline-size: clamp(20px, 5.5cqh, 30px);
+  block-size: clamp(20px, 5.5cqh, 30px);
   padding: 0;
   border: 1px solid rgb(103 232 249 / 68%);
   border-radius: 50%;
   color: #e6fbff;
   font: inherit;
-  font-size: clamp(16px, calc(var(--scene-block-size) * 0.038), 22px);
+  font-size: clamp(16px, 3.8cqh, 22px);
   line-height: 1;
   cursor: pointer;
   background: rgb(2 38 57 / 86%);

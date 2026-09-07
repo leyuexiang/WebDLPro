@@ -22,10 +22,22 @@ describe('拓扑画布暂停契约', () => {
     expect(panelSource).toContain('stableCanvasController.setSuspended(Boolean(suspended))')
   })
 
-  it('重新显示时自动重置视口且面板提供手动重置按钮', () => {
+  it('重新显示时通过受控端口自动重置视口', () => {
     expect(controllerSource).toContain('resetView(): void')
     expect(panelSource).toContain('controller.resetView()')
-    expect(panelSource).toContain('aria-label="重置拓扑图位置"')
+  })
+
+  it('公共面板保留统一重置按钮并复用同一受控端口', () => {
+    // 按钮必须属于公共面板而非某一拓扑包装组件，后续新增拓扑无需再次补入口。
+    expect(panelSource).toContain('class="topology-panel__reset"')
     expect(panelSource).toContain('@click="resetTopologyView"')
+    expect(panelSource).toContain('stableCanvasController.resetView()')
+  })
+
+  it('公共面板默认移除外层标题栏并由所有拓扑画布占满空间', () => {
+    // 满高是公共默认值，不再依据燃气、燃煤或未来业务拓扑键追加专用修饰类。
+    expect(panelSource).not.toContain('topology-panel__header')
+    expect(panelSource).not.toContain('topology-panel__content--canvas-only')
+    expect(panelSource).toMatch(/\.topology-panel__content\s*{[\s\S]*?grid-template-rows:\s*minmax\(0, 1fr\);[\s\S]*?gap:\s*0;/)
   })
 })

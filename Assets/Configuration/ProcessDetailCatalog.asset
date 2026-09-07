@@ -34,7 +34,8 @@ MonoBehaviour:
     _cameraPoseId: camera-pose.coal-power.boiler
     _stateNodeIds:
     - node.coal-boiler
-    _dynamicTargetIds: []
+    _dynamicTargetIds:
+    - node.coal-boiler
     _availability: 1
     _editorPrefab: {fileID: 1942214797568138815, guid: 785dbb6a8c002ce4990d0014f6d62b02,
       type: 3}

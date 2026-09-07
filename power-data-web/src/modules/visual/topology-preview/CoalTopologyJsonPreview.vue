@@ -1,58 +1,63 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { LockState, Meta2d, type Pen } from '@meta2d/core'
-import { loadCoalTopologyPreviewData } from '@/modules/visual/topology-preview/coal-topology-preview-data'
-import {
-  getCoalTopologyTooltipContent,
-  type CoalTopologyTooltipContent,
-} from '@/modules/visual/topology-preview/coal-topology-tooltip'
+import { LockState, Meta2d, type Meta2dData, type Pen } from '@meta2d/core'
+import { loadCoalTopologyPreviewData } from './coal-topology-preview-data'
+import { getCoalTopologyTooltipContent, type CoalTopologyTooltipContent } from './coal-topology-tooltip'
 import CoalTopologyLayerFilter from './CoalTopologyLayerFilter.vue'
+import TopologyFullscreenButton from './TopologyFullscreenButton.vue'
 import {
-  applyCoalTopologyLayerVisibility,
   createDefaultCoalTopologyFilterSelection,
-  createCoalTopologyLayerBindingIndex,
-  createCoalTopologyVisibilityRuleIndex,
+  formatCoalTopologyFilterSelection,
+  resolveCoalTopologyVariant,
   toggleCoalTopologyFilter,
   type CoalTopologyFilterId,
 } from './coal-topology-layer-filter'
+import type { CoalTopologyVariantId, CoalTopologyVariantManifestEntry } from './coal-topology-variant-manifest'
+import {
+  createGasTopologyConnectedLineIndex,
+  GAS_TOPOLOGY_SELECTION_COLOR,
+  GAS_TOPOLOGY_SELECTION_LINE_WIDTH,
+  resolveGasTopologyConnectedLineIds,
+} from './gas-topology-connection-highlight'
+
+interface Meta2dPointerEvent { readonly pen?: Pen }
+interface SourceLinePresentation { readonly color: string; readonly lineWidth: number }
 
 const canvasHost = ref<HTMLElement | null>(null)
 const canvasStage = ref<HTMLElement | null>(null)
 const loadingState = ref<'loading' | 'ready' | 'error'>('loading')
 const errorMessage = ref('')
+const layerNotice = ref('')
 const zoomPercent = ref(100)
 const activeTooltip = ref<CoalTopologyTooltipContent | null>(null)
 const tooltipX = ref(16)
 const tooltipY = ref(68)
-/** 筛选状态只保存稳定编号；图元显隐由同一份层级索引投影到 Meta2D（网页二维组态引擎）。 */
 const selectedFilterIds = ref<ReadonlySet<CoalTopologyFilterId>>(createDefaultCoalTopologyFilterSelection())
-const layerBindingIndex = ref<ReadonlyMap<string, readonly CoalTopologyFilterId[]>>(new Map())
-const visibilityRuleIndex = ref<ReturnType<typeof createCoalTopologyVisibilityRuleIndex>>(new Map())
+const currentVariantId = ref<CoalTopologyVariantId>('network-business-key-process')
+const connectedLineIndex = ref<ReturnType<typeof createGasTopologyConnectedLineIndex>>(new Map())
 const statusText = computed(() => loadingState.value === 'loading'
   ? '正在加载拓扑图…'
   : loadingState.value === 'error'
     ? errorMessage.value
-    : '已按原始拓扑数据渲染')
-const tooltipStyle = computed(() => ({
-  left: `${tooltipX.value}px`,
-  top: `${tooltipY.value}px`,
-}))
+    : `正在展示：${formatCoalTopologyFilterSelection(selectedFilterIds.value)}`)
+const tooltipStyle = computed(() => ({ left: `${tooltipX.value}px`, top: `${tooltipY.value}px` }))
 
 let meta2d: Meta2d | undefined
 let resizeObserver: ResizeObserver | undefined
 let resizeFrame: number | undefined
 let imageReadyFrame: number | undefined
-const requestController = new AbortController()
+let topologyRequestController: AbortController | undefined
+let loadRevision = 0
+let disposed = false
+const sourceLinePresentationById = new Map<string, SourceLinePresentation>()
+let highlightedLineIds: ReadonlySet<string> = new Set()
 
-/** 同步第三方画布内部倍率，工具栏只显示整数百分比，避免响应式层保存另一套缩放状态。 */
+/** 工具栏倍率始终读取画布内部状态，不保存第二套缩放来源。 */
 function syncZoomPercent(): void {
   zoomPercent.value = Math.round((meta2d?.store.data.scale ?? 1) * 100)
 }
 
-/**
- * 按全部图元的实际边界等比适配当前容器。
- * 只改变统一的画布观察倍率，不单独改写文字、设备、连线的坐标和尺寸，避免破坏数据中的相对布局。
- */
+/** 按当前完整文件边界等比适配，不改写图元坐标、文字或连线路径。 */
 function fitTopologyToViewport(): void {
   if (!meta2d || loadingState.value !== 'ready') return
   clearTopologyTooltip()
@@ -60,160 +65,213 @@ function fitTopologyToViewport(): void {
   syncZoomPercent()
 }
 
-/**
- * Meta2D 的 scale 参数是目标倍率而非增量，先读取当前倍率再计算，避免连续点击产生比例跳变。
- */
 function changeZoom(multiplier: number): void {
   if (!meta2d || loadingState.value !== 'ready') return
   clearTopologyTooltip()
   const currentScale = meta2d.store.data.scale || 1
-  const nextScale = Math.min(4, Math.max(0.1, currentScale * multiplier))
   const host = canvasHost.value
-  meta2d.scale(nextScale, {
+  meta2d.scale(Math.min(4, Math.max(0.1, currentScale * multiplier)), {
     x: (host?.clientWidth ?? 0) / 2,
     y: (host?.clientHeight ?? 0) / 2,
   })
   syncZoomPercent()
 }
 
-/** 将提示锚点限制在画布安全区，定位算法与原拓扑提示保持一致。 */
 function updateTooltipAnchor(event: MouseEvent): void {
   const stage = canvasStage.value
   if (!stage || !activeTooltip.value) return
-
   const bounds = stage.getBoundingClientRect()
   tooltipX.value = Math.min(Math.max(event.clientX - bounds.left, 12), Math.max(12, bounds.width - 24))
   tooltipY.value = Math.min(Math.max(event.clientY - bounds.top, 68), Math.max(68, bounds.height - 12))
 }
 
-/** 背景图元在选择策略中已完全禁用；这里再按提示内容门禁，避免未来数据变更产生空卡片。 */
 function handleTooltipPenEnter(pen?: Pen): void {
   activeTooltip.value = pen ? getCoalTopologyTooltipContent(pen) ?? null : null
 }
 
-/** 仅离开当前提示图元时关闭卡片，避免相邻设备快速切换产生错误清除。 */
 function handleTooltipPenLeave(pen?: Pen): void {
   if (!pen || activeTooltip.value?.penId === pen.id) clearTopologyTooltip()
 }
 
-function clearTopologyTooltip(): void {
-  activeTooltip.value = null
-}
+function clearTopologyTooltip(): void { activeTooltip.value = null }
 
-/** 一次筛选变化只更新每个图元的 visible 字段并统一渲染，避免重建 JSON、动图或画布实例。 */
-function applyLayerFilterSelection(): void {
+/** 选中只更新当前文件的直接关联线，取消时按提交阶段缓存的源样式精确恢复。 */
+function applySelectionVisual(pens: readonly Pen[], render = true): void {
   if (!meta2d || loadingState.value !== 'ready') return
-  const pens = meta2d.store.data.pens
-  const previousVisibilityByPenId = new Map(
-    pens
-      .filter((pen) => Boolean(pen.id))
-      .map((pen) => [pen.id!, pen.visible]),
+  const activePens = pens.filter((pen) => pen.id && pen.visible !== false)
+  const selectedPenIds = activePens.flatMap((pen) => pen.id ? [pen.id] : [])
+  const requestedLineIds = resolveGasTopologyConnectedLineIds(selectedPenIds, connectedLineIndex.value)
+  const nextHighlightedLineIds = new Set(
+    [...requestedLineIds].filter((lineId) => meta2d?.find(lineId)?.[0]?.visible !== false),
   )
-  applyCoalTopologyLayerVisibility(pens, layerBindingIndex.value, selectedFilterIds.value, visibilityRuleIndex.value)
-
-  // Meta2D 的专用显隐接口（setVisible）除了更新 visible 字段，还会同步 calculative.visible、图片缓存和子图元状态。
-  // 之前只调用 setValue 时，部分普通矩形边框在数据状态已变更后仍保留旧画布缓存；这里只处理真正发生变化的图元，
-  // 避免每次筛选都重复初始化 102 个图元的图片缓存，再统一执行一次 render，兼顾显示正确性与切换性能。
-  for (const pen of pens) {
-    if (!pen.id || previousVisibilityByPenId.get(pen.id) === pen.visible) continue
-    meta2d.setVisible(pen, pen.visible !== false, false)
+  for (const lineId of new Set([...highlightedLineIds, ...nextHighlightedLineIds])) {
+    const source = sourceLinePresentationById.get(lineId)
+    if (!source) continue
+    const highlighted = nextHighlightedLineIds.has(lineId)
+    meta2d.setValue({
+      id: lineId,
+      color: highlighted ? GAS_TOPOLOGY_SELECTION_COLOR : source.color,
+      lineWidth: highlighted ? Math.max(source.lineWidth, GAS_TOPOLOGY_SELECTION_LINE_WIDTH) : source.lineWidth,
+    }, { render: false, doEvent: false, history: false })
   }
+  highlightedLineIds = nextHighlightedLineIds
+  if (activePens.length > 0) meta2d.active(activePens, false)
+  else meta2d.inactive()
+  if (render) meta2d.render()
+}
+
+function handleCanvasClick(event?: Meta2dPointerEvent): void {
+  applySelectionVisual(event?.pen ? [event.pen] : [])
+}
+
+/** 切换文件时清空旧文件局部状态并重建索引，二维组态引擎实例和监听器保持共用。 */
+function commitTopologyVariant(
+  data: Meta2dData,
+  variant: CoalTopologyVariantManifestEntry,
+  revision: number,
+): void {
+  if (!meta2d || disposed || revision !== loadRevision) return
   clearTopologyTooltip()
-  meta2d.render()
+  highlightedLineIds = new Set()
+  sourceLinePresentationById.clear()
+  if (imageReadyFrame !== undefined) cancelAnimationFrame(imageReadyFrame)
+  imageReadyFrame = undefined
+  currentVariantId.value = variant.id
+  connectedLineIndex.value = createGasTopologyConnectedLineIndex(data.pens)
+  const defaultLineColor = data.color ?? '#bdc7db'
+  for (const pen of data.pens) {
+    if (pen.name === 'line' && pen.id) {
+      sourceLinePresentationById.set(pen.id, {
+        color: pen.color ?? defaultLineColor,
+        lineWidth: pen.lineWidth ?? 1,
+      })
+    }
+  }
+  meta2d.open(data)
+  meta2d.lock(LockState.DisableEdit)
+  loadingState.value = 'ready'
+  errorMessage.value = ''
+  layerNotice.value = ''
+  requestAnimationFrame(() => {
+    if (revision === loadRevision) fitTopologyToViewport()
+  })
+  fitAfterImagesReady(revision)
 }
 
-/** 主开关和各层复选框均通过纯函数更新，保证两个页面的交互规则完全一致。 */
+/** 递增加载序号配合请求中止，保证快速勾选时只有最后选择可以提交。 */
+async function switchTopologyVariant(variant: CoalTopologyVariantManifestEntry): Promise<void> {
+  if (variant.id === currentVariantId.value && loadingState.value === 'ready') {
+    layerNotice.value = ''
+    return
+  }
+  const revision = ++loadRevision
+  topologyRequestController?.abort()
+  const controller = new AbortController()
+  topologyRequestController = controller
+  const hasCurrentCanvas = loadingState.value === 'ready'
+  if (hasCurrentCanvas) layerNotice.value = `正在切换到${formatCoalTopologyFilterSelection(selectedFilterIds.value)}…`
+  else loadingState.value = 'loading'
+  try {
+    const data = await loadCoalTopologyPreviewData(variant.id, controller.signal)
+    if (disposed || revision !== loadRevision || controller.signal.aborted) return
+    commitTopologyVariant(data, variant, revision)
+  } catch (error) {
+    if (disposed || revision !== loadRevision || controller.signal.aborted) return
+    const message = error instanceof Error ? error.message : '燃煤拓扑加载失败。'
+    if (hasCurrentCanvas) layerNotice.value = message
+    else {
+      loadingState.value = 'error'
+      errorMessage.value = message
+    }
+  }
+}
+
+/** 缺少独立输入的组合不发请求、不修改当前画布，只更新勾选并显示非阻塞提示。 */
 function handleLayerFilterChange(filterId: CoalTopologyFilterId, checked: boolean): void {
-  selectedFilterIds.value = toggleCoalTopologyFilter(selectedFilterIds.value, filterId, checked)
-  applyLayerFilterSelection()
+  const nextSelection = toggleCoalTopologyFilter(selectedFilterIds.value, filterId, checked)
+  selectedFilterIds.value = nextSelection
+  const variant = resolveCoalTopologyVariant(nextSelection)
+  if (!variant) {
+    ++loadRevision
+    topologyRequestController?.abort()
+    const missingMessage = nextSelection.size === 0
+      ? '请至少选择一个有输入文件的层级。当前拓扑保持不变。'
+      : `${formatCoalTopologyFilterSelection(nextSelection)}暂无独立输入文件，当前拓扑保持不变。`
+    // 首次数据尚未提交时没有“当前拓扑”可保留，改为明确空态，避免中止首个请求后永久停在加载文案。
+    if (loadingState.value === 'ready') layerNotice.value = missingMessage
+    else {
+      loadingState.value = 'error'
+      errorMessage.value = missingMessage
+    }
+    return
+  }
+  void switchTopologyVariant(variant)
 }
 
-/** 容器尺寸变化合并到下一动画帧，并从当前源倍率重新等比适配全部图元。 */
+/** 容器尺寸更新合并到下一动画帧，切换和全屏期间不会连续重绘。 */
 function scheduleCanvasResize(): void {
   if (!meta2d || !canvasHost.value) return
   if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame)
   resizeFrame = requestAnimationFrame(() => {
     resizeFrame = undefined
     const host = canvasHost.value
-    if (!host || !meta2d) return
+    if (!host || !meta2d || host.clientWidth === 0 || host.clientHeight === 0) return
     meta2d.resize(host.clientWidth, host.clientHeight)
     fitTopologyToViewport()
   })
 }
 
-/**
- * 动态图片文档对象加载后，按源倍率对整图做一次等比适配，确保图片参与最终边界计算。
- * 使用动画帧轮询现有图片节点，不新增图片请求或常驻定时器，完成后立即停止。
- */
-function fitAfterImagesReady(attempt = 0): void {
+/** 图片轮询携带加载序号，旧文件的延迟完成事件不能覆盖新文件视图。 */
+function fitAfterImagesReady(revision: number, attempt = 0): void {
   const host = canvasHost.value
-  if (!host || !meta2d || requestController.signal.aborted) return
+  if (!host || !meta2d || disposed || revision !== loadRevision) return
   const images = Array.from(host.querySelectorAll('img'))
-  const allImagesReady = images.length > 0 && images.every((image) => image.complete)
-
-  if (allImagesReady || attempt >= 360) {
+  if ((images.length > 0 && images.every((image) => image.complete)) || attempt >= 360) {
     imageReadyFrame = undefined
     fitTopologyToViewport()
     return
   }
-
-  imageReadyFrame = requestAnimationFrame(() => fitAfterImagesReady(attempt + 1))
+  imageReadyFrame = requestAnimationFrame(() => fitAfterImagesReady(revision, attempt + 1))
 }
 
 onMounted(async () => {
   const host = canvasHost.value
   if (!host) return
-
-  try {
-    const topologyData = await loadCoalTopologyPreviewData(requestController.signal)
-    if (requestController.signal.aborted) return
-
-    layerBindingIndex.value = createCoalTopologyLayerBindingIndex(topologyData.pens)
-    visibilityRuleIndex.value = createCoalTopologyVisibilityRuleIndex(topologyData.pens, layerBindingIndex.value)
-    applyCoalTopologyLayerVisibility(topologyData.pens, layerBindingIndex.value, selectedFilterIds.value, visibilityRuleIndex.value)
-
-    // 等待布局完成后再创建引擎；Meta2D 初始化时会立即按容器尺寸创建离屏画布，零尺寸会导致图片层绘制失败。
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
-    if (host.clientWidth === 0 || host.clientHeight === 0) {
-      throw new Error('拓扑画布可用尺寸为零，请检查承载区域高度。')
-    }
-
-    // 使用生成该 JSON 的原生 Meta2D（网页二维组态引擎）打开数据，避免手工解释坐标与文字布局造成偏差。
-    meta2d = new Meta2d(host, {
-      minScale: 0.1,
-      maxScale: 4,
-      grid: false,
-      rule: false,
-      disableInput: true,
-      disableClipboard: true,
-    })
-    meta2d.open(topologyData)
-    // 复用组态引擎已有命中索引，不额外扫描 102 个图元；全画布只维护一个文档提示层。
-    meta2d.on<Pen>('enter', handleTooltipPenEnter)
-    meta2d.on<Pen>('leave', handleTooltipPenLeave)
-    // 禁止改图，但保留空白拖动画布和滚轮缩放，便于查看原始细节。
-    meta2d.lock(LockState.DisableEdit)
-    loadingState.value = 'ready'
-    resizeObserver = new ResizeObserver(scheduleCanvasResize)
-    resizeObserver.observe(host)
-    requestAnimationFrame(fitTopologyToViewport)
-    fitAfterImagesReady()
-  }
-  catch (error) {
-    if (requestController.signal.aborted) return
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+  if (host.clientWidth === 0 || host.clientHeight === 0) {
     loadingState.value = 'error'
-    errorMessage.value = error instanceof Error ? error.message : '拓扑图加载失败。'
+    errorMessage.value = '拓扑画布可用尺寸为零，请检查承载区域高度。'
+    return
   }
+  meta2d = new Meta2d(host, {
+    minScale: 0.1,
+    maxScale: 4,
+    grid: false,
+    rule: false,
+    activeColor: GAS_TOPOLOGY_SELECTION_COLOR,
+    disableInput: true,
+    disableClipboard: true,
+  })
+  // 监听器与尺寸观察器只注册一次；层级变化仅使用同一实例打开另一份完整数据。
+  meta2d.on<Pen>('enter', handleTooltipPenEnter)
+  meta2d.on<Pen>('leave', handleTooltipPenLeave)
+  meta2d.on<Meta2dPointerEvent>('click', handleCanvasClick)
+  resizeObserver = new ResizeObserver(scheduleCanvasResize)
+  resizeObserver.observe(host)
+  const initialVariant = resolveCoalTopologyVariant(selectedFilterIds.value)
+  if (initialVariant) await switchTopologyVariant(initialVariant)
 })
 
 onBeforeUnmount(() => {
-  requestController.abort()
+  disposed = true
+  ++loadRevision
+  topologyRequestController?.abort()
   resizeObserver?.disconnect()
   if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame)
   if (imageReadyFrame !== undefined) cancelAnimationFrame(imageReadyFrame)
   meta2d?.off<Pen>('enter', handleTooltipPenEnter)
   meta2d?.off<Pen>('leave', handleTooltipPenLeave)
-  // 显式释放多层 Canvas、动图文档对象和事件监听，避免返回旧燃煤拓扑后保留预览资源。
+  meta2d?.off<Meta2dPointerEvent>('click', handleCanvasClick)
   meta2d?.destroy()
   meta2d = undefined
 })
@@ -226,41 +284,31 @@ onBeforeUnmount(() => {
         <h1>燃煤拓扑图预览</h1>
         <p>{{ statusText }}</p>
       </div>
-
       <div class="coal-topology-preview__actions" aria-label="拓扑图视图控制">
         <button type="button" :disabled="loadingState !== 'ready'" @click="changeZoom(0.85)">缩小</button>
         <output aria-label="当前缩放比例">{{ zoomPercent }}%</output>
         <button type="button" :disabled="loadingState !== 'ready'" @click="changeZoom(1.15)">放大</button>
         <button type="button" :disabled="loadingState !== 'ready'" @click="fitTopologyToViewport">适应画布</button>
-        <RouterLink to="/embed?directAccess=1&amp;sceneId=coal-power">返回原燃煤拓扑</RouterLink>
       </div>
     </header>
 
     <section ref="canvasStage" class="coal-topology-preview__stage" aria-label="燃煤拓扑图画布">
-      <CoalTopologyLayerFilter
-        :selected-filter-ids="selectedFilterIds"
-        @change="handleLayerFilterChange"
-      />
+      <CoalTopologyLayerFilter :selected-filter-ids="selectedFilterIds" @change="handleLayerFilterChange" />
       <div
         ref="canvasHost"
         class="coal-topology-preview__canvas"
         @mouseleave="clearTopologyTooltip"
         @mousemove.passive="updateTooltipAnchor"
       />
-      <!-- 提示层与第三方引擎管理的画布容器保持同级，避免响应式更新干扰引擎追加的多层 Canvas 和动图元素。 -->
-      <div
-        v-if="activeTooltip"
-        class="coal-topology-preview__tooltip"
-        :style="tooltipStyle"
-        role="tooltip"
-        aria-live="polite"
-      >
+      <TopologyFullscreenButton :target="canvasStage" :disabled="loadingState !== 'ready'" />
+      <div v-if="activeTooltip" class="coal-topology-preview__tooltip" :style="tooltipStyle" role="tooltip">
         <strong>{{ activeTooltip.title }}</strong>
         <span>状态：{{ activeTooltip.status }}</span>
       </div>
-      <div v-if="loadingState !== 'ready'" class="coal-topology-preview__state" role="status">
-        {{ statusText }}
-      </div>
+      <p v-if="layerNotice && loadingState === 'ready'" class="coal-topology-preview__notice" role="status">
+        {{ layerNotice }}
+      </p>
+      <div v-if="loadingState !== 'ready'" class="coal-topology-preview__state" role="status">{{ statusText }}</div>
     </section>
   </main>
 </template>
@@ -290,68 +338,31 @@ onBeforeUnmount(() => {
   box-shadow: 0 4px 16px rgba(29, 42, 68, 0.08);
 }
 
-.coal-topology-preview__heading h1 {
-  margin: 0;
-  font-size: 20px;
-  line-height: 1.4;
-}
+.coal-topology-preview__heading h1 { margin: 0; font-size: 20px; line-height: 1.4; }
+.coal-topology-preview__heading p { margin: 2px 0 0; color: #667085; font-size: 12px; }
+.coal-topology-preview__actions { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
 
-.coal-topology-preview__heading p {
-  margin: 2px 0 0;
-  color: #667085;
-  font-size: 12px;
-}
-
-.coal-topology-preview__actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  white-space: nowrap;
-}
-
-.coal-topology-preview__actions button,
-.coal-topology-preview__actions a {
+.coal-topology-preview__actions button {
   min-block-size: 36px;
   padding: 7px 13px;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
-  background: #ffffff;
+  background: #fff;
   color: #24324a;
   font: inherit;
   font-size: 13px;
-  line-height: 20px;
-  text-decoration: none;
   cursor: pointer;
 }
 
-.coal-topology-preview__actions button:hover:not(:disabled),
-.coal-topology-preview__actions a:hover {
-  border-color: #2563eb;
-  color: #1d4ed8;
-}
-
-.coal-topology-preview__actions button:focus-visible,
-.coal-topology-preview__actions a:focus-visible {
-  outline: 3px solid rgba(37, 99, 235, 0.25);
-  outline-offset: 2px;
-}
-
-.coal-topology-preview__actions button:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
-}
-
-.coal-topology-preview__actions output {
-  inline-size: 58px;
-  color: #475467;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-}
+.coal-topology-preview__actions button:hover:not(:disabled) { border-color: #2563eb; color: #1d4ed8; }
+.coal-topology-preview__actions button:focus-visible { outline: 3px solid rgba(37, 99, 235, 0.25); outline-offset: 2px; }
+.coal-topology-preview__actions button:disabled { cursor: not-allowed; opacity: 0.45; }
+.coal-topology-preview__actions output { inline-size: 58px; color: #475467; text-align: center; font-variant-numeric: tabular-nums; }
 
 .coal-topology-preview__stage {
   position: relative;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   min-block-size: 0;
   margin: 16px;
   overflow: hidden;
@@ -361,14 +372,9 @@ onBeforeUnmount(() => {
   box-shadow: 0 12px 30px rgba(29, 42, 68, 0.1);
 }
 
-.coal-topology-preview__canvas {
-  inline-size: 100%;
-  block-size: 100%;
-  overflow: hidden;
-  background: #1e2430;
-}
+.coal-topology-preview__canvas { inline-size: 100%; block-size: 100%; overflow: hidden; background: #1e2430; }
+.coal-topology-preview__stage:fullscreen { margin: 0; border: 0; border-radius: 0; }
 
-/* 与原拓扑共用深色青边提示规范；全画布只有当前悬浮图元对应的一个提示实例。 */
 .coal-topology-preview__tooltip {
   position: absolute;
   z-index: 25;
@@ -386,12 +392,25 @@ onBeforeUnmount(() => {
   transform: translate(10px, calc(-100% - 10px));
 }
 
-.coal-topology-preview__tooltip strong {
-  font-size: 12px;
-}
+.coal-topology-preview__tooltip strong { font-size: 12px; }
+.coal-topology-preview__tooltip span { color: #9dd8e5; }
 
-.coal-topology-preview__tooltip span {
-  color: #9dd8e5;
+.coal-topology-preview__notice {
+  position: absolute;
+  inset-block-start: 12px;
+  inset-inline-start: 50%;
+  z-index: 24;
+  max-inline-size: min(560px, calc(100% - 120px));
+  margin: 0;
+  padding: 7px 12px;
+  border: 1px solid rgba(250, 204, 21, 0.58);
+  border-radius: 6px;
+  color: #fef3c7;
+  background: rgba(69, 48, 7, 0.92);
+  font-size: 12px;
+  text-align: center;
+  pointer-events: none;
+  transform: translateX(-50%);
 }
 
 .coal-topology-preview__state {
@@ -407,22 +426,9 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 760px) {
-  .coal-topology-preview__toolbar {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 10px;
-    padding: 10px 12px;
-  }
-
-  .coal-topology-preview__actions {
-    inline-size: 100%;
-    overflow-x: auto;
-    padding-block-end: 2px;
-  }
-
-  .coal-topology-preview__stage {
-    margin: 8px;
-  }
+  .coal-topology-preview__toolbar { align-items: flex-start; flex-direction: column; gap: 10px; padding: 10px 12px; }
+  .coal-topology-preview__actions { inline-size: 100%; overflow-x: auto; padding-block-end: 2px; }
+  .coal-topology-preview__stage { margin: 8px; }
 }
 </style>
 

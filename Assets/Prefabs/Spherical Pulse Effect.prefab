@@ -1,0 +1,296 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &5188473516727252284
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1321987914345927891}
+  - component: {fileID: 4502414663622868462}
+  - component: {fileID: 8604105456997820960}
+  m_Layer: 0
+  m_Name: Spherical Pulse Effect
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1321987914345927891
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5188473516727252284}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -1555.5712, y: -14.6669235, z: 227.328}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &4502414663622868462
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5188473516727252284}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 44e2ca6ae5d981d4b9930eb6cbdbfe4a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _targets:
+  - {fileID: 0}
+  _playOnStart: 1
+  _effectEnabled: 1
+  _loop: 1
+  _pulseMaterial: {fileID: 2100000, guid: addb3ae0e8623da418cbbb27f87e88ab, type: 2}
+  _pulseColor: {r: 3.4483063, g: 0, b: 0, a: 1}
+  _pulsePeakOpacity: 0.32
+  _pulseRimPower: 2.4
+  _pulseRimIntensity: 2.2
+  _pulseStartScale: 1
+  _pulseEndScale: 2.2
+  _pulseHorizontalScale: 1
+  _pulseVerticalScale: 0.12
+  _pulseRingWidth: 0.06
+  _upperHemisphereMaterial: {fileID: 2100000, guid: 099c2007bace0b1428224ad267c40917,
+    type: 2}
+  _upperHemisphereColor: {r: 1.1468117, g: 0, b: 0, a: 0.4745098}
+  _upperHemisphereOpacity: 0.28
+  _upperHemisphereRimPower: 2.6
+  _upperHemisphereRimIntensity: 1.6
+  _upperHemisphereScalePadding: 1.05
+  _upperHemisphereEndScale: 1.45
+  _shieldMaterial: {fileID: 2100000, guid: 0d77aa8e488a15b4da992de4100f90b5, type: 2}
+  _shieldColor: {r: 1.573923, g: 0, b: 0, a: 0.53333336}
+  _shieldOpacity: 0.34
+  _shieldRimPower: 2.1
+  _shieldRimIntensity: 1.8
+  _shieldScalePadding: 1.2
+  _duration: 1.8
+--- !u!114 &8604105456997820960
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5188473516727252284}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9cd0e563acc204447a147c4b34018b84, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _hologramMaterial: {fileID: 2100000, guid: ebfe5c5439e57cd4094894093b8ef6cc, type: 2}
+  _wireframeMaterial: {fileID: 2100000, guid: 42209b8d3af2e8a4795ddb50433abcdd, type: 2}
+  _enabled: 1
+  _opacityBreathing: 1
+  _breathingSpeed: 0.8
+  _breathingAmplitude: 0.35
+  _targets:
+  - _id: Group-10278655-115-162
+    _target: {fileID: 0}
+    _enabled: 0
+    _meshBindings:
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: e4e70184717ebeb4fa14a275a3766b3b, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: c7c9d571eacfec6469ef7b027c22ddb3, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: c662f1816c1f0914fb0f1b7a540152ed, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 026e606fef245414eb2cacc671b413c2, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: bcc85b12b687633489fef7e0150d191a, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 874db53a5bf06c345a97ec6264e396c8, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: a730f9451cee00e4d8a346e7044a6cd7, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 56943d0a401bc0c4d9ba6b1e939ff46c, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: e45390d863aa56f4e8aa54f73cce6818, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: ca5abee6732bc284ab13aa295e675bf6, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: e398462ad75791c4aa3487834e332788, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: a6bab0aae304f8545ae267a8c460e9aa, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 180ab191d7c728b4d9e938adbb7036fc, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 7b2234759e078bb4b9c5ac263e1b6ba6, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: a846b3df95bba54498d2236fb90aa22f, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 21b5fc092e52d2444a1444eee4f09ea1, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: f8f529271315f9f4ca4617be32091c30, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 0bebdfba56224124b8fa0faa2f9bff05, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 52360259fc4e51049b85e84a3c90a5b2, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 317b50f9733364f4b873750120bb3585, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 700a0f9437b09a84c8c3414bb1470f19, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 463405ecaefb6c740b4862f6d1e84dd6, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: cb0d938e94c7bca409914afc985013aa, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: a4914faddb7ada745ad12bd6075bd633, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 45225c1d06d7b35409b3785a5aa16600, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 7746428a46fde5b4d880f78701448350, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 26266516576389b4fa6030c05943213f, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 31298ff4016fb6d4fbcae1882a39be22, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 4268f9f50bb34f44aac9b0ebccae22d4, type: 2}
+  - _id: Group-10278655-332-180
+    _target: {fileID: 0}
+    _enabled: 0
+    _meshBindings:
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: a59dc8ff7cf762a4cafa3b88a665295a, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 02928857cdc050947a32d203e58cc9f2, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: ecf05ab37a2feb140b5d99c7dded9238, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 1198da5ce16545b44bde872ac00b2a9a, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 4bf84a156d14f9141886cac461f9a3ad, type: 2}
+  - _id: Group-10278655-332-181
+    _target: {fileID: 0}
+    _enabled: 0
+    _meshBindings:
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: eff90261b4470034da9a2d47bc9fd18d, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 78a7ff9d8c288c840b9391fc3f49101c, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: b5993a1c3b311e645ab2ede90b8b4ba7, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: bd939d94a5a91f94da0372c154942151, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: a589eb44551a7ac4689e4515b44b0f59, type: 2}
+  - _id: Group-13933239-22-945
+    _target: {fileID: 0}
+    _enabled: 0
+    _meshBindings:
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 37da40a357bea3d44a2f68e50eca79b3, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: eef1c987145fdc4418ee220eac410f3c, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 8be0bdca4a26da14dad88bf348a6d669, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: ac56b9b6d317c7f4e9b68caaaa104ebb, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 720857e9c9e2d68458e0a955b3b91a27, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 1b577a48692f64541b9325dd7d1138fc, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 8ed35b6bf1a38b540863db60bdc7f9bc, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: cdd2ca64696574a439bb50ef89ddd624, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 983dc2413296ef640af37de805ab9c88, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: edf7438b2381a23488e53237395e49be, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 7426ded851ad20b41987977fcd1557e7, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 50fed330f8620ed47a80334727858a86, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: b38eeb7ab39dd6948a20d4ff46e490ff, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 429252777b6072a4091493a05e9a4882, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: ba37f3ac4536be646bf92d81cc2f6d3d, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 8882010df62295d4f86bffd0009d1715, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 8a0ab4296bb2cd042a0dd9f003e247a0, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 809f0b3de5c6a884abf2fa95f50c37e5, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 1d14b38076690514bbdaa634824e21e1, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 4b687e3e6342b1f47a9fcf33025c4d12, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 3715f0c810b8bc1458e0923a27d3d66a, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: db4912fb3dfe3df4fb6da1ec3ab5de47, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: cdd0ba09b1e20ba49915ed323e7c950c, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: affb5748c31b09440b10d700daa92c0e, type: 2}
+  - _id: Group-13933239-22-949
+    _target: {fileID: 0}
+    _enabled: 0
+    _meshBindings:
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 9644353e36cd7094eb9d644069f775e5, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 0f6ee77e47925604ea67399d1c279e50, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: c2beb6292409a1c4fa60f1e02f77cb83, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 25eb505bdc4242745b975a456a583303, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 6266cee1a8dc86c489aee0fcca623976, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 44e8038debcdea146902f7cd50aaa9ef, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 15cee442de60bba4b959ca4b361fc9a8, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 90ce13e23b63b354a91152e0a978d5b8, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 038c35797608fde479c2b5e2195c2eea, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 944a6d6d56f4d4446bc90176b428575a, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: f93e422bba51a284aaac01c53b1e71ad, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 72e3f52575edfd046b89c4a8b11fd0e3, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 458d65f4deab5da4bb8131e6d1d7de14, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 8af0b38cd0bda8a4ab6e7286d831f1a9, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 31a751c0cc973fa4d8f7412845b727bc, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 74a06d3524e2f0642aea6b69d7c1e3f5, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 182b1e8ded5880045af57a8b3396f6a4, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: bd5708d310ef47549857cbdd939a2a92, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 4fc00bb9a0253984cbc5f783240ec660, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: aead8b7d77d5844459a8fc11662d25d5, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 3a5c422b792421544b2136799d09c3a0, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 733a4b032e2b77445b9aea2cba9eb87e, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 665dcb600fcb32c49bc708fb46d48fc4, type: 2}
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: b5d7220aae878dc408f3d40fc7e06478, type: 2}
+  - _id: Obj3d66-13933239-1889-321
+    _target: {fileID: 0}
+    _enabled: 0
+    _meshBindings:
+    - _sourceFilter: {fileID: 0}
+      _wireframeMesh: {fileID: 4300000, guid: 5df332a335a37ec4a8e49e479054e729, type: 2}

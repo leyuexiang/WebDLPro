@@ -11,6 +11,7 @@ import {
   isProcessDetailVisualizationStableContext,
 } from '@/modules/visual/orchestration/visualization.store'
 import type { PreparedTopology, TopologyRuntime } from '@/modules/visual/topology/topology-runtime'
+import { getProcessDetailTopologyDataContext } from '@/modules/visual/topology/process-detail-topology-contexts'
 
 /** 第三层 Unity 端口显式暴露准备、提交、取消、退出与播放控制，不包含旧组合进入或流程步骤命令。 */
 export interface ProcessDetailUnityPort {
@@ -43,7 +44,7 @@ interface ActiveProcessDetailTransaction {
 
 /**
  * 独立关键环节原子事务。
- * 进入时先等待 Unity 完成隐藏加载和状态重放，再暂停唯一拓扑并等待全屏布局落盘，最后提交资源与相机；返回时反向执行。
+ * 进入时先等待 Unity 完成隐藏加载和状态重放，再切换同一公共画布的数据上下文并等待双区布局落盘，最后提交资源与相机；返回时反向执行。
  * 任一失败均保留或恢复上一个稳定组合，不调用 enterProcessStep、focusNode、setNodeVisibility 或 resetScene。
  */
 export class ProcessDetailTransactionHandler {
@@ -136,9 +137,7 @@ export class ProcessDetailTransactionHandler {
       // 外层截止时先恢复同一画布的业务拓扑，避免协调器恢复业务稳定态后短暂暴露仍暂停的空画布。
       this.topologyRuntime.activate(active.rollbackTopology, active.transitionId)
     }
-    if (active.kind === 'switch' && active.previousDetail) {
-      this.topologyRuntime.retargetProcessDetail(active.previousDetail.sceneId, active.previousDetail.stateNodeId)
-    }
+    if (active.kind === 'switch' && active.previousDetail) this.restoreProcessDetailTopology(active.previousDetail)
     if (active.kind !== 'exit') this.cleanupAbandonedProcessDetail(active)
     this.coordinator.submit({
       type: 'transition.fail',
@@ -214,14 +213,10 @@ export class ProcessDetailTransactionHandler {
       }
       active.phase = 'prepared'
 
-      // 同场景第三层直切时画布已经暂停；从第二层进入才需要保存视口并切换状态投影目标。
-      if (!switchesProcessDetail && !this.topologyRuntime.suspendForProcessDetail(detail.sceneId, detail.stateNodeId)) {
+      // 第三层始终保留同一二维画布，只把数据源切到目录中登记的独立 JSON。
+      if (!this.activateProcessDetailTopology(detail)) {
         await this.unity.abortProcessDetail(detail.sceneId, detail.processDetailId, transitionId)
-        return this.fail(transitionId, correlationId, '唯一拓扑画布未能安全暂停。', 'activating-topology')
-      }
-      if (switchesProcessDetail && !this.topologyRuntime.retargetProcessDetail(detail.sceneId, detail.stateNodeId)) {
-        await this.unity.abortProcessDetail(detail.sceneId, detail.processDetailId, transitionId)
-        return this.fail(transitionId, correlationId, '关键环节状态投影目标未能安全切换。', 'activating-topology')
+        return this.fail(transitionId, correlationId, '关键环节拓扑数据未能安全切换。', 'activating-topology')
       }
       const topologyIdle = this.coordinator.submit({ type: 'topology.status.reported', transitionId, status: 'idle' })
       if (topologyIdle.status !== 'accepted') {
@@ -229,7 +224,7 @@ export class ProcessDetailTransactionHandler {
         return this.superseded(transitionId)
       }
 
-      // 先让组合根提交“全屏三维 + 拓扑暂停”布局，再允许 Unity 显示候选和移动相机。
+      // 先让组合根提交“三维与二维双区”布局，再允许 Unity 显示候选和移动相机。
       await this.waitForProcessDetailLayoutCommit()
       if (active.cancelled || !this.isCurrent(transitionId)) {
         this.cleanupAbandonedProcessDetail(active)
@@ -244,7 +239,7 @@ export class ProcessDetailTransactionHandler {
       }
       if (!committedInUnity.success) {
         await this.unity.abortProcessDetail(detail.sceneId, detail.processDetailId, transitionId)
-        if (previousDetail) this.topologyRuntime.retargetProcessDetail(previousDetail.sceneId, previousDetail.stateNodeId)
+        if (previousDetail) this.restoreProcessDetailTopology(previousDetail)
         if (rollbackTopology && !this.topologyRuntime.activate(rollbackTopology, transitionId)) {
           return this.failToError(transitionId, correlationId, '关键环节提交失败且业务拓扑未能恢复。')
         }
@@ -360,6 +355,34 @@ export class ProcessDetailTransactionHandler {
     }
     this.activeTransactionsByCorrelationId.set(correlationId, active)
     return active
+  }
+
+  /** 将已校验的关键环节目录精确转换为第三层拓扑上下文，不按标题或资源名猜测。 */
+  private activateProcessDetailTopology(detail: ProcessDetailDefinition): boolean {
+    const context = this.getProcessDetailTopologyContext(detail)
+    if (context) return this.topologyRuntime.activateProcessDetail(detail.sceneId, detail.stateNodeId, context)
+    // 未登记上下文只允许旧占位清单保留原拓扑结构，不猜测或拼接任何第三层 JSON。
+    return detail.topologyDataContextId === undefined
+      ? this.topologyRuntime.activateProcessDetailStateOnly(detail.sceneId, detail.stateNodeId)
+      : false
+  }
+
+  /** 直切失败或超时时恢复原关键环节数据源和三维节点状态筛选。 */
+  private restoreProcessDetailTopology(detail: ProcessDetailDefinition): boolean {
+    const context = this.getProcessDetailTopologyContext(detail)
+    if (context) return this.topologyRuntime.activateProcessDetail(detail.sceneId, detail.stateNodeId, context)
+    return detail.topologyDataContextId === undefined
+      ? this.topologyRuntime.activateProcessDetailStateOnly(detail.sceneId, detail.stateNodeId)
+      : false
+  }
+
+  /**
+   * 只接受清单显式登记的拓扑数据上下文标识；processDetailId 仅用于 Unity 资源事务，
+   * 不再作为第三层 JSON 的隐式回退键，避免不同关键环节意外复用错误拓扑文件。
+   */
+  private getProcessDetailTopologyContext(detail: ProcessDetailDefinition) {
+    if (detail.topologyDataContextId === undefined) return undefined
+    return getProcessDetailTopologyDataContext(detail.topologyDataContextId)
   }
 
   /** 只删除仍属于本次异步调用的记录，避免未来重试复用关联标识时误删新事务。 */

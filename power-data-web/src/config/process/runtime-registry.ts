@@ -9,6 +9,22 @@ import {
 import type { ProcessConfigValidationIssue, WebglRuntimeRegistration } from '@/config/process/types'
 import { isWebglCommandType, isWebglEventType, parseExactOrigin, WEBGL_PROTOCOL_VERSION } from '@/services/webgl/protocol'
 
+/** 发布时注入的 Unity 构建身份；资源摘要使用带算法前缀的 SHA-256 十六进制值。 */
+export interface WebglRuntimeIdentity {
+  readonly buildId: string
+  readonly resourceDigest: string
+}
+
+export interface WebglRuntimeIdentityLoadResult {
+  readonly identity?: WebglRuntimeIdentity
+  readonly issues: readonly ProcessConfigValidationIssue[]
+}
+
+type WebglRuntimeIdentityEnvironment = Readonly<{
+  VITE_POWER_UNITY_BUILD_ID?: string
+  VITE_POWER_UNITY_RESOURCE_DIGEST?: string
+}>
+
 /**
  * 只读网页图形运行时登记表。
  *
@@ -40,8 +56,33 @@ export class ReadonlyWebglRuntimeRegistry {
  */
 const deploymentConfigurationResult = readDeploymentConfiguration()
 
+/**
+ * 构建身份缺失或格式错误时不生成任何 Unity 登记，避免正式包退回固定占位值并与错误产物完成自洽握手。
+ */
+export function readWebglRuntimeIdentity(environment: WebglRuntimeIdentityEnvironment): WebglRuntimeIdentityLoadResult {
+  const buildId = environment.VITE_POWER_UNITY_BUILD_ID?.trim()
+  const resourceDigest = environment.VITE_POWER_UNITY_RESOURCE_DIGEST?.trim()
+  const issues: ProcessConfigValidationIssue[] = []
+
+  if (!buildId || !/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/.test(buildId)) {
+    issues.push({ code: 'runtime.build-id', message: '网页图形运行时必须绑定合法的 Unity 发布标识。' })
+  }
+  if (!resourceDigest || !/^sha256:[a-f0-9]{64}$/.test(resourceDigest)) {
+    issues.push({ code: 'runtime.resource-digest', message: '网页图形运行时必须绑定真实 Unity 目录的 SHA-256 资源摘要。' })
+  }
+
+  return issues.length === 0
+    ? { identity: Object.freeze({ buildId: buildId!, resourceDigest: resourceDigest! }), issues: Object.freeze([]) }
+    : { issues: Object.freeze(issues) }
+}
+
+const runtimeIdentityResult = readWebglRuntimeIdentity(import.meta.env)
+
 /** 部署配置失败时保留稳定问题码，嵌入壳据此显示安全错误态而不输出原始环境变量。 */
-export const deploymentConfigurationIssues = deploymentConfigurationResult.issues
+export const deploymentConfigurationIssues = Object.freeze([
+  ...deploymentConfigurationResult.issues,
+  ...runtimeIdentityResult.issues,
+])
 
 /**
  * 为一个业务入口生成只读 Unity 运行时登记。
@@ -53,19 +94,20 @@ export const deploymentConfigurationIssues = deploymentConfigurationResult.issue
 function createPowerPlantRuntimeRegistration(
   runtimeKey: 'gas-plant-release' | 'coal-plant-release',
   configuration: DeploymentConfiguration,
+  identity: WebglRuntimeIdentity,
 ): WebglRuntimeRegistration {
   return {
     runtimeKey: toRuntimeKey(runtimeKey),
-    buildId: 'local-webgl-topology-link',
+    buildId: identity.buildId,
     configVersion: LOCAL_PROCESS_CONFIG_VERSION,
     sceneMappingVersion: LOCAL_PROCESS_CONFIG_VERSION,
     protocolVersion: WEBGL_PROTOCOL_VERSION,
-    resourceDigest: 'local-webgl-topology-link',
+    resourceDigest: identity.resourceDigest,
     entryUrl: configuration.unityEntryUrl,
     childOrigin: configuration.unityChildOrigin,
     // Unity iframe 的直接父窗口是本嵌入壳；必须使用独立精确来源，不能错误沿用外层宿主页来源。
     allowedParentOrigin: configuration.unityParentOrigin,
-    capabilities: ['init', 'resize', 'switchScene', 'enterProcessStep', 'moveCameraToPose', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'enterProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
+    capabilities: ['init', 'resize', 'switchScene', 'enterProcessStep', 'moveCameraToPose', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'enterProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'resetCamera', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
     eventCapabilities: ['ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'selectionCleared', 'disposed'],
     resourceBudget: {
       initialMemoryMb: 256,
@@ -79,12 +121,16 @@ function createPowerPlantRuntimeRegistration(
  * 只有部署配置完整时才同时发布燃气与燃煤入口登记；构造时不接受业务页面提供的 URL。
  * 测试可显式传入受控读取结果，生产代码只能使用当前构建环境的全局读取结果。
  */
-export function createRuntimeRegistry(configurationResult: DeploymentConfigurationLoadResult): ReadonlyWebglRuntimeRegistry {
+export function createRuntimeRegistry(
+  configurationResult: DeploymentConfigurationLoadResult,
+  identityResult: WebglRuntimeIdentityLoadResult = runtimeIdentityResult,
+): ReadonlyWebglRuntimeRegistry {
   const configuration = configurationResult.configuration
-  const registrations: readonly WebglRuntimeRegistration[] = configuration
+  const identity = identityResult.identity
+  const registrations: readonly WebglRuntimeRegistration[] = configuration && identity
     ? [
-        createPowerPlantRuntimeRegistration('gas-plant-release', configuration),
-        createPowerPlantRuntimeRegistration('coal-plant-release', configuration),
+        createPowerPlantRuntimeRegistration('gas-plant-release', configuration, identity),
+        createPowerPlantRuntimeRegistration('coal-plant-release', configuration, identity),
       ]
     : []
 

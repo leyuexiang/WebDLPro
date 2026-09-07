@@ -7,13 +7,12 @@ using UnityEngine.SceneManagement;
 using WebDLPro.Unity.SceneRuntime;
 
 /// <summary>
-/// 生成燃煤锅炉燃烧第三层占位包装预制体、增量登记关键环节目录，并装配燃煤业务场景。
-/// 当前版本只接入模型加载、远端展示、专用相机位和设备状态视觉；动态目标数组保持为空，
-/// 不接入播放/停止控制。后续模型调整后可重复执行生成命令，稳定标识和场景挂载关系不会改变。
+/// 生成燃煤锅炉燃烧第三层包装预制体、增量登记关键环节目录，并装配燃煤业务场景。
+/// 包装接入统一动态播放协议：故障停止，其他状态默认播放；具体控制阀特效及排除项由燃煤专用适配器显式配置。
 /// </summary>
 public static class CoalBoilerProcessDetailPrefabBuilder
 {
-    public const string SourcePrefabPath = "Assets/Art/C4D项目/燃煤燃烧系统.prefab";
+    public const string SourcePrefabPath = "Assets/Prefabs/燃煤燃烧系统.prefab";
     public const string OutputFolderPath = "Assets/ProcessDetails/CoalPower/Boiler";
     public const string OutputPrefabPath = OutputFolderPath + "/CoalBoilerProcessDetail.prefab";
     public const string CatalogAssetPath = "Assets/Configuration/ProcessDetailCatalog.asset";
@@ -28,7 +27,7 @@ public static class CoalBoilerProcessDetailPrefabBuilder
     // 第三层展示区与二层厂区保持显式空间隔离，满足协调器至少 1000 米的远端距离校验。
     private static readonly Vector3 RemoteDisplayPosition = new Vector3(10000f, 0f, 0f);
 
-    [MenuItem("Tools/WebDLPro/关键环节/生成燃煤锅炉燃烧第三层占位资源")]
+    [MenuItem("Tools/WebDLPro/关键环节/生成燃煤锅炉燃烧第三层资源")]
     public static void CreateOrUpdate()
     {
         EnsureFolder(OutputFolderPath);
@@ -52,7 +51,7 @@ public static class CoalBoilerProcessDetailPrefabBuilder
 
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
-        Debug.Log($"[ProcessDetailBuilder] 已生成燃煤锅炉燃烧第三层占位资源：{OutputPrefabPath}");
+        Debug.Log($"[ProcessDetailBuilder] 已生成燃煤锅炉燃烧第三层资源：{OutputPrefabPath}");
     }
 
     /// <summary>
@@ -82,8 +81,19 @@ public static class CoalBoilerProcessDetailPrefabBuilder
             modelInstance.transform.localRotation = Quaternion.identity;
             modelInstance.transform.localScale = Vector3.one;
 
-            // 当前只做静态占位，不让源模型在启用时自行循环播放；后续接入独立动态适配器时再移除此覆盖。
-            DisableAutomaticPlayback(modelInstance);
+            ControlValveEffectController[] effectControllers =
+                modelInstance.GetComponentsInChildren<ControlValveEffectController>(true);
+            if (effectControllers.Length == 0)
+            {
+                throw new InvalidOperationException("燃煤燃烧系统源预制体缺少可控制的特效组件。");
+            }
+
+            CoalBoilerProcessDetailDynamicAdapter dynamicAdapter =
+                host.AddComponent<CoalBoilerProcessDetailDynamicAdapter>();
+            // 当前全部特效都纳入控制；后续常驻环境效果可写入第二个数组排除，无需修改统一协调器。
+            dynamicAdapter.ConfigureForEditor(
+                effectControllers,
+                Array.Empty<ControlValveEffectController>());
 
             Bounds modelBounds = CalculateModelBounds(modelInstance);
             Transform cameraPose = CreateCameraPose(host.transform, modelBounds);
@@ -97,6 +107,7 @@ public static class CoalBoilerProcessDetailPrefabBuilder
             ProcessDetailStateVisualAdapter visualAdapter =
                 host.AddComponent<ProcessDetailStateVisualAdapter>();
             visualAdapter.ConfigureForEditor(
+                true,
                 visualRenderers,
                 visualConfig.AlarmColor,
                 visualConfig.FaultColor,
@@ -113,10 +124,10 @@ public static class CoalBoilerProcessDetailPrefabBuilder
                 ResourceId,
                 CameraPoseId,
                 new[] { StateNodeId },
-                Array.Empty<string>(),
+                new[] { StateNodeId },
                 displayAnchor,
                 cameraPose,
-                Array.Empty<MonoBehaviour>(),
+                new MonoBehaviour[] { dynamicAdapter },
                 new MonoBehaviour[] { visualAdapter },
                 marker);
 
@@ -134,31 +145,6 @@ public static class CoalBoilerProcessDetailPrefabBuilder
     }
 
     /// <summary>
-    /// 仅在包装实例上关闭自动演示，不修改美术源预制体。这样第三层占位激活后保持静态，
-    /// 页面播放/停止命令也不会误绑定到尚未冻结的模型动画结构。
-    /// </summary>
-    private static void DisableAutomaticPlayback(GameObject modelInstance)
-    {
-        ControlValveEffectController[] controllers =
-            modelInstance.GetComponentsInChildren<ControlValveEffectController>(true);
-        for (int index = 0; index < controllers.Length; index++)
-        {
-            SerializedObject serializedController = new SerializedObject(controllers[index]);
-            SerializedProperty playOnEnable = serializedController.FindProperty("_playOnEnable");
-            SerializedProperty loopDemo = serializedController.FindProperty("_loopDemo");
-            if (playOnEnable != null)
-            {
-                playOnEnable.boolValue = false;
-            }
-            if (loopDemo != null)
-            {
-                loopDemo.boolValue = false;
-            }
-            serializedController.ApplyModifiedPropertiesWithoutUndo();
-        }
-    }
-
-    /// <summary>
     /// 制作期一次性计算模型包围盒并写入专用相机位。运行时不扫描渲染器，也不依赖模型名称推断镜头。
     /// 镜头沿模型较短的 Z 轴观察，使横向较长的整套燃烧系统能完整进入宽屏画面。
     /// </summary>
@@ -171,7 +157,8 @@ public static class CoalBoilerProcessDetailPrefabBuilder
         float horizontalHalfExtent = Mathf.Max(modelBounds.extents.x, 1f);
         float depth = Mathf.Max(modelBounds.extents.z, 1f);
         float distance = Mathf.Max(42f, horizontalHalfExtent * 1.8f + depth);
-        Vector3 position = target + new Vector3(0f, Mathf.Max(8f, modelBounds.extents.y * 1.4f), -distance);
+        // 从模型中心的正 Z 侧观察；与原负 Z 侧机位前后对调，并重新朝向模型中心。
+        Vector3 position = target + new Vector3(0f, Mathf.Max(8f, modelBounds.extents.y * 1.4f), distance);
         cameraPose.localPosition = position;
         cameraPose.localRotation = Quaternion.LookRotation(target - position, Vector3.up);
         cameraPose.localScale = Vector3.one;
@@ -288,7 +275,7 @@ public static class CoalBoilerProcessDetailPrefabBuilder
             ResourceId,
             CameraPoseId,
             new[] { StateNodeId },
-            Array.Empty<string>(),
+            new[] { StateNodeId },
             BusinessSceneAvailability.Available);
         entry.SetEditorPrefabForEditor(wrapperPrefab);
 

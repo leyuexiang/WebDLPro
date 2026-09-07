@@ -89,7 +89,8 @@
      */
     const shellOrigin = 'http://127.0.0.1:5174';
     const channel = 'power-scene-topology-shell';
-    const version = 1;
+    // 与当前嵌入壳使用同一协议版本，确保视觉与全屏回归经过真实握手，而非停在未初始化画面。
+    const version = 2;
     const frame = document.querySelector('#shell-frame');
     const instanceId = `visual-baseline-${crypto.randomUUID()}`;
     let sessionId = '';
