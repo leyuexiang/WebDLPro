@@ -101,6 +101,12 @@ public static class WireframeOverlayBaker
     /// </summary>
     private static Mesh BuildWireframeMesh(Mesh source)
     {
+        return BuildWireframeMesh(source, WireframeOverlayBakeSettings.FeatureAngleDegrees);
+    }
+
+    /// <summary>显式角度用于专用烘焙，不修改用户全局烘焙偏好。</summary>
+    public static Mesh BuildWireframeMesh(Mesh source, float featureAngleDegrees)
+    {
         Stopwatch stageStopwatch = Stopwatch.StartNew();
         Vector3[] vertices = source.vertices;
         int[] triangles = source.triangles;
@@ -130,7 +136,7 @@ public static class WireframeOverlayBaker
         }
         long normalMilliseconds = stageStopwatch.ElapsedMilliseconds - dataReadMilliseconds - weldMilliseconds;
 
-        float cosThreshold = Mathf.Cos(WireframeOverlayBakeSettings.FeatureAngleDegrees * Mathf.Deg2Rad);
+        float cosThreshold = Mathf.Cos(Mathf.Clamp(featureAngleDegrees, 1f, 89f) * Mathf.Deg2Rad);
 
         // 特征边表使用定长开放寻址：边写入和查询均为均摊 O(n)，且全部数据位于连续数组。
         // 相比 Dictionary<long,int> + HashSet<long> 的两套节点容器，可显著减少百万边模型的分配、扩容和随机内存访问。
@@ -151,7 +157,7 @@ public static class WireframeOverlayBaker
         Debug.Log(
             $"[WireframeOverlayBaker] {source.name}: 顶点={vertices.Length}，三角面={triangleCount}，" +
             $"焊接={weldMilliseconds} ms，法线={normalMilliseconds} ms，边筛选={edgeMilliseconds} ms，" +
-            $"线网格={lineMeshMilliseconds} ms，阈值={WireframeOverlayBakeSettings.FeatureAngleDegrees:0.##}°");
+            $"线网格={lineMeshMilliseconds} ms，阈值={featureAngleDegrees:0.##}°");
 
         return wireframe;
     }
