@@ -6,9 +6,12 @@ import {
   resolveGasTopologyConnectedLineIds,
 } from './gas-topology-connection-highlight'
 
-/** 使用当前正式预览数据锁定图元与连线关系，防止更新 JSON 后高亮仍引用旧编号。 */
+/** 使用当前默认组合文件锁定图元与连线关系，避免顶层旧副本继续成为测试依赖。 */
 function loadTopologyFixture(): Meta2dData {
-  const topologyUrl = new URL('../../../../public/topology/gas-json-preview/topology.json', import.meta.url)
+  const topologyUrl = new URL(
+    '../../../../public/topology/gas-v3-json-preview/variants/network-business-key-process/topology.json',
+    import.meta.url,
+  )
   return JSON.parse(readFileSync(topologyUrl, 'utf8')) as Meta2dData
 }
 
@@ -16,18 +19,18 @@ describe('燃气拓扑选中连线高亮', () => {
   it('按 connectedLines 明确映射选中设备的全部直接关联连线', () => {
     const index = createGasTopologyConnectedLineIndex(loadTopologyFixture().pens)
 
-    expect(index.get('17723a9e')).toEqual(['1ee8f2a4', 'a05ca33'])
-    expect(index.get('91493e5')).toEqual(['389c38d', '81006f9', 'a05ca33'])
-    expect(resolveGasTopologyConnectedLineIds(['17723a9e', '91493e5'], index)).toEqual(new Set([
-      '1ee8f2a4', 'a05ca33', '389c38d', '81006f9',
+    expect(index.get('29b5edb2')).toEqual(['286202c1', '41b04fa'])
+    expect(index.get('868df1f')).toEqual(['8ec756', 'd4f0661'])
+    expect(resolveGasTopologyConnectedLineIds(['29b5edb2', '868df1f'], index)).toEqual(new Set([
+      '286202c1', '41b04fa', '8ec756', 'd4f0661',
     ]))
   })
 
   it('过滤源数据中指向已删除连线的历史残留编号', () => {
     const index = createGasTopologyConnectedLineIndex(loadTopologyFixture().pens)
 
-    expect(index.get('2b71305')).toEqual(['fab3076'])
-    expect(index.get('5f3c5f1c')).toBeUndefined()
-    expect(index.get('ea88a62')).toBeUndefined()
+    expect(index.get('c2bd2d5')).toEqual(['818d35f', '6138c4c', '46e767f', '169f421'])
+    expect(index.get('716def7b')).toEqual(['79be0126'])
+    expect(index.get('15bf99f3')).toEqual(['5a88794a', 'ea557fd', '4bbcaa12', '6138c4c'])
   })
 })

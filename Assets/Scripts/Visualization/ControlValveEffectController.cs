@@ -94,6 +94,9 @@ public sealed class ControlValveEffectController : MonoBehaviour
     private float _stateStartFillAmount;
     private bool _continueLoop;
     private bool _effectPlaying;
+    // 关键环节在隐藏加载阶段会先下发播放许可；该状态优先于组件自身的自动演示配置。
+    private bool _hasExternalPlaybackState;
+    private bool _externalPlaybackAllowed = true;
     private MaterialPropertyBlock _propertyBlock;
 
     /// <summary>当前阀门开度，只读查询不会创建临时对象。</summary>
@@ -191,6 +194,24 @@ public sealed class ControlValveEffectController : MonoBehaviour
         ApplyVisualState(true);
     }
 
+    /// <summary>
+    /// 接收关键环节专用适配器的播放许可。
+    /// 该状态会跨未激活阶段保留，确保预置故障不会在包装根激活时被自动演示重新启动。
+    /// </summary>
+    public void SetPlayback(bool playing)
+    {
+        _hasExternalPlaybackState = true;
+        _externalPlaybackAllowed = playing;
+        if (playing)
+        {
+            PlayDemo();
+        }
+        else
+        {
+            Pause();
+        }
+    }
+
     /// <summary>立即更新外壳透明度，不修改共享材质资产。</summary>
     public void SetShellOpacity(float opacity)
     {
@@ -202,6 +223,15 @@ public sealed class ControlValveEffectController : MonoBehaviour
     {
         ApplyVisualState(false);
         ApplyShellOpacity();
+
+        if (_hasExternalPlaybackState)
+        {
+            if (_externalPlaybackAllowed)
+                PlayDemo();
+            else
+                Pause();
+            return;
+        }
 
         if (_playOnEnable)
         {

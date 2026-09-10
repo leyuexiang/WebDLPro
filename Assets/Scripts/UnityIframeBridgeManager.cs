@@ -21,6 +21,8 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
     // JavaScript 可无损表达的最大整数；来源修订号超过该边界会在浏览器与 C# 之间产生精度歧义，必须拒绝。
     private const long MaxJavaScriptSafeInteger = 9007199254740991L;
     private const string LocalSceneMappingVersion = "unpublished";
+    private const string CoalOverviewBuildingId = "overview-building.coal-power";
+    private const string GasOverviewBuildingId = "overview-building.gas-power";
 
     /// <summary>
     /// 当前物理场景中单个三维节点最近成功应用的壳内快照序号。
@@ -298,7 +300,7 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         public bool success;
         public bool isolate;
         public bool enabled;
-        // 关键环节播放开关由独立命令显式下发；设备四态处理器不得读取或改写该字段。
+        // 保留历史播放命令载荷字段；当前燃气关键环节实际播放许可由设备状态绑定器决定。
         public bool playing;
         public float width;
         public float height;
@@ -503,6 +505,9 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
                 break;
             case "resetScene":
                 HandleResetScene(message);
+                break;
+            case "resetCamera":
+                HandleResetCamera(message);
                 break;
             case "focusNode":
                 HandleFocusNode(message);
@@ -1098,6 +1103,35 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         return true;
     }
 
+    /// <summary>
+    /// 恢复当前活动场景的初始镜头，并由业务控制器撤销流程、命名镜头和交互产生的临时视觉。
+    /// 设备当前状态必须保留；只有控制器完整成功后才通知前端清空拓扑选择，失败命令不得误清页面状态。
+    /// </summary>
+    private void HandleResetCamera(BridgeMessage message)
+    {
+        TryBindSceneController();
+        if (_sceneController == null)
+        {
+            SendCommandResult(message, false, "controller-unavailable", "当前没有已初始化的业务场景控制器。");
+            return;
+        }
+        if (!(_sceneController is IBusinessSceneCameraResetController cameraResetController))
+        {
+            SendCommandResult(message, false, "camera-reset-unsupported", "当前业务场景未提供相机复位能力。");
+            return;
+        }
+
+        BusinessSceneCommandResult result = cameraResetController.ResetCamera();
+        SendSceneCommandResult(message, result);
+        if (!result.Success)
+        {
+            return;
+        }
+
+        // 复位成功后复用既有 selectionCleared（选择清除）事件；前端会清空节点及关联连线且不会回发 clearSelection。
+        ReportSelectionCleared();
+    }
+
     private void HandleResetScene(BridgeMessage message)
     {
         if (!TryGetSceneController(message, BusinessSceneCapability.ResetScene, out IBusinessSceneController controller))
@@ -1195,6 +1229,12 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
             SendCommandResult(message, false, "node-visual-state-payload-invalid", "设备状态命令缺少合法三维节点标识、固定四态状态或本地快照序号。");
             return;
         }
+        TryBindSceneController();
+        if (_sceneController is OverviewSceneController overviewController)
+        {
+            HandleOverviewBuildingVisualState(message, overviewController, payload.sceneNodeId, visualState, false);
+            return;
+        }
         if (!TryGetSceneController(message, BusinessSceneCapability.UpdateNodeVisualState, out IBusinessSceneController controller))
         {
             return;
@@ -1238,6 +1278,12 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
             SendCommandResult(message, false, "node-visual-state-clear-payload-invalid", "设备状态清除命令缺少合法三维节点标识或本地快照序号。");
             return;
         }
+        TryBindSceneController();
+        if (_sceneController is OverviewSceneController overviewController)
+        {
+            HandleOverviewBuildingVisualState(message, overviewController, payload.sceneNodeId, BusinessSceneNodeVisualState.Normal, true);
+            return;
+        }
         if (!TryGetSceneController(message, BusinessSceneCapability.ClearNodeVisualState, out IBusinessSceneController controller))
         {
             return;
@@ -1260,6 +1306,43 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         if (result.Success)
         {
             _nodeVisualStateWatermarks[payload.sceneNodeId] = incomingWatermark;
+        }
+        SendSceneCommandResult(message, result);
+    }
+
+    /// <summary>
+    /// 沙盘只接受燃气、燃煤两个已登记入口。设置命令只允许故障态；恢复统一走清除命令，
+    /// 并与业务节点共用快照水位，防止旧故障在恢复后迟到写回。
+    /// </summary>
+    private void HandleOverviewBuildingVisualState(
+        BridgeMessage message,
+        OverviewSceneController controller,
+        string overviewBuildingId,
+        BusinessSceneNodeVisualState visualState,
+        bool clearState)
+    {
+        if ((!string.Equals(overviewBuildingId, CoalOverviewBuildingId, StringComparison.Ordinal) &&
+             !string.Equals(overviewBuildingId, GasOverviewBuildingId, StringComparison.Ordinal)) ||
+            (!clearState && visualState != BusinessSceneNodeVisualState.Fault))
+        {
+            SendCommandResult(message, false, "overview-building-state-unsupported", "沙盘当前只支持燃气、燃煤入口的故障状态。");
+            return;
+        }
+
+        NodeVisualStateWatermark incomingWatermark = new NodeVisualStateWatermark(message.payload.snapshotSequence);
+        if (_nodeVisualStateWatermarks.TryGetValue(overviewBuildingId, out NodeVisualStateWatermark latestWatermark) &&
+            IsOutdatedOrDuplicate(incomingWatermark, latestWatermark))
+        {
+            SendCommandResult(message, true, string.Empty, "重复或迟到的沙盘入口状态已幂等忽略。");
+            return;
+        }
+
+        BusinessSceneCommandResult result = clearState
+            ? controller.ClearBuildingVisualState(overviewBuildingId)
+            : controller.ApplyBuildingVisualState(overviewBuildingId, BusinessSceneNodeVisualState.Fault);
+        if (result.Success)
+        {
+            _nodeVisualStateWatermarks[overviewBuildingId] = incomingWatermark;
         }
         SendSceneCommandResult(message, result);
     }

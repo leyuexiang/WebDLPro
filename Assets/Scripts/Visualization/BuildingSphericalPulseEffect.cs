@@ -23,6 +23,8 @@ public sealed class BuildingSphericalPulseEffect : MonoBehaviour
 
     private sealed class TargetVisual
     {
+        // 保存原始目标引用，供动态目标的幂等添加、精确删除和共享管理器并行显示多个厂房。
+        public GameObject Target;
         public MeshRenderer PulseRenderer;
         public MeshRenderer ShieldRenderer;
         public MeshRenderer UpperHemisphereRenderer;
@@ -91,8 +93,10 @@ public sealed class BuildingSphericalPulseEffect : MonoBehaviour
     private readonly List<TargetVisual> _visuals = new List<TargetVisual>();
     private MaterialPropertyBlock _propertyBlock;
     private float _elapsed;
+    private int _nextVisualId;
     private bool _isPlaying;
-    private bool _isInitialized;
+    private bool _resourcesInitialized;
+    private bool _initialTargetsLoaded;
 
     /// <summary>当前是否正在播放；循环模式会一直保持 true，直到外部调用 Stop。</summary>
     public bool IsPlaying => _isPlaying;
@@ -106,7 +110,7 @@ public sealed class BuildingSphericalPulseEffect : MonoBehaviour
     /// </summary>
     private void OnValidate()
     {
-        if (Application.isPlaying && _isInitialized)
+        if (Application.isPlaying && _resourcesInitialized)
         {
             SetEffectEnabled(_effectEnabled);
         }
@@ -115,6 +119,7 @@ public sealed class BuildingSphericalPulseEffect : MonoBehaviour
 
     private void Start()
     {
+        EnsureInitialTargetsLoaded();
         if (_playOnStart && _effectEnabled)
         {
             Play();
@@ -191,7 +196,7 @@ public sealed class BuildingSphericalPulseEffect : MonoBehaviour
     /// </summary>
     public void Play()
     {
-        if (!_effectEnabled || !TryInitializeVisuals())
+        if (!_effectEnabled || !EnsureInitialTargetsLoaded() || _visuals.Count == 0)
         {
             return;
         }
@@ -209,14 +214,126 @@ public sealed class BuildingSphericalPulseEffect : MonoBehaviour
         SetVisualsEnabled(false);
     }
 
-    private bool TryInitializeVisuals()
+    /// <summary>
+    /// 动态添加一个目标。重复添加同一对象保持幂等；管理器已启用时，新目标会立即加入当前循环。
+    /// </summary>
+    public bool TryAddTarget(GameObject target)
     {
-        if (_isInitialized)
+        if (target == null || !EnsureInitialTargetsLoaded())
         {
-            return _visuals.Count > 0;
+            return false;
         }
 
-        _isInitialized = true;
+        int existingIndex = FindTargetVisualIndex(target);
+        if (existingIndex >= 0)
+        {
+            return true;
+        }
+        if (!TryCalculateTargetBounds(target, out Bounds bounds))
+        {
+            Debug.LogWarning(
+                $"[{nameof(BuildingSphericalPulseEffect)}] 目标 {target.name} 没有可用于计算包围盒的模型渲染器。",
+                target);
+            return false;
+        }
+
+        _visuals.Add(CreateTargetVisual(target, _nextVisualId++, bounds));
+        if (_effectEnabled)
+        {
+            if (!_isPlaying)
+            {
+                _elapsed = 0f;
+                _isPlaying = true;
+            }
+
+            // 动态加入时沿用共享时间轴，避免第二座厂房故障导致第一座厂房的循环被强制重置。
+            SetVisualsEnabled(true);
+            ApplyFrame(Mathf.Clamp01(_elapsed / _duration));
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// 动态删除指定目标及其三个运行时特效对象。其他仍故障的厂房继续播放，不受本次删除影响。
+    /// </summary>
+    public bool TryRemoveTarget(GameObject target)
+    {
+        int visualIndex = FindTargetVisualIndex(target);
+        if (visualIndex < 0)
+        {
+            return false;
+        }
+
+        TargetVisual visual = _visuals[visualIndex];
+        SetTargetVisualEnabled(visual, false);
+        DestroyTargetVisual(visual);
+        _visuals.RemoveAt(visualIndex);
+        if (_visuals.Count == 0)
+        {
+            _isPlaying = false;
+            _elapsed = 0f;
+        }
+
+        return true;
+    }
+
+    /// <summary>删除全部动态和初始目标，主要用于场景释放或外部整体重置。</summary>
+    public void ClearTargets()
+    {
+        for (int visualIndex = _visuals.Count - 1; visualIndex >= 0; visualIndex--)
+        {
+            TargetVisual visual = _visuals[visualIndex];
+            SetTargetVisualEnabled(visual, false);
+            DestroyTargetVisual(visual);
+        }
+
+        _visuals.Clear();
+        _isPlaying = false;
+        _elapsed = 0f;
+    }
+
+    private bool EnsureInitialTargetsLoaded()
+    {
+        if (!EnsureResourcesInitialized())
+        {
+            return false;
+        }
+        if (_initialTargetsLoaded)
+        {
+            return true;
+        }
+
+        _initialTargetsLoaded = true;
+        if (_targets == null)
+        {
+            return true;
+        }
+
+        // 序列化目标只在首次使用时转换为运行时对象；循环播放期间不再扫描或重建。
+        for (int targetIndex = 0; targetIndex < _targets.Length; targetIndex++)
+        {
+            GameObject target = _targets[targetIndex];
+            if (target == null || FindTargetVisualIndex(target) >= 0 ||
+                !TryCalculateTargetBounds(target, out Bounds bounds))
+            {
+                continue;
+            }
+
+            _visuals.Add(CreateTargetVisual(target, _nextVisualId++, bounds));
+        }
+
+        return true;
+    }
+
+    private bool EnsureResourcesInitialized()
+    {
+        if (_resourcesInitialized)
+        {
+            return _propertyBlock != null;
+        }
+
+        _resourcesInitialized = true;
         if (_pulseMaterial == null || _shieldMaterial == null)
         {
             Debug.LogWarning($"[{nameof(BuildingSphericalPulseEffect)}] 缺少扩散光圈或能量罩材质，无法播放特效。", this);
@@ -224,29 +341,20 @@ public sealed class BuildingSphericalPulseEffect : MonoBehaviour
         }
 
         _propertyBlock = new MaterialPropertyBlock();
-        if (_targets == null || _targets.Length == 0)
-        {
-            Debug.LogWarning($"[{nameof(BuildingSphericalPulseEffect)}] 目标对象组为空，无法播放特效。", this);
-            return false;
-        }
+        return true;
+    }
 
-        for (int targetIndex = 0; targetIndex < _targets.Length; targetIndex++)
+    private int FindTargetVisualIndex(GameObject target)
+    {
+        for (int visualIndex = 0; visualIndex < _visuals.Count; visualIndex++)
         {
-            GameObject target = _targets[targetIndex];
-            if (target == null || !TryCalculateTargetBounds(target, out Bounds bounds))
+            if (_visuals[visualIndex].Target == target)
             {
-                continue;
+                return visualIndex;
             }
-
-            _visuals.Add(CreateTargetVisual(target, targetIndex, bounds));
         }
 
-        if (_visuals.Count == 0)
-        {
-            Debug.LogWarning($"[{nameof(BuildingSphericalPulseEffect)}] 目标对象组内没有可用于计算包围盒的模型渲染器。", this);
-        }
-
-        return _visuals.Count > 0;
+        return -1;
     }
 
     private TargetVisual CreateTargetVisual(GameObject target, int targetIndex, Bounds bounds)
@@ -261,6 +369,7 @@ public sealed class BuildingSphericalPulseEffect : MonoBehaviour
         float upperHemisphereDiameter = Mathf.Max(bounds.extents.magnitude * 2f * _upperHemisphereScalePadding, 0.01f);
         TargetVisual visual = new TargetVisual
         {
+            Target = target,
             PulseRenderer = CreateEffectRenderer(PulseObjectNamePrefix + targetIndex, target.layer, _pulseMaterial),
             ShieldRenderer = CreateEffectRenderer(ShieldObjectNamePrefix + targetIndex, target.layer, _shieldMaterial),
             UpperHemisphereRenderer = _upperHemisphereMaterial != null
@@ -409,13 +518,48 @@ public sealed class BuildingSphericalPulseEffect : MonoBehaviour
     {
         for (int visualIndex = 0; visualIndex < _visuals.Count; visualIndex++)
         {
-            TargetVisual visual = _visuals[visualIndex];
+            SetTargetVisualEnabled(_visuals[visualIndex], enabled);
+        }
+    }
+
+    private static void SetTargetVisualEnabled(TargetVisual visual, bool enabled)
+    {
+        if (visual.PulseRenderer != null)
+        {
             visual.PulseRenderer.enabled = enabled;
+        }
+        if (visual.ShieldRenderer != null)
+        {
             visual.ShieldRenderer.enabled = enabled;
-            if (visual.UpperHemisphereRenderer != null)
-            {
-                visual.UpperHemisphereRenderer.enabled = enabled;
-            }
+        }
+        if (visual.UpperHemisphereRenderer != null)
+        {
+            visual.UpperHemisphereRenderer.enabled = enabled;
+        }
+    }
+
+    /// <summary>销毁单个目标生成的运行时对象；只处理管理器创建的隐藏节点，不触碰目标建筑。</summary>
+    private static void DestroyTargetVisual(TargetVisual visual)
+    {
+        DestroyEffectRenderer(visual.PulseRenderer);
+        DestroyEffectRenderer(visual.ShieldRenderer);
+        DestroyEffectRenderer(visual.UpperHemisphereRenderer);
+    }
+
+    private static void DestroyEffectRenderer(Renderer renderer)
+    {
+        if (renderer == null)
+        {
+            return;
+        }
+
+        if (Application.isPlaying)
+        {
+            Destroy(renderer.gameObject);
+        }
+        else
+        {
+            DestroyImmediate(renderer.gameObject);
         }
     }
 }

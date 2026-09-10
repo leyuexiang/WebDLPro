@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createCoalPowerManifest, createHostPage } from '../scripts/build-gas-power-smoke-release.mjs'
 import { coalPowerEdgeColors } from '../scripts/coal-power-topology.mjs'
 import { createLocalProcessConfigLoader } from '../src/config/process/local-process-config'
-import { createRuntimeRegistry } from '../src/config/process/runtime-registry'
+import { createRuntimeRegistry, readWebglRuntimeIdentity } from '../src/config/process/runtime-registry'
 import { validateSceneTopologyManifest } from '../src/config/scene-topology/validator'
 
 /**
@@ -171,14 +171,17 @@ describe('燃煤发电拓扑发布契约', () => {
     expect(validateSceneTopologyManifest(manifest)).toEqual([])
   })
 
-  it('仅发布总览动作、总览三维步骤和燃煤场景入口', async () => {
+  it('发布总览动作、锅炉第三层动作和燃煤场景入口', async () => {
     const manifest = await createCoalPowerManifest('action-contract-test')
     const coalScene = manifest.scenes.find((scene) => scene.sceneId === 'coal-power')
     const coalMapping = manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'coal-power')
 
     expect(coalScene?.defaultTopologyId).toBe('topology.coal-power.overview')
     expect(coalScene?.topologyIds).toEqual(['topology.coal-power.overview'])
-    expect(coalScene?.supportedActionIds).toEqual(['action.coal-power.overview'])
+    expect(coalScene?.supportedActionIds).toEqual([
+      'action.coal-power.overview',
+      'action.coal-power.boiler',
+    ])
     expect(coalMapping?.sceneNodeIds).toEqual([
       'node.coal-feeder',
       'node.coal-boiler',
@@ -189,16 +192,39 @@ describe('燃煤发电拓扑发布契约', () => {
     expect(coalMapping?.processSteps).toEqual([{ processId: 'coal-power-generation', stepId: 'overview' }])
     expect(coalMapping?.routeIds).toEqual([])
 
-    expect(manifest.actions).toHaveLength(1)
+    expect(manifest.actions).toHaveLength(2)
     expect(manifest.actions.map((action) => action.actionId)).toEqual(coalScene?.supportedActionIds)
-    expect(manifest.actions.every((action) => (
-      action.targetSceneId === 'coal-power' &&
-      action.failurePolicy === 'keep-current-context' &&
-      action.unityAction.type === 'enterProcessStep' &&
-      action.unityAction.processId === 'coal-power-generation' &&
-      action.unityAction.defaultUnitId === 'all' &&
-      action.unityAction.isolate === true
-    ))).toBe(true)
+    expect(manifest.actions.find((action) => action.actionId === 'action.coal-power.overview')).toEqual(expect.objectContaining({
+      targetSceneId: 'coal-power',
+      targetViewMode: 'business',
+      failurePolicy: 'keep-current-context',
+      unityAction: expect.objectContaining({
+        type: 'enterProcessStep',
+        processId: 'coal-power-generation',
+        stepId: 'overview',
+        defaultUnitId: 'all',
+        isolate: true,
+      }),
+    }))
+    const boilerAction = manifest.actions.find((action) => action.actionId === 'action.coal-power.boiler')
+    expect(boilerAction).toEqual(expect.objectContaining({
+      targetSceneId: 'coal-power',
+      targetViewMode: 'process-detail',
+      processDetailId: 'process-detail.coal-power.boiler',
+      failurePolicy: 'keep-current-context',
+      unityAction: { type: 'enterProcessDetail', processDetailId: 'process-detail.coal-power.boiler' },
+    }))
+    expect(boilerAction).not.toHaveProperty('targetTopologyId')
+    expect(manifest.processDetails).toEqual([{
+      sceneId: 'coal-power',
+      processId: 'coal-power-generation',
+      stepId: 'boiler',
+      processDetailId: 'process-detail.coal-power.boiler',
+      resourceId: 'process-detail-resource.coal-power.boiler',
+      cameraPoseId: 'camera-pose.coal-power.boiler',
+      stateNodeId: 'node.coal-boiler',
+      topologyDataContextId: 'process-detail.coal-power.boiler',
+    }])
     /**
      * 旧流程动作即使仍存在于参考源码，也绝不能进入正式清单；否则外部调用方可绕过页面入口
      * 直接触发已经下线的二维/三维流程视图。
@@ -207,6 +233,22 @@ describe('燃煤发电拓扑发布契约', () => {
       .not.toMatch(/combustion|water-steam-cycle|power-output/)
     // 燃煤清单必须声明燃煤专用网页入口键，避免 Unity 已切到燃煤而握手元数据仍显示燃气。
     expect(manifest.unityRuntimeKey).toBe('coal-plant-release')
+  })
+
+  it('构建身份缺失或仍是占位格式时不生成 Unity 运行时登记', () => {
+    const missingIdentity = readWebglRuntimeIdentity({})
+    const invalidIdentity = readWebglRuntimeIdentity({
+      VITE_POWER_UNITY_BUILD_ID: 'local-webgl-topology-link',
+      VITE_POWER_UNITY_RESOURCE_DIGEST: 'local-webgl-topology-link',
+    })
+
+    expect(missingIdentity.identity).toBeUndefined()
+    expect(missingIdentity.issues.map((issue) => issue.code)).toEqual([
+      'runtime.build-id',
+      'runtime.resource-digest',
+    ])
+    expect(invalidIdentity.identity).toBeUndefined()
+    expect(invalidIdentity.issues.map((issue) => issue.code)).toContain('runtime.resource-digest')
   })
 
   it('燃煤总览通过专用运行时登记申请同一个 Unity 单实例', () => {
@@ -221,6 +263,12 @@ describe('燃煤发电拓扑发布契约', () => {
         minimumViewportWidth: 600,
         minimumViewportHeight: 600,
         addressMode: 'fixed-origin',
+      },
+      issues: [],
+    }, {
+      identity: {
+        buildId: 'unity-contract-test',
+        resourceDigest: `sha256:${'a'.repeat(64)}`,
       },
       issues: [],
     })

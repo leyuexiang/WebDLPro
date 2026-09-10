@@ -631,6 +631,9 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
       used.add(identifier)
     }
     validateIdentifier(item.stateNodeId, '关键环节状态节点标识', issues)
+    if (item.topologyDataContextId !== undefined) {
+      validateIdentifier(item.topologyDataContextId, '关键环节拓扑数据上下文标识', issues)
+    }
     const stepReference = `${String(item.sceneId)}:${String(item.processId)}:${String(item.stepId)}`
     if (processDetailStepReferences.has(stepReference)) appendIssue(issues, 'process-detail.duplicate-step', '同一场景的关键环节流程步骤组合重复。')
     processDetailStepReferences.add(stepReference)

@@ -8,7 +8,7 @@ using WebDLPro.Unity.SceneRuntime;
 /// 将现有燃气 PowerPlantProcessController 组合适配到九场景统一接口。
 /// 适配器不修改用户正在重构的节点、材质和静态流动实现，也不会把已删除的 setRouteFlow 能力恢复到协议中。
 /// </summary>
-public sealed class GasPowerBusinessSceneControllerAdapter : IBusinessSceneController, IBusinessSceneProcessDetailController, IBusinessSceneNamedCameraPoseController
+public sealed class GasPowerBusinessSceneControllerAdapter : IBusinessSceneController, IBusinessSceneProcessDetailController, IBusinessSceneNamedCameraPoseController, IBusinessSceneCameraResetController
 {
     private const string GasPowerSceneId = "gas-power";
 
@@ -139,6 +139,34 @@ public sealed class GasPowerBusinessSceneControllerAdapter : IBusinessSceneContr
         return _cameraPoseRegistry != null
             ? _cameraPoseRegistry.MoveCameraToPose(cameraPoseId)
             : BusinessSceneCommandResult.Unsupported(BusinessSceneCapability.MoveCameraToPose);
+    }
+
+    /// <summary>
+    /// 平滑恢复燃气场景初始镜头，并将流程、命名镜头和交互产生的临时视觉恢复到总览。
+    /// 当前设备四态由流程控制器原样保留并重新应用；该入口不经过流程切换，也不改写流程字段。
+    /// </summary>
+    public BusinessSceneCommandResult ResetCamera()
+    {
+        if (!TryUseController(out BusinessSceneCommandResult unavailable))
+        {
+            return unavailable;
+        }
+        if (_cameraPoseRegistry == null)
+        {
+            return BusinessSceneCommandResult.Failed("camera-reset-unavailable", "燃气场景缺少相机复位控制器。");
+        }
+
+        // 先验证并启动镜头复位。镜头配置无效时不得先改变场景视觉，避免失败命令留下半完成状态。
+        BusinessSceneCommandResult cameraResult = _cameraPoseRegistry.ResetCamera();
+        if (!cameraResult.Success)
+        {
+            return cameraResult;
+        }
+
+        bool visualResetSucceeded = _controller.TryResetOverviewVisualsPreservingDeviceStates(out string visualMessage);
+        return visualResetSucceeded
+            ? BusinessSceneCommandResult.Completed($"{cameraResult.Message}{visualMessage}")
+            : BusinessSceneCommandResult.Failed("camera-visual-reset-failed", visualMessage);
     }
 
     /// <summary>

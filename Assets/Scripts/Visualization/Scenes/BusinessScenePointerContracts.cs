@@ -40,6 +40,15 @@ namespace WebDLPro.Unity.SceneRuntime
     }
 
     /// <summary>
+    /// 当前活动场景可选的复位能力。相机恢复初始姿态；业务场景可同时撤销临时聚焦视觉，
+    /// 但不得清除设备状态或通过该入口改写流程事务字段。
+    /// </summary>
+    public interface IBusinessSceneCameraResetController
+    {
+        BusinessSceneCommandResult ResetCamera();
+    }
+
+    /// <summary>
     /// 第三层事务使用的相机快照扩展。它恢复进入前的业务镜头，而不是场景资产中的初始镜头。
     /// </summary>
     public interface IBusinessSceneCameraSnapshotController : IBusinessSceneCameraPoseController

@@ -15,7 +15,7 @@ const allowedDeliveryRootEntries = new Set([
   'artifact-integrity.json', 'shell', 'unity',
 ])
 const requiredUnityCommandCapabilities = Object.freeze([
-  'init', 'resize', 'switchScene', 'enterProcessStep', 'moveCameraToPose', 'enterProcessDetail', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'focusNode', 'clearSelection',
+  'init', 'resize', 'switchScene', 'enterProcessStep', 'moveCameraToPose', 'enterProcessDetail', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'resetCamera', 'focusNode', 'clearSelection',
   'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose',
 ])
 const requiredEnterProcessDetailFields = Object.freeze(['sceneId', 'processId', 'stepId', 'processDetailId', 'transitionId'])
@@ -24,7 +24,7 @@ const requiredCommitProcessDetailFields = Object.freeze(['sceneId', 'processDeta
 const requiredAbortProcessDetailFields = Object.freeze(['sceneId', 'processDetailId', 'transitionId'])
 const requiredExitProcessDetailFields = Object.freeze(['sceneId', 'processDetailId', 'transitionId'])
 const requiredSetProcessDetailPlaybackFields = Object.freeze(['sceneId', 'processDetailId', 'playing'])
-// 结构版本9在第三层事务基础上增加独立命名镜头点能力；旧构建不得绕过镜头按钮发布门禁。
+// 结构版本10在命名镜头点基础上增加独立相机复位能力；旧构建不得绕过右上角复位按钮发布门禁。
 const requiredUnityEventCapabilities = Object.freeze([
   'ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'selectionCleared', 'disposed',
 ])
@@ -130,6 +130,22 @@ async function calculateSha256(filePath) {
     stream.on('end', resolve)
   })
   return digest.digest('hex')
+}
+
+/**
+ * 对指定目录的普通文件生成稳定资源摘要。聚合输入同时包含规范化相对路径、字节数和单文件摘要，
+ * 因此文件改名、增删或内容变化都会改变结果；大型 Unity 文件始终流式读取，不占用整包内存。
+ */
+export async function calculateDirectoryResourceDigest(rootDirectory) {
+  const digest = createHash('sha256')
+  const files = await listReleaseFiles(rootDirectory)
+  for (const filePath of files) {
+    const relativePath = normalizeRelativePath(rootDirectory, filePath)
+    const fileStats = await stat(filePath)
+    const fileDigest = await calculateSha256(filePath)
+    digest.update(`${relativePath}\0${fileStats.size}\0${fileDigest}\n`, 'utf8')
+  }
+  return `sha256:${digest.digest('hex')}`
 }
 
 /**
@@ -276,19 +292,31 @@ export async function validateReleaseArtifact(rootDirectory) {
     if (topologyManifest.unityBuildId !== releaseManifest.unityReleaseId) issues.push('Unity 构建标识在结构清单与发布摘要中不一致。')
     const processDetails = Array.isArray(topologyManifest.processDetails) ? topologyManifest.processDetails : []
     const gasTurbineDetail = processDetails.find((detail) => detail?.processDetailId === 'process-detail.gas-power.gas-turbine')
+    const coalBoilerDetail = processDetails.find((detail) => detail?.processDetailId === 'process-detail.coal-power.boiler')
     const gasTurbineAction = Array.isArray(topologyManifest.actions)
       ? topologyManifest.actions.find((action) => action?.actionId === 'action.gas-power.gas-turbine')
+      : undefined
+    const coalBoilerAction = Array.isArray(topologyManifest.actions)
+      ? topologyManifest.actions.find((action) => action?.actionId === 'action.coal-power.boiler')
       : undefined
     const gasMapping = Array.isArray(topologyManifest.unitySceneMappings)
       ? topologyManifest.unitySceneMappings.find((mapping) => mapping?.sceneId === 'gas-power')
       : undefined
-    if (processDetails.length !== 1 || !gasTurbineDetail ||
+    const coalMapping = Array.isArray(topologyManifest.unitySceneMappings)
+      ? topologyManifest.unitySceneMappings.find((mapping) => mapping?.sceneId === 'coal-power')
+      : undefined
+    if (processDetails.length !== 2 || !gasTurbineDetail ||
         gasTurbineDetail.sceneId !== 'gas-power' || gasTurbineDetail.processId !== 'gas-power-generation' ||
         gasTurbineDetail.stepId !== 'gas-turbine' ||
         gasTurbineDetail.resourceId !== 'process-detail-resource.gas-power.gas-turbine' ||
         gasTurbineDetail.cameraPoseId !== 'camera-pose.gas-power.gas-turbine' ||
-        gasTurbineDetail.stateNodeId !== 'gas-turbine') {
-      issues.push('结构清单必须且只能发布燃气轮机这一项独立第三层目录。')
+        gasTurbineDetail.stateNodeId !== 'gas-turbine' || !coalBoilerDetail ||
+        coalBoilerDetail.sceneId !== 'coal-power' || coalBoilerDetail.processId !== 'coal-power-generation' ||
+        coalBoilerDetail.stepId !== 'boiler' ||
+        coalBoilerDetail.resourceId !== 'process-detail-resource.coal-power.boiler' ||
+        coalBoilerDetail.cameraPoseId !== 'camera-pose.coal-power.boiler' ||
+        coalBoilerDetail.stateNodeId !== 'node.coal-boiler') {
+      issues.push('结构清单必须且只能发布燃气轮机与燃煤锅炉两项独立第三层目录。')
     }
     if (!gasTurbineAction || gasTurbineAction.targetViewMode !== 'process-detail' ||
         gasTurbineAction.processDetailId !== 'process-detail.gas-power.gas-turbine' ||
@@ -296,8 +324,15 @@ export async function validateReleaseArtifact(rootDirectory) {
         gasTurbineAction.unityAction?.type !== 'enterProcessDetail') {
       issues.push('燃气轮机动作必须进入无拓扑的独立第三层，不能回退为旧流程步骤。')
     }
-    if (gasMapping?.processSteps?.some((step) => step?.stepId === 'gas-turbine')) {
-      issues.push('燃气 Unity 正式流程步骤清单不得继续发布旧 gas-turbine 过滤步骤。')
+    if (!coalBoilerAction || coalBoilerAction.targetViewMode !== 'process-detail' ||
+        coalBoilerAction.processDetailId !== 'process-detail.coal-power.boiler' ||
+        Object.prototype.hasOwnProperty.call(coalBoilerAction, 'targetTopologyId') ||
+        coalBoilerAction.unityAction?.type !== 'enterProcessDetail') {
+      issues.push('燃煤锅炉动作必须进入无拓扑的独立第三层，不能回退为旧流程步骤。')
+    }
+    if (gasMapping?.processSteps?.some((step) => step?.stepId === 'gas-turbine') ||
+        coalMapping?.processSteps?.some((step) => step?.stepId === 'boiler')) {
+      issues.push('Unity 正式流程步骤清单不得继续发布已独立为第三层的燃机或锅炉步骤。')
     }
     const sourceTopology = Array.isArray(topologyManifest.topologies)
       ? topologyManifest.topologies.find((topology) => topology?.topologyId === releaseManifest.nodeProtocolPolicy?.sourceTopologyId)
@@ -316,6 +351,33 @@ export async function validateReleaseArtifact(rootDirectory) {
   }
 
   if (unityProtocolMetadata) {
+    const runtimeIdentity = releaseManifest.runtimeIdentity
+    const unityDirectory = path.join(rootDirectory, 'unity')
+    if (!runtimeIdentity || runtimeIdentity.buildId !== releaseManifest.unityReleaseId ||
+        typeof runtimeIdentity.resourceDigest !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(runtimeIdentity.resourceDigest)) {
+      issues.push('发布摘要必须以 Unity 发布标识和有效 SHA-256 资源摘要声明运行时身份。')
+    } else {
+      const actualResourceDigest = await calculateDirectoryResourceDigest(unityDirectory)
+      if (actualResourceDigest !== runtimeIdentity.resourceDigest) {
+        issues.push('运行时资源摘要与发布目录中的 Unity 实际文件不一致。')
+      }
+
+      // 前端壳必须真正编译进同一身份值；只写发布摘要不能约束 iframe 握手使用哪个 Unity 产物。
+      const shellDirectory = path.join(rootDirectory, 'shell')
+      const shellFiles = await exists(shellDirectory) ? await listReleaseFiles(shellDirectory) : []
+      let shellContainsBuildId = false
+      let shellContainsResourceDigest = false
+      for (const shellFile of shellFiles) {
+        if (path.extname(shellFile).toLowerCase() !== '.js') continue
+        const source = await readFile(shellFile, 'utf8')
+        shellContainsBuildId ||= source.includes(runtimeIdentity.buildId)
+        shellContainsResourceDigest ||= source.includes(runtimeIdentity.resourceDigest)
+      }
+      if (!shellContainsBuildId || !shellContainsResourceDigest) {
+        issues.push('协议壳未编译进与 Unity 发布目录一致的构建标识和资源摘要。')
+      }
+    }
+
     const capabilities = new Set(Array.isArray(unityProtocolMetadata.commandCapabilities) ? unityProtocolMetadata.commandCapabilities : [])
     const eventCapabilities = new Set(Array.isArray(unityProtocolMetadata.eventCapabilities) ? unityProtocolMetadata.eventCapabilities : [])
     const missingEvents = requiredUnityEventCapabilities.some((capability) => !eventCapabilities.has(capability))
@@ -343,7 +405,7 @@ export async function validateReleaseArtifact(rootDirectory) {
     const missingAbortProcessDetailFields = requiredAbortProcessDetailFields.some((field) => !abortProcessDetailFields.has(field))
     const missingExitProcessDetailFields = requiredExitProcessDetailFields.some((field) => !exitProcessDetailFields.has(field))
     const missingPlaybackFields = requiredSetProcessDetailPlaybackFields.some((field) => !playbackFields.has(field))
-    if (unityProtocolMetadata.schemaVersion !== 9 || unityProtocolMetadata.channel !== 'power3d-unity' ||
+    if (unityProtocolMetadata.schemaVersion !== 10 || unityProtocolMetadata.channel !== 'power3d-unity' ||
       unityProtocolMetadata.protocolVersion !== 2 || unityProtocolMetadata.unityReleaseId !== releaseManifest.unityReleaseId ||
       unityProtocolMetadata.processDetailCommandSchemaVersion !== 2 ||
       requiredUnityCommandCapabilities.some((capability) => !capabilities.has(capability)) ||

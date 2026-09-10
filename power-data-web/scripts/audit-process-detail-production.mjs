@@ -149,17 +149,25 @@ export async function auditProcessDetailProduction(releaseId = 'process-detail-s
 
   const manifest = await createConfiguredPowerScenesManifest(releaseId, 'gas-power')
   const gasDetails = manifest.processDetails.filter((detail) => detail.sceneId === 'gas-power')
-  const detailAction = manifest.actions.find((action) => action.actionId === 'action.gas-power.gas-turbine')
+  const coalDetails = manifest.processDetails.filter((detail) => detail.sceneId === 'coal-power')
+  const gasDetailAction = manifest.actions.find((action) => action.actionId === 'action.gas-power.gas-turbine')
+  const coalDetailAction = manifest.actions.find((action) => action.actionId === 'action.coal-power.boiler')
   const gasMapping = manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'gas-power')
-  if (gasDetails.length !== 1 || gasDetails[0]?.processDetailId !== 'process-detail.gas-power.gas-turbine') {
-    issues.push({ code: 'process-detail.catalog-not-single', file: 'power-data-web/scripts/build-gas-power-smoke-release.mjs' })
+  const coalMapping = manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'coal-power')
+  if (gasDetails.length !== 1 || gasDetails[0]?.processDetailId !== 'process-detail.gas-power.gas-turbine' ||
+      coalDetails.length !== 1 || coalDetails[0]?.processDetailId !== 'process-detail.coal-power.boiler') {
+    issues.push({ code: 'process-detail.catalog-not-approved', file: 'power-data-web/scripts/build-gas-power-smoke-release.mjs' })
   }
-  if (!detailAction || detailAction.targetViewMode !== 'process-detail' ||
-      Object.prototype.hasOwnProperty.call(detailAction, 'targetTopologyId') ||
-      detailAction.unityAction?.type !== 'enterProcessDetail') {
+  if (!gasDetailAction || gasDetailAction.targetViewMode !== 'process-detail' ||
+      Object.prototype.hasOwnProperty.call(gasDetailAction, 'targetTopologyId') ||
+      gasDetailAction.unityAction?.type !== 'enterProcessDetail' ||
+      !coalDetailAction || coalDetailAction.targetViewMode !== 'process-detail' ||
+      Object.prototype.hasOwnProperty.call(coalDetailAction, 'targetTopologyId') ||
+      coalDetailAction.unityAction?.type !== 'enterProcessDetail') {
     issues.push({ code: 'process-detail.action-uses-legacy-path', file: 'power-data-web/scripts/build-gas-power-smoke-release.mjs' })
   }
-  if (gasMapping?.processSteps.some((step) => step.stepId === 'gas-turbine')) {
+  if (gasMapping?.processSteps.some((step) => step.stepId === 'gas-turbine') ||
+      coalMapping?.processSteps.some((step) => step.stepId === 'boiler')) {
     issues.push({ code: 'process-detail.legacy-step-published', file: 'power-data-web/scripts/build-gas-power-smoke-release.mjs' })
   }
 

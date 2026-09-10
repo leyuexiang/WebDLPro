@@ -21,7 +21,7 @@ describe('网页图形受控连接器', () => {
     entryUrl: `${childOrigin}/index.html`,
     childOrigin,
     allowedParentOrigin: 'https://platform.example.com',
-    capabilities: ['init', 'dispose', 'focusNode', 'clearSelection', 'resize', 'switchScene', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow'],
+    capabilities: ['init', 'dispose', 'focusNode', 'clearSelection', 'resetCamera', 'resize', 'switchScene', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow'],
     eventCapabilities: ['ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'selectionCleared', 'disposed'],
     resourceBudget: { initialMemoryMb: 128, maxConcurrentInstances: 1, cacheMode: 'versioned' },
   } as const satisfies WebglRuntimeRegistration
@@ -217,6 +217,13 @@ describe('网页图形受控连接器', () => {
       expect.objectContaining({ type: 'clearSelection', payload: {} }),
       childOrigin,
     )
+
+    expect(connector.sendCommand('resetCamera', {})).toContain('instance-1-4')
+    expect(childWindow.postMessage).toHaveBeenLastCalledWith(
+      expect.objectContaining({ type: 'resetCamera', payload: {} }),
+      childOrigin,
+    )
+    expect(connector.sendCommand('resetCamera', { position: [0, 0, 0] })).toBeUndefined()
 
     connector.forceDispose()
   })

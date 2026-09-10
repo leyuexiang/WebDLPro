@@ -1,12 +1,11 @@
 using System;
 using System.Collections;
 using UnityEngine;
-using UnityEngine.InputSystem;
 
 /// <summary>
 /// WaiKeHeBing 整体特效统一控制器。
-/// 整合动画、气流粒子、体积流动和电线信号四个子系统，提供点击交互和逐步启动效果。
-/// 点击控制柜后按顺序启动各子系统，再次点击则立即全部停止。
+/// 整合动画、气流粒子、体积流动和电线信号四个子系统，提供统一播放许可和逐步启动效果。
+/// 播放许可由关键环节状态绑定器驱动；本模型不再处理自身点击输入。
 /// </summary>
 [DisallowMultipleComponent]
 public sealed class WaiKeHeBingMasterController : MonoBehaviour
@@ -17,10 +16,8 @@ public sealed class WaiKeHeBingMasterController : MonoBehaviour
     private static readonly int FlowIntensityPropertyId = Shader.PropertyToID("_FlowIntensity");
     private static readonly int FlowDirectionPropertyId = Shader.PropertyToID("_FlowDirectionOS");
 
-    [Header("点击交互")]
-    [Tooltip("点击目标物体（控制柜）。必须有 Collider，用于射线检测。")]
-    [SerializeField] private GameObject _clickTarget;
-    [Tooltip("默认状态：false = 初始关闭，点击后逐步启动；true = 自动播放。")]
+    [Header("播放基线")]
+    [Tooltip("默认状态：false = 初始关闭；true = 自动播放。实际播放许可由关键环节设备状态驱动。")]
     [SerializeField] private bool _playOnEnable;
 
     [Header("动画旋转")]
@@ -75,40 +72,18 @@ public sealed class WaiKeHeBingMasterController : MonoBehaviour
     [Tooltip("各子系统启动间隔（秒）。")]
     [SerializeField, Min(0.05f)] private float _startupStepDelay = 0.3f;
 
-    private Camera _mainCamera;
     private MaterialPropertyBlock _rightShellPropertyBlock;
     private MaterialPropertyBlock _volumePropertyBlock;
     private MaterialPropertyBlock _wirePropertyBlock;
     private ParticleSystem.Particle[] _particleBuffer;
     private float _wireOriginalFlowSpeed;
     private bool _isPlaying;
+    private bool _isFaultStopping;
+    private bool _hasPlaybackState;
     private bool _isStartingUp;
 
     private void Awake()
     {
-        _mainCamera = Camera.main;
-        if (_mainCamera == null)
-        {
-            Debug.LogError("[WaiKeHeBingMasterController] 未找到主相机，无法处理点击。", this);
-            enabled = false;
-            return;
-        }
-
-        if (_clickTarget != null && _clickTarget.GetComponent<Collider>() == null)
-        {
-            Debug.LogWarning($"[WaiKeHeBingMasterController] 点击目标 {_clickTarget.name} 缺少 Collider，自动添加 MeshCollider。", this);
-            MeshFilter meshFilter = _clickTarget.GetComponent<MeshFilter>();
-            if (meshFilter != null && meshFilter.sharedMesh != null)
-            {
-                MeshCollider collider = _clickTarget.AddComponent<MeshCollider>();
-                collider.sharedMesh = meshFilter.sharedMesh;
-            }
-            else
-            {
-                _clickTarget.AddComponent<BoxCollider>();
-            }
-        }
-
         _rightShellPropertyBlock = new MaterialPropertyBlock();
         _volumePropertyBlock = new MaterialPropertyBlock();
         _wirePropertyBlock = new MaterialPropertyBlock();
@@ -124,15 +99,33 @@ public sealed class WaiKeHeBingMasterController : MonoBehaviour
 
         ApplyRightShellOpacity();
 
-        // 强制初始化为关闭状态，确保所有特效不可见
+        // 初始状态要求所有粒子可见；状态绑定器稍后会根据是否故障覆盖动态播放策略。
         if (!_playOnEnable)
         {
-            StopAllSubsystems();
+            SetParticlePlayback(true);
+            SetVolumeRendererEnabled(true);
+            SetVolumeFlowSpeed(true);
+            SetWireFlowIntensity(2.8f);
+            SetWireFlowSpeed(_wireOriginalFlowSpeed);
         }
     }
 
     private void OnEnable()
     {
+        if (_hasPlaybackState)
+        {
+            // 隐藏加载阶段只记录状态；包装实例真正激活后再安全启动协程或应用故障停机。
+            if (_isPlaying)
+            {
+                StartCoroutine(StartupSequence());
+            }
+            else
+            {
+                StopAllSubsystems(_isFaultStopping);
+            }
+            return;
+        }
+
         if (_playOnEnable)
         {
             SetPlaying(true);
@@ -141,39 +134,25 @@ public sealed class WaiKeHeBingMasterController : MonoBehaviour
 
     private void Update()
     {
-        HandleClick();
         UpdateAnimation();
         UpdateInternalParticleConstraints();
     }
 
-    private void HandleClick()
+    /// <summary>由状态绑定器设置整体动态播放许可；故障时仅保留前端蓝色粒子覆盖层。</summary>
+    public void SetPlaying(bool isPlaying, bool faultStop = false)
     {
-        Mouse mouse = Mouse.current;
-        if (_clickTarget == null || mouse == null || !mouse.leftButton.wasPressedThisFrame)
+        if (_hasPlaybackState && _isPlaying == isPlaying && _isFaultStopping == faultStop)
         {
             return;
         }
 
-        Ray ray = _mainCamera.ScreenPointToRay(mouse.position.ReadValue());
-        if (Physics.Raycast(ray, out RaycastHit hit) && hit.collider.gameObject == _clickTarget)
-        {
-            TogglePlayback();
-        }
-    }
-
-    public void TogglePlayback()
-    {
-        SetPlaying(!_isPlaying);
-    }
-
-    public void SetPlaying(bool isPlaying)
-    {
-        if (_isPlaying == isPlaying)
-        {
-            return;
-        }
-
+        _hasPlaybackState = true;
         _isPlaying = isPlaying;
+        _isFaultStopping = faultStop;
+        if (!isActiveAndEnabled)
+        {
+            return;
+        }
 
         if (isPlaying)
         {
@@ -181,7 +160,7 @@ public sealed class WaiKeHeBingMasterController : MonoBehaviour
         }
         else
         {
-            StopAllSubsystems();
+            StopAllSubsystems(faultStop);
         }
     }
 
@@ -213,12 +192,23 @@ public sealed class WaiKeHeBingMasterController : MonoBehaviour
         _isStartingUp = false;
     }
 
-    private void StopAllSubsystems()
+    private void StopAllSubsystems(bool faultStop)
     {
         StopAllCoroutines();
         _isStartingUp = false;
+        if (faultStop)
+        {
+            // 故障状态保留前端蓝色粒子覆盖层，其余粒子全部停止并清空。
+            SetParticlePlayback(false, true);
+            SetVolumeRendererEnabled(false);
+            SetWireFlowIntensity(0f);
+            return;
+        }
+
+        // 资源释放等非故障停止路径不保留任何运行时效果。
         SetParticlePlayback(false);
         SetVolumeRendererEnabled(false);
+        SetVolumeFlowSpeed(false);
         SetWireFlowIntensity(0f);
     }
 
@@ -248,24 +238,57 @@ public sealed class WaiKeHeBingMasterController : MonoBehaviour
         }
     }
 
-    private void SetParticlePlayback(bool play)
+    /// <summary>
+    /// 设置粒子播放状态。正常播放时启动全部粒子；故障停止时只保留前端蓝色覆盖层。
+    /// </summary>
+    private void SetParticlePlayback(bool play, bool keepFrontBlueParticle = false)
     {
-        if (_blueIntakeCloud != null) SetParticle(_blueIntakeCloud, play);
-        if (_redExhaustFlame != null) SetParticle(_redExhaustFlame, play);
-        if (_blueInternalFlow != null) SetParticle(_blueInternalFlow, play);
-        if (_redInternalFlow != null) SetParticle(_redInternalFlow, play);
-        if (_orangeCombustionFlame != null) SetParticle(_orangeCombustionFlame, play);
-        if (_blueParticleOverlay != null) SetParticle(_blueParticleOverlay, play);
-        if (_redParticleOverlay != null) SetParticle(_redParticleOverlay, play);
+        if (play)
+        {
+            SetParticle(_blueIntakeCloud, true);
+            SetParticle(_redExhaustFlame, true);
+            SetParticle(_blueInternalFlow, true);
+            SetParticle(_redInternalFlow, true);
+            SetParticle(_orangeCombustionFlame, true);
+            SetParticle(_blueParticleOverlay, true);
+            SetParticle(_redParticleOverlay, true);
+
+            for (int index = 0; index < _tongFlameJets.Length; index++)
+            {
+                if (_tongFlameJets[index] != null)
+                {
+                    SetParticle(_tongFlameJets[index], true);
+                }
+            }
+
+            return;
+        }
+
+        // 前端蓝色粒子覆盖层在停止状态也保持播放，其他粒子全部停止并清空。
+        SetParticle(_blueParticleOverlay, keepFrontBlueParticle);
+        SetParticle(_blueIntakeCloud, false);
+        SetParticle(_redExhaustFlame, false);
+        SetParticle(_blueInternalFlow, false);
+        SetParticle(_redInternalFlow, false);
+        SetParticle(_orangeCombustionFlame, false);
+        SetParticle(_redParticleOverlay, false);
 
         for (int index = 0; index < _tongFlameJets.Length; index++)
         {
-            if (_tongFlameJets[index] != null) SetParticle(_tongFlameJets[index], play);
+            if (_tongFlameJets[index] != null)
+            {
+                SetParticle(_tongFlameJets[index], false);
+            }
         }
     }
 
     private static void SetParticle(ParticleSystem ps, bool play)
     {
+        if (ps == null)
+        {
+            return;
+        }
+
         if (play)
         {
             if (!ps.isPlaying) ps.Play();

@@ -3,7 +3,7 @@ import { toProcessNodeId, toRouteId, toTopologyKey } from '@/config/process/iden
 import type { TopologyDefinition } from '@/config/process/types'
 import { createTopologyPanelPresentation } from '@/modules/visual/components/topology-panel-presentation'
 
-/** 夹具使用非燃气名称，证明面板标题、图例和状态完全来自拓扑配置。 */
+/** 夹具使用非燃气名称，证明公共面板状态不依赖任何具体业务场景。 */
 function createTopology(overrides: Partial<TopologyDefinition> = {}): TopologyDefinition {
   return {
     topologyKey: toTopologyKey('topology.wind.overview'),
@@ -22,22 +22,21 @@ function createTopology(overrides: Partial<TopologyDefinition> = {}): TopologyDe
 }
 
 describe('拓扑面板展示模型', () => {
-  it('从当前拓扑配置读取标题和已声明图例，不依赖燃气固定文本或状态摘要', () => {
+  it('从当前拓扑配置读取无障碍标题，不创建会占用画布空间的展示数据', () => {
     const presentation = createTopologyPanelPresentation(createTopology())
 
     expect(presentation.title).toBe('风电场控制拓扑')
-    expect(presentation.legends.map((legend) => legend.label)).toEqual(['已确认', '待确认'])
-    expect(presentation.emptyMessage).toBe('')
+    expect(presentation).toEqual({ title: '风电场控制拓扑', emptyMessage: '', isEmpty: false })
   })
 
   it('空拓扑保留配置标题并显示不猜测结构的明确状态', () => {
     const presentation = createTopologyPanelPresentation(createTopology({ title: '配电网概览', nodes: [], edges: [] }))
 
-    expect(presentation).toMatchObject({ title: '配电网概览', legends: [], isEmpty: true })
+    expect(presentation).toMatchObject({ title: '配电网概览', isEmpty: true })
     expect(presentation.emptyMessage).toContain('不会根据页面名称')
   })
 
-  it('任意拓扑均只呈现已声明的连线证据图例，不复制场景专用组件', () => {
+  it('任意拓扑都使用同一个精简展示模型，不复制场景专用标题栏', () => {
     const presentation = createTopologyPanelPresentation(createTopology({
       title: '微电网自治控制拓扑',
       nodes: [
@@ -55,8 +54,7 @@ describe('拓扑面板展示模型', () => {
     }))
 
     expect(presentation.title).toBe('微电网自治控制拓扑')
-    expect(presentation.legends.map((legend) => legend.label)).toEqual(['已确认', '待确认', '概念连接', '未分类关系'])
-    expect(presentation.emptyMessage).toBe('')
+    expect(presentation).toEqual({ title: '微电网自治控制拓扑', emptyMessage: '', isEmpty: false })
   })
 
   it('空白配置标题只降级为通用标题，不回退到任一业务场景名称', () => {

@@ -46,12 +46,12 @@ mergeInto(LibraryManager.library, {
     }
 
     // 该白名单必须与前端 runtime-registry（运行时登记表）和 webgl-protocol-capabilities.json 完全一致；
-    // moveCameraToPose（命名镜头定位）由前端第二层镜头导航使用，缺失时 ready 会被前端能力校验拒绝，
-    // 即使元数据文件声明了该能力，实际跨窗口桥仍会在握手阶段判定为不兼容。
+    // moveCameraToPose（命名镜头定位）与 resetCamera（相机复位）都只改变当前镜头；
+    // 任一能力缺失都会在握手阶段被前端判定为不兼容。
     var commandCapabilities = [
       'init', 'resize', 'switchScene', 'enterProcessStep', 'moveCameraToPose', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail',
       'enterProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback',
-      'resetScene', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState',
+      'resetScene', 'resetCamera', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState',
  'setRouteFlow', 'setNodeVisibility', 'dispose'
     ];
     var eventCapabilities = ['ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'selectionCleared', 'disposed'];

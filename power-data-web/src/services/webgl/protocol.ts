@@ -23,6 +23,7 @@ export const WEBGL_COMMAND_TYPES = [
   'exitProcessDetail',
   'setProcessDetailPlayback',
   'resetScene',
+  'resetCamera',
   'focusNode',
   'clearSelection',
   'setNodeVisualState',
@@ -102,6 +103,9 @@ export interface WebglEnterProcessStepPayload {
 export interface WebglMoveCameraToPosePayload {
   cameraPoseId: string
 }
+
+/** 相机复位不接收坐标、旋转、场景或流程字段，只允许严格空对象。 */
+export type WebglResetCameraPayload = Record<string, never>
 
 /**
  * 第三层进入命令只携带目录中已交叉验证的业务标识；资源和相机位由 Unity 本地目录解析，
@@ -357,11 +361,17 @@ export function isWebglEnterProcessStepPayload(value: unknown): value is WebglEn
 }
 
 export function isWebglMoveCameraToPosePayload(value: unknown): value is WebglMoveCameraToPosePayload {
-  if (!value || typeof value !== 'object') return false
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
 
   const candidate = value as Record<string, unknown>
   const keys = Object.keys(candidate)
   return keys.length === 1 && keys[0] === 'cameraPoseId' && isBoundedStableIdentifier(candidate.cameraPoseId)
+}
+
+/** 相机复位只接受严格空对象，禁止网页借该命令注入坐标或其他场景参数。 */
+export function isWebglResetCameraPayload(value: unknown): value is WebglResetCameraPayload {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  return Object.keys(value).length === 0
 }
 
 /** 进入载荷严格只允许五个稳定字段，旧流程隔离、过滤和聚焦字段一律不能混入第三层。 */

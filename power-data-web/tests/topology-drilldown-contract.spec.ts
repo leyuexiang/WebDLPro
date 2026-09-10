@@ -20,7 +20,7 @@ describe('燃气与燃煤拓扑无下钻发布契约', () => {
 
     for (const [manifest, overviewTopologyId, expectedActionIds] of [
       [gasManifest, 'topology.gas-power.overview', ['action.gas-power.overview', 'action.gas-power.gas-turbine']],
-      [coalManifest, 'topology.coal-power.overview', ['action.coal-power.overview']],
+      [coalManifest, 'topology.coal-power.overview', ['action.coal-power.overview', 'action.coal-power.boiler']],
     ] as const) {
       /** 空数组明确表达能力已下线，并让注册表与外部消费者保持一致。 */
       expect(manifest.drilldowns).toEqual([])
@@ -53,6 +53,7 @@ describe('燃气与燃煤拓扑无下钻发布契约', () => {
       'action.gas-power.overview',
       'action.gas-power.gas-turbine',
       'action.coal-power.overview',
+      'action.coal-power.boiler',
     ])
 
     // 历史键只能返回缺失，不能为了兼容旧页面保留隐藏说明内容。

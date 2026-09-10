@@ -1,82 +1,164 @@
 import type { Meta2dData, Pen } from '@meta2d/core'
+import type { TopologyDeviceStatus } from '@/config/process/types'
 import { applyCoalTopologySelectionPolicy } from './coal-topology-selection'
+import { getCoalTopologyResourceManifest } from './coal-topology-manifest'
+import { getTopologySharedPublicAssetUrl } from './topology-shared-assets'
+import {
+  COAL_TOPOLOGY_VARIANT_BY_ID,
+  type CoalTopologyVariantId,
+} from './coal-topology-variant-manifest'
+
+export {
+  COAL_TOPOLOGY_BACKGROUND_PEN_IDS,
+  COAL_TOPOLOGY_DEVICE_PEN_IDS,
+} from './coal-topology-manifest'
+
+/** 平台四态协议与公共资源目录保持一一对应。 */
+const ICON_DIRECTORY_BY_STATUS: Readonly<Record<TopologyDeviceStatus, string>> = Object.freeze({
+  normal: 'normal', alarm: 'alarm', fault: 'fault', offline: 'offline',
+})
 
 /**
- * 用户提供的动态图标统一采用 WebP（网页图片格式）版本：它保留动画，同时体积约为 APNG
- *（带动画的 PNG 图片）版本的五分之一。映射键使用 JSON 图元 penId（图元标识），避免多个
- * 语义不同的图元共用一个远程图片地址时发生误替换；未列入映射的图片仍保留原始地址供诊断。
+ * 缓存只保存未交给二维组态引擎（Meta2D）的安全原始副本；每次打开返回深拷贝，
+ * 防止状态图片、选中样式或引擎计算字段污染再次切回同一版本的结果。
  */
-const LOCAL_IMAGE_PATH_BY_PEN_ID = new Map<string, string>([
-  ['2b71305', 'icons/normal/firewall.webp'], ['30122c32', 'icons/normal/firewall.webp'],
-  ['ae2d950', 'icons/normal/server.webp'], ['7c5f939', 'icons/normal/server.webp'],
-  ['71863327', 'icons/normal/server.webp'], ['2dcb5e32', 'icons/normal/server.webp'], ['3459bcf4', 'icons/normal/server.webp'],
-  ['efdfac7', 'icons/normal/coal_mill.webp'], ['643c415e', 'icons/normal/conveyor.webp'],
-  ['72e3b42a', 'icons/normal/desulfurization.webp'], ['7d7bf688', 'icons/normal/pump.webp'],
-  // 图源没有“电除尘器灰斗”专用素材，显式复用同属环保处理设备的脱硫塔动图；不得按标题运行时猜图。
-  ['8c7f158', 'icons/normal/desulfurization.webp'],
-  ['17723a9e', 'icons/normal/generator.webp'], ['369a5871', 'icons/normal/boiler.webp'], ['ed5e92c', 'icons/normal/steam_turbine.webp'],
-  ['5f3c5f1c', 'icons/normal/desktop.webp'], ['ea88a62', 'icons/normal/desktop.webp'],
-  ['d80643c', 'icons/normal/desktop.webp'], ['df77d73', 'icons/normal/desktop.webp'],
-  ['9b9d1e6', 'icons/normal/office.webp'], ['18b5e2e', 'icons/normal/office.webp'],
-  ['65adc3b6', 'icons/normal/office.webp'], ['021173d', 'icons/normal/office.webp'],
-  ['4f68483a', 'icons/normal/office.webp'], ['8e6a7e5', 'icons/normal/office.webp'],
-  ['025c248', 'icons/normal/mirror.webp'], ['68a979f', 'icons/normal/mirror.webp'], ['352337e9', 'icons/normal/mirror.webp'],
-  ['533cd1cf', 'icons/normal/dcs.webp'], ['e29514', 'icons/normal/plc.webp'], ['c154b27', 'icons/normal/plc.webp'],
-  ['1c78393', 'icons/normal/dcs.webp'], ['75426ac5', 'icons/normal/dcs.webp'], ['782a7b2e', 'icons/normal/dcs.webp'],
-  ['fa7d41a', 'icons/normal/plc.webp'], ['521f11a', 'icons/normal/plc.webp'],
-])
+const sourceDataCache = new Map<CoalTopologyVariantId, Meta2dData>()
 
-/** 供正式运行画布和契约测试复用同一份显式图元素材路径，未知图元不会返回猜测结果。 */
-export function getCoalTopologyPreviewIconPath(penId: string): string | undefined {
-  return LOCAL_IMAGE_PATH_BY_PEN_ID.get(penId)
+/** 按版本和图元编号读取公共四态图标，不解析标题、坐标或输入文件的原图片地址。 */
+export function getCoalTopologyPreviewIconPath(
+  variantId: CoalTopologyVariantId,
+  penId: string,
+  status: TopologyDeviceStatus = 'normal',
+): string | undefined {
+  const normalPath = getCoalTopologyResourceManifest(variantId).deviceIconPathByPenId.get(penId)
+  return normalPath?.replace('/normal/', `/${ICON_DIRECTORY_BY_STATUS[status]}/`)
 }
 
-/** 预览静态资源统一经 Vite 基础路径拼接，保证站点部署在子目录时仍能正确加载。 */
-function getPreviewPublicAssetUrl(relativePath: string): string {
-  const basePath = import.meta.env.BASE_URL.endsWith('/')
-    ? import.meta.env.BASE_URL
-    : `${import.meta.env.BASE_URL}/`
-  return `${basePath}topology/coal-json-preview/${relativePath}`
+/** 把正式设备状态转换为受控公共资源地址。 */
+export function getCoalTopologyStatusIconUrl(
+  variantId: CoalTopologyVariantId,
+  penId: string,
+  status: TopologyDeviceStatus,
+): string | undefined {
+  const relativePath = getCoalTopologyPreviewIconPath(variantId, penId, status)
+  return relativePath ? getTopologySharedPublicAssetUrl(relativePath) : undefined
+}
+
+/** 生成燃煤版本数据地址；图片资源始终由公共资源地址工具单独生成。 */
+export function getCoalTopologyPreviewPublicAssetUrl(
+  relativePath: string,
+  viteBaseUrl = import.meta.env.BASE_URL,
+  entryModuleScriptUrl = typeof document === 'undefined'
+    ? undefined
+    : document.querySelector<HTMLScriptElement>('script[type="module"][src]')?.src || undefined,
+): string {
+  const assetRelativePath = `topology/coal-json-preview/${relativePath}`
+  if ((viteBaseUrl === './' || viteBaseUrl === '.') && entryModuleScriptUrl) {
+    return new URL(`../${assetRelativePath}`, entryModuleScriptUrl).toString()
+  }
+  const basePath = viteBaseUrl.endsWith('/') ? viteBaseUrl : `${viteBaseUrl}/`
+  return `${basePath}${assetRelativePath}`
+}
+
+/** 使用平台原生结构化克隆，确保缓存对象不可被画布或调用方修改。 */
+function cloneTopologyData(data: Meta2dData): Meta2dData {
+  return structuredClone(data)
 }
 
 /**
- * 将原图纸中的图片引用按 penId 替换为用户提供的本地 WebP 动图。
- * 函数直接更新刚刚获取、尚未交给画布的对象，避免为图元创建第二份深拷贝。
+ * 只替换当前版本清单中登记的设备和区域标题背景。任何遗漏图片都会中止加载，
+ * 防止浏览器继续请求压缩包中的站点路径，或把装饰图片误当成设备状态载体。
  */
-function localizePenImage(pen: Pen): void {
-  const localRelativePath = pen.id ? getCoalTopologyPreviewIconPath(pen.id) : undefined
-  if (localRelativePath) pen.image = getPreviewPublicAssetUrl(localRelativePath)
+function localizePenImage(pen: Pen, variantId: CoalTopologyVariantId): void {
+  if (!pen.image?.trim() || !pen.id) return
+  const manifest = getCoalTopologyResourceManifest(variantId)
+  if (manifest.titleBackgroundPenIds.has(pen.id)) {
+    pen.image = getTopologySharedPublicAssetUrl('background/flow-light-3.png')
+    return
+  }
+  const iconPath = getCoalTopologyPreviewIconPath(variantId, pen.id)
+  if (iconPath) {
+    pen.image = getTopologySharedPublicAssetUrl(iconPath)
+    return
+  }
+  const staticPath = manifest.staticImagePathByPenId.get(pen.id)
+  if (staticPath) {
+    pen.image = getTopologySharedPublicAssetUrl(staticPath)
+    return
+  }
+  throw new Error(`燃煤拓扑图片图元未登记：${variantId}/${pen.id}`)
+}
+
+/** 逐文件校验图元数、稳定编号与有限几何字段，避免损坏数据污染画布边界。 */
+function validateCoalTopologyPens(
+  pens: readonly Pen[],
+  variantId: CoalTopologyVariantId,
+  expectedPenCount: number,
+): void {
+  if (pens.length !== expectedPenCount) {
+    throw new Error(`燃煤拓扑 ${variantId} 图元数量异常：应为 ${expectedPenCount}，实际为 ${pens.length}。`)
+  }
+  const ids = new Set<string>()
+  for (const pen of pens) {
+    if (!pen.id) throw new Error(`燃煤拓扑 ${variantId} 格式无效：存在无编号图元。`)
+    if (ids.has(pen.id)) throw new Error(`燃煤拓扑 ${variantId} 格式无效：图元编号重复 ${pen.id}。`)
+    ids.add(pen.id)
+    if (![pen.x, pen.y, pen.width, pen.height].every((value) => typeof value === 'number' && Number.isFinite(value))) {
+      throw new Error(`燃煤拓扑 ${variantId} 格式无效：图元 ${pen.id} 的坐标或尺寸不是有限数字。`)
+    }
+  }
+}
+
+/** 禁用导出文件中的模拟、联网、数据点和初始化脚本，保留纯视觉动画属性。 */
+function sanitizeTopologyData(data: Meta2dData): void {
+  const safeData = data as Meta2dData & {
+    enableMock?: boolean
+    dataPoints?: unknown[]
+    networks?: unknown[]
+    initJs?: string
+  }
+  safeData.enableMock = false
+  safeData.dataPoints = []
+  safeData.networks = []
+  safeData.initJs = ''
 }
 
 /**
- * 获取并校验原始组态数据，再只替换图片地址；坐标、层级、文字、连线、颜色和画布参数全部保留。
+ * 加载一份完整版本文件。首次请求后缓存安全原始副本；每次返回隔离副本并应用公共资源和选择策略。
+ * 函数不会合并多个文件，也不会通过 visible（可见性）字段模拟层级筛选。
  */
-export async function loadCoalTopologyPreviewData(signal?: AbortSignal): Promise<Meta2dData> {
-  const response = await fetch(getPreviewPublicAssetUrl('topology.json'), {
-    signal,
-    cache: import.meta.env.DEV ? 'no-store' : 'force-cache',
-  })
+export async function loadCoalTopologyPreviewData(
+  variantId: CoalTopologyVariantId = 'network-business-key-process',
+  signal?: AbortSignal,
+): Promise<Meta2dData> {
+  const variant = COAL_TOPOLOGY_VARIANT_BY_ID.get(variantId)
+  if (!variant) throw new Error(`燃煤拓扑版本未登记：${variantId}`)
 
-  if (!response.ok) {
-    throw new Error(`拓扑 JSON 加载失败：${response.status}`)
+  let sourceData = sourceDataCache.get(variantId)
+  if (!sourceData) {
+    const response = await fetch(getCoalTopologyPreviewPublicAssetUrl(variant.topologyPath), {
+      signal,
+      cache: import.meta.env.DEV ? 'no-store' : 'force-cache',
+    })
+    if (!response.ok) throw new Error(`燃煤拓扑 ${variantId} 加载失败：${response.status}`)
+    const fetchedData = await response.json() as Partial<Meta2dData>
+    if (!Array.isArray(fetchedData.pens)) throw new Error(`燃煤拓扑 ${variantId} 格式无效：缺少图元数组。`)
+    validateCoalTopologyPens(fetchedData.pens, variantId, variant.expectedPenCount)
+    sourceData = fetchedData as Meta2dData
+    sanitizeTopologyData(sourceData)
+    sourceDataCache.set(variantId, cloneTopologyData(sourceData))
   }
 
-  const data = await response.json() as Partial<Meta2dData>
-  if (!Array.isArray(data.pens)) {
-    throw new Error('拓扑 JSON 格式无效：缺少图元数组。')
-  }
-
-  for (const pen of data.pens) localizePenImage(pen)
-  // 背景矩形、分区文字和连线只承担视觉分组，不参与鼠标命中；设备与底部流程节点保持只读可选。
-  applyCoalTopologySelectionPolicy(data.pens)
-
-  // 数据由组态引擎 1.1.19 保存，图元坐标、尺寸和字号均与顶层 scale 构成同一套缩放链。
-  // 必须保留文件中的实时倍率，再由同一引擎从该倍率等比适配当前画布；若先把 scale 归一为 1，
-  // 文字会脱离图元尺寸单独放大。此处不写死倍率，后续替换新版拓扑数据时可继续沿用原始视觉比例。
-  // 源 width/height 是旧编辑器的 1920×1080 纸张，直接放入响应式容器会只覆盖左侧并留下黑色空块；
-  // 取消固定纸张只会让相同背景色铺满当前容器，不会改动任何业务图元。旧视口平移量由页面打开后统一居中。
+  const data = cloneTopologyData(sourceData)
+  for (const pen of data.pens) localizePenImage(pen, variantId)
+  applyCoalTopologySelectionPolicy(data.pens, variantId)
+  // 仅取消旧编辑器固定纸张尺寸；源图元坐标、组合关系、连线路径和倍率保持不变。
   data.width = undefined
   data.height = undefined
-  return data as Meta2dData
+  return data
 }
 
+/** 仅供单元测试隔离不可变缓存，生产代码不会主动清空已校验数据。 */
+export function clearCoalTopologyPreviewDataCacheForTests(): void {
+  sourceDataCache.clear()
+}

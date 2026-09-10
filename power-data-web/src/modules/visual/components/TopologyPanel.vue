@@ -1,20 +1,21 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { ProcessNodeId, RouteId } from '@/config/process/identifiers'
 import type { TopologyDefinition, TopologyDeviceStatus } from '@/config/process/types'
 import TopologyCanvas from '@/modules/visual/components/TopologyCanvas.vue'
 import CoalTopologyRuntimeCanvas from '@/modules/visual/topology-preview/CoalTopologyRuntimeCanvas.vue'
-import GasTopologyRuntimeCanvas from '@/modules/visual/topology-preview/GasTopologyRuntimeCanvas.vue'
+import GasV3TopologyRuntimeCanvas from '@/modules/visual/topology-preview/GasV3TopologyRuntimeCanvas.vue'
 import { createTopologyPanelPresentation } from '@/modules/visual/components/topology-panel-presentation'
 import type { TopologyCanvasController } from '@/modules/visual/components/topology-canvas-controller'
+import type { TopologyDataContext } from '@/modules/visual/topology/topology-runtime'
 
 const props = defineProps<{
   topology: TopologyDefinition
   selectedNodeIds: readonly ProcessNodeId[]
   selectedRouteIds: readonly RouteId[]
   /**
-   * 第三层关键环节稳定态为 true。此时保留唯一二维画布实例，只暂停输入、尺寸观察和重绘；
-   * 返回第二层后在同一实例上恢复已保存的拓扑、视口与选择。
+   * 平台总览隐藏态为 true。此时保留唯一二维画布实例，只暂停输入、尺寸观察和重绘；
+   * 业务层与第三层关键环节均保持双区布局，并在同一实例上切换拓扑数据上下文。
    */
   suspended?: boolean
   /** 状态快照是独立运行时数据，不会改写当前拓扑定义或触发画布路径重建。 */
@@ -29,8 +30,6 @@ const emit = defineEmits<{
   doubleClickNode: [nodeId: ProcessNodeId]
 }>()
 
-const panelElement = ref<HTMLElement | null>(null)
-const isFullscreen = ref(false)
 const topologyCanvas = ref<TopologyCanvasController | null>(null)
 
 /**
@@ -57,6 +56,7 @@ let pendingControllerNodeIds: readonly ProcessNodeId[] = props.selectedNodeIds
 let pendingControllerRouteIds: readonly RouteId[] = props.selectedRouteIds
 let pendingControllerStatuses: ReadonlyMap<ProcessNodeId, TopologyDeviceStatus> = props.nodeStatuses ?? new Map()
 let pendingControllerViewState: ReturnType<TopologyCanvasController['getViewState']>
+let pendingControllerDataContext: TopologyDataContext | undefined
 let canvasControllerDisposed = false
 let canvasControllerSuspended = Boolean(props.suspended)
 
@@ -71,6 +71,10 @@ const stableCanvasController: TopologyCanvasController = Object.freeze({
     pendingControllerNodeIds = nodeIds
     pendingControllerRouteIds = routeIds
     if (!canvasControllerSuspended) topologyCanvas.value?.setSelection(nodeIds, routeIds)
+  },
+  setTopologyDataContext(context: TopologyDataContext | undefined) {
+    pendingControllerDataContext = context
+    if (!canvasControllerSuspended) topologyCanvas.value?.setTopologyDataContext?.(context)
   },
   setNodeStatuses(statuses: ReadonlyMap<ProcessNodeId, TopologyDeviceStatus>) {
     pendingControllerStatuses = statuses
@@ -101,6 +105,7 @@ const stableCanvasController: TopologyCanvasController = Object.freeze({
 
     // 暂停期间只保留每类数据的最新快照；恢复时按固定顺序一次补发，避免触发重复布局。
     controller.setTopology(pendingControllerTopology)
+    controller.setTopologyDataContext?.(pendingControllerDataContext)
     controller.setNodeStatuses(pendingControllerStatuses)
     controller.setSelection(pendingControllerNodeIds, pendingControllerRouteIds)
     if (pendingControllerViewState) controller.restoreViewState(pendingControllerViewState)
@@ -124,11 +129,20 @@ function getCanvasController(): TopologyCanvasController | undefined {
   return stableCanvasController
 }
 
-/** 仅暴露单画布端口；全屏状态和 DOM（文档对象模型）元素继续由面板内部管理。 */
+/** 仅暴露单画布端口；面板外观统一由公共满高布局管理，不向上层暴露文档对象模型元素。 */
 defineExpose({ getCanvasController })
 
 /** 展示模型只从当前拓扑计算，切换场景或拓扑时无需复制组件或维护燃气专用条件分支。 */
 const presentation = computed(() => createTopologyPanelPresentation(props.topology))
+
+/**
+ * 公共重置入口只调用受控画布端口，不直接接触 Meta2D（网页二维组态引擎）或具体拓扑实现。
+ * 因此燃气、燃煤和后续新增拓扑都复用同一套“适应画布并居中”逻辑；空态和暂停态不发无效命令。
+ */
+function resetTopologyView(): void {
+  if (presentation.value.isEmpty || Boolean(props.suspended)) return
+  stableCanvasController.resetView()
+}
 
 /** 画布实现发生替换后补发同一份运行时快照；每类数据只保留最新值，不累积历史命令。 */
 watch(topologyCanvas, (controller) => {
@@ -136,6 +150,7 @@ watch(topologyCanvas, (controller) => {
   controller.setSuspended(canvasControllerSuspended)
   if (canvasControllerSuspended) return
   controller.setTopology(pendingControllerTopology)
+  controller.setTopologyDataContext?.(pendingControllerDataContext)
   controller.setNodeStatuses(pendingControllerStatuses)
   controller.setSelection(pendingControllerNodeIds, pendingControllerRouteIds)
   if (pendingControllerViewState) controller.restoreViewState(pendingControllerViewState)
@@ -152,93 +167,26 @@ watch(() => props.nodeStatuses, (statuses) => {
   pendingControllerStatuses = statuses ?? new Map()
 })
 
-/**
- * 全屏状态只以浏览器实际登记的全屏元素为准，不能在点击后直接反转本地布尔值。
- * 平台通过 iframe（内嵌框架）承载本应用时，只要父 iframe 声明 fullscreen（全屏）权限，
- * 当前面板就会与三维容器一样越过平台内容区进入浏览器原生全屏；按 Esc、浏览器拒绝请求
- * 或其他元素接管全屏时，按钮名称和画布尺寸都会跟随 fullscreenchange（全屏变化）恢复。
- */
-function synchronizeFullscreenState(): void {
-  isFullscreen.value = document.fullscreenElement === panelElement.value
-}
-
-/**
- * 请求当前拓扑面板进入浏览器原生全屏，并始终复用已挂载的唯一画布实例。
- * 请求失败时不伪造全屏状态，也不重建拓扑、清空选择或改变三维运行时；用户可继续使用常规布局。
- */
-async function toggleFullscreen(): Promise<void> {
-  const panel = panelElement.value
-  if (!panel) return
-
-  try {
-    if (document.fullscreenElement === panel) {
-      await document.exitFullscreen()
-      return
-    }
-
-    await panel.requestFullscreen()
-  } catch {
-    // 权限策略或浏览器窗口状态可能拒绝原生全屏；重新读取真实状态，禁止显示虚假的退出按钮。
-    synchronizeFullscreenState()
-  }
-}
-
-/**
- * 工具栏重置与自动恢复使用同一受控端口，确保普通 Canvas 和两种 Meta2D 画布行为一致。
- * 空态和暂停态不执行命令，防止隐藏画布在尺寸为零时产生无效视口。
- */
-function resetTopologyView(): void {
-  if (presentation.value.isEmpty || canvasControllerSuspended) return
-  stableCanvasController.resetView()
-}
-
-/** 监听浏览器原生全屏状态；组件卸载后立即移除，避免多拓扑切换累积监听器。 */
-onMounted(() => {
-  document.addEventListener('fullscreenchange', synchronizeFullscreenState)
-})
-
-onBeforeUnmount(() => {
-  document.removeEventListener('fullscreenchange', synchronizeFullscreenState)
-})
 </script>
 
 <template>
-  <section ref="panelElement" :class="['topology-panel', { 'topology-panel--fullscreen': isFullscreen }]" :aria-label="presentation.title">
+  <section class="topology-panel" :aria-label="presentation.title">
+    <!-- 公共层统一提供视图重置按钮，避免每个拓扑包装组件重复实现或遗漏该能力。 -->
+    <button
+      type="button"
+      class="topology-panel__reset"
+      :disabled="presentation.isEmpty || Boolean(props.suspended)"
+      aria-label="重置拓扑图位置"
+      title="重置拓扑图位置"
+      @click="resetTopologyView"
+    >
+      重置
+    </button>
     <div class="topology-panel__content">
-    <header class="topology-panel__header">
-      <div>
-        <p class="eyebrow">控制网络拓扑</p>
-        <h2>{{ presentation.title }}</h2>
-      </div>
-      <div class="topology-panel__actions">
-        <div v-if="presentation.legends.length > 0" class="topology-panel__legend" aria-label="当前拓扑连线图例">
-          <span v-for="legend in presentation.legends" :key="legend.modifier">
-            <i :class="['topology-panel__line', `topology-panel__line--${legend.modifier}`]" />{{ legend.label }}
-          </span>
-        </div>
-        <button
-          type="button"
-          class="topology-panel__action-button topology-panel__action-button--text"
-          :disabled="presentation.isEmpty || Boolean(props.suspended)"
-          aria-label="重置拓扑图位置"
-          title="重置拓扑图位置"
-          @click="resetTopologyView"
-        >
-          重置
-        </button>
-        <!-- 常规态显示放大图标；全屏态改为关闭图标，减少用户寻找退出入口的成本。 -->
-        <button
-          type="button"
-          class="topology-panel__action-button"
-          :aria-label="isFullscreen ? '退出拓扑图全屏展示' : '全屏展示拓扑图'"
-          :aria-pressed="isFullscreen"
-          :title="isFullscreen ? '退出全屏' : '全屏展示'"
-          @click="void toggleFullscreen()"
-        >
-          <span aria-hidden="true">{{ isFullscreen ? '×' : '⛶' }}</span>
-        </button>
-      </div>
-    </header>
+    <!--
+      公共面板默认只承载画布；唯一通用操作是上方的视图重置按钮，不为具体业务拓扑复制操作栏。
+      因此当前燃气、燃煤以及后续接入的拓扑都会自动占满面板高度。
+    -->
     <CoalTopologyRuntimeCanvas
       v-if="usesLatestCoalOverviewCanvas"
       ref="topologyCanvas"
@@ -250,7 +198,7 @@ onBeforeUnmount(() => {
       @clear-selection="emit('clearSelection')"
       @double-click-node="emit('doubleClickNode', $event)"
     />
-    <GasTopologyRuntimeCanvas
+    <GasV3TopologyRuntimeCanvas
       v-else-if="usesLatestJsonOverviewCanvas"
       ref="topologyCanvas"
       :topology="props.topology"
@@ -269,15 +217,12 @@ onBeforeUnmount(() => {
       :selected-node-ids="props.selectedNodeIds"
       :selected-route-ids="props.selectedRouteIds"
       :node-statuses="props.nodeStatuses"
-      :fullscreen="isFullscreen"
       @select-node="emit('selectNode', $event)"
       @clear-selection="emit('clearSelection')"
       @double-click-node="emit('doubleClickNode', $event)"
     />
     <!-- 空态提示与隐藏的唯一预备画布独立渲染：保留实例避免切换时重建资源，提示仍准确说明尚无已激活拓扑。 -->
     <p v-if="presentation.isEmpty" class="topology-panel__empty">{{ presentation.emptyMessage }}</p>
-    <!-- 与参考原型一致，提供键盘退出提示；按钮本身始终保留为可见的关闭入口。 -->
-    <p v-if="isFullscreen" class="topology-panel__fullscreen-hint" role="status">按 Esc 键退出全屏</p>
     </div>
   </section>
 </template>
@@ -302,113 +247,47 @@ onBeforeUnmount(() => {
   display: grid;
   min-block-size: 0;
   block-size: 100%;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: var(--space-3);
+  /* 单一弹性轨道是所有拓扑的默认值，未来画布接入后无需再声明专用满高修饰类。 */
+  grid-template-rows: minmax(0, 1fr);
+  gap: 0;
 }
 
-.topology-panel__header {
-  display: flex;
-  align-items: start;
-  justify-content: space-between;
-  gap: var(--space-3);
-}
-
-.topology-panel__header > div:first-child {
-  min-inline-size: 0;
-}
-
-.topology-panel__actions {
-  display: flex;
-  align-items: start;
-  flex-wrap: wrap;
-  justify-content: end;
-  gap: var(--space-2);
-}
-
-.topology-panel__header h2,
-.topology-panel__header p,
-.topology-panel__empty {
-  margin: 0;
-}
-
-.topology-panel__header h2 {
-  margin-block-start: var(--space-1);
-  font-size: 1rem;
-}
-
-.topology-panel__header .eyebrow {
-  color: #67e8f9;
-}
-
-.topology-panel__legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  justify-content: end;
-  color: #b7d9e8;
-  font-size: 0.75rem;
-}
-
-.topology-panel__action-button {
-  display: inline-grid;
-  flex: 0 0 auto;
-  inline-size: 30px;
-  block-size: 30px;
-  place-items: center;
+/*
+ * 按钮悬浮在画布右上角并避开各拓扑自己的全屏按钮；它不参与网格排版，
+ * 所以不会为后续拓扑增加标题行或挤压画布的可用高度。
+ */
+.topology-panel__reset {
+  position: absolute;
+  z-index: 23;
+  inset-block-start: calc(var(--space-4) + 8px);
+  inset-inline-end: calc(var(--space-4) + 48px);
+  min-inline-size: 46px;
+  min-block-size: 32px;
+  padding: 0 9px;
   border: 1px solid rgba(103, 232, 249, 0.44);
   border-radius: 5px;
-  background: rgba(8, 47, 73, 0.56);
+  background: rgba(8, 47, 73, 0.86);
   color: #bff7ff;
-  font-size: 1rem;
-  line-height: 1;
+  font: 600 12px/1 "Microsoft YaHei", sans-serif;
+  cursor: pointer;
   transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
 }
 
-.topology-panel__action-button:hover:not(:disabled),
-.topology-panel__action-button:focus-visible {
+.topology-panel__reset:hover:not(:disabled),
+.topology-panel__reset:focus-visible {
   border-color: #67e8f9;
-  background: rgba(8, 145, 178, 0.42);
+  background: rgba(8, 145, 178, 0.8);
   color: #ffffff;
 }
 
-.topology-panel__action-button:disabled {
+.topology-panel__reset:focus-visible {
+  outline: 2px solid rgba(103, 232, 249, 0.55);
+  outline-offset: 2px;
+}
+
+.topology-panel__reset:disabled {
   cursor: not-allowed;
   opacity: 0.42;
-}
-
-/* 重置按钮保留可见文字，避免只靠图标或悬浮提示表达关键恢复能力。 */
-.topology-panel__action-button--text {
-  inline-size: auto;
-  min-inline-size: 46px;
-  padding-inline: 9px;
-  font-size: 0.75rem;
-}
-
-.topology-panel__legend span {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.topology-panel__line {
-  inline-size: 18px;
-  border-block-start: 2px solid #22d3ee;
-}
-
-.topology-panel__line--pending {
-  border-block-start-style: dashed;
-  border-color: #f59e0b;
-}
-
-.topology-panel__line--conceptual {
-  border-block-start-style: dashed;
-  border-color: #64748b;
-}
-
-/* 新原子清单未声明连线证据时使用中性虚线，不借用旧燃气的“已确认”视觉语义。 */
-.topology-panel__line--unclassified {
-  border-block-start-style: dashed;
-  border-color: #94a3b8;
 }
 
 .topology-panel__empty {
@@ -421,63 +300,6 @@ onBeforeUnmount(() => {
   color: var(--color-text-secondary);
   line-height: 1.65;
   text-align: center;
-}
-
-/*
- * 浏览器原生全屏元素直接占满物理屏幕可用区域，与三维容器使用相同机制。
- * 不再使用 fixed（固定定位）遮罩，因此嵌入平台后不会被限制在平台为 iframe 分配的内容尺寸内。
- */
-.topology-panel--fullscreen {
-  position: relative;
-  inline-size: 100%;
-  block-size: 100%;
-  min-inline-size: 0;
-  min-block-size: 0;
-  box-sizing: border-box;
-  overflow: hidden;
-  padding: clamp(12px, 1.5vw, 22px);
-  border: 0;
-  border-radius: 0;
-  background: #03111d;
-  box-shadow: none;
-}
-
-/* 全屏时画布接管面板最后一行；ResizeObserver 会在尺寸变更后重绘而不重建缓存。 */
-.topology-panel--fullscreen :deep(.topology-canvas) {
-  min-block-size: 0;
-}
-
-.topology-panel__fullscreen-hint {
-  position: absolute;
-  inset-block-start: 18px;
-  inset-inline-end: 64px;
   margin: 0;
-  padding: 5px 9px;
-  border: 1px solid rgba(103, 232, 249, 0.28);
-  border-radius: 5px;
-  background: rgba(3, 17, 29, 0.78);
-  color: #b7d9e8;
-  font-size: 0.75rem;
-  pointer-events: none;
-}
-
-@media (width < 620px) {
-  .topology-panel__header {
-    align-items: start;
-    flex-direction: column;
-  }
-
-  .topology-panel__legend {
-    justify-content: start;
-  }
-
-  .topology-panel__actions {
-    inline-size: 100%;
-    justify-content: space-between;
-  }
-
-  .topology-panel__fullscreen-hint {
-    display: none;
-  }
 }
 </style>

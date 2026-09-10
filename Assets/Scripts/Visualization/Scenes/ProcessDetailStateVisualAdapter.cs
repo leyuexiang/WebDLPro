@@ -12,6 +12,11 @@ namespace WebDLPro.Unity.SceneRuntime
     [DisallowMultipleComponent]
     public sealed class ProcessDetailStateVisualAdapter : MonoBehaviour, IProcessDetailVisualStateTarget
     {
+        [Header("状态视觉开关")]
+        [Tooltip("是否启用告警、故障和离线状态的模型变色。关闭后仍接收状态并控制动态特效，但模型保持基础颜色。")]
+        [SerializeField] private bool _enableStateVisuals = true;
+
+        [Header("状态视觉参数")]
         [SerializeField] private Renderer[] _renderers = Array.Empty<Renderer>();
         [SerializeField, ColorUsage(true, true)] private Color _alarmColor = new Color(1f, 0.69f, 0f, 1f);
         [SerializeField, ColorUsage(true, true)] private Color _faultColor = new Color(1f, 0f, 0.03f, 1f);
@@ -29,6 +34,12 @@ namespace WebDLPro.Unity.SceneRuntime
 
         public BusinessSceneCommandResult ApplyVisualState(BusinessSceneNodeVisualState visualState)
         {
+            if (!_enableStateVisuals)
+            {
+                RestoreBaselineIfInitialized();
+                return BusinessSceneCommandResult.Completed("关键环节状态视觉已关闭，模型保持基础颜色。" );
+            }
+
             if (!EnsureInitialized(out string error))
             {
                 return BusinessSceneCommandResult.Failed("process-detail-visual-binding-invalid", error);
@@ -50,6 +61,12 @@ namespace WebDLPro.Unity.SceneRuntime
 
         public BusinessSceneCommandResult ClearVisualState()
         {
+            if (!_enableStateVisuals)
+            {
+                RestoreBaselineIfInitialized();
+                return BusinessSceneCommandResult.Completed("关键环节状态视觉已关闭，模型保持基础颜色。" );
+            }
+
             if (!EnsureInitialized(out string error))
             {
                 return BusinessSceneCommandResult.Failed("process-detail-visual-binding-invalid", error);
@@ -158,6 +175,15 @@ namespace WebDLPro.Unity.SceneRuntime
             }
         }
 
+        /// <summary>仅在已经缓存基础颜色后执行恢复，关闭视觉开关时不触发无意义的渲染器初始化。</summary>
+        private void RestoreBaselineIfInitialized()
+        {
+            if (_initialized)
+            {
+                RestoreBaseline();
+            }
+        }
+
         private void RestoreBaseline()
         {
             for (int rendererIndex = 0; rendererIndex < _renderers.Length; rendererIndex++)
@@ -196,12 +222,14 @@ namespace WebDLPro.Unity.SceneRuntime
 #if UNITY_EDITOR
         /// <summary>仅供包装预制体生成器写入已排除透明壳和气流后的稳定数组。</summary>
         public void ConfigureForEditor(
+            bool enableStateVisuals,
             Renderer[] renderers,
             Color alarmColor,
             Color faultColor,
             Color offlineColor,
             float tintStrength)
         {
+            _enableStateVisuals = enableStateVisuals;
             _renderers = renderers ?? Array.Empty<Renderer>();
             _alarmColor = alarmColor;
             _faultColor = faultColor;

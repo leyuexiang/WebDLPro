@@ -11,8 +11,8 @@ namespace WebDLPro.Unity.SceneRuntime
     {
         public const string Channel = "power3d-unity";
         public const int ProtocolVersion = 2;
-        // 第九版元数据增加独立命名镜头点命令；该命令只播放相机插值，不复用流程步骤语义。
-        public const int MetadataSchemaVersion = 9;
+        // 第十版元数据增加独立相机复位命令；该命令只恢复当前场景初始镜头，不复用场景重置语义。
+        public const int MetadataSchemaVersion = 10;
         // 第二版场景完成结构新增物理 sceneActivationId；全局信封版本保持不变，避免无关命令被迫升级。
         public const int SceneChangedSchemaVersion = 2;
         // 第一版失败恢复声明要求 commandResult 在自动恢复成功时携带新的物理场景激活标识。
@@ -47,6 +47,7 @@ namespace WebDLPro.Unity.SceneRuntime
                 "exitProcessDetail",
                 "setProcessDetailPlayback",
                 "resetScene",
+                "resetCamera",
                 "focusNode",
                 "clearSelection",
                 "setNodeVisualState",

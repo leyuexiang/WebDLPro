@@ -9,7 +9,7 @@ using UnityEngine;
 using WebDLPro.Unity.SceneRuntime;
 
 /// <summary>
-/// 构建第三层关键环节独立预制体资源包和受限目录。当前发布包含燃气轮机正式项与燃煤锅炉燃烧占位项，
+/// 构建第三层关键环节独立预制体资源包和受限目录。当前发布包含燃气轮机与燃煤锅炉燃烧正式项，
 /// 目录结构支持每个场景零到多个条目，且与主播放器共用同一 releaseId（发布标识）。
 /// </summary>
 public static class PowerPlantProcessDetailBundleBuild

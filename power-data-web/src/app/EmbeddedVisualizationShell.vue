@@ -23,13 +23,13 @@ import {
   getCameraPoseNavigationButtons,
   type CameraPoseNavigationButton,
 } from '@/modules/visual/components/camera-pose-navigation'
+import { shouldShowPipelineLegend } from '@/modules/visual/components/pipeline-legend-visibility'
 import ManifestTopologyRuntimePanel from '@/modules/visual/topology/ManifestTopologyRuntimePanel.vue'
 import VisualizationRuntimeHost from '@/modules/visual/runtime/VisualizationRuntimeHost.vue'
 import { VisualizationCoordinator } from '@/modules/visual/orchestration/visualization-coordinator'
 import { createVisualizationCoordinatorFacade, visualizationCoordinatorFacadeKey } from '@/modules/visual/orchestration/visualization-coordinator-facade'
 import {
   isBusinessVisualizationStableContext,
-  isProcessDetailVisualizationStableContext,
   useVisualizationStore,
 } from '@/modules/visual/orchestration/visualization.store'
 import { getVisualizationTransitionOverlayState } from '@/modules/visual/orchestration/visualization-transition-overlay'
@@ -169,21 +169,16 @@ const overviewActive = computed(() => (
   visualizationStore.runtimeStatus === 'ready'
   && Boolean(visualizationStore.stableContext && isOverviewSceneId(visualizationStore.stableContext.sceneId))
 ))
-/** 第三层与沙盘同为无拓扑全屏布局，但二者保持不同稳定上下文和协议字段。 */
-const processDetailActive = computed(() => (
-  visualizationStore.runtimeStatus === 'ready'
-  && Boolean(visualizationStore.stableContext && isProcessDetailVisualizationStableContext(visualizationStore.stableContext))
-))
+/** 第三层仍保持三维与二维双区布局；只有平台总览（第一层）隐藏拓扑画布。 */
+const topologySuppressed = computed(() => overviewActive.value)
 /**
- * 两阶段进入在 Unity 提交前先将拓扑状态置为空闲；该瞬态只用于提交全屏三维布局，
- * 不会把目标环节提前写成稳定上下文，遮罩仍持续阻断用户操作直至完整事务提交。
+ * 图例使用已提交稳定上下文统一判断第二层，不按燃气、燃煤或其他场景名称分支。
+ * 原生全屏状态不参与该计算，因此进入全屏和退出全屏都复用同一个图例节点。
  */
-const processDetailLayoutPrepared = computed(() => (
-  visualizationStore.activeTransitionId !== null
-  && visualizationStore.targetProcessDetailId !== null
-  && visualizationStore.topologyStatus === 'idle'
+const pipelineLegendVisible = computed(() => shouldShowPipelineLegend(
+  visualizationStore.runtimeStatus,
+  visualizationStore.stableContext,
 ))
-const topologySuppressed = computed(() => overviewActive.value || processDetailActive.value || processDetailLayoutPrepared.value)
 
 /**
  * 命名镜头按钮只属于燃气、燃煤第二层业务视图。平台总览没有对应镜头，第三层关键环节又会拒绝
@@ -238,7 +233,8 @@ const cameraPoseNavigationAvailable = computed(() => {
 })
 
 /**
- * 向当前唯一运行时发送固定命名镜头标识。这里不加全局在途锁：连续点击不同步骤时，后一次命令应从
+ * 向当前唯一运行时发送固定命名镜头步骤。Unity 会在同一命令内先应用该步骤的多模型脉冲描边与全场半透明上下文，
+ * 再移动到固定镜头点。这里不加全局在途锁：连续点击不同步骤时，后一次命令应从
  * 当前相机位置接管插值；请求序号与稳定上下文版本共同过滤乱序回执和切场景后的迟到结果。
  */
 async function moveCameraToPose(button: CameraPoseNavigationButton): Promise<void> {
@@ -278,6 +274,14 @@ async function moveCameraToPose(button: CameraPoseNavigationButton): Promise<voi
   activeCameraPoseId.value = null
   // 页面只输出固定诊断，不展示 Unity 原始错误或场景内部信息。
   console.warn('[命名镜头定位]', '三维运行时未确认本次镜头定位。')
+}
+
+/** 相机复位成功后使旧镜头点回执失效，并清除不再对应当前镜头的按钮与说明反馈。 */
+function handleCameraReset(): void {
+  cameraPoseRequestSequence += 1
+  activeCameraPoseId.value = null
+  pendingCameraPoseId.value = null
+  displayedCameraPoseButton.value = null
 }
 
 /** 关闭按钮是同一稳定业务视图内唯一主动关闭入口，不修改镜头定位的成功态或在途状态。 */
@@ -734,48 +738,55 @@ onBeforeUnmount(() => {
           aria-label="三维场景容器"
           :inert="visualizationMaskVisible"
         >
-          <ProcessScenePanel :result="sceneBaseline" />
-          <!--
-            说明气泡与 Unity 视口共用场景尺寸变量，高度固定为视口三分之一；
-            它是非模态内容，只能通过自身右上角按钮关闭，步骤按钮负责替换当前说明。
-          -->
-          <CameraPoseInformationBubble
-            v-if="displayedCameraPoseButton && cameraPoseControlsVisible"
-            id="camera-pose-information-bubble"
-            :title="displayedCameraPoseButton.label"
-            :description="displayedCameraPoseButton.description"
-            @close="closeCameraPoseInformation"
-          />
-          <!--
-            临时步骤导航只发送独立命名镜头命令，不触发流程步骤，不改变模型显隐、选择、描边或设备状态。
-            六个按钮来自当前稳定业务场景的固定映射，禁止把页面输入直接作为 cameraPoseId（镜头点标识）。
-          -->
-          <nav
-            v-if="cameraPoseControlsVisible"
-            class="embedded-visualization-shell__camera-steps"
-            aria-label="关键环节镜头定位"
+          <ProcessScenePanel
+            :result="sceneBaseline"
+            :show-pipeline-legend="pipelineLegendVisible"
+            @camera-reset="handleCameraReset"
           >
-            <ol class="embedded-visualization-shell__camera-step-list">
-              <li v-for="(button, index) in cameraPoseButtons" :key="button.cameraPoseId">
-                <button
-                  class="embedded-visualization-shell__camera-step-button"
-                  type="button"
-                  :disabled="!cameraPoseNavigationAvailable"
-                  :aria-pressed="activeCameraPoseId === button.cameraPoseId"
-                  :aria-busy="pendingCameraPoseId === button.cameraPoseId ? 'true' : 'false'"
-                  aria-controls="camera-pose-information-bubble"
-                  :aria-expanded="displayedCameraPoseButton?.cameraPoseId === button.cameraPoseId"
-                  :title="cameraPoseNavigationAvailable ? button.label : '当前三维运行时不支持命名镜头定位'"
-                  @click="moveCameraToPose(button)"
-                >
-                  <span class="embedded-visualization-shell__camera-step-index" aria-hidden="true">
-                    {{ String(index + 1).padStart(2, '0') }}
-                  </span>
-                  <span>{{ button.label }}</span>
-                </button>
-              </li>
-            </ol>
-          </nav>
+            <template #overlays>
+              <!--
+                气泡与步骤导航直接挂在实际 Unity 视口内，进入原生全屏时保留显示并同步缩放。
+                气泡仍是非模态内容：同一业务视图只通过自身右上角按钮关闭，步骤按钮替换当前说明。
+              -->
+              <CameraPoseInformationBubble
+                v-if="displayedCameraPoseButton && cameraPoseControlsVisible"
+                id="camera-pose-information-bubble"
+                :title="displayedCameraPoseButton.label"
+                :description="displayedCameraPoseButton.description"
+                @close="closeCameraPoseInformation"
+              />
+              <!--
+                临时步骤导航只发送独立命名镜头命令，不触发流程步骤，不改变模型显隐、选择、描边或设备状态。
+                六个按钮来自当前稳定业务场景的固定映射，禁止把页面输入直接作为 cameraPoseId（镜头点标识）。
+              -->
+              <nav
+                v-if="cameraPoseControlsVisible"
+                class="embedded-visualization-shell__camera-steps"
+                aria-label="关键环节镜头定位"
+              >
+                <ol class="embedded-visualization-shell__camera-step-list">
+                  <li v-for="(button, index) in cameraPoseButtons" :key="button.cameraPoseId">
+                    <button
+                      class="embedded-visualization-shell__camera-step-button"
+                      type="button"
+                      :disabled="!cameraPoseNavigationAvailable"
+                      :aria-pressed="activeCameraPoseId === button.cameraPoseId"
+                      :aria-busy="pendingCameraPoseId === button.cameraPoseId ? 'true' : 'false'"
+                      aria-controls="camera-pose-information-bubble"
+                      :aria-expanded="displayedCameraPoseButton?.cameraPoseId === button.cameraPoseId"
+                      :title="cameraPoseNavigationAvailable ? button.label : '当前三维运行时不支持命名镜头定位'"
+                      @click="moveCameraToPose(button)"
+                    >
+                      <span class="embedded-visualization-shell__camera-step-index" aria-hidden="true">
+                        {{ String(index + 1).padStart(2, '0') }}
+                      </span>
+                      <span>{{ button.label }}</span>
+                    </button>
+                  </li>
+                </ol>
+              </nav>
+            </template>
+          </ProcessScenePanel>
           <!-- 运行时尚未就绪时遮罩三维区域，但底层面板仍会登记视口并完成唯一实例初始化。 -->
           <AppStatePanel
             v-if="status === 'idle' || status === 'creating' || status === 'handshaking' || status === 'switching' || status === 'releasing'"
@@ -949,22 +960,20 @@ onBeforeUnmount(() => {
 }
 
 /*
- * 六步镜头导航覆盖在第二层三维区底部，不参与网格计算，因此不会触发 Unity 视口重排。
- * 普通业务视图必须复用 --visualization-work-inline-size（Unity 实际视口宽度），而不能读取外层
- * 场景区域的 100% 宽度；这样宽屏两侧的留白不会被按钮条占用。六个按钮始终收缩在导航条边界内，
- * 文本在按钮内部换行，页面和三维容器保持无横向滚动条。
+ * 六步导航定位在实际 Unity 视口的覆盖层底部，不参与网格计算，不占用画布两侧留白。
+ * 普通态与原生全屏态都读取同一父容器的完整宽度，无需另设全屏宽度或监听窗口变化。
+ * 六个按钮始终等分并收缩在导航条内，窄屏文案内部换行，不产生横向滚动条。
  */
 .embedded-visualization-shell__camera-steps {
   position: absolute;
   z-index: 2;
   inset-block-end: clamp(12px, 2.4cqh, 28px);
-  inset-inline-start: 50%;
+  inset-inline-start: 0;
   /*
-   * 导航条的外框明确绑定到与 ProcessScenePanel（Unity 容器）相同的工作宽度，
-   * 而不是由外层场景区域或六个按钮的内容宽度反向撑开。显式使用 border-box，
-   * 让边框和内边距都包含在 Unity 容器宽度内，外框不会从画布两侧溢出。
+   * 父覆盖层就是 Unity 实际画布；使用包含边框和内边距的完整宽度，
+   * 防止按钮内容撑宽外框，同时避免继续引用壳页面的半屏工作宽度。
    */
-  inline-size: var(--visualization-work-inline-size);
+  inline-size: 100%;
   max-inline-size: 100%;
   box-sizing: border-box;
   padding: 8px;
@@ -974,19 +983,11 @@ onBeforeUnmount(() => {
   border-radius: 10px;
   background: rgb(2 15 28 / 84%);
   box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
-  transform: translateX(-50%);
+  /* 父覆盖层默认透传鼠标；仅导航自身恢复交互，不阻断其余 Unity 画面。 */
+  pointer-events: auto;
   backdrop-filter: blur(6px);
   scrollbar-width: thin;
   scrollbar-color: rgb(103 232 249 / 55%) transparent;
-}
-
-/*
- * 总览或关键环节全屏态会把 Unity 容器从 16:9 工作宽度扩展到整个场景区域；
- * 导航条同步扩展，避免全屏时仍沿用普通态变量而在 Unity 画布两侧留下错位边界。
- */
-.embedded-visualization-shell__content--full-scene .embedded-visualization-shell__camera-steps {
-  inline-size: 100%;
-  max-inline-size: 100%;
 }
 
 .embedded-visualization-shell__camera-step-list {

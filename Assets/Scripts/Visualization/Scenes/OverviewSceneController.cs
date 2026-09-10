@@ -11,7 +11,7 @@ namespace WebDLPro.Unity.SceneRuntime
     /// 建筑聚合、异常视觉、管道及区域影响继续由 R-008—R-014 分阶段接入。
     /// </summary>
     [DisallowMultipleComponent]
-    public sealed class OverviewSceneController : MonoBehaviour, IBusinessSceneController
+    public sealed class OverviewSceneController : MonoBehaviour, IBusinessSceneController, IBusinessSceneCameraResetController
     {
         // 与业务场景保持相同的单击判定阈值，避免相机拖拽结束时误触发建筑下钻。
         private const float PointerSelectionDragThreshold = 6f;
@@ -30,6 +30,8 @@ namespace WebDLPro.Unity.SceneRuntime
         private bool _initialized;
         private bool _released;
         private string _activeBuildingId;
+        // 总览相机控制接口首次复位时从已序列化的交互相机组件中解析并缓存，后续点击不再扫描组件。
+        private IBusinessSceneCameraPoseController _cameraPoseController;
 
         // 事件只传递占位资产显式登记的建筑和目标场景标识；控制器不直接依赖多场景协调器。
         public event Action<string, string, string> BuildingSelected;
@@ -316,6 +318,42 @@ namespace WebDLPro.Unity.SceneRuntime
             return BusinessSceneCommandResult.Unsupported(BusinessSceneCapability.SetNodeVisibility);
         }
 
+        /// <summary>
+        /// 平滑恢复总览相机首次加载时缓存的位置和旋转，并清除当前建筑选择。
+        /// 建筑异常状态呈现器不在此处重置，因此故障高亮、停流和球形脉冲继续保持当前状态。
+        /// 选择清除事件由桥接命令成功后统一发送，避免控制器事件和命令处理各发送一次。
+        /// </summary>
+        public BusinessSceneCommandResult ResetCamera()
+        {
+            if (_released || !_initialized)
+            {
+                return BusinessSceneCommandResult.Failed("overview-controller-unavailable", "总览场景控制器尚未就绪。");
+            }
+
+            if (_cameraPoseController == null)
+            {
+                MonoBehaviour[] cameraBehaviours = _interactionCamera.GetComponents<MonoBehaviour>();
+                for (int behaviourIndex = 0; behaviourIndex < cameraBehaviours.Length; behaviourIndex++)
+                {
+                    if (cameraBehaviours[behaviourIndex] is IBusinessSceneCameraPoseController resolvedController)
+                    {
+                        _cameraPoseController = resolvedController;
+                        break;
+                    }
+                }
+            }
+
+            if (_cameraPoseController == null)
+            {
+                return BusinessSceneCommandResult.Failed("camera-reset-unavailable", "总览场景缺少相机复位控制器。");
+            }
+
+            _cameraPoseController.ResetToInitialTransform();
+            // 只清空选择标识，不调用 ClearActiveSelection；selectionCleared（选择清除）由桥接层成功后统一上报。
+            _activeBuildingId = string.Empty;
+            return BusinessSceneCommandResult.Completed("已开始恢复总览场景的初始镜头并清除建筑选择，故障效果保持不变。");
+        }
+
         public BusinessSceneCommandResult ResetScene()
         {
             return BusinessSceneCommandResult.Unsupported(BusinessSceneCapability.ResetScene);
@@ -335,6 +373,7 @@ namespace WebDLPro.Unity.SceneRuntime
             _released = true;
             _initialized = false;
             _activeBuildingId = string.Empty;
+            _cameraPoseController = null;
             _buildingsById.Clear();
             _buildingsByCollider.Clear();
             StopAllCoroutines();

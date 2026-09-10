@@ -554,6 +554,10 @@ namespace WebDLPro.Unity.Tests
                 "{\"sceneNodeId\":\"scene-node.test\",\"enabled\":false}",
                 "request.bridge.full-capability.visibility"));
             InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage(
+                "resetCamera",
+                "{}",
+                "request.bridge.full-capability.camera-reset"));
+            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage(
                 "resetScene",
                 "{}",
                 "request.bridge.full-capability.reset"));
@@ -587,6 +591,7 @@ namespace WebDLPro.Unity.Tests
             Assert.That(controller.VisibilityCalls, Is.EqualTo(1));
             Assert.That(controller.LastVisibilityNodeId, Is.EqualTo("scene-node.test"));
             Assert.That(controller.LastVisibility, Is.False);
+            Assert.That(controller.CameraResetCalls, Is.EqualTo(1));
             Assert.That(controller.ResetCalls, Is.EqualTo(1));
             Assert.That(HasBridgeLogFragmentForRequest("request.bridge.full-capability.state-missing", "\"errorCode\":\"invalid-node\""), Is.True);
             Assert.That(HasBridgeLogFragmentForRequest("request.bridge.full-capability.route-missing", "\"errorCode\":\"invalid-route\""), Is.True);
@@ -601,6 +606,7 @@ namespace WebDLPro.Unity.Tests
                 "request.bridge.full-capability.state-clear",
                 "request.bridge.full-capability.route",
                 "request.bridge.full-capability.visibility",
+                "request.bridge.full-capability.camera-reset",
                 "request.bridge.full-capability.reset"
             };
             for (int requestIndex = 0; requestIndex < successfulRequestIds.Length; requestIndex++)
@@ -679,8 +685,8 @@ namespace WebDLPro.Unity.Tests
                 "燃气场景未在流程节点登记验证前完成加载。");
 
             // gas-turbine 已迁移为独立第三层关键环节，只能由 enterProcessDetail 进入，
-            // 不得再作为旧 enterProcessStep 流程步骤下发；其状态视觉、独立播放控制及返回链路
-            // 由本文件“燃气轮机第三层状态视觉与独立播放命令完全解耦”专项用例覆盖。
+            // 不得再作为旧 enterProcessStep 流程步骤下发；其状态视觉、状态驱动播放及返回链路
+            // 由本文件“燃气轮机第三层状态视觉与状态驱动播放”专项用例覆盖。
             // gas-network 尚无独立场景节点登记，必须明确拒绝，不能为满足测试而借用进气或总览节点。
             string[] publishedStepIds = { "overview", "inlet-duct", "hrsg", "steam-turbine", "generator", "grid-output" };
             for (int stepIndex = 0; stepIndex < publishedStepIds.Length; stepIndex++)
@@ -835,6 +841,44 @@ namespace WebDLPro.Unity.Tests
                 Assert.That(HasBridgeLogFragmentForRequest(clearStateRequestId, "\"success\":true"), Is.True, $"燃煤四态节点 {nodeId} 未成功清除状态。");
             }
 
+            // 相机复位必须保留故障设备状态，同时恢复总览视觉但不能把当前流程字段改写为 overview。
+            const string retainedFaultRequestId = "request.bridge.coal-actions.visual.retained-fault";
+            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage(
+                "setNodeVisualState",
+                "{\"sceneNodeId\":\"node.coal-boiler\",\"visualState\":\"fault\",\"snapshotSequence\":3,\"statusUpdatedAt\":\"2026-09-05T10:00:00.000Z\",\"sourceRevision\":3}",
+                retainedFaultRequestId));
+            yield return WaitForCompletion(
+                () => HasNotice("commandResult", retainedFaultRequestId, string.Empty),
+                "燃煤锅炉保留故障状态未返回命令结果。");
+            Assert.That(HasBridgeLogFragmentForRequest(retainedFaultRequestId, "\"success\":true"), Is.True);
+
+            const string resetCameraRequestId = "request.bridge.coal-actions.camera-reset";
+            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage("resetCamera", "{}", resetCameraRequestId));
+            yield return WaitForCompletion(
+                () => HasNotice("commandResult", resetCameraRequestId, string.Empty),
+                "燃煤相机与总览视觉复位未返回命令结果。");
+            Assert.That(HasBridgeLogFragmentForRequest(resetCameraRequestId, "\"success\":true"), Is.True);
+            Assert.That(_coordinator.ActiveController.GetStateDescription(), Does.Contain("step=combustion"), "相机复位不得改写当前流程步骤字段。");
+            Assert.That(HasOutboundEvent("selectionCleared", "coal-power"), Is.True, "相机复位成功后必须通知前端清空拓扑选择。");
+
+            Scene coalScene = SceneManager.GetSceneByPath(CoalPowerScenePath);
+            MonoBehaviour processController = FindBehaviourInScene(coalScene, "PowerPlantProcessController");
+            Assert.That(processController, Is.Not.Null, "燃煤场景缺少流程控制器，无法验证故障状态保留。");
+            PropertyInfo pipelineStoppedProperty = processController.GetType().GetProperty("ArePipelineFlowsStopped", BindingFlags.Instance | BindingFlags.Public);
+            Assert.That(pipelineStoppedProperty, Is.Not.Null);
+            Assert.That((bool)pipelineStoppedProperty.GetValue(processController), Is.True, "总览视觉复位后故障状态及其停流效果必须继续保持。");
+
+            // 清除测试故障，避免后续 resetScene 断言把状态停流误认为场景复位副作用。
+            const string clearRetainedFaultRequestId = "request.bridge.coal-actions.visual.retained-fault-clear";
+            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage(
+                "clearNodeVisualState",
+                "{\"sceneNodeId\":\"node.coal-boiler\",\"snapshotSequence\":4}",
+                clearRetainedFaultRequestId));
+            yield return WaitForCompletion(
+                () => HasNotice("commandResult", clearRetainedFaultRequestId, string.Empty),
+                "燃煤锅炉保留故障状态清除未返回命令结果。");
+            Assert.That(HasBridgeLogFragmentForRequest(clearRetainedFaultRequestId, "\"success\":true"), Is.True);
+
             // 燃煤三维路径尚未交付，路径命令应稳定拒绝而不是伪造成功。
             const string routeRequestId = "request.bridge.coal-actions.route-unsupported";
             InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage(
@@ -862,11 +906,11 @@ namespace WebDLPro.Unity.Tests
 
         /// <summary>
         /// 使用正式 Bootstrap、燃气场景和第二版桥接命令验证第三层完整运行链路。
-        /// 故障状态先于模型加载写入缓存，但只影响视觉；独立播放命令负责停止和恢复旋转、粒子与气流，
-        /// 退出仍恢复二层业务根节点和进入前镜头并销毁独立实例。
+        /// 故障状态先于模型加载写入缓存，并在关键环节显示前停止旋转、粒子与气流；
+        /// 状态恢复或状态缺失时启动播放，退出仍恢复二层业务根节点和进入前镜头并销毁独立实例。
         /// </summary>
         [UnityTest]
-        public IEnumerator 燃气轮机第三层状态视觉与独立播放命令完全解耦()
+        public IEnumerator 燃气轮机第三层状态视觉与状态驱动播放()
         {
             yield return LoadBootstrap();
             yield return LoadGasPower("transition.playmode.process-detail.gas");
@@ -960,13 +1004,14 @@ namespace WebDLPro.Unity.Tests
             Assert.That(HasBridgeLogFragmentForRequest(commitRequestId, "\"success\":true"), Is.True);
             Assert.That(binding.gameObject.activeInHierarchy, Is.True);
             Assert.That(businessRoot.activeSelf, Is.True, "第三层活动期间二层业务资源必须保持活动。");
+            AssertProcessDetailPlaybackAllowed(binding.gameObject, false);
             MonoBehaviour processController = FindBehaviourInScene(gasScene, "PowerPlantProcessController");
             Assert.That(processController, Is.Not.Null);
             Assert.That(processController.enabled, Is.True, "第三层不得停用二层控制器及其状态更新。");
             PropertyInfo interactionsBlockedProperty = processController.GetType().GetProperty("InteractionsBlocked");
             Assert.That(interactionsBlockedProperty, Is.Not.Null);
             Assert.That(interactionsBlockedProperty.GetValue(processController), Is.EqualTo(true), "第三层提交后必须只阻断二层本地点击交互。");
-            AssertProcessDetailPlaybackAllowed(binding.gameObject, true);
+            AssertProcessDetailPlaybackAllowed(binding.gameObject, false);
 
             // 同场景直接切换通过第二个准备事务替换活动实例，不返回二层、不恢复业务相机。
             ProcessDetailDeviceBinding previousBinding = binding;
@@ -999,6 +1044,8 @@ namespace WebDLPro.Unity.Tests
             Assert.That(binding, Is.Not.SameAs(previousBinding), "直接切换必须提交新候选并释放旧实例。");
             Assert.That(binding.gameObject.activeInHierarchy, Is.True);
             Assert.That(businessRoot.activeSelf, Is.True);
+            // 预置故障状态会在新实例提交前被重放，因此切换后的动态效果仍必须保持停止。
+            AssertProcessDetailPlaybackAllowed(binding.gameObject, false);
 
             const string stopRequestId = "request.bridge.process-detail.stop";
             InvokeBridgeMethod(
@@ -1076,7 +1123,8 @@ namespace WebDLPro.Unity.Tests
                 () => HasNotice("commandResult", normalRequestId, string.Empty),
                 "燃气轮机故障解除未返回命令结果。");
             Assert.That(HasBridgeLogFragmentForRequest(normalRequestId, "\"success\":true"), Is.True);
-            AssertProcessDetailPlaybackAllowed(binding.gameObject, false);
+            // 故障解除后，状态更新必须自动恢复动画、粒子和气流播放，不需要点击模型或额外播放命令。
+            AssertProcessDetailPlaybackAllowed(binding.gameObject, true);
 
             const string playRequestId = "request.bridge.process-detail.play";
             InvokeBridgeMethod(
@@ -1166,7 +1214,7 @@ namespace WebDLPro.Unity.Tests
         /// 仅用于验证桥接分派的记录控制器。所有方法为常数时间赋值且不持有Unity对象、场景句柄或资源，
         /// 因此不会改变正式目录，也不会把测试标识泄漏到构建产物或运行时映射中。
         /// </summary>
-        private sealed class RecordingBusinessSceneController : IBusinessSceneController
+        private sealed class RecordingBusinessSceneController : IBusinessSceneController, IBusinessSceneCameraResetController
         {
             private const BusinessSceneCapability AllCapabilities =
                 BusinessSceneCapability.Initialize |
@@ -1202,6 +1250,7 @@ namespace WebDLPro.Unity.Tests
             public int VisibilityCalls { get; private set; }
             public string LastVisibilityNodeId { get; private set; }
             public bool LastVisibility { get; private set; }
+            public int CameraResetCalls { get; private set; }
             public int ResetCalls { get; private set; }
 
             public IEnumerator InitializeAsync(BusinessSceneInitializationContext context, System.Action<BusinessSceneCommandResult> completed)
@@ -1280,6 +1329,12 @@ namespace WebDLPro.Unity.Tests
                 LastVisibilityNodeId = sceneNodeId;
                 LastVisibility = visible;
                 return BusinessSceneCommandResult.Completed("显隐命令已记录。");
+            }
+
+            public BusinessSceneCommandResult ResetCamera()
+            {
+                CameraResetCalls++;
+                return BusinessSceneCommandResult.Completed("相机复位命令已记录。");
             }
 
             public BusinessSceneCommandResult ResetScene()
@@ -1361,36 +1416,24 @@ namespace WebDLPro.Unity.Tests
             return null;
         }
 
-        /// <summary>读取三个具体控制器的受控播放许可，确保适配器同时覆盖旋转、粒子和气流体积。</summary>
+        /// <summary>读取统一动态控制器的运行状态，确保状态绑定器同时覆盖旋转、粒子、气流体积和电线流动。</summary>
         private static void AssertProcessDetailPlaybackAllowed(GameObject detailRoot, bool expected)
         {
-            string[] controllerTypeNames =
-            {
-                "WaiKeHeBingAnimationController",
-                "WaiKeHeBingGasFlowEffectController",
-                "WaiKeHeBingGasVolumeController"
-            };
             MonoBehaviour[] behaviours = detailRoot.GetComponentsInChildren<MonoBehaviour>(true);
-            for (int typeIndex = 0; typeIndex < controllerTypeNames.Length; typeIndex++)
+            MonoBehaviour controller = null;
+            for (int index = 0; index < behaviours.Length; index++)
             {
-                MonoBehaviour resolved = null;
-                for (int behaviourIndex = 0; behaviourIndex < behaviours.Length; behaviourIndex++)
+                if (behaviours[index] != null && behaviours[index].GetType().Name == "WaiKeHeBingMasterController")
                 {
-                    MonoBehaviour behaviour = behaviours[behaviourIndex];
-                    if (behaviour != null && behaviour.GetType().Name == controllerTypeNames[typeIndex])
-                    {
-                        resolved = behaviour;
-                        break;
-                    }
+                    controller = behaviours[index];
+                    break;
                 }
-
-                Assert.That(resolved, Is.Not.Null, $"第三层实例缺少动态控制器：{controllerTypeNames[typeIndex]}");
-                FieldInfo playbackAllowed = resolved.GetType().GetField(
-                    "_playbackAllowed",
-                    BindingFlags.Instance | BindingFlags.NonPublic);
-                Assert.That(playbackAllowed, Is.Not.Null, $"动态控制器缺少播放许可字段：{controllerTypeNames[typeIndex]}");
-                Assert.That(playbackAllowed.GetValue(resolved), Is.EqualTo(expected));
             }
+
+            Assert.That(controller, Is.Not.Null, "第三层实例缺少统一动态控制器。");
+            FieldInfo isPlaying = controller.GetType().GetField("_isPlaying", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(isPlaying, Is.Not.Null, "统一动态控制器缺少播放状态字段。");
+            Assert.That(isPlaying.GetValue(controller), Is.EqualTo(expected));
         }
 
         /// <summary>默认程序集中的桥接器按精确类型名查找；测试只获得 MonoBehaviour 引用，不跨程序集编译依赖业务实现。</summary>
@@ -1658,6 +1701,26 @@ namespace WebDLPro.Unity.Tests
                 }
             }
             return -1;
+        }
+
+        /// <summary>
+        /// 查找不关联原请求的 Unity 上行事件，并同时校验当前场景标识。
+        /// selectionCleared（选择清除）使用独立 messageId，因此不能复用 commandResult 的 requestId 查询。
+        /// </summary>
+        private bool HasOutboundEvent(string type, string sceneId)
+        {
+            string typeFragment = $"\"type\":\"{type}\"";
+            string sceneFragment = $"\"sceneId\":\"{sceneId}\"";
+            for (int index = 0; index < _bridgeOutboundLogs.Count; index++)
+            {
+                string log = _bridgeOutboundLogs[index];
+                if (log.Contains(typeFragment) && log.Contains(sceneFragment))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>将错误码与原请求关联，避免前一条命令的同类错误掩盖后续命令的路由错误。</summary>

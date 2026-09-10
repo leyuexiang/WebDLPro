@@ -146,6 +146,7 @@ describe('燃气总览发布契约', () => {
       resourceId: 'process-detail-resource.gas-power.gas-turbine',
       cameraPoseId: 'camera-pose.gas-power.gas-turbine',
       stateNodeId: 'gas-turbine',
+      topologyDataContextId: 'process-detail.gas-power.gas-turbine',
     }])
     expect(detailAction).toEqual(expect.objectContaining({
       targetSceneId: 'gas-power',
@@ -182,22 +183,31 @@ describe('燃气总览发布契约', () => {
     }
     expect(() => createHostPage('invalid-entry-contract-test', 'unknown-package')).toThrow('未知包类型')
 
-    // 内部自测页从沙盘开始，关键环节稳定后通过受控协议提供播放/停止按钮；不得用设备四态伪装动态控制。
-    expect(selfTestPage).toContain('燃气轮机单环节全链路自测')
+    // 内部自测页从沙盘开始，覆盖燃气、燃煤两套总览和各自关键环节，并通过受控协议提供播放/停止按钮。
+    expect(selfTestPage).toContain('燃气、燃煤双场景全链路自测')
     expect(selfTestPage).toContain("sceneId: 'overview'")
     expect(selfTestPage).toContain('data-command="overview" disabled>沙盘</button>')
     expect(selfTestPage).toContain('data-action-id="action.gas-power.overview"')
     expect(selfTestPage).toContain('data-action-id="action.gas-power.gas-turbine"')
-    expect(selfTestPage).toContain('disabled>燃气</button>')
-    expect(selfTestPage).toContain('disabled>关键环节</button>')
+    expect(selfTestPage).toContain('data-action-id="action.coal-power.overview"')
+    expect(selfTestPage).toContain('data-action-id="action.coal-power.boiler"')
+    expect(selfTestPage).toContain('disabled>燃气总览</button>')
+    expect(selfTestPage).toContain('disabled>燃气关键</button>')
+    expect(selfTestPage).toContain('disabled>燃煤总览</button>')
+    expect(selfTestPage).toContain('disabled>燃煤关键</button>')
     expect(selfTestPage).toContain('data-playback="play"')
     expect(selfTestPage).toContain('data-playback="stop"')
     expect(selfTestPage).toContain("process-detail.playback")
-    expect(selfTestPage).not.toContain("items: [{ nodeId: 'inlet-duct', deviceStatus")
-    expect(selfTestPage).not.toContain('data-device-status=')
+    // 状态测试必须使用完整快照，同时提交两个跨场景稳定 nodeId，不能只更新当前按钮对应节点。
+    expect(selfTestPage).toContain('data-device-node-id="inlet-duct" data-device-status="normal"')
+    expect(selfTestPage).toContain('data-device-node-id="system.boiler-dcs" data-device-status="fault"')
+    expect(selfTestPage).toContain("sendCommand('device.states.update'")
+    expect(selfTestPage).toContain('items: Array.from(deviceStates')
+    expect(selfTestPage).toContain("['inlet-duct', 'normal']")
+    expect(selfTestPage).toContain("['system.boiler-dcs', 'normal']")
     expect(selfTestPage).not.toContain('燃气轮机动态已停止。')
     expect(selfTestPage).not.toContain('燃气轮机动态已开始播放。')
-    expect(selfTestPage).toContain('按钮仅通过外层受控协议操作当前三维模型')
+    expect(selfTestPage).toContain('状态按钮用于观察绑定设备在正常/故障之间切换后的二维、三维效果')
     expect(selfTestPage).toContain('message.payload.topologyId === undefined')
     expect(selfTestPage).toContain('test-status')
     expect(selfTestPage).not.toContain('data-device-status="alarm"')
@@ -207,7 +217,6 @@ describe('燃气总览发布契约', () => {
     expect(selfTestPage).not.toContain('data-command="snapshot"')
     expect(selfTestPage).not.toContain('test-events')
     expect(selfTestPage).not.toMatch(/action\.gas-power\.(hrsg|steam-turbine)/)
-    expect(selfTestPage).not.toContain('action.coal-power')
     expect(selfTestPage).toContain('const version = 2')
     expect(selfTestPage).not.toContain('const version = 1')
 
@@ -227,11 +236,11 @@ describe('燃气总览发布契约', () => {
     expect(() => readReleaseConfiguration(['--include-self-test', 'yes'])).toThrow('只能是 true 或 false')
   })
 
-  it('默认 Unity 基线与当前可发布协议基线保持一致', () => {
-    // 此断言只锁定发布器的默认标识，避免已归档目录变更后无参数构建仍指向不存在的旧基线。
-    // 目录可读性、标识一致性和命令能力由真实发布流程的 Unity 协议门禁负责校验，不在单元测试依赖构建产物。
-    // 默认发布输入已切换到通过结构版本8、关键环节命令版本2门禁的 Unity 网页图形基线。
-    expect(readReleaseConfiguration([]).unityReleaseId).toBe('three-layer-unity-demo-20260831-2300')
+  it('发布脚本不再隐式绑定可能不存在或过期的 Unity 基线', () => {
+    // 纯配置读取允许单元测试检查其他默认项；真实 main 构建入口会在落盘前要求显式 --unity-release-id。
+    expect(readReleaseConfiguration([]).unityReleaseId).toBeUndefined()
+    expect(readReleaseConfiguration(['--unity-release-id', 'three-layer-unity-20260904-120000']).unityReleaseId)
+      .toBe('three-layer-unity-20260904-120000')
   })
 
   it('合作方联调包显式区分监听地址与三层公开来源', () => {

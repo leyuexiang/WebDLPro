@@ -7,7 +7,7 @@ describe('嵌入壳网页历史基础路径', () => {
   })
 
   it('独立拓扑预览同样应保留 shell 前缀', () => {
-    expect(resolveRouterHistoryBase('.', '/shell/gas-topology-json-preview')).toBe('/shell/')
+    expect(resolveRouterHistoryBase('.', '/shell/gas-v3-topology-json-preview')).toBe('/shell/')
   })
 
   it('绝对构建前缀不应被发布包规则改写', () => {

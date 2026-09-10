@@ -13,7 +13,7 @@ using WebDLPro.Unity.SceneRuntime;
 /// 外部平台只传递流程、步骤、机组和路由标识；模型名称、显隐集合、材质与描边策略全部保留在 Unity 内。
 /// </summary>
 [DisallowMultipleComponent]
-public sealed class PowerPlantProcessController : MonoBehaviour, IBusinessSceneInteractionGate
+public sealed class PowerPlantProcessController : MonoBehaviour, IBusinessSceneInteractionGate, IBusinessSceneNamedCameraVisualFocusController
 {
     private const string GasPowerGenerationProcessId = "gas-power-generation";
     private const string OverviewStepId = "overview";
@@ -660,6 +660,47 @@ public sealed class PowerPlantProcessController : MonoBehaviour, IBusinessSceneI
         return true;
     }
 
+    /// <summary>
+    /// 为命名镜头步骤应用模型视觉聚焦。该入口只接收场景属性面板显式绑定的对象组，
+    /// 复用点击模型时的脉冲描边和上下文半透明，但不触发自动包围盒取景，也不回传二维拓扑选择。
+    /// 固定镜头动画由 BusinessSceneNamedCameraPoseRegistry（业务场景命名镜头注册表）随后执行。
+    /// </summary>
+    public bool TryApplyNamedCameraVisualFocus(IReadOnlyList<GameObject> targets, out string message)
+    {
+        if (_runtimeResourcesReleased)
+        {
+            message = "当前发电场景控制器已经释放，不能应用步骤高亮。";
+            return false;
+        }
+
+        _selectionFocusObjects.Clear();
+        if (targets != null)
+        {
+            for (int targetIndex = 0; targetIndex < targets.Count; targetIndex++)
+            {
+                GameObject target = targets[targetIndex];
+                if (target != null)
+                {
+                    _selectionFocusObjects.Add(target);
+                }
+            }
+        }
+
+        if (_selectionFocusObjects.Count == 0)
+        {
+            message = "当前命名镜头步骤没有配置有效的高亮模型。";
+            return false;
+        }
+
+        // 命名镜头步骤替换旧的流程或交互描边，但不登记交互节点，避免空白点击向网页回传无关的选择清除事件。
+        ClearProcessHighlight();
+        _activeInteractionNodeId = null;
+        ApplySelectionFocusContext();
+        ApplyProcessHighlightForTargets(targets);
+        message = $"已高亮 {_selectionFocusObjects.Count} 个步骤模型并淡化其余场景模型。";
+        return true;
+    }
+
     public bool TryResetScene(out string message)
     {
         // 重置场景会替换交互描边；清除标记后，后续空白点击不会向二维拓扑发送过期取消事件。
@@ -684,6 +725,45 @@ public sealed class PowerPlantProcessController : MonoBehaviour, IBusinessSceneI
         _currentStepId = OverviewStepId;
         _currentUnitId = AllUnitsId;
         message = "已恢复总览场景：核心设备正常显示、其余模型半透明，地面始终显示并恢复初始视角。";
+        return true;
+    }
+
+    /// <summary>
+    /// 相机复位使用独立的总览视觉恢复语义：清除流程、命名镜头和交互聚焦产生的临时描边与上下文，
+    /// 恢复总览显隐后重新应用当前设备四态。该入口不修改流程字段、设备状态表或平台状态因果水位。
+    /// </summary>
+    public bool TryResetOverviewVisualsPreservingDeviceStates(out string message)
+    {
+        if (_runtimeResourcesReleased)
+        {
+            message = "当前发电场景控制器已经释放，不能恢复总览视觉。";
+            return false;
+        }
+
+        _activeInteractionNodeId = null;
+        _selectionFocusObjects.Clear();
+        ClearProcessHighlight();
+        // 旧内部告警入口不属于平台设备四态；相机复位只保留四态登记器维护的当前设备状态。
+        ClearAlarmHighlight();
+
+        // 视觉恢复必须在相机复位之后执行，但不能取消相机控制器刚建立的初始姿态补间。
+        // 状态材质可能临时覆盖上下文材质。必须先回退到真实基础材质，再按总览规则重建上下文，
+        // 最后重新应用当前状态；顺序颠倒会让故障设备恢复时错误引用即将销毁的半透明材质副本。
+        RestoreAllVisualStateMaterials();
+        ClearVisualStateHighlightTargets();
+        if (TryResolveStep(OverviewStepId, AllUnitsId, out List<string> overviewVisibleNodeIds, out _))
+        {
+            ShowAllSceneModels(overviewVisibleNodeIds);
+        }
+        else
+        {
+            RestoreInitialVisibility();
+        }
+
+        ReapplyActiveVisualStates();
+        // 状态材质恢复会还原渲染器属性块，因此无论停流布尔值是否变化都要重写当前故障停流结果。
+        SetPipelineFlowStopped(HasActiveFaultState(), true);
+        message = "已恢复总览显隐、材质与交互状态，并保留当前设备四态效果。";
         return true;
     }
 
@@ -998,8 +1078,21 @@ public sealed class PowerPlantProcessController : MonoBehaviour, IBusinessSceneI
             return;
         }
 
-        GameObject[] targets = node.Targets;
-        for (int targetIndex = 0; targetIndex < targets.Length; targetIndex++)
+        CollectTargetRenderers(node.Targets, destination);
+    }
+
+    /// <summary>
+    /// 从已显式绑定的目标组收集描边渲染器。该方法仅在步骤切换或选择变化时执行，
+    /// 使用共享集合去重，不进入每帧路径；广告牌子树继续排除，避免说明文字被一起描边。
+    /// </summary>
+    private static void CollectTargetRenderers(IReadOnlyList<GameObject> targets, ISet<Renderer> destination)
+    {
+        if (targets == null || destination == null)
+        {
+            return;
+        }
+
+        for (int targetIndex = 0; targetIndex < targets.Count; targetIndex++)
         {
             GameObject target = targets[targetIndex];
             if (target == null)
@@ -1047,6 +1140,23 @@ public sealed class PowerPlantProcessController : MonoBehaviour, IBusinessSceneI
         UpdateProcessHighlightColor(nodeId);
         _highlightRendererSet.Clear();
         CollectNodeRenderers(nodeId, _highlightRendererSet);
+        ApplyHighlight(_processHighlightEffect, _highlightRendererSet);
+    }
+
+    /// <summary>
+    /// 为命名镜头步骤的一组模型应用默认流程描边。步骤对象不对应单一设备状态节点，
+    /// 因此保持统一青色；脉冲强度仍由 UpdateHighlightOutlinePulse（描边脉冲更新）每帧无分配刷新。
+    /// </summary>
+    private void ApplyProcessHighlightForTargets(IReadOnlyList<GameObject> targets)
+    {
+        EnsureHighlightEffects();
+        if (_processHighlightEffect != null)
+        {
+            _processHighlightEffect.outlineColor = _processOutlineColor;
+        }
+
+        _highlightRendererSet.Clear();
+        CollectTargetRenderers(targets, _highlightRendererSet);
         ApplyHighlight(_processHighlightEffect, _highlightRendererSet);
     }
 
@@ -1204,6 +1314,43 @@ public sealed class PowerPlantProcessController : MonoBehaviour, IBusinessSceneI
         ApplyVisualStateHighlight(_offlineStateHighlightEffect, _offlineStateRenderers);
     }
 
+    /// <summary>
+    /// 总览视觉恢复前关闭全部四态描边目标，但不清除设备状态表和渲染器索引。
+    /// 随后 ReapplyActiveVisualStates（重新应用当前设备状态）会按当前快照重新建立材质与描边。
+    /// </summary>
+    private void ClearVisualStateHighlightTargets()
+    {
+        _alarmStateRenderers.Clear();
+        _faultStateRenderers.Clear();
+        _offlineStateRenderers.Clear();
+        if (_alarmStateHighlightEffect != null)
+        {
+            _alarmStateHighlightEffect.SetHighlighted(false);
+        }
+        if (_faultStateHighlightEffect != null)
+        {
+            _faultStateHighlightEffect.SetHighlighted(false);
+        }
+        if (_offlineStateHighlightEffect != null)
+        {
+            _offlineStateHighlightEffect.SetHighlighted(false);
+        }
+    }
+
+    /// <summary>
+    /// 在总览上下文建立完成后重新应用当前设备状态。状态字典只读遍历，不重建映射、不扫描场景层级；
+    /// 告警和故障恢复状态材质，离线按配置恢复描边，正常态不保存在活动状态表中。
+    /// </summary>
+    private void ReapplyActiveVisualStates()
+    {
+        foreach (KeyValuePair<string, BusinessSceneNodeVisualState> entry in _activeVisualStatesByNodeId)
+        {
+            ApplyVisualStateMaterials(entry.Key, entry.Value);
+        }
+
+        RefreshVisualStateHighlights();
+    }
+
     private static void ApplyVisualStateHighlight(HighlightEffect effect, List<Renderer> renderers)
     {
         if (effect == null)
@@ -1224,9 +1371,7 @@ public sealed class PowerPlantProcessController : MonoBehaviour, IBusinessSceneI
     {
         _activeVisualStatesByNodeId.Clear();
         _visualStateRenderersByNodeId.Clear();
-        _alarmStateRenderers.Clear();
-        _faultStateRenderers.Clear();
-        _offlineStateRenderers.Clear();
+        ClearVisualStateHighlightTargets();
         DisableHighlightEffect(_alarmStateHighlightEffect);
         DisableHighlightEffect(_faultStateHighlightEffect);
         DisableHighlightEffect(_offlineStateHighlightEffect);
@@ -1839,6 +1984,15 @@ public sealed class PowerPlantProcessController : MonoBehaviour, IBusinessSceneI
             }
         }
 
+        ApplySelectionFocusContext();
+    }
+
+    /// <summary>
+    /// 根据当前已填充的选择目标集合重建全场视觉上下文。节点选择与命名镜头步骤共用该实现，
+    /// 保证多模型步骤和单模型点击拥有完全一致的半透明恢复规则。
+    /// </summary>
+    private void ApplySelectionFocusContext()
+    {
         // 先恢复上一次聚焦的运行时材质，再按当前选中节点重建上下文，避免透明度叠加或残留。
         RestoreAllContextFades();
         RestoreOverviewOnlyObjectsForOverview();
