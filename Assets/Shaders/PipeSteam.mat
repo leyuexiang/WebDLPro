@@ -25,17 +25,17 @@ Material:
     m_TexEnvs: []
     m_Ints: []
     m_Floats:
-    - _Density: 1.05
-    - _Distortion: 1.8
-    - _Emission: 0.35
+    - _Density: 2.55
+    - _Distortion: 1.9
+    - _Emission: 0.5
     - _FlowScale: 2.4
-    - _FlowSpeed: 1.55
-    - _NoiseScale: 1.05
-    - _Opacity: 0.32
-    - _RayLength: 4.2
+    - _FlowSpeed: 2.25
+    - _NoiseScale: 0.78
+    - _Opacity: 0.58
+    - _RayLength: 5.2
     - _Softness: 0.42
-    - _StepCount: 16
+    - _StepCount: 24
     m_Colors:
-    - _FlowDirectionOS: {r: 0, g: 1, b: 0, a: 0}
-    - _SteamColor: {r: 0.82, g: 0.95, b: 1, a: 1}
+    - _FlowDirectionOS: {r: 0, g: -1, b: 0, a: 0}
+    - _SteamColor: {r: 0.35, g: 0.72, b: 0.9, a: 1}
   m_BuildTextureStacks: []

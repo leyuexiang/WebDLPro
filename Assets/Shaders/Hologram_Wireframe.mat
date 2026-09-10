@@ -25,7 +25,7 @@ Material:
     m_TexEnvs: []
     m_Ints: []
     m_Floats:
-    - _DepthOffset: 0.00199
+    - _DepthOffset: 0.0015
     m_Colors:
-    - _LineColor: {r: 0, g: 0, b: 0, a: 0.20392157}
+    - _LineColor: {r: 0.1, g: 0.55, b: 1, a: 0.42}
   m_BuildTextureStacks: []
