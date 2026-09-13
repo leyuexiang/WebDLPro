@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Serialization;
@@ -13,20 +14,50 @@ using UnityEngine.Serialization;
 [DisallowMultipleComponent]
 public sealed class WireframeHologramEffect : MonoBehaviour
 {
+    [Serializable]
+    private sealed class WireframeBinding
+    {
+        [SerializeField] private MeshFilter sourceFilter;
+        [SerializeField] private Mesh wireframeMesh;
+
+        public MeshFilter SourceFilter => sourceFilter;
+        public Mesh WireframeMesh => wireframeMesh;
+    }
+
     private const string WireframeChildName = "__WireframeOverlay";
     private static readonly int BreathingParamsPropertyId = Shader.PropertyToID("_BreathingParams");
+    private static readonly int OpacityPropertyId = Shader.PropertyToID("_Opacity");
 
     [Header("材质")]
+    [Tooltip("运行时叠加在本体上的玻璃材质；留空则使用全息材质。")]
+    [SerializeField] private Material glassMaterial;
+    [Tooltip("仅这些本体渲染器在运行时使用玻璃，不包含子级线框。")]
+    [SerializeField] private Renderer[] glassTargets = Array.Empty<Renderer>();
+    [Tooltip("玻璃基础透明度。")]
+    [Range(0.05f, 0.8f)]
+    [SerializeField] private float glassOpacity = 0.28f;
     [Tooltip("本体使用的全息半透明材质。留空则只显示线框。")]
     [SerializeField] private Material hologramMaterial;
     [Tooltip("线框使用的材质，需搭配线段拓扑网格。")]
     [SerializeField] private Material wireframeMaterial;
 
     [Header("线框网格")]
-    [Tooltip("与本组件所在网格对应的预烘焙线框网格。为空时自动跳过线框绘制。")]
+    [Tooltip("兼容旧配置：与本组件所在网格对应的预烘焙线框网格。")]
     [SerializeField] private Mesh wireframeMesh;
+    [Tooltip("多网格模型的线框映射。每个源网格使用对应的预烘焙线框网格。")]
+    [SerializeField] private WireframeBinding[] wireframeBindings = Array.Empty<WireframeBinding>();
 
-    [Header("运行时开关")]
+    [Header("外观 / 内部层级")]
+    [Tooltip("只将这些外壳节点替换为半透明全息本体；未列入的内部零部件保留原始材质，仅显示线框提示。")]
+    [SerializeField] private Transform[] exteriorTargets = Array.Empty<Transform>();
+    [Tooltip("外观壳体的全息透明度。值越低越容易看到内部零部件。")]
+    [Range(0.01f, 0.5f)]
+    [SerializeField] private float exteriorOpacity = 0.14f;
+    [Tooltip("需要比普通外壳更通透的运行时目标。")]
+    [SerializeField] private Transform[] extraTransparentTargets = Array.Empty<Transform>();
+    [Tooltip("更通透目标的全息透明度。")]
+    [Range(0.01f, 0.5f)]
+    [SerializeField] private float extraTransparentOpacity = 0.05f;
     [Tooltip("控制特效状态。播放模式下可直接在检视面板勾选或取消，修改后立即生效。")]
     [FormerlySerializedAs("activeOnStart")]
     [SerializeField] private bool effectEnabled;
@@ -45,9 +76,17 @@ public sealed class WireframeHologramEffect : MonoBehaviour
     private readonly List<Renderer> _bodyRenderers = new List<Renderer>();
     private readonly List<Material[]> _originalMaterials = new List<Material[]>();
     private readonly List<Material[]> _hologramMaterials = new List<Material[]>();
+    private readonly List<Material[]> _extraTransparentHologramMaterials = new List<Material[]>();
+    private readonly List<Material[]> _glassMaterials = new List<Material[]>();
+    private readonly List<Material[]> _extraTransparentGlassMaterials = new List<Material[]>();
+    private readonly List<bool> _isExteriorRenderer = new List<bool>();
+    private readonly List<bool> _isExtraTransparentRenderer = new List<bool>();
 
-    private GameObject _wireframeObject;
+    private readonly List<GameObject> _wireframeObjects = new List<GameObject>();
     private Material _runtimeHologramMaterial;
+    private Material _runtimeExtraTransparentHologramMaterial;
+    private Material _runtimeGlassMaterial;
+    private Material _runtimeExtraTransparentGlassMaterial;
     private bool _hologramSupportsBreathing;
     private bool _breathingSettingsApplied;
     private Vector4 _appliedBreathingParams;
@@ -84,10 +123,21 @@ public sealed class WireframeHologramEffect : MonoBehaviour
     private void OnDestroy()
     {
         // 运行时材质副本必须显式销毁，否则会随场景切换持续占用内存。
-        if (_runtimeHologramMaterial != null)
+        for (int index = 0; index < _wireframeObjects.Count; index++)
         {
-            Destroy(_runtimeHologramMaterial);
+            if (_wireframeObjects[index] != null)
+            {
+                Destroy(_wireframeObjects[index]);
+            }
         }
+
+        _wireframeObjects.Clear();
+        _isExteriorRenderer.Clear();
+        _isExtraTransparentRenderer.Clear();
+        DestroyRuntimeMaterial(_runtimeHologramMaterial);
+        DestroyRuntimeMaterial(_runtimeExtraTransparentHologramMaterial);
+        DestroyRuntimeMaterial(_runtimeGlassMaterial);
+        DestroyRuntimeMaterial(_runtimeExtraTransparentGlassMaterial);
     }
 
     /// <summary>
@@ -114,14 +164,31 @@ public sealed class WireframeHologramEffect : MonoBehaviour
                 continue;
             }
 
-            renderer.sharedMaterials = isActive && _runtimeHologramMaterial != null
-                ? _hologramMaterials[rendererIndex]
-                : _originalMaterials[rendererIndex];
+            if (isActive && _runtimeGlassMaterial != null && Array.IndexOf(glassTargets, renderer) >= 0)
+            {
+                renderer.sharedMaterials = _isExtraTransparentRenderer[rendererIndex]
+                    ? _extraTransparentGlassMaterials[rendererIndex]
+                    : _glassMaterials[rendererIndex];
+            }
+            else if (!isActive || _runtimeHologramMaterial == null || !_isExteriorRenderer[rendererIndex])
+            {
+                renderer.sharedMaterials = _originalMaterials[rendererIndex];
+            }
+            else
+            {
+                renderer.sharedMaterials = _isExtraTransparentRenderer[rendererIndex]
+                    ? _extraTransparentHologramMaterials[rendererIndex]
+                    : _hologramMaterials[rendererIndex];
+            }
         }
 
-        if (_wireframeObject != null)
+        for (int index = 0; index < _wireframeObjects.Count; index++)
         {
-            _wireframeObject.SetActive(isActive);
+            GameObject wireframeObject = _wireframeObjects[index];
+            if (wireframeObject != null)
+            {
+                wireframeObject.SetActive(isActive);
+            }
         }
 
         // 切换状态时立即应用一次呼吸参数，避免等待后续操作才刷新材质配置。
@@ -151,6 +218,10 @@ public sealed class WireframeHologramEffect : MonoBehaviour
         // x 保存每秒周期数，y 保存相对基础透明度的变化幅度；关闭时写入零值，
         // 让着色器直接跳过正弦计算，同时保留材质副本以隔离共享材质资产。
         _runtimeHologramMaterial.SetVector(BreathingParamsPropertyId, breathingParams);
+        if (_runtimeExtraTransparentHologramMaterial != null)
+        {
+            _runtimeExtraTransparentHologramMaterial.SetVector(BreathingParamsPropertyId, breathingParams);
+        }
         _appliedBreathingParams = breathingParams;
         _breathingSettingsApplied = true;
     }
@@ -167,64 +238,187 @@ public sealed class WireframeHologramEffect : MonoBehaviour
 
         _isInitialized = true;
 
-        // 使用运行时材质副本承载呼吸透明度，绝不直接改写检视面板引用的共享材质。
         if (hologramMaterial != null)
         {
-            _runtimeHologramMaterial = new Material(hologramMaterial)
-            {
-                name = $"{hologramMaterial.name} (Runtime Hologram)",
-                hideFlags = HideFlags.DontSave
-            };
-            _hologramSupportsBreathing = _runtimeHologramMaterial.HasProperty(BreathingParamsPropertyId);
+            _runtimeHologramMaterial = CreateRuntimeHologramMaterial(exteriorOpacity, "Runtime Exterior Hologram");
+            _runtimeExtraTransparentHologramMaterial = CreateRuntimeHologramMaterial(extraTransparentOpacity, "Runtime Extra Transparent Hologram");
+            _hologramSupportsBreathing = _runtimeHologramMaterial != null && _runtimeHologramMaterial.HasProperty(BreathingParamsPropertyId);
+        }
+
+        if (glassMaterial != null)
+        {
+            _runtimeGlassMaterial = CreateRuntimeMaterial(glassMaterial, glassOpacity, "Runtime Glass");
+            _runtimeExtraTransparentGlassMaterial = CreateRuntimeMaterial(glassMaterial, extraTransparentOpacity, "Runtime Extra Transparent Glass");
         }
 
         Renderer[] renderers = GetComponentsInChildren<Renderer>(true);
         for (int index = 0; index < renderers.Length; index++)
         {
             Renderer renderer = renderers[index];
+            // 已有线框是独立绘制层，不能套用本体材质，也不能被玻璃替换。
+            Mesh mesh = renderer.GetComponent<MeshFilter>()?.sharedMesh;
+            if (mesh != null && mesh.subMeshCount > 0 && mesh.GetTopology(0) != MeshTopology.Triangles)
+            {
+                continue;
+            }
             Material[] originals = renderer.sharedMaterials;
             _bodyRenderers.Add(renderer);
             _originalMaterials.Add(originals);
+            _isExteriorRenderer.Add(IsTargetRenderer(renderer.transform, exteriorTargets));
+            _isExtraTransparentRenderer.Add(IsTargetRenderer(renderer.transform, extraTransparentTargets));
 
             // 全息材质按槽位数量铺满，保证多材质模型的每个子网格都被替换。
             Material[] hologramSlots = new Material[originals.Length];
+            Material[] extraTransparentHologramSlots = new Material[originals.Length];
             for (int slot = 0; slot < hologramSlots.Length; slot++)
             {
                 hologramSlots[slot] = _runtimeHologramMaterial;
+                extraTransparentHologramSlots[slot] = _runtimeExtraTransparentHologramMaterial;
             }
 
             _hologramMaterials.Add(hologramSlots);
+            _extraTransparentHologramMaterials.Add(extraTransparentHologramSlots);
+            Material[] glassSlots = new Material[originals.Length];
+            Material[] extraTransparentGlassSlots = new Material[originals.Length];
+            for (int slot = 0; slot < glassSlots.Length; slot++)
+            {
+                glassSlots[slot] = _runtimeGlassMaterial;
+                extraTransparentGlassSlots[slot] = _runtimeExtraTransparentGlassMaterial;
+            }
+            _glassMaterials.Add(glassSlots);
+            _extraTransparentGlassMaterials.Add(extraTransparentGlassSlots);
         }
 
-        CreateWireframeObject();
+        CreateWireframeObjects();
     }
 
-    /// <summary>
-    /// 用独立子对象绘制线框，使其与本体共享变换但可单独控制显隐和材质。
-    /// </summary>
-    private void CreateWireframeObject()
+    private Material CreateRuntimeHologramMaterial(float opacity, string runtimeName)
     {
-        if (wireframeMesh == null || wireframeMaterial == null)
+        if (hologramMaterial == null)
+        {
+            return null;
+        }
+
+        Material runtimeMaterial = new Material(hologramMaterial)
+        {
+            name = $"{hologramMaterial.name} ({runtimeName})",
+            hideFlags = HideFlags.DontSave
+        };
+        if (runtimeMaterial.HasProperty(OpacityPropertyId))
+        {
+            runtimeMaterial.SetFloat(OpacityPropertyId, Mathf.Clamp(opacity, 0.01f, 0.5f));
+        }
+        else
+        {
+            int baseColorId = Shader.PropertyToID("_BaseColor");
+            if (runtimeMaterial.HasProperty(baseColorId))
+            {
+                Color color = runtimeMaterial.GetColor(baseColorId);
+                color.a = Mathf.Clamp01(opacity);
+                runtimeMaterial.SetColor(baseColorId, color);
+            }
+        }
+
+        return runtimeMaterial;
+    }
+
+    private Material CreateRuntimeMaterial(Material source, float opacity, string runtimeName)
+    {
+        Material runtimeMaterial = new Material(source)
+        {
+            name = $"{source.name} ({runtimeName})",
+            hideFlags = HideFlags.DontSave
+        };
+        int baseColorId = Shader.PropertyToID("_BaseColor");
+        if (runtimeMaterial.HasProperty(baseColorId))
+        {
+            Color color = runtimeMaterial.GetColor(baseColorId);
+            color.a = Mathf.Clamp01(opacity);
+            runtimeMaterial.SetColor(baseColorId, color);
+        }
+        return runtimeMaterial;
+    }
+    private static void DestroyRuntimeMaterial(Material material)
+    {
+        if (material != null)
+        {
+            Destroy(material);
+        }
+    }
+
+    private static bool IsTargetRenderer(Transform rendererTransform, Transform[] targets)
+    {
+        if (targets == null || targets.Length == 0 || rendererTransform == null)
+        {
+            return false;
+        }
+
+        for (int index = 0; index < targets.Length; index++)
+        {
+            Transform exteriorTarget = targets[index];
+            if (exteriorTarget == null)
+            {
+                continue;
+            }
+
+            if (rendererTransform == exteriorTarget || rendererTransform.IsChildOf(exteriorTarget))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+
+    private void CreateWireframeObjects()
+    {
+        if (wireframeMaterial == null)
         {
             return;
         }
 
-        MeshFilter sourceFilter = GetComponentInChildren<MeshFilter>(true);
-        Transform parent = sourceFilter != null ? sourceFilter.transform : transform;
+        WireframeBinding[] bindings = wireframeBindings;
+        if (bindings == null || bindings.Length == 0)
+        {
+            MeshFilter legacySourceFilter = GetComponentInChildren<MeshFilter>(true);
+            if (wireframeMesh == null || legacySourceFilter == null)
+            {
+                return;
+            }
 
-        _wireframeObject = new GameObject(WireframeChildName);
-        _wireframeObject.transform.SetParent(parent, false);
+            CreateWireframeObject(legacySourceFilter.transform, wireframeMesh, 0);
+            return;
+        }
 
-        MeshFilter filter = _wireframeObject.AddComponent<MeshFilter>();
-        filter.sharedMesh = wireframeMesh;
+        for (int index = 0; index < bindings.Length; index++)
+        {
+            WireframeBinding binding = bindings[index];
+            if (binding == null || binding.SourceFilter == null || binding.WireframeMesh == null)
+            {
+                continue;
+            }
 
-        MeshRenderer renderer = _wireframeObject.AddComponent<MeshRenderer>();
+            CreateWireframeObject(binding.SourceFilter.transform, binding.WireframeMesh, index);
+        }
+    }
+
+    private void CreateWireframeObject(Transform parent, Mesh mesh, int index)
+    {
+        GameObject wireframeObject = new GameObject($"{WireframeChildName}_{index}");
+        wireframeObject.transform.SetParent(parent, false);
+
+        MeshFilter filter = wireframeObject.AddComponent<MeshFilter>();
+        filter.sharedMesh = mesh;
+
+        MeshRenderer renderer = wireframeObject.AddComponent<MeshRenderer>();
         renderer.sharedMaterial = wireframeMaterial;
         renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
         renderer.receiveShadows = false;
         renderer.lightProbeUsage = UnityEngine.Rendering.LightProbeUsage.Off;
         renderer.reflectionProbeUsage = UnityEngine.Rendering.ReflectionProbeUsage.Off;
 
-        _wireframeObject.SetActive(false);
+        wireframeObject.SetActive(false);
+        _wireframeObjects.Add(wireframeObject);
     }
 }
