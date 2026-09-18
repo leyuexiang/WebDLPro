@@ -27,9 +27,9 @@ Material:
     m_Floats:
     - _BorderWidth: 0.08
     - _GridSpacing: 4
-    - _GridStrength: 0.1
+    - _GridStrength: 1
     m_Colors:
-    - _BaseColor: {r: 0.018, g: 0.08, b: 0.28, a: 0.56}
+    - _BaseColor: {r: 0.018, g: 0.079999976, b: 0.27999997, a: 0.35}
     - _Bounds: {r: 0, g: 0, b: 38.27, a: 19.48}
     - _LineColor: {r: 0.08, g: 0.55, b: 1.35, a: 1}
   m_BuildTextureStacks: []
