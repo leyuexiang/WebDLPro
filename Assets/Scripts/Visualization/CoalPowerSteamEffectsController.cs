@@ -31,12 +31,26 @@ public sealed class CoalPowerSteamEffectsController : MonoBehaviour
     private float _fill;
     private double _previousTime;
 
+    private bool _faultStop;
     public float FillAmount => _fill;
     public float OpenAmount => _openAmount;
     public bool EffectsRunning => _allEffectsEnabled;
 
     /// <summary>运行时总控。开启会从进气、开阀、充盈到出气重新播放；关闭会清除全部特效并复位阀芯。</summary>
     public void SetEffectsRunning(bool value)
+    {
+        _faultStop = false;
+        SetRunning(value);
+    }
+
+    /// <summary>Fault stops valve/outlet effects but preserves intake, wiring and speed-synchronised shaft energy.</summary>
+    public void SetFaultStopped()
+    {
+        _faultStop = true;
+        SetRunning(false);
+    }
+
+    private void SetRunning(bool value)
     {
         if (_allEffectsEnabled == value)
         {
@@ -139,16 +153,18 @@ public sealed class CoalPowerSteamEffectsController : MonoBehaviour
         bool gasAllowed = liftAllowed && _openAmount >= 1f;
         _fill = gasAllowed && wasOpen
             ? Mathf.MoveTowards(_fill, 1f, delta / Mathf.Max(0.1f, _fillDuration)) : 0f;
-        SetFlow(_intake, active && _intakeEnabled, 1f);
+        bool faultActive = isActiveAndEnabled && _faultStop;
+        SetFlow(_intake, (active || faultActive) && _intakeEnabled, 1f);
         SetFlow(_valveFill, gasAllowed, _fill);
         SetFlow(_valveThrough, gasAllowed, Mathf.SmoothStep(0f, 1f, _fill));
         float outletIntensity = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((_fill - 0.4f) / 0.6f));
         SetFlow(_outlet, gasAllowed && _outletEnabled, outletIntensity);
-        if (_controlWire != null && _controlWire.enabled != (active && _controlWireEnabled))
-            _controlWire.enabled = active && _controlWireEnabled;
+        bool wire = (active || faultActive) && _controlWireEnabled;
+        if (_controlWire != null && _controlWire.enabled != wire)
+            _controlWire.enabled = wire;
         if (_shaftEnergy != null)
         {
-            bool show = active && _shaftEnergyEnabled;
+            bool show = (active || faultActive) && _shaftEnergyEnabled;
             if (_shaftEnergy.enabled != show) _shaftEnergy.enabled = show;
         }
     }

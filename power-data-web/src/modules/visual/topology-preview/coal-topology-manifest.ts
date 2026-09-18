@@ -120,15 +120,24 @@ const RESOURCE_MANIFEST_BY_VARIANT_ID: ReadonlyMap<CoalTopologyVariantId, CoalTo
     processNodePenIds: ['85cabfb', '2e3deb0', '400b2e', '5b595f', 'c8c3578', 'dc91da3', '21e09460', '6d77b386', '7b765f3b', '4c9274d9', '6cda614d', 'c4ff0d1'],
   })],
   ['process-detail-steam-turbine', createResourceManifest({
-    steam_turbine: ['baf5ab7', 'b9ae43'],
+    // 主设备改用公共四态图元；状态只替换设备自身图片，不新增状态圆点或角标。
+    generator: ['9533a1f'], boiler: ['8be4fc2'], steam_turbine: ['429749ea'],
     titleBackgroundPenIds: ['d22317e', '44e2393', '7d7130ab'],
+    // 控制系统类图片已有项目内静态资源，但没有可靠独立业务节点，保持静态展示。
+    staticImagePathByPenId: {
+      '6de883f': 'assets/turbine-governor.png',
+      'c6c435c': 'assets/boiler-safety-control.png',
+      '57ad893': 'assets/coordination-control.png',
+      '6ec996f': 'assets/generator-excitation-control.png',
+      '7902e1f': 'assets/unit-coordination.png',
+    },
     processNodePenIds: [],
   })],
 ])
 
 /** 严格读取目标版本清单；缺项属于开发配置错误，不回退到默认文件。 */
 export function getCoalTopologyResourceManifest(variantId: CoalTopologyVariantId): CoalTopologyResourceManifest {
-  // 锅炉第三层当前复用已发布关键环节输入文件的资源登记，不复制公共资源表。
+  // 保留旧预览变体的资源回退仅用于历史预览；正式第三层目录只发布汽轮机上下文。
   if (variantId === 'process-detail-boiler') {
     return RESOURCE_MANIFEST_BY_VARIANT_ID.get('key-process')!
   }

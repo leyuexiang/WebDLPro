@@ -12,7 +12,8 @@ import { TopologyDeviceStateCache, type TopologyNodeStateApplyResult, type Topol
  */
 export interface TopologyDataContext {
   readonly contextId: string
-  readonly renderer: 'gas-v3' | 'coal-v2'
+  /** 渲染器标识决定由哪套现有公共画布消费上下文，不允许按文件名或场景标题推断。 */
+  readonly renderer: 'gas-v3' | 'coal-v2' | 'solar'
   readonly topologyPath: string
   readonly sourceSha256: string
   readonly expectedPenCount: number

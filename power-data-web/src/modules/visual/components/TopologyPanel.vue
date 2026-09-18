@@ -5,6 +5,8 @@ import type { TopologyDefinition, TopologyDeviceStatus } from '@/config/process/
 import TopologyCanvas from '@/modules/visual/components/TopologyCanvas.vue'
 import CoalTopologyRuntimeCanvas from '@/modules/visual/topology-preview/CoalTopologyRuntimeCanvas.vue'
 import GasV3TopologyRuntimeCanvas from '@/modules/visual/topology-preview/GasV3TopologyRuntimeCanvas.vue'
+import WindTopologyJsonPreview from '@/modules/visual/topology-preview/WindTopologyJsonPreview.vue'
+import SolarTopologyJsonPreview from '@/modules/visual/topology-preview/SolarTopologyJsonPreview.vue'
 import { createTopologyPanelPresentation } from '@/modules/visual/components/topology-panel-presentation'
 import type { TopologyCanvasController } from '@/modules/visual/components/topology-canvas-controller'
 import type { TopologyDataContext } from '@/modules/visual/topology/topology-runtime'
@@ -30,7 +32,12 @@ const emit = defineEmits<{
   doubleClickNode: [nodeId: ProcessNodeId]
 }>()
 
-const topologyCanvas = ref<TopologyCanvasController | null>(null)
+/** 光伏 JSON 画布在公共控制器之外额外暴露 ready，只用于重置按钮的可用性判断。 */
+const topologyCanvas = ref<(TopologyCanvasController & { readonly ready?: boolean }) | null>(null)
+/** 正式面板是全屏公共祖先，重置、筛选和图形需要一起进入全屏。 */
+const panelRoot = ref<HTMLElement | null>(null)
+/** 风电当前只接收窄视口接口；光伏已接入完整画布控制器并复用 topologyCanvas。 */
+const jsonOverviewCanvas = ref<{ readonly ready: boolean; resetView(): void } | null>(null)
 
 /**
  * 最新 JSON 组态图接管燃气、燃煤两个“总览”拓扑；两类场景均已下线流程子图。新版燃煤
@@ -45,6 +52,11 @@ const usesLatestJsonOverviewCanvas = computed(() => {
 
 /** 该开关只在已确认的燃煤总览键成立，防止其他场景意外创建燃煤 JSON 运行时画布。 */
 const usesLatestCoalOverviewCanvas = computed(() => String(props.topology.topologyKey) === 'topology.coal-power.overview')
+/** 风电、光伏正式总览复用已经验收的 JSON 预览运行时，避免退回通用空拓扑画布。 */
+const usesWindOverviewCanvas = computed(() => String(props.topology.topologyKey) === 'topology.wind-power.overview')
+const usesSolarOverviewCanvas = computed(() => String(props.topology.topologyKey) === 'topology.solar-power.overview')
+/** 风电、光伏拓扑由 JSON 运行时自行加载，清单中的节点占位为空时不应覆盖真实画布。 */
+const usesExternalJsonOverviewCanvas = computed(() => usesWindOverviewCanvas.value || usesSolarOverviewCanvas.value)
 
 /**
  * 拓扑切换时 Vue（渐进式网页框架）会在下一渲染批次替换实际画布组件，而运行时会在同一同步事务内
@@ -92,7 +104,10 @@ const stableCanvasController: TopologyCanvasController = Object.freeze({
   resetView() {
     // 显式重置会废弃旧视口快照，避免后续恢复或画布实现替换时再次回放已经失效的位置。
     pendingControllerViewState = undefined
-    if (!canvasControllerSuspended) topologyCanvas.value?.resetView()
+    if (!canvasControllerSuspended) {
+      if (usesWindOverviewCanvas.value) jsonOverviewCanvas.value?.resetView()
+      else topologyCanvas.value?.resetView()
+    }
   },
   setSuspended(suspended: boolean) {
     if (canvasControllerDisposed || canvasControllerSuspended === suspended) return
@@ -134,13 +149,20 @@ defineExpose({ getCanvasController })
 
 /** 展示模型只从当前拓扑计算，切换场景或拓扑时无需复制组件或维护燃气专用条件分支。 */
 const presentation = computed(() => createTopologyPanelPresentation(props.topology))
+/** 外部数据画布依据真实加载状态解锁；空变电站仍禁用，不能以空业务绑定清单判断风光画布为空。 */
+const resetDisabled = computed(() => Boolean(props.suspended) || (usesWindOverviewCanvas.value
+  ? !jsonOverviewCanvas.value?.ready
+  : usesSolarOverviewCanvas.value
+    // 真实光伏画布提供 ready；兼容测试替身未实现该只读字段时沿用公共控制器能力。
+    ? topologyCanvas.value?.ready === false
+    : presentation.value.isEmpty))
 
 /**
  * 公共重置入口只调用受控画布端口，不直接接触 Meta2D（网页二维组态引擎）或具体拓扑实现。
  * 因此燃气、燃煤和后续新增拓扑都复用同一套“适应画布并居中”逻辑；空态和暂停态不发无效命令。
  */
 function resetTopologyView(): void {
-  if (presentation.value.isEmpty || Boolean(props.suspended)) return
+  if (resetDisabled.value) return
   stableCanvasController.resetView()
 }
 
@@ -170,12 +192,12 @@ watch(() => props.nodeStatuses, (statuses) => {
 </script>
 
 <template>
-  <section class="topology-panel" :aria-label="presentation.title">
+  <section ref="panelRoot" class="topology-panel" :aria-label="presentation.title">
     <!-- 公共层统一提供视图重置按钮，避免每个拓扑包装组件重复实现或遗漏该能力。 -->
     <button
       type="button"
       class="topology-panel__reset"
-      :disabled="presentation.isEmpty || Boolean(props.suspended)"
+      :disabled="resetDisabled"
       aria-label="重置拓扑图位置"
       title="重置拓扑图位置"
       @click="resetTopologyView"
@@ -209,6 +231,21 @@ watch(() => props.nodeStatuses, (statuses) => {
       @clear-selection="emit('clearSelection')"
       @double-click-node="emit('doubleClickNode', $event)"
     />
+    <WindTopologyJsonPreview v-else-if="usesWindOverviewCanvas" ref="jsonOverviewCanvas" :fullscreen-target="panelRoot" :suspended="props.suspended" />
+    <!-- 光伏使用完整控制器：中央状态、二维选择和双击事件都沿用成熟场景的公共通道。 -->
+    <SolarTopologyJsonPreview
+      v-else-if="usesSolarOverviewCanvas"
+      ref="topologyCanvas"
+      :fullscreen-target="panelRoot"
+      :suspended="props.suspended"
+      :topology="props.topology"
+      :selected-node-ids="props.selectedNodeIds"
+      :selected-route-ids="props.selectedRouteIds"
+      :node-statuses="props.nodeStatuses"
+      @select-node="emit('selectNode', $event)"
+      @clear-selection="emit('clearSelection')"
+      @double-click-node="emit('doubleClickNode', $event)"
+    />
     <TopologyCanvas
       v-else
       ref="topologyCanvas"
@@ -222,7 +259,7 @@ watch(() => props.nodeStatuses, (statuses) => {
       @double-click-node="emit('doubleClickNode', $event)"
     />
     <!-- 空态提示与隐藏的唯一预备画布独立渲染：保留实例避免切换时重建资源，提示仍准确说明尚无已激活拓扑。 -->
-    <p v-if="presentation.isEmpty" class="topology-panel__empty">{{ presentation.emptyMessage }}</p>
+    <p v-if="presentation.isEmpty && !usesExternalJsonOverviewCanvas" class="topology-panel__empty">{{ presentation.emptyMessage }}</p>
     </div>
   </section>
 </template>

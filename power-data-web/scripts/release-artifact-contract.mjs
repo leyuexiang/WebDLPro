@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { access, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { formatProcessDetailTopologyIssue, validateProcessDetailTopologies } from './process-detail-topology-contract.mjs'
 
 const integrityFileName = 'artifact-integrity.json'
 const textExtensions = new Set(['.css', '.html', '.js', '.json', '.md', '.mjs', '.svg'])
@@ -15,7 +16,7 @@ const allowedDeliveryRootEntries = new Set([
   'artifact-integrity.json', 'shell', 'unity',
 ])
 const requiredUnityCommandCapabilities = Object.freeze([
-  'init', 'resize', 'switchScene', 'enterProcessStep', 'moveCameraToPose', 'enterProcessDetail', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'resetCamera', 'focusNode', 'clearSelection',
+  'init', 'resize', 'switchScene', 'moveCameraToPose', 'enterProcessDetail', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'resetCamera', 'focusNode', 'clearSelection',
   'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose',
 ])
 const requiredEnterProcessDetailFields = Object.freeze(['sceneId', 'processId', 'stepId', 'processDetailId', 'transitionId'])
@@ -27,6 +28,26 @@ const requiredSetProcessDetailPlaybackFields = Object.freeze(['sceneId', 'proces
 // 结构版本10在命名镜头点基础上增加独立相机复位能力；旧构建不得绕过右上角复位按钮发布门禁。
 const requiredUnityEventCapabilities = Object.freeze([
   'ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'selectionCleared', 'disposed',
+])
+/**
+ * 当前合作方以动作摘要生成全部可绑定入口，因此十项公开动作属于发布契约本身，不能只做两份清单的相对一致性检查。
+ * 目标、视图和三维动作类型一并固定，防止生成器与摘要同时回退，或把普通场景导航误写成未实现的流程能力。
+ */
+const requiredPublishedActionContracts = Object.freeze([
+  { actionId: 'action.scene.overview', targetSceneId: 'overview', targetViewMode: 'overview', unityActionType: 'none' },
+  { actionId: 'action.gas-power.overview', targetSceneId: 'gas-power', targetViewMode: 'business', targetTopologyId: 'topology.gas-power.overview', unityActionType: 'resetScene' },
+  { actionId: 'action.gas-power.gas-turbine', targetSceneId: 'gas-power', targetViewMode: 'process-detail', processDetailId: 'process-detail.gas-power.gas-turbine', unityActionType: 'enterProcessDetail' },
+  { actionId: 'action.coal-power.overview', targetSceneId: 'coal-power', targetViewMode: 'business', targetTopologyId: 'topology.coal-power.overview', unityActionType: 'resetScene' },
+  { actionId: 'action.coal-power.steam-turbine', targetSceneId: 'coal-power', targetViewMode: 'process-detail', processDetailId: 'process-detail.coal-power.steam-turbine', unityActionType: 'enterProcessDetail' },
+  { actionId: 'action.wind-power.overview', targetSceneId: 'wind-power', targetViewMode: 'business', targetTopologyId: 'topology.wind-power.overview', unityActionType: 'none' },
+  { actionId: 'action.solar-power.overview', targetSceneId: 'solar-power', targetViewMode: 'business', targetTopologyId: 'topology.solar-power.overview', unityActionType: 'none' },
+  { actionId: 'action.solar-power.inverter', targetSceneId: 'solar-power', targetViewMode: 'process-detail', processDetailId: 'process-detail.solar-power.inverter', unityActionType: 'enterProcessDetail' },
+  { actionId: 'action.step-up-substation.overview', targetSceneId: 'step-up-substation', targetViewMode: 'business', targetTopologyId: 'topology.step-up-substation.overview', unityActionType: 'none' },
+  { actionId: 'action.step-down-substation.overview', targetSceneId: 'step-down-substation', targetViewMode: 'business', targetTopologyId: 'topology.step-down-substation.overview', unityActionType: 'none' },
+])
+const navigationOnlySceneIds = Object.freeze([
+  // 光伏已经交付逆变器关键环节，不再属于“仅总览导航”场景。
+  'wind-power', 'step-up-substation', 'step-down-substation',
 ])
 const deviceIdentifierSuffixes = new Set(['id', 'ids'])
 const deviceMappingSuffixes = new Set(['mapping', 'mappings'])
@@ -220,6 +241,13 @@ export async function validateReleaseArtifact(rootDirectory) {
     issues.push('缺少或无法解析 Unity 版本化协议能力文件。')
   }
 
+  /**
+   * 构建工具会把 public/topology 原样复制到 shell/topology。门禁直接检查最终目录，确保清单登记的
+   * 三项第三层上下文都有完整、未篡改且不夹带资源副本的独立二维拓扑，而非只相信源码审计结果。
+   */
+  const processDetailTopologyIssues = await validateProcessDetailTopologies(path.join(rootDirectory, 'shell', 'topology'))
+  issues.push(...processDetailTopologyIssues.map(formatProcessDetailTopologyIssue))
+
   const packageType = releaseManifest.packageType
   const isLocalTest = packageType === 'local-test'
   if (!['local-test', 'partner-integration', 'standalone-formal'].includes(packageType)) {
@@ -290,14 +318,104 @@ export async function validateReleaseArtifact(rootDirectory) {
     if (new Set(sourceNodeIds).size !== sourceNodeIds.length) issues.push('结构清单的来源节点标识必须在资源内全局唯一。')
     if (topologyManifest.manifestVersion !== releaseManifest.manifestVersion) issues.push('结构清单版本与发布摘要不一致。')
     if (topologyManifest.unityBuildId !== releaseManifest.unityReleaseId) issues.push('Unity 构建标识在结构清单与发布摘要中不一致。')
+    /**
+     * 合作方绑定菜单直接消费 workflowActions（流程动作摘要），因此摘要必须逐项镜像结构清单中的公开导航信息。
+     * 这里只比较有限稳定字段，不把 Unity 内部动作、参数白名单或失败策略重复暴露到发布摘要。
+     */
+    const expectedWorkflowActions = Array.isArray(topologyManifest.actions)
+      ? topologyManifest.actions.map((action) => ({
+          actionId: action?.actionId,
+          title: action?.title,
+          targetSceneId: action?.targetSceneId,
+          targetViewMode: action?.targetViewMode,
+          ...(action?.targetTopologyId ? { targetTopologyId: action.targetTopologyId } : {}),
+          ...(action?.processDetailId ? { processDetailId: action.processDetailId } : {}),
+        }))
+      : []
+    if (!Array.isArray(releaseManifest.workflowActions) || JSON.stringify(releaseManifest.workflowActions) !== JSON.stringify(expectedWorkflowActions)) {
+      issues.push('发布摘要的流程动作必须与结构清单逐项一致，避免合作方遗漏新增场景或绑定到失效目标。')
+    }
+    const publishedActions = Array.isArray(topologyManifest.actions) ? topologyManifest.actions : []
+    const actionById = new Map(publishedActions.map((action) => [action?.actionId, action]))
+    const hasInvalidPublishedAction = requiredPublishedActionContracts.some((contract) => {
+      const action = actionById.get(contract.actionId)
+      if (!action || typeof action.title !== 'string' || action.title.trim().length === 0) return true
+      if (action.targetSceneId !== contract.targetSceneId || action.targetViewMode !== contract.targetViewMode ||
+          action.unityAction?.type !== contract.unityActionType || action.failurePolicy !== 'keep-current-context' ||
+          !Array.isArray(action.allowedParameters) || action.allowedParameters.length !== 0) return true
+      const topologyMatches = contract.targetTopologyId === undefined
+        ? !Object.hasOwn(action, 'targetTopologyId')
+        : action.targetTopologyId === contract.targetTopologyId
+      const processDetailMatches = contract.processDetailId === undefined
+        ? !Object.hasOwn(action, 'processDetailId')
+        : action.processDetailId === contract.processDetailId
+      return !topologyMatches || !processDetailMatches
+    })
+    const requiredActionIds = new Set(requiredPublishedActionContracts.map((contract) => contract.actionId))
+    if (publishedActions.length !== requiredPublishedActionContracts.length || actionById.size !== requiredPublishedActionContracts.length ||
+        [...actionById.keys()].some((actionId) => !requiredActionIds.has(actionId)) || hasInvalidPublishedAction) {
+      issues.push('结构清单必须完整发布当前十项公开动作及其固定目标，禁止两份清单同时回退或伪造三维流程能力。')
+    }
+
+    /**
+     * supportedActionIds（支持动作标识集合）是场景侧的反向索引，必须与动作目标双向一致。
+     * 先按目标场景构建索引，再逐场景比较集合，避免嵌套扫描并同时发现遗漏、重复和越权引用。
+     */
+    const actionIdsBySceneId = new Map()
+    for (const action of publishedActions) {
+      if (action?.targetSceneId === 'overview' || typeof action?.targetSceneId !== 'string' || typeof action?.actionId !== 'string') continue
+      const actionIds = actionIdsBySceneId.get(action.targetSceneId) ?? []
+      actionIds.push(action.actionId)
+      actionIdsBySceneId.set(action.targetSceneId, actionIds)
+    }
+    const scenes = Array.isArray(topologyManifest.scenes) ? topologyManifest.scenes : []
+    const sceneById = new Map(scenes.map((scene) => [scene?.sceneId, scene]))
+    const hasMissingTargetScene = [...actionIdsBySceneId.keys()].some((sceneId) => !sceneById.has(sceneId))
+    const hasInvalidSceneActionIndex = hasMissingTargetScene || scenes.some((scene) => {
+      const expectedActionIds = actionIdsBySceneId.get(scene?.sceneId) ?? []
+      const supportedActionIds = scene?.supportedActionIds
+      if (!Array.isArray(supportedActionIds)) return true
+      const supportedActionIdSet = new Set(supportedActionIds)
+      return supportedActionIds.length !== expectedActionIds.length || supportedActionIdSet.size !== supportedActionIds.length ||
+        expectedActionIds.some((actionId) => !supportedActionIdSet.has(actionId))
+    })
+    if (hasInvalidSceneActionIndex) {
+      issues.push('业务场景的支持动作标识必须与指向该场景的公开动作双向一致。')
+    }
+
+    /**
+     * 风电和两站当前只提供场景导航：必须指向本场景默认总览拓扑，且不得登记流程步骤或第三层目录。
+     * 该约束把“可从菜单进入场景”和“已实现三维工艺能力”明确分开。
+     */
+    const unityMappingBySceneId = new Map(
+      (Array.isArray(topologyManifest.unitySceneMappings) ? topologyManifest.unitySceneMappings : [])
+        .map((mapping) => [mapping?.sceneId, mapping]),
+    )
+    const hasInvalidNavigationScene = navigationOnlySceneIds.some((sceneId) => {
+      const topologyId = `topology.${sceneId}.overview`
+      const actionId = `action.${sceneId}.overview`
+      const scene = sceneById.get(sceneId)
+      const mapping = unityMappingBySceneId.get(sceneId)
+      return !scene || scene.defaultTopologyId !== topologyId || !Array.isArray(scene.topologyIds) ||
+        scene.topologyIds.length !== 1 || scene.topologyIds[0] !== topologyId ||
+        !Array.isArray(scene.supportedActionIds) || scene.supportedActionIds.length !== 1 || scene.supportedActionIds[0] !== actionId ||
+        !mapping
+    })
     const processDetails = Array.isArray(topologyManifest.processDetails) ? topologyManifest.processDetails : []
+    if (hasInvalidNavigationScene || processDetails.some((detail) => navigationOnlySceneIds.includes(detail?.sceneId))) {
+      issues.push('风电、升压站和降压站只能发布无三维流程副作用的总览导航，流程步骤和第三层目录必须为空。')
+    }
     const gasTurbineDetail = processDetails.find((detail) => detail?.processDetailId === 'process-detail.gas-power.gas-turbine')
-    const coalBoilerDetail = processDetails.find((detail) => detail?.processDetailId === 'process-detail.coal-power.boiler')
+    const coalSteamTurbineDetail = processDetails.find((detail) => detail?.processDetailId === 'process-detail.coal-power.steam-turbine')
+    const solarInverterDetail = processDetails.find((detail) => detail?.processDetailId === 'process-detail.solar-power.inverter')
     const gasTurbineAction = Array.isArray(topologyManifest.actions)
       ? topologyManifest.actions.find((action) => action?.actionId === 'action.gas-power.gas-turbine')
       : undefined
-    const coalBoilerAction = Array.isArray(topologyManifest.actions)
-      ? topologyManifest.actions.find((action) => action?.actionId === 'action.coal-power.boiler')
+    const coalSteamTurbineAction = Array.isArray(topologyManifest.actions)
+      ? topologyManifest.actions.find((action) => action?.actionId === 'action.coal-power.steam-turbine')
+      : undefined
+    const solarInverterAction = Array.isArray(topologyManifest.actions)
+      ? topologyManifest.actions.find((action) => action?.actionId === 'action.solar-power.inverter')
       : undefined
     const gasMapping = Array.isArray(topologyManifest.unitySceneMappings)
       ? topologyManifest.unitySceneMappings.find((mapping) => mapping?.sceneId === 'gas-power')
@@ -305,34 +423,44 @@ export async function validateReleaseArtifact(rootDirectory) {
     const coalMapping = Array.isArray(topologyManifest.unitySceneMappings)
       ? topologyManifest.unitySceneMappings.find((mapping) => mapping?.sceneId === 'coal-power')
       : undefined
-    if (processDetails.length !== 2 || !gasTurbineDetail ||
+    if (processDetails.length !== 3 || !gasTurbineDetail ||
         gasTurbineDetail.sceneId !== 'gas-power' || gasTurbineDetail.processId !== 'gas-power-generation' ||
         gasTurbineDetail.stepId !== 'gas-turbine' ||
         gasTurbineDetail.resourceId !== 'process-detail-resource.gas-power.gas-turbine' ||
         gasTurbineDetail.cameraPoseId !== 'camera-pose.gas-power.gas-turbine' ||
-        gasTurbineDetail.stateNodeId !== 'gas-turbine' || !coalBoilerDetail ||
-        coalBoilerDetail.sceneId !== 'coal-power' || coalBoilerDetail.processId !== 'coal-power-generation' ||
-        coalBoilerDetail.stepId !== 'boiler' ||
-        coalBoilerDetail.resourceId !== 'process-detail-resource.coal-power.boiler' ||
-        coalBoilerDetail.cameraPoseId !== 'camera-pose.coal-power.boiler' ||
-        coalBoilerDetail.stateNodeId !== 'node.coal-boiler') {
-      issues.push('结构清单必须且只能发布燃气轮机与燃煤锅炉两项独立第三层目录。')
+        gasTurbineDetail.stateNodeId !== 'node.gas-turbine' ||
+        gasTurbineDetail.topologyDataContextId !== 'process-detail.gas-power.gas-turbine' || !coalSteamTurbineDetail ||
+        coalSteamTurbineDetail.sceneId !== 'coal-power' || coalSteamTurbineDetail.processId !== 'coal-power-generation' ||
+        coalSteamTurbineDetail.stepId !== 'steam-turbine' ||
+        coalSteamTurbineDetail.resourceId !== 'process-detail-resource.coal-power.steam-turbine' ||
+        coalSteamTurbineDetail.cameraPoseId !== 'camera-pose.coal-power.steam-turbine' ||
+        coalSteamTurbineDetail.stateNodeId !== 'node.coal-steam-turbine' ||
+        coalSteamTurbineDetail.topologyDataContextId !== 'process-detail.coal-power.steam-turbine' || !solarInverterDetail ||
+        solarInverterDetail.sceneId !== 'solar-power' || solarInverterDetail.processId !== 'solar-power-generation' ||
+        solarInverterDetail.stepId !== 'inverter' ||
+        solarInverterDetail.resourceId !== 'process-detail-resource.solar-power.inverter' ||
+        solarInverterDetail.cameraPoseId !== 'camera-pose.solar-power.inverter' ||
+        solarInverterDetail.stateNodeId !== 'node.solar-inverter' ||
+        solarInverterDetail.topologyDataContextId !== 'process-detail.solar-power.inverter') {
+      issues.push('结构清单必须且只能发布燃气轮机、燃煤汽轮机与光伏逆变器三项独立第三层目录。')
     }
     if (!gasTurbineAction || gasTurbineAction.targetViewMode !== 'process-detail' ||
         gasTurbineAction.processDetailId !== 'process-detail.gas-power.gas-turbine' ||
         Object.prototype.hasOwnProperty.call(gasTurbineAction, 'targetTopologyId') ||
         gasTurbineAction.unityAction?.type !== 'enterProcessDetail') {
-      issues.push('燃气轮机动作必须进入无拓扑的独立第三层，不能回退为旧流程步骤。')
+      issues.push('燃气轮机动作必须进入不携带第二层拓扑编号的独立第三层，不能回退为旧流程步骤。')
     }
-    if (!coalBoilerAction || coalBoilerAction.targetViewMode !== 'process-detail' ||
-        coalBoilerAction.processDetailId !== 'process-detail.coal-power.boiler' ||
-        Object.prototype.hasOwnProperty.call(coalBoilerAction, 'targetTopologyId') ||
-        coalBoilerAction.unityAction?.type !== 'enterProcessDetail') {
-      issues.push('燃煤锅炉动作必须进入无拓扑的独立第三层，不能回退为旧流程步骤。')
+    if (!coalSteamTurbineAction || coalSteamTurbineAction.targetViewMode !== 'process-detail' ||
+        coalSteamTurbineAction.processDetailId !== 'process-detail.coal-power.steam-turbine' ||
+        Object.prototype.hasOwnProperty.call(coalSteamTurbineAction, 'targetTopologyId') ||
+        coalSteamTurbineAction.unityAction?.type !== 'enterProcessDetail') {
+      issues.push('燃煤汽轮机动作必须进入不携带第二层拓扑编号的独立第三层，不能回退为旧流程步骤。')
     }
-    if (gasMapping?.processSteps?.some((step) => step?.stepId === 'gas-turbine') ||
-        coalMapping?.processSteps?.some((step) => step?.stepId === 'boiler')) {
-      issues.push('Unity 正式流程步骤清单不得继续发布已独立为第三层的燃机或锅炉步骤。')
+    if (!solarInverterAction || solarInverterAction.targetViewMode !== 'process-detail' ||
+        solarInverterAction.processDetailId !== 'process-detail.solar-power.inverter' ||
+        Object.prototype.hasOwnProperty.call(solarInverterAction, 'targetTopologyId') ||
+        solarInverterAction.unityAction?.type !== 'enterProcessDetail') {
+      issues.push('光伏逆变器动作必须进入独立第三层，不能回退为普通总览导航或流程步骤。')
     }
     const sourceTopology = Array.isArray(topologyManifest.topologies)
       ? topologyManifest.topologies.find((topology) => topology?.topologyId === releaseManifest.nodeProtocolPolicy?.sourceTopologyId)
@@ -431,18 +559,22 @@ export async function validateReleaseArtifact(rootDirectory) {
     }
   }
 
-  /** 外层和 Unity 必须同时锁定第二版；第一版父页面不能把第三层无拓扑状态误读为业务视图。 */
+  /**
+   * 外层和 Unity 必须同时锁定第二版；第一版父页面不能把“不携带第二层 topologyId”误读为普通业务视图。
+   * 第三层独立拓扑仍由发布目录的 topologyDataContextId 在内部绑定，不进入外层稳定视图载荷。
+   */
   if (releaseManifest.protocolVersions?.host !== 2 || releaseManifest.protocolVersions?.unity !== 2) {
     issues.push('发布摘要必须声明外层与 Unity 均使用第二版协议。')
   }
 
   /**
-   * 外层握手保持15秒短预算，只有 Unity 与初始稳定视图拥有120秒预算。
+   * 外层握手保持15秒短预算，Unity 初始稳定视图与场景终态各自拥有120秒预算。
    * 不能只声明一个含义模糊的总启动超时，否则平台无法按第二版协议正确分段计时。
    */
   if (releaseManifest.runtimeTimeouts?.outerReadyMilliseconds !== 15_000 ||
-      releaseManifest.runtimeTimeouts?.unityAndInitialViewMilliseconds !== 120_000) {
-    issues.push('发布摘要必须声明外层就绪15秒、Unity与初始稳定视图120秒的分阶段超时。')
+      releaseManifest.runtimeTimeouts?.unityAndInitialViewMilliseconds !== 120_000 ||
+      releaseManifest.runtimeTimeouts?.sceneSwitchResultMilliseconds !== 120_000) {
+    issues.push('发布摘要必须声明外层就绪15秒、Unity初始稳定视图120秒、场景终态120秒的分阶段超时。')
   }
 
   if (releaseManifest.platformArtifactPatchingAllowed !== false) issues.push('发布摘要必须明确禁止平台修改构建产物。')

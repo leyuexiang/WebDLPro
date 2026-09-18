@@ -7,11 +7,13 @@ import type {
   ProcessDetailResourceId,
   RouteId,
   SceneId,
+  OverviewSceneId,
   SceneNodeId,
   StepId,
   TopologyId,
   UnityRuntimeKey,
   UnitySceneKey,
+  ViewSceneId,
 } from '@/config/scene-topology/identifiers'
 import type { TopologyIconKey } from '@/config/process/types'
 
@@ -37,7 +39,6 @@ export interface TopologyNodeDrilldownReference {
 /** 已受控的 Unity 动作；外部父页面永远只能传动作标识，不能传 Unity 方法名称。 */
 export type UnityActionDefinition =
   | { type: 'none' }
-  | { type: 'enterProcessStep'; processId: ProcessId; stepId: StepId; defaultUnitId?: string; isolate: boolean }
   /** 第三层只下发目录中的稳定入口编号，资源、相机和模型绑定继续由 Unity 独立目录解析。 */
   | { type: 'enterProcessDetail'; processDetailId: ProcessDetailId }
   | { type: 'focusNode'; sceneNodeId: SceneNodeId; isolate: boolean }
@@ -48,7 +49,6 @@ export type UnityActionDefinition =
 export interface UnitySceneMappingDefinition {
   sceneId: SceneId
   mappingVersion: string
-  processSteps: readonly { processId: ProcessId; stepId: StepId }[]
   sceneNodeIds: readonly SceneNodeId[]
   routeIds: readonly RouteId[]
 }
@@ -233,11 +233,14 @@ export interface TopologyDefinition {
   filter?: TopologyFilterDefinition
 }
 
-/** 动作公共字段；目标视图字段由可判别联合保证严格互斥。 */
-interface ActionDefinitionBase {
+/**
+ * 动作公共字段；目标场景类型由各视图分支显式收窄。
+ * 平台总览属于可打开视图，但不属于十一项业务场景，因此不能伪造业务场景或空拓扑。
+ */
+interface ActionDefinitionBase<TTargetSceneId extends ViewSceneId> {
   actionId: ActionId
   title: string
-  targetSceneId: SceneId
+  targetSceneId: TTargetSceneId
   allowedParameters: readonly string[]
   unityAction: UnityActionDefinition
   failurePolicy: 'keep-current-context' | 'commit-view-with-warning'
@@ -245,14 +248,14 @@ interface ActionDefinitionBase {
 }
 
 /** 第二层业务动作必须携带拓扑，不能携带关键环节编号。 */
-export type BusinessActionDefinition = ActionDefinitionBase & {
+export type BusinessActionDefinition = ActionDefinitionBase<SceneId> & {
   targetViewMode: 'business'
   targetTopologyId: TopologyId
   processDetailId?: never
 }
 
 /** 第三层动作必须携带关键环节编号，不能夹带旧过滤拓扑。 */
-export type ProcessDetailActionDefinition = ActionDefinitionBase & {
+export type ProcessDetailActionDefinition = ActionDefinitionBase<SceneId> & {
   targetViewMode: 'process-detail'
   targetTopologyId?: never
   processDetailId: ProcessDetailId
@@ -260,8 +263,20 @@ export type ProcessDetailActionDefinition = ActionDefinitionBase & {
   failurePolicy: 'keep-current-context'
 }
 
-/** 外部动作到第二层业务视图或第三层关键环节的唯一受控映射。 */
-export type ActionDefinition = BusinessActionDefinition | ProcessDetailActionDefinition
+/**
+ * 平台总览动作只表达受控导航，不携带拓扑或三维动作。
+ * 该定义让只消费动作清单的合作方也能绑定总览入口，同时保持总览无拓扑的既有协议约束。
+ */
+export type OverviewActionDefinition = ActionDefinitionBase<OverviewSceneId> & {
+  targetViewMode: 'overview'
+  targetTopologyId?: never
+  processDetailId?: never
+  unityAction: Extract<UnityActionDefinition, { type: 'none' }>
+  failurePolicy: 'keep-current-context'
+}
+
+/** 外部动作到平台总览、第二层业务视图或第三层关键环节的唯一受控映射。 */
+export type ActionDefinition = OverviewActionDefinition | BusinessActionDefinition | ProcessDetailActionDefinition
 
 /**
  * 场景、拓扑、动作和 Unity 场景映射的原子发布单元。

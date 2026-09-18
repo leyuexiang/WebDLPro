@@ -129,7 +129,9 @@ QualitySettings:
     Server: 0
     Stadia: 2
     Standalone: 2
-    WebGL: 1
+    # WebGL 默认使用 High Fidelity（高保真）质量档，确保运行时启用 4 倍抗锯齿；
+    # 构建脚本仍会在普通包构建期间恢复编辑器会话设置，不影响本地编辑器预览。
+    WebGL: 2
     Windows Store Apps: 2
     XboxOne: 2
     iPhone: 1

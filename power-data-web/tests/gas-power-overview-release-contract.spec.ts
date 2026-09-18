@@ -21,20 +21,20 @@ describe('燃气总览发布契约', () => {
     expect(overview?.focusRegions).toEqual([
       {
         regionId: 'focus.gas-turbine-control',
-        anchorNodeId: 'inlet-duct',
-        nodeIds: ['inlet-duct', 'fuel-gas-pressure-valve', 'fuel-gas-electric-actuator'],
+        anchorNodeId: 'system.gas-turbine-control',
+        nodeIds: ['system.gas-turbine-control', 'fuel-gas-pressure-valve', 'asset.gas-turbine'],
         label: '燃机控制区域',
       },
       {
         regionId: 'focus.hrsg-control',
-        anchorNodeId: 'hrsg',
-        nodeIds: ['hrsg', 'hrsg-drum-level-sensor'],
+        anchorNodeId: 'system.gas-hrsg-control',
+        nodeIds: ['system.gas-hrsg-control', 'asset.gas-hrsg'],
         label: '余热锅炉控制区域',
       },
       {
         regionId: 'focus.steam-turbine-control',
-        anchorNodeId: 'steam-turbine',
-        nodeIds: ['steam-turbine', 'steam-main-control-valve'],
+        anchorNodeId: 'system.gas-steam-turbine-control',
+        nodeIds: ['system.gas-steam-turbine-control', 'asset.gas-steam-turbine'],
         label: '蒸汽轮机控制区域',
       },
     ])
@@ -90,7 +90,14 @@ describe('燃气总览发布契约', () => {
 
     expect(overview?.nodes).toHaveLength(23)
     expect(new Set(overview?.nodes.map((node) => node.nodeId))).toHaveLength(23)
+    // 发布基线统一为正常，真实告警、故障和离线状态仅由外部快照覆盖。
+    expect(overview?.nodes.every((node) => node.deviceStatus === 'normal')).toBe(true)
     expect(overview?.nodes.every((node) => node.doubleClickBehavior === 'emit-node')).toBe(true)
+    // 上层控制系统与下层现场设备必须使用不同 sceneNodeId（场景节点标识），防止三维点击反选到上层。
+    expect(overview?.nodes.find((node) => node.nodeId === 'system.gas-generator-control')?.sceneNodeId).toBe('unit.gas-generator.control')
+    expect(overview?.nodes.find((node) => node.nodeId === 'asset.gas-generator')?.sceneNodeId).toBe('node.gas-generator')
+    expect(overview?.nodes.find((node) => node.nodeId === 'system.gas-turbine-control')?.sceneNodeId).toBe('unit.gas-turbine.control')
+    expect(overview?.nodes.find((node) => node.nodeId === 'asset.gas-turbine')?.sceneNodeId).toBe('node.gas-turbine')
     expect(overview?.nodes.every((node) => !Object.prototype.hasOwnProperty.call(node, 'deviceId'))).toBe(true)
     expect(Object.prototype.hasOwnProperty.call(manifest, 'deviceMappings')).toBe(false)
     expect(Object.prototype.hasOwnProperty.call(manifest, 'platformBindingCount')).toBe(false)
@@ -112,19 +119,10 @@ describe('燃气总览发布契约', () => {
       targetViewMode: 'business',
       targetTopologyId: 'topology.gas-power.overview',
       failurePolicy: 'keep-current-context',
-      unityAction: {
-        type: 'enterProcessStep',
-        processId: 'gas-power-generation',
-        stepId: 'overview',
-        defaultUnitId: 'all',
-        isolate: true,
-      },
+      unityAction: { type: 'resetScene' },
     })
     expect(gasScene?.supportedActionIds).toContain('action.gas-power.overview')
-    expect(gasUnityMapping?.processSteps).toContainEqual({
-      processId: 'gas-power-generation',
-      stepId: 'overview',
-    })
+    expect(gasUnityMapping).not.toHaveProperty('processSteps')
 
     // 外层必须走 workflow.trigger（工作流触发）事务，禁止退回只切二维拓扑的 view.open（打开视图）命令。
     expect(hostPage).toContain('data-action-id="action.gas-power.overview"')
@@ -145,7 +143,7 @@ describe('燃气总览发布契约', () => {
       processDetailId: 'process-detail.gas-power.gas-turbine',
       resourceId: 'process-detail-resource.gas-power.gas-turbine',
       cameraPoseId: 'camera-pose.gas-power.gas-turbine',
-      stateNodeId: 'gas-turbine',
+      stateNodeId: 'node.gas-turbine',
       topologyDataContextId: 'process-detail.gas-power.gas-turbine',
     }])
     expect(detailAction).toEqual(expect.objectContaining({
@@ -156,8 +154,7 @@ describe('燃气总览发布契约', () => {
     }))
     expect(detailAction).not.toHaveProperty('targetTopologyId')
     expect(JSON.stringify(detailAction)).not.toContain('enterProcessStep')
-    expect(manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'gas-power')?.processSteps)
-      .not.toContainEqual(expect.objectContaining({ stepId: 'gas-turbine' }))
+    expect(manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'gas-power')).not.toHaveProperty('processSteps')
   })
 
   it('本地根入口保留自动初始化，独立服务根入口将平台直接导航到协议壳', () => {
@@ -183,28 +180,53 @@ describe('燃气总览发布契约', () => {
     }
     expect(() => createHostPage('invalid-entry-contract-test', 'unknown-package')).toThrow('未知包类型')
 
-    // 内部自测页从沙盘开始，覆盖燃气、燃煤两套总览和各自关键环节，并通过受控协议提供播放/停止按钮。
-    expect(selfTestPage).toContain('燃气、燃煤双场景全链路自测')
+    // 内部自测页从沙盘开始，十个可见入口全部使用合作方实际消费的流程动作协议。
+    expect(selfTestPage).toContain('燃气、燃煤、光伏三场景全链路自测')
     expect(selfTestPage).toContain("sceneId: 'overview'")
-    expect(selfTestPage).toContain('data-command="overview" disabled>沙盘</button>')
+    expect(selfTestPage).toContain('data-action-id="action.scene.overview" disabled>沙盘</button>')
     expect(selfTestPage).toContain('data-action-id="action.gas-power.overview"')
     expect(selfTestPage).toContain('data-action-id="action.gas-power.gas-turbine"')
     expect(selfTestPage).toContain('data-action-id="action.coal-power.overview"')
-    expect(selfTestPage).toContain('data-action-id="action.coal-power.boiler"')
+    expect(selfTestPage).toContain('data-action-id="action.coal-power.steam-turbine"')
+    for (const sceneId of ['wind-power', 'solar-power', 'step-up-substation', 'step-down-substation']) {
+      expect(selfTestPage).toContain(`data-action-id="action.${sceneId}.overview"`)
+    }
+    /**
+     * 单独检查共享按钮处理函数，确保本地自测不再用另一套 view.open（视图打开）捷径掩盖合作方动作清单问题。
+     * 场景、拓扑和无 Unity 副作用映射均由已验证结构清单解析，页面只提交稳定 actionId（动作标识）。
+     */
+    const workflowStart = selfTestPage.indexOf('function triggerWorkflow')
+    const workflowEnd = selfTestPage.indexOf('actionButtons.forEach', workflowStart)
+    const workflowBlock = selfTestPage.slice(workflowStart, workflowEnd)
+    expect(workflowStart).toBeGreaterThan(-1)
+    expect(workflowEnd).toBeGreaterThan(workflowStart)
+    expect(selfTestPage).toContain('shell.contentWindow?.postMessage')
+    expect(workflowBlock).toContain("sendCommand('workflow.trigger'")
+    expect(workflowBlock).toContain('{ actionId, expectedContextRevision: contextRevision }')
+    expect(workflowBlock).not.toContain("sendCommand('view.open'")
     expect(selfTestPage).toContain('disabled>燃气总览</button>')
     expect(selfTestPage).toContain('disabled>燃气关键</button>')
     expect(selfTestPage).toContain('disabled>燃煤总览</button>')
     expect(selfTestPage).toContain('disabled>燃煤关键</button>')
+    expect(selfTestPage).toContain('data-action-id="action.solar-power.inverter"')
+    expect(selfTestPage).toContain('disabled>光伏关键</button>')
     expect(selfTestPage).toContain('data-playback="play"')
     expect(selfTestPage).toContain('data-playback="stop"')
     expect(selfTestPage).toContain("process-detail.playback")
-    // 状态测试必须使用完整快照，同时提交两个跨场景稳定 nodeId，不能只更新当前按钮对应节点。
-    expect(selfTestPage).toContain('data-device-node-id="inlet-duct" data-device-status="normal"')
-    expect(selfTestPage).toContain('data-device-node-id="system.boiler-dcs" data-device-status="fault"')
+    // 状态测试必须使用完整快照，同时提交三个跨场景稳定节点，不能只更新当前按钮对应节点。
+    expect(selfTestPage).toContain('data-device-node-id="asset.gas-turbine" data-device-status="normal"')
+    expect(selfTestPage).toContain('data-device-node-id="asset.coal-steam-turbine" data-device-status="fault"')
+    expect(selfTestPage).toContain('data-device-node-id="asset.coal-steam-turbine" data-device-status="normal"')
+    expect(selfTestPage).toContain('燃煤汽轮机绑定设备')
+    expect(selfTestPage).toContain('data-device-node-id="asset.solar-inverter" data-device-status="fault"')
+    expect(selfTestPage).toContain('光伏逆变器绑定设备')
+    expect(selfTestPage).not.toContain('asset.coal-boiler')
+    expect(selfTestPage).not.toContain('燃煤锅炉')
     expect(selfTestPage).toContain("sendCommand('device.states.update'")
     expect(selfTestPage).toContain('items: Array.from(deviceStates')
-    expect(selfTestPage).toContain("['inlet-duct', 'normal']")
-    expect(selfTestPage).toContain("['system.boiler-dcs', 'normal']")
+    expect(selfTestPage).toContain("['asset.gas-turbine', 'normal']")
+    expect(selfTestPage).toContain("['asset.coal-steam-turbine', 'normal']")
+    expect(selfTestPage).toContain("['asset.solar-inverter', 'normal']")
     expect(selfTestPage).not.toContain('燃气轮机动态已停止。')
     expect(selfTestPage).not.toContain('燃气轮机动态已开始播放。')
     expect(selfTestPage).toContain('状态按钮用于观察绑定设备在正常/故障之间切换后的二维、三维效果')

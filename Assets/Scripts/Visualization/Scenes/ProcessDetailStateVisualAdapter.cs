@@ -15,6 +15,8 @@ namespace WebDLPro.Unity.SceneRuntime
         [Header("状态视觉开关")]
         [Tooltip("是否启用告警、故障和离线状态的模型变色。关闭后仍接收状态并控制动态特效，但模型保持基础颜色。")]
         [SerializeField] private bool _enableStateVisuals = true;
+        [Tooltip("故障状态是否应用故障颜色。关闭后故障仍参与动态停播，但模型恢复基础颜色。")]
+        [SerializeField] private bool _enableFaultVisual = true;
 
         [Header("状态视觉参数")]
         [SerializeField] private Renderer[] _renderers = Array.Empty<Renderer>();
@@ -44,10 +46,13 @@ namespace WebDLPro.Unity.SceneRuntime
             {
                 return BusinessSceneCommandResult.Failed("process-detail-visual-binding-invalid", error);
             }
-            if (visualState == BusinessSceneNodeVisualState.Normal)
+            if (visualState == BusinessSceneNodeVisualState.Normal ||
+                (visualState == BusinessSceneNodeVisualState.Fault && !_enableFaultVisual))
             {
                 RestoreBaseline();
-                return BusinessSceneCommandResult.Completed("关键环节已恢复正常基础视觉。" );
+                return visualState == BusinessSceneNodeVisualState.Fault
+                    ? BusinessSceneCommandResult.Completed("关键环节故障变色已关闭，模型保持基础颜色。")
+                    : BusinessSceneCommandResult.Completed("关键环节已恢复正常基础视觉。");
             }
 
             Color stateColor = visualState == BusinessSceneNodeVisualState.Alarm
@@ -223,6 +228,7 @@ namespace WebDLPro.Unity.SceneRuntime
         /// <summary>仅供包装预制体生成器写入已排除透明壳和气流后的稳定数组。</summary>
         public void ConfigureForEditor(
             bool enableStateVisuals,
+            bool enableFaultVisual,
             Renderer[] renderers,
             Color alarmColor,
             Color faultColor,
@@ -230,6 +236,7 @@ namespace WebDLPro.Unity.SceneRuntime
             float tintStrength)
         {
             _enableStateVisuals = enableStateVisuals;
+            _enableFaultVisual = enableFaultVisual;
             _renderers = renderers ?? Array.Empty<Renderer>();
             _alarmColor = alarmColor;
             _faultColor = faultColor;

@@ -22,6 +22,12 @@ namespace WebDLPro.Unity.SceneRuntime
         // 点击热路径直接按 Collider（碰撞体）读取建筑，不遍历九个占位对象，也不依赖对象名称或层级路径。
         private readonly Dictionary<Collider, OverviewBuildingPlaceholder> _buildingsByCollider =
             new Dictionary<Collider, OverviewBuildingPlaceholder>();
+        // 故障来源节点由各建筑序列化配置；运行时只做字典查找，不按燃气、燃煤或对象名称写死分支。
+        private readonly Dictionary<string, OverviewBuildingPlaceholder> _buildingsByFaultSourceNodeId =
+            new Dictionary<string, OverviewBuildingPlaceholder>(StringComparer.Ordinal);
+        // 同一建筑可由多个设备节点共同触发，只有最后一个活动故障清除后才恢复基础视觉。
+        private readonly Dictionary<string, HashSet<string>> _activeFaultSourceNodeIdsByBuildingId =
+            new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
 
         [SerializeField] private Camera _interactionCamera;
 
@@ -69,6 +75,8 @@ namespace WebDLPro.Unity.SceneRuntime
 
             _buildingsById.Clear();
             _buildingsByCollider.Clear();
+            _buildingsByFaultSourceNodeId.Clear();
+            _activeFaultSourceNodeIdsByBuildingId.Clear();
             // 目标场景只在初始化阶段校验一次；点击热路径直接读取占位组件，不创建集合或重复扫描。
             HashSet<string> targetSceneIds = new HashSet<string>(StringComparer.Ordinal);
             OverviewBuildingPlaceholder[] placeholders = GetComponentsInChildren<OverviewBuildingPlaceholder>(true);
@@ -108,6 +116,28 @@ namespace WebDLPro.Unity.SceneRuntime
                         "overview-building-target-scene-duplicate",
                         $"多个总览建筑重复映射目标业务场景：{placeholder.TargetSceneId}。"));
                     yield break;
+                }
+
+                IReadOnlyList<string> faultSourceNodeIds = placeholder.FaultSourceNodeIds;
+                for (int sourceIndex = 0; sourceIndex < faultSourceNodeIds.Count; sourceIndex++)
+                {
+                    string faultSourceNodeId = faultSourceNodeIds[sourceIndex];
+                    if (string.IsNullOrWhiteSpace(faultSourceNodeId))
+                    {
+                        completed?.Invoke(BusinessSceneCommandResult.Failed(
+                            "overview-building-fault-source-invalid",
+                            $"总览建筑 {placeholder.OverviewBuildingId} 配置了空故障来源节点 ID。"));
+                        yield break;
+                    }
+                    if (_buildingsByFaultSourceNodeId.ContainsKey(faultSourceNodeId))
+                    {
+                        completed?.Invoke(BusinessSceneCommandResult.Failed(
+                            "overview-building-fault-source-duplicate",
+                            $"故障来源节点 {faultSourceNodeId} 被多个总览建筑重复绑定。"));
+                        yield break;
+                    }
+
+                    _buildingsByFaultSourceNodeId.Add(faultSourceNodeId, placeholder);
                 }
 
                 _buildingsById.Add(placeholder.OverviewBuildingId, placeholder);
@@ -220,6 +250,87 @@ namespace WebDLPro.Unity.SceneRuntime
             BuildingSelectionCleared?.Invoke();
         }
 
+        /// <summary>
+        /// 按建筑资产配置的来源节点应用故障。未绑定节点属于其它业务场景或尚未接入的设备，安全忽略而不阻断完整快照。
+        /// </summary>
+        public BusinessSceneCommandResult ApplyFaultSourceVisualState(
+            string faultSourceNodeId,
+            BusinessSceneNodeVisualState visualState)
+        {
+            if (_released || !_initialized)
+            {
+                return BusinessSceneCommandResult.Failed(
+                    "overview-controller-unavailable",
+                    "总览场景控制器尚未就绪，不能更新故障来源状态。");
+            }
+            if (visualState != BusinessSceneNodeVisualState.Fault)
+            {
+                return BusinessSceneCommandResult.Failed(
+                    "overview-fault-source-state-unsupported",
+                    "总览建筑来源节点只响应故障状态；恢复必须使用清除命令。");
+            }
+            if (string.IsNullOrWhiteSpace(faultSourceNodeId) ||
+                !_buildingsByFaultSourceNodeId.TryGetValue(faultSourceNodeId, out OverviewBuildingPlaceholder building))
+            {
+                return BusinessSceneCommandResult.Completed($"状态节点 {faultSourceNodeId} 未绑定沙盘建筑，已忽略。");
+            }
+            if (building.VisualStatePresenter == null)
+            {
+                return BusinessSceneCommandResult.Failed(
+                    "overview-building-presenter-missing",
+                    $"总览建筑 {building.OverviewBuildingId} 缺少异常视觉呈现组件。");
+            }
+
+            if (!_activeFaultSourceNodeIdsByBuildingId.TryGetValue(
+                    building.OverviewBuildingId,
+                    out HashSet<string> activeSourceNodeIds))
+            {
+                activeSourceNodeIds = new HashSet<string>(StringComparer.Ordinal);
+                _activeFaultSourceNodeIdsByBuildingId.Add(building.OverviewBuildingId, activeSourceNodeIds);
+            }
+
+            if (activeSourceNodeIds.Add(faultSourceNodeId) && activeSourceNodeIds.Count == 1)
+            {
+                building.VisualStatePresenter.ApplyVisualState(BusinessSceneNodeVisualState.Fault);
+            }
+
+            return BusinessSceneCommandResult.Completed(
+                $"故障来源节点 {faultSourceNodeId} 已作用于总览建筑 {building.OverviewBuildingId}。");
+        }
+
+        /// <summary>清除单个来源节点；同一建筑仍有其它活动故障时保持当前故障效果。</summary>
+        public BusinessSceneCommandResult ClearFaultSourceVisualState(string faultSourceNodeId)
+        {
+            if (_released || !_initialized)
+            {
+                return BusinessSceneCommandResult.Failed(
+                    "overview-controller-unavailable",
+                    "总览场景控制器尚未就绪，不能清除故障来源状态。");
+            }
+            if (string.IsNullOrWhiteSpace(faultSourceNodeId) ||
+                !_buildingsByFaultSourceNodeId.TryGetValue(faultSourceNodeId, out OverviewBuildingPlaceholder building))
+            {
+                return BusinessSceneCommandResult.Completed($"状态节点 {faultSourceNodeId} 未绑定沙盘建筑，无需清除。");
+            }
+            if (!_activeFaultSourceNodeIdsByBuildingId.TryGetValue(
+                    building.OverviewBuildingId,
+                    out HashSet<string> activeSourceNodeIds) ||
+                !activeSourceNodeIds.Remove(faultSourceNodeId))
+            {
+                return BusinessSceneCommandResult.Completed(
+                    $"故障来源节点 {faultSourceNodeId} 当前未激活，无需清除。");
+            }
+
+            if (activeSourceNodeIds.Count == 0)
+            {
+                _activeFaultSourceNodeIdsByBuildingId.Remove(building.OverviewBuildingId);
+                building.VisualStatePresenter?.ClearVisualState();
+            }
+
+            return BusinessSceneCommandResult.Completed(
+                $"故障来源节点 {faultSourceNodeId} 已从总览建筑 {building.OverviewBuildingId} 清除。");
+        }
+
         public BusinessSceneCommandResult ApplyBuildingVisualState(
             string overviewBuildingId,
             BusinessSceneNodeVisualState visualState)
@@ -281,11 +392,6 @@ namespace WebDLPro.Unity.SceneRuntime
 
             building.VisualStatePresenter.ClearVisualState();
             return BusinessSceneCommandResult.Completed($"总览建筑 {overviewBuildingId} 已清除异常视觉。");
-        }
-
-        public BusinessSceneCommandResult EnterProcessStep(string processId, string stepId, string unitId, bool isolate)
-        {
-            return BusinessSceneCommandResult.Unsupported(BusinessSceneCapability.EnterProcessStep);
         }
 
         public BusinessSceneCommandResult FocusNode(string sceneNodeId, bool isolate)
@@ -368,7 +474,12 @@ namespace WebDLPro.Unity.SceneRuntime
 
             foreach (KeyValuePair<string, OverviewBuildingPlaceholder> pair in _buildingsById)
             {
-                pair.Value.VisualStatePresenter?.ReleaseVisualState();
+                // 场景退出时子对象可能先销毁，不能用 ?. 绕过 Unity 的失效对象检查。
+                OverviewBuildingPlaceholder placeholder = pair.Value;
+                if (placeholder != null && placeholder.VisualStatePresenter != null)
+                {
+                    placeholder.VisualStatePresenter.ReleaseVisualState();
+                }
             }
             _released = true;
             _initialized = false;
@@ -376,6 +487,8 @@ namespace WebDLPro.Unity.SceneRuntime
             _cameraPoseController = null;
             _buildingsById.Clear();
             _buildingsByCollider.Clear();
+            _buildingsByFaultSourceNodeId.Clear();
+            _activeFaultSourceNodeIdsByBuildingId.Clear();
             StopAllCoroutines();
             return BusinessSceneCommandResult.Completed("总览场景控制器已释放。");
         }

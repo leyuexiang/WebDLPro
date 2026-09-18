@@ -21,7 +21,8 @@ Shader "Custom/Rail"
 		
 		Tags { "RenderPipeline"="UniversalPipeline" "RenderType"="Transparent" "Queue"="Transparent" }
 		
-		Cull Back
+			// 关闭面剔除，使轨道区域网格的正面与背面都可见。
+			Cull Off
 		HLSLINCLUDE
 		#pragma target 3.0
 		ENDHLSL

@@ -4,7 +4,6 @@ import {
   isWebglMessageEnvelope,
   isWebglObjectSelectedPayload,
   isWebglSelectionClearedPayload,
-  isWebglEnterProcessStepPayload,
   isWebglMoveCameraToPosePayload,
   isWebglResetCameraPayload,
   isWebglEnterProcessDetailPayload,
@@ -95,8 +94,6 @@ describe('网页图形协议', () => {
 
   /** 动作命令必须只携带稳定映射标识与固定枚举，不能夹带二维节点、路径对象或任意材质参数。 */
   it('校验流程、三维节点、四态状态和路径动作载荷', () => {
-    expect(isWebglEnterProcessStepPayload({ processId: 'gas-power-generation', stepId: 'gas-turbine', unitId: 'unit-01', isolate: true })).toBe(true)
-    expect(isWebglEnterProcessStepPayload({ processId: 'gas-power-generation', stepId: '', isolate: true })).toBe(false)
     expect(isWebglMoveCameraToPosePayload({ cameraPoseId: 'gas-power.camera.inlet' })).toBe(true)
     expect(isWebglMoveCameraToPosePayload({ cameraPoseId: '', position: [0, 0, 0] })).toBe(false)
     expect(isWebglResetCameraPayload({})).toBe(true)

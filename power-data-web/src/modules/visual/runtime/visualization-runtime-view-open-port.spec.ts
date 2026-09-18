@@ -73,23 +73,14 @@ describe('view.open Unity 运行时端口', () => {
     })
   })
 
-  it('流程动作只转换为内层白名单载荷，失败不透出运行时原因', async () => {
+  it('默认状态动作转换为 resetScene，失败不透出运行时原因', async () => {
     const runtime = createRuntime(false)
     const port = new VisualizationRuntimeViewOpenPort(runtime)
 
     await expect(port.executeAction({
-      type: 'enterProcessStep',
-      processId: toProcessId('wind-power-generation'),
-      stepId: toStepId('overview'),
-      defaultUnitId: 'all',
-      isolate: true,
+      type: 'resetScene',
     }, toActionId('action.wind.overview'), toTransitionId('transition.wind.2'))).resolves.toEqual({ success: false, errorCode: 'action.execute.failed' })
-    expect(runtime.sendCommandAndWait).toHaveBeenCalledWith('enterProcessStep', {
-      processId: toProcessId('wind-power-generation'),
-      stepId: toStepId('overview'),
-      unitId: 'all',
-      isolate: true,
-    })
+    expect(runtime.sendCommandAndWait).toHaveBeenCalledWith('resetScene', {})
   })
 
   it('聚焦动作使用当前视图事务作为显式选择标识', async () => {
@@ -120,7 +111,7 @@ describe('view.open Unity 运行时端口', () => {
       processDetailId: toProcessDetailId('process-detail.gas-power.gas-turbine'),
       resourceId: toProcessDetailResourceId('process-detail-resource.gas-power.gas-turbine'),
       cameraPoseId: toCameraPoseId('camera-pose.gas-power.gas-turbine'),
-      stateNodeId: toSceneNodeId('gas-turbine'),
+      stateNodeId: toSceneNodeId('node.gas-turbine'),
     }
 
     await expect(port.prepareProcessDetail(detail, transitionId)).resolves.toEqual({ success: true })

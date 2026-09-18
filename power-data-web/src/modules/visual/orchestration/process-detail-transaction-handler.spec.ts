@@ -29,15 +29,20 @@ import { TopologyRuntime, type TopologyCanvasPort } from '@/modules/visual/topol
 const manifestVersion = 'process-detail-test.1'
 const gasSceneId = toSceneId('gas-power')
 const gasTopologyId = toTopologyId('topology.gas-power.overview')
+const coalSceneId = toSceneId('coal-power')
+const coalTopologyId = toTopologyId('topology.coal-power.overview')
 const detailActionId = toActionId('action.gas-power.gas-turbine')
 const secondDetailActionId = toActionId('action.gas-power.steam-turbine')
 const overviewActionId = toActionId('action.gas-power.overview')
+const coalOverviewActionId = toActionId('action.coal-power.overview')
+const coalDetailActionId = toActionId('action.coal-power.steam-turbine')
 const processDetailId = toProcessDetailId('process-detail.gas-power.gas-turbine')
 const secondProcessDetailId = toProcessDetailId('process-detail.gas-power.steam-turbine')
+const coalProcessDetailId = toProcessDetailId('process-detail.coal-power.steam-turbine')
 
 /**
- * 构造九场景最小合法清单，给燃气登记两个关键环节以覆盖同场景直接切换。
- * 其余场景保持零项，验证目录不会把关键环节数量写死。
+ * 构造九场景最小合法清单：燃气登记两个关键环节，燃煤登记一个关键环节，
+ * 用于同时覆盖同场景切换和燃气、燃煤之间的跨场景切换。
  */
 function createManifest(): SceneTopologyManifest {
   const scenes = SCENE_IDS.map((sceneId) => {
@@ -48,7 +53,11 @@ function createManifest(): SceneTopologyManifest {
       unitySceneKey: toUnitySceneKey(`scene.${sceneId}`),
       defaultTopologyId: topologyId,
       topologyIds: [topologyId],
-      supportedActionIds: sceneId === gasSceneId ? [overviewActionId, detailActionId, secondDetailActionId] : [],
+      supportedActionIds: sceneId === gasSceneId
+        ? [overviewActionId, detailActionId, secondDetailActionId]
+        : sceneId === coalSceneId
+          ? [coalOverviewActionId, coalDetailActionId]
+          : [],
       sceneMappingVersion: `mapping.${sceneId}.1`,
       resourceVersion: `resource.${sceneId}.1`,
       switchStrategy: 'unload-first' as const,
@@ -76,7 +85,7 @@ function createManifest(): SceneTopologyManifest {
         processDetailId,
         resourceId: toProcessDetailResourceId('process-detail-resource.gas-power.gas-turbine'),
         cameraPoseId: toCameraPoseId('camera-pose.gas-power.gas-turbine'),
-        stateNodeId: toSceneNodeId('gas-turbine'),
+        stateNodeId: toSceneNodeId('node.gas-turbine'),
         // 该夹具显式登记上下文标识，验证事务不会把 processDetailId 当作隐式拓扑文件键。
         topologyDataContextId: 'process-detail.gas-power.gas-turbine',
       },
@@ -87,7 +96,16 @@ function createManifest(): SceneTopologyManifest {
         processDetailId: secondProcessDetailId,
         resourceId: toProcessDetailResourceId('process-detail-resource.gas-power.steam-turbine'),
         cameraPoseId: toCameraPoseId('camera-pose.gas-power.steam-turbine'),
-        stateNodeId: toSceneNodeId('steam-turbine'),
+        stateNodeId: toSceneNodeId('node.gas-steam-turbine'),
+      },
+      {
+        sceneId: coalSceneId,
+        processId: toProcessId('coal-power-generation'),
+        stepId: toStepId('steam-turbine'),
+        processDetailId: coalProcessDetailId,
+        resourceId: toProcessDetailResourceId('process-detail-resource.coal-power.steam-turbine'),
+        cameraPoseId: toCameraPoseId('camera-pose.coal-power.steam-turbine'),
+        stateNodeId: toSceneNodeId('node.coal-steam-turbine'),
       },
     ],
     actions: [
@@ -124,12 +142,37 @@ function createManifest(): SceneTopologyManifest {
         failurePolicy: 'keep-current-context',
         configVersion: manifestVersion,
       },
+      {
+        actionId: coalOverviewActionId,
+        title: '进入燃煤总览',
+        targetViewMode: 'business',
+        targetSceneId: coalSceneId,
+        targetTopologyId: coalTopologyId,
+        allowedParameters: [],
+        unityAction: { type: 'none' },
+        failurePolicy: 'keep-current-context',
+        configVersion: manifestVersion,
+      },
+      {
+        actionId: coalDetailActionId,
+        title: '进入燃煤汽轮机关键环节',
+        targetViewMode: 'process-detail',
+        targetSceneId: coalSceneId,
+        processDetailId: coalProcessDetailId,
+        allowedParameters: [],
+        unityAction: { type: 'enterProcessDetail', processDetailId: coalProcessDetailId },
+        failurePolicy: 'keep-current-context',
+        configVersion: manifestVersion,
+      },
     ],
     unitySceneMappings: scenes.map((scene) => ({
       sceneId: scene.sceneId,
       mappingVersion: scene.sceneMappingVersion,
-      processSteps: [],
-      sceneNodeIds: scene.sceneId === gasSceneId ? [toSceneNodeId('gas-turbine'), toSceneNodeId('steam-turbine')] : [],
+      sceneNodeIds: scene.sceneId === gasSceneId
+        ? [toSceneNodeId('node.gas-turbine'), toSceneNodeId('node.gas-steam-turbine')]
+        : scene.sceneId === coalSceneId
+          ? [toSceneNodeId('node.coal-steam-turbine')]
+          : [],
       routeIds: [],
     })),
   }
@@ -177,6 +220,101 @@ function createHarness(unity: ProcessDetailUnityPort, transitionIds = [
     waitForLayoutCommit,
   )
   return { handler, store, topologyRuntime, unity }
+}
+
+/**
+ * 建立“燃气关键环节已稳定”的跨场景测试环境。
+ * 所有阶段写入固定顺序数组，确保前端先退出旧第三层，再切场景并按需进入目标第三层。
+ */
+async function createEnteredGasDetailCrossSceneHarness() {
+  const registryResult = TopologyRegistry.create(createManifest())
+  if (registryResult.status !== 'ready') throw new Error(`跨场景测试清单无效：${registryResult.issues.map((issue) => issue.code).join(',')}`)
+  const registry = registryResult.registry
+  const store = useVisualizationStore()
+  const facade = createVisualizationCoordinatorFacade(new VisualizationCoordinator(store))
+  const topologyRuntime = new TopologyRuntime(registry, createCanvas())
+  const initialTransitionId = toTransitionId('transition.initial.gas-business.cross-scene')
+  const initialTopology = topologyRuntime.prepare(gasSceneId, gasTopologyId, initialTransitionId)
+  if (!initialTopology) throw new Error('跨场景测试的燃气拓扑预备失败。')
+  facade.submit({ type: 'transition.begin', transitionId: initialTransitionId, sceneId: gasSceneId, topologyId: gasTopologyId, actionId: null })
+  facade.submit({ type: 'unity.status.reported', transitionId: initialTransitionId, status: 'ready' })
+  topologyRuntime.activate(initialTopology, initialTransitionId)
+  facade.submit({ type: 'topology.status.reported', transitionId: initialTransitionId, status: 'ready' })
+  facade.submit({
+    type: 'transition.commit',
+    transitionId: initialTransitionId,
+    sceneId: gasSceneId,
+    topologyId: gasTopologyId,
+    actionId: null,
+    sceneActivationId: toSceneActivationId('scene-activation.gas.source'),
+  })
+
+  const phaseOrder: string[] = []
+  const unity: ProcessDetailUnityPort & ViewOpenUnityPort = {
+    switchScene: vi.fn(async (sceneId) => {
+      phaseOrder.push(`切换场景:${sceneId}`)
+      return { success: true, sceneActivationId: toSceneActivationId(`scene-activation.${sceneId}.target`) }
+    }),
+    executeAction: vi.fn().mockResolvedValue({ success: true }),
+    prepareProcessDetail: vi.fn(async (detail) => {
+      phaseOrder.push(`准备关键环节:${detail.processDetailId}`)
+      return { success: true }
+    }),
+    commitProcessDetail: vi.fn(async (_sceneId, processDetailId) => {
+      phaseOrder.push(`提交关键环节:${processDetailId}`)
+      return { success: true }
+    }),
+    abortProcessDetail: vi.fn().mockResolvedValue({ success: true }),
+    exitProcessDetail: vi.fn(async (sceneId, processDetailId) => {
+      phaseOrder.push(`退出关键环节:${sceneId}:${processDetailId}`)
+      return { success: true }
+    }),
+    setProcessDetailPlayback: vi.fn().mockResolvedValue({ success: true }),
+  }
+  const processTransitionIds = [
+    toTransitionId('transition.process-detail.cross-scene.enter-source'),
+    toTransitionId('transition.process-detail.cross-scene.exit-source'),
+    toTransitionId('transition.process-detail.cross-scene.enter-target'),
+  ]
+  let processTransitionIndex = 0
+  const processDetail = new ProcessDetailTransactionHandler(
+    registry,
+    topologyRuntime,
+    unity,
+    facade,
+    () => processTransitionIds[processTransitionIndex++] ?? toTransitionId(`transition.process-detail.cross-scene.fallback.${processTransitionIndex}`),
+    async () => { phaseOrder.push('提交关键环节布局') },
+  )
+  const viewOpen = new ViewOpenTransactionHandler(
+    registry,
+    topologyRuntime,
+    unity,
+    facade,
+    'mapping.runtime.test.1',
+    () => toTransitionId('transition.view-open.cross-scene.target'),
+  )
+  const synchronizeState = vi.fn(async () => {
+    phaseOrder.push('重放目标场景状态')
+    return true
+  })
+  const workflow = new WorkflowTriggerTransactionHandler(
+    registry,
+    viewOpen,
+    facade,
+    'cross-scene',
+    processDetail,
+    synchronizeState,
+  )
+
+  const entered = await processDetail.submit({
+    type: 'workflow.trigger',
+    correlationId: 'enter-source-gas-detail',
+    payload: { actionId: detailActionId, expectedContextRevision: 1 },
+  })
+  if (!entered.success) throw new Error('跨场景测试未能建立燃气关键环节初始状态。')
+  phaseOrder.length = 0
+
+  return { workflow, topologyRuntime, store, unity, synchronizeState, phaseOrder }
 }
 
 beforeEach(() => setActivePinia(createPinia()))
@@ -281,6 +419,62 @@ describe('关键环节原子事务', () => {
     expect(topologyRuntime.getActiveTopology()?.topologyId).toBe(gasTopologyId)
   })
 
+  it('从燃气关键环节切到燃煤总览时先安全退出旧第三层，再执行目标场景切换', async () => {
+    const { workflow, topologyRuntime, store, unity, phaseOrder } = await createEnteredGasDetailCrossSceneHarness()
+
+    const result = await workflow.submit({
+      type: 'workflow.trigger',
+      correlationId: 'gas-detail-to-coal-business',
+      payload: { actionId: coalOverviewActionId, expectedContextRevision: 2 },
+    })
+
+    expect(result).toMatchObject({ success: true, status: 'completed', contextRevision: 4 })
+    expect(phaseOrder).toEqual([
+      `退出关键环节:${gasSceneId}:${processDetailId}`,
+      `切换场景:${coalSceneId}`,
+    ])
+    expect(unity.switchScene).toHaveBeenCalledWith(
+      coalSceneId,
+      'mapping.coal-power.1',
+      toTransitionId('transition.view-open.cross-scene.target'),
+    )
+    expect(topologyRuntime.getActiveTopology()?.topologyId).toBe(coalTopologyId)
+    expect(store.stableContext).toEqual({
+      sceneId: coalSceneId,
+      topologyId: coalTopologyId,
+      actionId: coalOverviewActionId,
+      contextRevision: 4,
+    })
+  })
+
+  it('从燃气关键环节切到燃煤关键环节时按退出、切场景、重放、进入的顺序完成', async () => {
+    const { workflow, topologyRuntime, store, synchronizeState, phaseOrder } = await createEnteredGasDetailCrossSceneHarness()
+
+    const result = await workflow.submit({
+      type: 'workflow.trigger',
+      correlationId: 'gas-detail-to-coal-detail',
+      payload: { actionId: coalDetailActionId, expectedContextRevision: 2 },
+    })
+
+    expect(result).toMatchObject({ success: true, status: 'completed', contextRevision: 5 })
+    expect(phaseOrder).toEqual([
+      `退出关键环节:${gasSceneId}:${processDetailId}`,
+      `切换场景:${coalSceneId}`,
+      '重放目标场景状态',
+      `准备关键环节:${coalProcessDetailId}`,
+      '提交关键环节布局',
+      `提交关键环节:${coalProcessDetailId}`,
+    ])
+    expect(synchronizeState).toHaveBeenCalledWith(toSceneActivationId('scene-activation.coal-power.target'))
+    expect(topologyRuntime.getActiveTopology()?.topologyId).toBe(coalTopologyId)
+    expect(store.stableContext).toEqual({
+      sceneId: coalSceneId,
+      processDetailId: coalProcessDetailId,
+      actionId: coalDetailActionId,
+      contextRevision: 5,
+    })
+  })
+
   it('联调演示控件只控制当前稳定关键环节并复核上下文版本', async () => {
     const unity: ProcessDetailUnityPort = {
       prepareProcessDetail: vi.fn().mockResolvedValue({ success: true }),
@@ -312,7 +506,7 @@ describe('关键环节原子事务', () => {
     expect(unity.setProcessDetailPlayback).toHaveBeenCalledTimes(1)
   })
 
-  it('按同一事务标识进入无拓扑第三层，再恢复原燃气拓扑', async () => {
+  it('按同一事务标识进入独立拓扑第三层，再恢复原燃气第二层拓扑', async () => {
     const phaseOrder: string[] = []
     const unity: ProcessDetailUnityPort = {
       prepareProcessDetail: vi.fn(async () => {

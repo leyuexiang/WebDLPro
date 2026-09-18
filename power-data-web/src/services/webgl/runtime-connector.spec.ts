@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { toRuntimeKey } from '@/config/process/identifiers'
 import type { WebglRuntimeRegistration } from '@/config/process/types'
 import { WEBGL_PROTOCOL_CHANNEL, WEBGL_PROTOCOL_VERSION, type WebglMessageEnvelope, type WebglObjectSelectedPayload, type WebglSelectionClearedPayload } from './protocol'
-import { WEBGL_HANDSHAKE_TIMEOUT_MS, WebglRuntimeConnector } from './runtime-connector'
+import { SCENE_SWITCH_RESULT_TIMEOUT_MS, WEBGL_HANDSHAKE_TIMEOUT_MS, WebglRuntimeConnector } from './runtime-connector'
 
 /**
  * 连接器测试使用最小伪窗口，不依赖浏览器或真实 iframe。
@@ -434,6 +434,57 @@ describe('网页图形受控连接器', () => {
     expect(onSceneChanged).toHaveBeenCalledWith(expect.objectContaining({ transitionId: 'transition-gas-1' }), 'changed-current')
     expect(onCommandCompleted).toHaveBeenCalledWith({ command: 'switchScene', requestId, success: true, sceneActivationId: 'scene-activation.gas-1' })
     expect(connector.getRejections()).toHaveLength(2)
+    connector.forceDispose()
+  })
+
+  /**
+   * 合作方冷缓存环境可能连续三十秒收不到 Unity 中间进度；接收确认后的等待预算必须覆盖
+   * 发布契约声明的一百二十秒，而不能沿用旧版三十秒静默窗口提前制造场景切换失败。
+   */
+  it('场景切换确认后静默超过三十秒仍继续等待最终结果', () => {
+    const onCommandFailure = vi.fn()
+    const onCommandCompleted = vi.fn()
+    const connector = new WebglRuntimeConnector(runtime, 'instance-1', { onCommandFailure, onCommandCompleted })
+    connector.startListening()
+    connector.attachChildWindow(childWindow as unknown as WindowProxy)
+    emit(readyEnvelope())
+    const initMessage = childWindow.postMessage.mock.calls[0]?.[0] as WebglMessageEnvelope
+    emit({ channel: WEBGL_PROTOCOL_CHANNEL, version: WEBGL_PROTOCOL_VERSION, instanceId: 'instance-1', messageId: 'ack-init-long-switch', type: 'ack', payload: { requestId: initMessage.messageId, success: true }, timestamp: 2 })
+
+    const requestId = connector.sendCommand('switchScene', {
+      sceneId: 'gas-power',
+      transitionId: 'transition-gas-long-load',
+      sceneMappingVersion: runtime.sceneMappingVersion,
+      forceReload: false,
+    })
+    emit({ channel: WEBGL_PROTOCOL_CHANNEL, version: WEBGL_PROTOCOL_VERSION, instanceId: 'instance-1', messageId: 'ack-switch-long-load', type: 'ack', payload: { requestId, success: true }, timestamp: 3 })
+
+    // 推进到一百二十秒预算前一毫秒，既覆盖旧三十秒故障点，也精确锁定新契约边界。
+    vi.advanceTimersByTime(SCENE_SWITCH_RESULT_TIMEOUT_MS - 1)
+    expect(onCommandFailure).not.toHaveBeenCalled()
+    expect(onCommandCompleted).not.toHaveBeenCalled()
+
+    emit({
+      channel: WEBGL_PROTOCOL_CHANNEL,
+      version: WEBGL_PROTOCOL_VERSION,
+      instanceId: 'instance-1',
+      messageId: 'changed-after-long-load',
+      type: 'sceneChanged',
+      payload: {
+        requestId,
+        sceneId: 'gas-power',
+        transitionId: 'transition-gas-long-load',
+        sceneActivationId: 'scene-activation.gas-long-load',
+        success: true,
+      },
+      timestamp: 4,
+    })
+    expect(onCommandCompleted).toHaveBeenCalledWith({
+      command: 'switchScene',
+      requestId,
+      success: true,
+      sceneActivationId: 'scene-activation.gas-long-load',
+    })
     connector.forceDispose()
   })
 

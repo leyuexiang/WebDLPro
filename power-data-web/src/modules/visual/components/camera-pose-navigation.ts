@@ -2,9 +2,9 @@ import { toCameraPoseId, type CameraPoseId, type SceneId } from '@/config/scene-
 
 /**
  * 第二层厂区三维视口允许展示镜头按钮的场景闭集。
- * 该闭集与九场景目录分开维护，防止其他业务场景因标题相似而误用燃气或燃煤镜头点。
+ * 该闭集与十一场景目录分开维护，防止其他业务场景因标题相似而误用已登记镜头点。
  */
-export type CameraPoseNavigationSceneId = 'gas-power' | 'coal-power'
+export type CameraPoseNavigationSceneId = 'gas-power' | 'coal-power' | 'wind-power' | 'solar-power'
 
 /**
  * 单个镜头按钮只保存用户可见标题、临时说明和 Unity 已登记的稳定镜头标识。
@@ -21,7 +21,7 @@ export interface CameraPoseNavigationButton {
 const EMPTY_CAMERA_POSE_BUTTONS: readonly CameraPoseNavigationButton[] = Object.freeze([])
 
 /**
- * 燃气与燃煤各六个按钮严格按工艺顺序登记。
+ * 燃气、燃煤各六个按钮，风电、光伏各四个按钮，均严格按各自工艺顺序登记。
  * 标识必须与 Unity 场景内 BusinessSceneNamedCameraPoseRegistry（业务场景命名镜头注册表）一致；
  * 后续若只调整 Unity 镜头位置和旋转，不需要改动此固定映射。
  */
@@ -90,6 +90,50 @@ const CAMERA_POSE_BUTTONS_BY_SCENE: Readonly<Record<CameraPoseNavigationSceneId,
       cameraPoseId: toCameraPoseId('coal-power.camera.grid-output'),
     },
   ]),
+  'wind-power': Object.freeze([
+    {
+      label: '风能转化电能',
+      description: '风力机组捕获风能并驱动发电机，将风能转换为电能。',
+      cameraPoseId: toCameraPoseId('wind-power.camera.wind-generation'),
+    },
+    {
+      label: '电能升压传输',
+      description: '风机输出电能经箱变升压后，通过电塔和电线向站内汇集传输。',
+      cameraPoseId: toCameraPoseId('wind-power.camera.step-up-transmission'),
+    },
+    {
+      label: '储能箱存储',
+      description: '储能箱接收并存储风电系统输出的电能，为后续调节和并网提供储能支撑。',
+      cameraPoseId: toCameraPoseId('wind-power.camera.energy-storage'),
+    },
+    {
+      label: '并网输出',
+      description: '汇集后的电能经变压器完成电压匹配，并向电网侧输出。',
+      cameraPoseId: toCameraPoseId('wind-power.camera.grid-output'),
+    },
+  ]),
+  'solar-power': Object.freeze([
+    {
+      label: '太阳能转换直流电',
+      description: '太阳能板吸收太阳能并将光能转换为直流电，为后续汇流和逆变环节提供电能输入。',
+      cameraPoseId: toCameraPoseId('solar-power.camera.solar-array'),
+    },
+    {
+      label: '汇流并转交流电',
+      description: '各组串电流汇入汇流箱后送入逆变器，由逆变器将直流电转换为交流电。',
+      cameraPoseId: toCameraPoseId('solar-power.camera.combiner-inverter'),
+    },
+    {
+      label: '储能箱存储',
+      description: '储能箱接收并存储光伏系统输出的电能，为后续用电或并网输出提供储能支撑。',
+      cameraPoseId: toCameraPoseId('solar-power.camera.energy-storage'),
+    },
+    {
+      label: '并网输出',
+      description: '电能经变压器升压后汇入并网侧，完成光伏电站的电能输出。',
+      cameraPoseId: toCameraPoseId('solar-power.camera.grid-output'),
+    },
+  ]),
 })
 
 /**
@@ -99,5 +143,7 @@ const CAMERA_POSE_BUTTONS_BY_SCENE: Readonly<Record<CameraPoseNavigationSceneId,
 export function getCameraPoseNavigationButtons(sceneId: SceneId | undefined): readonly CameraPoseNavigationButton[] {
   if (sceneId === 'gas-power') return CAMERA_POSE_BUTTONS_BY_SCENE['gas-power']
   if (sceneId === 'coal-power') return CAMERA_POSE_BUTTONS_BY_SCENE['coal-power']
+  if (sceneId === 'wind-power') return CAMERA_POSE_BUTTONS_BY_SCENE['wind-power']
+  if (sceneId === 'solar-power') return CAMERA_POSE_BUTTONS_BY_SCENE['solar-power']
   return EMPTY_CAMERA_POSE_BUTTONS
 }

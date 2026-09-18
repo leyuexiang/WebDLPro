@@ -29,7 +29,11 @@ export type ProcessRuntimeMode = 'webgl' | 'static-preview' | 'empty'
  */
 export type TopologyEvidenceStatus = 'verified' | 'pending-confirmation' | 'conceptual' | 'unclassified'
 
-/** 设备运行状态与用户选中状态分离；缺少、非法或超时状态必须归一为离线。 */
+/**
+ * 设备运行状态与用户选中状态分离。
+ * 拓扑首次加载且尚未收到外部状态快照时使用配置中的正常基线；外部数据仍可明确下发
+ * 正常、告警、故障或离线四态，非法状态由外部协议校验拒绝，不在画布侧自行推断。
+ */
 export type TopologyDeviceStatus = 'normal' | 'alarm' | 'fault' | 'offline'
 
 /**
@@ -107,7 +111,8 @@ export interface ProcessGuideDefinition {
 
 /**
  * 二维节点的布局坐标为归一化百分比，画布适配器据此适配任意容器尺寸。
- * 图元和状态由受控登记表驱动；没有实时状态时明确传入 offline，不能默认渲染为正常。
+ * 图元和状态由受控登记表驱动；没有实时状态时使用清单显式登记的正常基线，
+ * 收到外部状态快照后仅由该快照覆盖对应节点，画布不自行变更状态。
  */
 export interface TopologyNodeDefinition {
   nodeId: ProcessNodeId

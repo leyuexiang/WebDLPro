@@ -48,8 +48,10 @@ describe('燃气拓扑逐文件运行时绑定', () => {
   it('各版本反向索引互相隔离，同一业务节点仍可映射多个视觉图元', () => {
     const fullIndex = createGasV3TopologyRuntimeBindingIndex('network-business-key-process')
     const keyProcessIndex = createGasV3TopologyRuntimeBindingIndex('key-process')
-    expect(fullIndex.penIdsByNodeId.get(toProcessNodeId('generator'))).toEqual(['29b5edb2', '0f354e'])
-    expect(keyProcessIndex.penIdsByNodeId.get(toProcessNodeId('generator'))).toEqual(['ef84ff0', 'ca0550f'])
+    expect(fullIndex.penIdsByNodeId.get(toProcessNodeId('system.gas-generator-control'))).toEqual(['0f354e'])
+    expect(fullIndex.penIdsByNodeId.get(toProcessNodeId('asset.gas-generator'))).toEqual(['29b5edb2'])
+    expect(keyProcessIndex.penIdsByNodeId.get(toProcessNodeId('system.gas-generator-control'))).toEqual(['ca0550f'])
+    expect(keyProcessIndex.penIdsByNodeId.get(toProcessNodeId('asset.gas-generator'))).toEqual(['ef84ff0'])
     expect(keyProcessIndex.nodeIdByPenId.has('29b5edb2')).toBe(false)
   })
 
@@ -64,11 +66,11 @@ describe('燃气拓扑逐文件运行时绑定', () => {
       .toEqual(['69b370e9', '68d2510', 'fcd4c1', 'd971830'])
     expect(index.penIdsByNodeId.get(toProcessNodeId('operator-station')))
       .toEqual(['c2b04d2', '503af85f', '4d7640b9', '7d762fc'])
-    // 三个燃气专属控制设备必须接续原状态节点，旧文件编号不得残留在当前索引中。
-    expect(index.penIdsByNodeId.get(toProcessNodeId('inlet-duct'))).toEqual(['1cff0ae6'])
-    expect(index.penIdsByNodeId.get(toProcessNodeId('hrsg'))).toEqual(['4ffe660d'])
+    // 只有网络和业务层的版本不存在现场设备层，因此这里只登记上层控制系统图元。
+    expect(index.penIdsByNodeId.get(toProcessNodeId('system.gas-turbine-control'))).toEqual(['1cff0ae6'])
+    expect(index.penIdsByNodeId.get(toProcessNodeId('system.gas-hrsg-control'))).toEqual(['4ffe660d'])
     expect(index.penIdsByNodeId.get(toProcessNodeId('fuel-gas-pressure-valve'))).toEqual(['064d5de'])
-    expect(index.penIdsByNodeId.get(toProcessNodeId('generator'))).toEqual(['3ea7f2e1'])
+    expect(index.penIdsByNodeId.get(toProcessNodeId('system.gas-generator-control'))).toEqual(['3ea7f2e1'])
     expect(index.nodeIdByPenId.has('4d47e500')).toBe(false)
   })
 

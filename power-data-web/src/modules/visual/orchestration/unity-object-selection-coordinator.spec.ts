@@ -59,7 +59,6 @@ function createRegistry(mappingTopologyId: typeof topologyId = topologyId) {
     unitySceneMappings: SCENE_IDS.map((candidateSceneId) => ({
       sceneId: candidateSceneId,
       mappingVersion: manifestVersion,
-      processSteps: [],
       sceneNodeIds: candidateSceneId === sceneId ? [sceneNodeId] : [],
       routeIds: [],
     })),

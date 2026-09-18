@@ -39,6 +39,13 @@ describe.each([
     preview: 'CoalTopologyJsonPreview.vue',
     filterComponent: 'CoalTopologyLayerFilter',
   },
+  {
+    kind: '光伏',
+    // 光伏独立预览同时承担正式运行画布职责，仍只创建一个二维组态引擎实例。
+    runtime: 'SolarTopologyJsonPreview.vue',
+    preview: 'SolarTopologyJsonPreview.vue',
+    filterComponent: 'SolarTopologyLayerFilter',
+  },
 ])('$kind拓扑画布布局', ({ runtime, preview, filterComponent }) => {
   it('正式运行与独立预览均把完整高度交给拓扑画布', () => {
     const runtimeSource = readFileSync(`${basePath}/${runtime}`, 'utf8')
@@ -48,11 +55,13 @@ describe.each([
   })
 
   it('第三层隐藏并禁用筛选，退出后恢复第二层筛选', () => {
-    const runtimeSource = readFileSync(`${basePath}/${runtime}`, 'utf8')
+    // 统一换行符后再做静态契约匹配，避免 Windows 工作区的 CRLF 与 Linux CI 的 LF 造成无意义红测。
+    const runtimeSource = readFileSync(`${basePath}/${runtime}`, 'utf8').replace(/\r\n/g, '\n')
     expect(runtimeSource).toContain('const processDetailContextActive = ref(false)')
     expect(runtimeSource).toContain('processDetailContextActive.value = true')
     expect(runtimeSource).toContain('processDetailContextActive.value = false')
     expect(runtimeSource).toContain('if (processDetailContextActive.value) return')
-    expect(runtimeSource).toContain(`<${filterComponent}\n      v-if="!processDetailContextActive"`)
+    // 不锁死模板缩进，只要求筛选组件本身携带第三层隐藏条件。
+    expect(runtimeSource).toMatch(new RegExp(`<${filterComponent}\\s+v-if="!processDetailContextActive"`))
   })
 })

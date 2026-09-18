@@ -14,7 +14,6 @@ export const WEBGL_COMMAND_TYPES = [
   'init',
   'resize',
   'switchScene',
-  'enterProcessStep',
   'moveCameraToPose',
   'prepareProcessDetail',
   'commitProcessDetail',
@@ -92,13 +91,6 @@ export interface WebglSwitchScenePayload {
  * 该类型不携带 Unity 方法名、层级路径、材质参数或任意颜色，
  * 因而外层动作映射只能描述业务意图，不能借由 iframe 执行任意引擎操作。
  */
-export interface WebglEnterProcessStepPayload {
-  processId: string
-  stepId: string
-  unitId?: string
-  isolate: boolean
-}
-
 /** 独立镜头定位只允许稳定镜头点标识，不能携带坐标、旋转、流程或模型视觉参数。 */
 export interface WebglMoveCameraToPosePayload {
   cameraPoseId: string
@@ -344,19 +336,6 @@ export function isWebglSwitchScenePayload(value: unknown): value is WebglSwitchS
     isBoundedIdentifier(candidate.transitionId) &&
     isBoundedIdentifier(candidate.sceneMappingVersion) &&
     typeof candidate.forceReload === 'boolean'
-  )
-}
-
-/** 验证流程命令的受控标识和布尔隔离开关；unitId 可以省略，由发布动作映射提供默认值。 */
-export function isWebglEnterProcessStepPayload(value: unknown): value is WebglEnterProcessStepPayload {
-  if (!value || typeof value !== 'object') return false
-
-  const candidate = value as Record<string, unknown>
-  return (
-    isBoundedIdentifier(candidate.processId) &&
-    isBoundedIdentifier(candidate.stepId) &&
-    (candidate.unitId === undefined || isBoundedIdentifier(candidate.unitId)) &&
-    typeof candidate.isolate === 'boolean'
   )
 }
 

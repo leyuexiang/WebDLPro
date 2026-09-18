@@ -20,22 +20,35 @@ MonoBehaviour:
     _resourceId: process-detail-resource.gas-power.gas-turbine
     _cameraPoseId: camera-pose.gas-power.gas-turbine
     _stateNodeIds:
-    - gas-turbine
+    - node.gas-turbine
     _dynamicTargetIds:
-    - gas-turbine
+    - node.gas-turbine
     _availability: 1
     _editorPrefab: {fileID: 287525903796519437, guid: e0eb74baaa310fd43881afd7dc794df5,
       type: 3}
   - _sceneId: coal-power
     _processId: coal-power-generation
-    _stepId: boiler
-    _processDetailId: process-detail.coal-power.boiler
-    _resourceId: process-detail-resource.coal-power.boiler
-    _cameraPoseId: camera-pose.coal-power.boiler
+    _stepId: steam-turbine
+    _processDetailId: process-detail.coal-power.steam-turbine
+    _resourceId: process-detail-resource.coal-power.steam-turbine
+    _cameraPoseId: camera-pose.coal-power.steam-turbine
     _stateNodeIds:
-    - node.coal-boiler
+    - node.coal-steam-turbine
     _dynamicTargetIds:
-    - node.coal-boiler
+    - node.coal-steam-turbine
     _availability: 1
     _editorPrefab: {fileID: 1942214797568138815, guid: 785dbb6a8c002ce4990d0014f6d62b02,
+      type: 3}
+  - _sceneId: solar-power
+    _processId: solar-power-generation
+    _stepId: inverter
+    _processDetailId: process-detail.solar-power.inverter
+    _resourceId: process-detail-resource.solar-power.inverter
+    _cameraPoseId: camera-pose.solar-power.inverter
+    _stateNodeIds:
+    - node.solar-inverter
+    _dynamicTargetIds:
+    - node.solar-inverter
+    _availability: 1
+    _editorPrefab: {fileID: 5617771883254390857, guid: 0848ba37fac725f47a6c27d7277419d8,
       type: 3}

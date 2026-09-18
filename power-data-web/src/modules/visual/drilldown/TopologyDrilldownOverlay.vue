@@ -46,12 +46,13 @@ const activeTooltipInstance = computed(() => {
   const instanceId = hoveredInstanceId.value
   return instanceId ? instanceById.value.get(instanceId) : undefined
 })
+/** 未传入触发入口的实时状态时，说明节点以正常展示；实时状态仍完全由入口属性传入。 */
 const activeTooltipStatus = computed(() => ({
   normal: '正常',
   alarm: '告警',
   fault: '故障',
   offline: '离线',
-} as const)[props.status ?? 'offline'])
+} as const)[props.status ?? 'normal'])
 const tooltipStyle = computed(() => tooltipUsesKeyboardPosition.value
   ? undefined
   : { left: `${tooltipX.value}px`, top: `${tooltipY.value}px` })

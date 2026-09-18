@@ -20,7 +20,7 @@ const visualBaselinePagePath = fileURLToPath(new URL('../visual-regression/host/
  * 两枚节点服务于“完整快照缺失已绑定设备”的回归，避免为了测试清除语义而构造正式协议禁止的空状态数组。
  */
 function createTestManifest() {
-  const sceneIds = ['coal-power', 'gas-power', 'wind-power', 'solar-power', 'substation', 'distribution', 'consumption', 'microgrid', 'dispatch']
+  const sceneIds = ['coal-power', 'gas-power', 'wind-power', 'solar-power', 'substation', 'distribution', 'consumption', 'microgrid', 'dispatch', 'step-up-substation', 'step-down-substation']
   const manifestVersion = 'local-shell-regression.1'
   const gasResetActionId = 'action.gas.reset'
   const windResetActionId = 'action.wind.reset'
@@ -115,7 +115,6 @@ function createTestManifest() {
     unitySceneMappings: scenes.map((scene) => ({
       sceneId: scene.sceneId,
       mappingVersion: scene.sceneMappingVersion,
-      processSteps: [],
       // 三维节点清单与上方二维节点一一对应，保证壳从二维引用派生三维目标的真实路径能够通过校验。
       sceneNodeIds: scene.sceneId === 'gas-power' ? ['scene-node.gas-turbine', 'scene-node.gas-generator'] : [],
       routeIds: [],

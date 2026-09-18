@@ -7,6 +7,8 @@ const KNOWN_ROUTE_SUFFIXES = Object.freeze([
   '/embed',
   '/gas-v3-topology-json-preview',
   '/coal-topology-json-preview',
+  '/wind-topology-json-preview',
+  '/solar-topology-json-preview',
 ])
 
 /**

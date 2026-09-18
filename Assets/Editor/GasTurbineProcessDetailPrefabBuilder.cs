@@ -18,9 +18,8 @@ public static class GasTurbineProcessDetailPrefabBuilder
     public const string CatalogAssetPath = "Assets/Configuration/ProcessDetailCatalog.asset";
     public const string GasPowerScenePath = "Assets/Scenes/Business/GasPower.unity";
     private const string VisualStateConfigPath = "Assets/Configuration/PowerPlantVisualStateConfig.asset";
-    // 第三层展示区固定在厂区坐标之外；相机位保留演示场景已验证的模型相对观察偏移。
+    // 第三层展示区固定在厂区坐标之外；CameraPose 由 Prefab 中的制作期占位节点保存。
     private static readonly Vector3 RemoteDisplayPosition = new Vector3(10000f, 0f, 0f);
-    private static readonly Vector3 CameraOffsetFromDisplay = new Vector3(-10.86195f, 2.483585f, -1.561808f);
 
     [MenuItem("Tools/WebDLPro/关键环节/生成燃气轮机第三层资源")]
     public static void CreateOrUpdate()
@@ -63,11 +62,10 @@ public static class GasTurbineProcessDetailPrefabBuilder
             modelInstance.transform.localRotation = Quaternion.identity;
             modelInstance.transform.localScale = Vector3.one;
 
-            Transform cameraPose = new GameObject("CameraPose").transform;
-            cameraPose.SetParent(host.transform, false);
-            // 采用已验证的模型相对观察偏移，并整体平移到显式远端展示区；不使用运行时包围盒计算。
-            cameraPose.localPosition = RemoteDisplayPosition + CameraOffsetFromDisplay;
-            cameraPose.localRotation = Quaternion.Euler(8.457968f, 86.63072f, -0.0002123377f);
+            Transform cameraPose = ProcessDetailCameraPosePreservation.CreateCameraPose(
+                host.transform,
+                OutputPrefabPath,
+                displayAnchor);
 
             WaiKeHeBingMasterController masterController =
                 modelInstance.GetComponent<WaiKeHeBingMasterController>();
@@ -91,6 +89,7 @@ public static class GasTurbineProcessDetailPrefabBuilder
             }
             visualAdapter.ConfigureForEditor(
                 false,
+                true,
                 visualRenderers,
                 visualConfig.AlarmColor,
                 visualConfig.FaultColor,
@@ -106,8 +105,8 @@ public static class GasTurbineProcessDetailPrefabBuilder
                 "process-detail.gas-power.gas-turbine",
                 "process-detail-resource.gas-power.gas-turbine",
                 "camera-pose.gas-power.gas-turbine",
-                new[] { "gas-turbine" },
-                new[] { "gas-turbine" },
+                new[] { "node.gas-turbine" },
+                new[] { "node.gas-turbine" },
                 displayAnchor,
                 cameraPose,
                 new MonoBehaviour[] { dynamicAdapter },
@@ -217,7 +216,7 @@ public static class GasTurbineProcessDetailPrefabBuilder
             "process-detail.gas-power.gas-turbine",
             "process-detail-resource.gas-power.gas-turbine",
             "camera-pose.gas-power.gas-turbine",
-            "gas-turbine",
+            "node.gas-turbine",
             BusinessSceneAvailability.Available);
         entry.SetEditorPrefabForEditor(wrapperPrefab);
         List<ProcessDetailCatalogEntry> entries = new List<ProcessDetailCatalogEntry>(catalog.Entries.Count + 1);

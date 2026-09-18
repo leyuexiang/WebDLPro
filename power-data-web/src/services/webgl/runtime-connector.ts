@@ -3,7 +3,6 @@ import {
   createWebglCommand,
   WEBGL_PROTOCOL_CHANNEL,
   isWebglEventType,
-  isWebglEnterProcessStepPayload,
   isWebglMoveCameraToPosePayload,
   isWebglResetCameraPayload,
   isWebglEnterProcessDetailPayload,
@@ -82,7 +81,12 @@ interface PendingCommand {
 }
 
 const COMMAND_TIMEOUT_MS = 10_000
-const SCENE_SWITCH_RESULT_TIMEOUT_MS = 30_000
+/**
+ * 场景切换接收确认后的最终结果等待预算。
+ * 冷缓存下共享资源下载、解压与场景初始化可能连续三十秒没有中间进度，因此这里与外层场景事务的
+ * 一百二十秒发布契约对齐；合法进度仍会刷新窗口，但外层事务总预算会继续提供最终有限边界。
+ */
+export const SCENE_SWITCH_RESULT_TIMEOUT_MS = 120_000
 // Unity 网页图形包可能需要较长时间下载、解压和创建图形上下文，因此内层握手独立使用120秒；
 // 该时限不属于外层 system.ready（系统就绪）阶段，也不能延后外层握手。
 export const WEBGL_HANDSHAKE_TIMEOUT_MS = 120_000
@@ -611,8 +615,8 @@ export class WebglRuntimeConnector {
   }
 
   /**
-   * switchScene 接收确认后需要等待异步加载完成。每次合法进度都会刷新 30 秒窗口，
-   * 防止大场景加载过程被普通命令的十秒确认超时误判，同时不会无限等待失联运行时。
+   * switchScene 接收确认后需要等待异步加载完成。每次合法进度都会刷新一百二十秒内层窗口，
+   * 防止冷缓存大场景加载被普通命令的十秒确认超时误判；外层事务仍以自己的总预算收敛失联运行时。
    */
   private refreshSceneSwitchTimeout(pending: PendingCommand): void {
     clearTimeout(pending.timeoutHandle)
@@ -667,8 +671,6 @@ function isValidWebglCommandPayload(command: WebglCommandType, payload: unknown)
   switch (command) {
     case 'switchScene':
       return isWebglSwitchScenePayload(payload)
-    case 'enterProcessStep':
-      return isWebglEnterProcessStepPayload(payload)
     case 'moveCameraToPose':
       return isWebglMoveCameraToPosePayload(payload)
     case 'resetCamera':
@@ -705,8 +707,6 @@ function getWebglCommandPayloadError(command: WebglCommandType): string {
   switch (command) {
     case 'switchScene':
       return '场景切换命令缺少合法场景标识、事务标识或映射版本。'
-    case 'enterProcessStep':
-      return '流程命令缺少合法流程、步骤、机组或隔离标识。'
     case 'moveCameraToPose':
       return '镜头定位命令缺少合法镜头点标识。'
     case 'resetCamera':

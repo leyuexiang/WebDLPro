@@ -63,6 +63,7 @@ async function readLayout(shell) {
       bubble: bubble?.getBoundingClientRect().toJSON(),
       fullscreen: document.fullscreenElement === viewport,
       legend: legendRect?.toJSON(),
+      legendSource: legend?.getAttribute('src') ?? null,
       legendInViewport: Boolean(legend && viewport.contains(legend)),
       legendPointerEvents: legend ? getComputedStyle(legend).pointerEvents : null,
       legendPassesThroughPointer: legendRect
@@ -92,12 +93,13 @@ async function waitForResizeSettlement() {
 }
 
 /** 导航外框与实际画布等宽且贴近底部；气泡始终按实际画布高度和原始矢量图比例缩放。 */
-function assertLayout(layout, fullscreen) {
+function assertLayout(layout, fullscreen, expectedLegendAsset) {
   assert.equal(layout.fullscreen, fullscreen, '浏览器必须实际切换全屏状态')
   assert.equal(layout.legendInViewport, true, '第二层管线图例必须属于真正的全屏视口')
   assert.equal(layout.legendPointerEvents, 'none', '管线图例不能接管任何鼠标交互')
   assert.equal(layout.legendPassesThroughPointer, true, '管线图例覆盖区域必须继续命中下方三维画面')
   assert.ok(layout.legend.width > 0 && layout.legend.height > 0, '管线图例必须完成可见绘制')
+  assert.ok(layout.legendSource?.includes(expectedLegendAsset), `当前场景必须加载 ${expectedLegendAsset} 图例资源`)
   const legendCenter = layout.legend.left + layout.legend.width / 2
   const viewportCenter = layout.viewport.left + layout.viewport.width / 2
   assert.ok(Math.abs(legendCenter - viewportCenter) <= 1, '管线图例必须位于三维视口顶部正中')
@@ -129,6 +131,10 @@ try {
 
   // 两个场景分别验证最小桌面、常见桌面和超宽屏；同一个运行时跨尺寸与全屏往返必须保持身份。
   for (const sceneId of ['gas-power', 'coal-power']) {
+    // 燃煤图例与既有燃气图例资源独立，普通与全屏往返都必须保持当前场景对应的那一份资源。
+    const expectedLegendAsset = sceneId === 'coal-power'
+      ? 'pipeline-legend-horizontal-coal.png'
+      : 'pipeline-legend-horizontal.png'
     await openScene(sceneId)
     assert.equal(await bubble.count(), 0, '场景切换必须清空旧说明')
     // 视图协议确认早于二维资源加载完成；本测试针对已加载视图的全屏操作，先等实际画布就绪。
@@ -148,8 +154,8 @@ try {
       await shell.getByRole('button', { name: '进入三维全屏', exact: true }).click()
       await shell.waitForFunction(() => document.fullscreenElement?.classList.contains('process-scene__runtime'))
       await waitForResizeSettlement()
-      assertLayout(await readLayout(shell), true)
-      assertLayout(normal, false)
+      assertLayout(await readLayout(shell), true, expectedLegendAsset)
+      assertLayout(normal, false, expectedLegendAsset)
       await buttons.last().click()
       assert.equal(await bubble.locator('h2').innerText(), (await buttons.last().innerText()).replace(/^06\s*/, ''))
       // 可选截图供人工核对真实全屏视觉；输出目录由调用方准备，不写入正式发布资源。
@@ -164,7 +170,7 @@ try {
       await shell.waitForFunction(() => document.fullscreenElement === null)
       await waitForResizeSettlement()
       const restored = await readLayout(shell)
-      assertLayout(restored, false)
+      assertLayout(restored, false, expectedLegendAsset)
       assert.ok(Math.abs(restored.viewport.width - normal.viewport.width) <= 1, '退出全屏后恢复原视口宽度')
       assert.equal(await runtimeFrame.evaluate((frame) => frame === document.querySelector('.process-scene__runtime iframe')), true)
       // 覆盖层空白必须命中原内嵌框架，且点击三维画面不能改变“仅关闭按钮主动关闭”的规则。
@@ -181,6 +187,7 @@ try {
   assert.equal(await bubble.count(), 0, '切换场景后不残留气泡')
   assert.equal(await buttons.count(), 0, '非燃气燃煤场景不残留步骤按钮')
   assert.equal(await shell.locator('.process-scene__pipeline-legend').count(), 1, '其他第二层业务场景也必须显示公共管线图例')
+  assert.ok((await readLayout(shell)).legendSource?.includes('pipeline-legend-horizontal.png'), '当前非燃煤第二层场景保持既有燃气图例资源')
   // 分开报告控件断言与整页异常；即使所有布局项通过，也不得把其他页面异常静默当作成功。
   console.log(JSON.stringify({ layoutResult: '全屏步骤导航断言通过', cases: results, pageErrorCount: pageErrors.length }, null, 2))
   assert.deepEqual(pageErrors, [], '页面不应存在未处理异常，完整回归仍需处理上方异常')

@@ -53,12 +53,12 @@ export const COAL_TOPOLOGY_VARIANTS = Object.freeze([
   {
     id: 'architecture', combinationKey: 'architecture', layerIds: Object.freeze(['architecture']),
     topologyPath: 'variants/architecture/topology.json',
-    sourceSha256: '79d54e1315d9d6ffa5aa982e829ebcf1f4ad768ef0d787d94639017a4371fbbd', expectedPenCount: 70,
+    sourceSha256: '5d302bd3d8c006ac379fade4fdf80b915c29eee3c9059b2fa25540c61ac99861', expectedPenCount: 70,
   },
   {
     id: 'network', combinationKey: 'network', layerIds: Object.freeze(['network']),
     topologyPath: 'variants/network/topology.json',
-    sourceSha256: 'c1af259822755419e69aff7a2da15667327474b13ed06b0b1a282b4daeede26d', expectedPenCount: 110,
+    sourceSha256: '2a5036e2b6a648159baa42679863db743ddd1e51e13465ada6a71c72c7fbca62', expectedPenCount: 110,
   },
   {
     id: 'business', combinationKey: 'business', layerIds: Object.freeze(['business']),
@@ -73,12 +73,12 @@ export const COAL_TOPOLOGY_VARIANTS = Object.freeze([
   {
     id: 'network-business', combinationKey: 'network+business', layerIds: Object.freeze(['network', 'business']),
     topologyPath: 'variants/network-business/topology.json',
-    sourceSha256: '063d6a49b8512c1c8a37e2a6bdba7cf0d1567b557801ec0ffef056326170a0f0', expectedPenCount: 136,
+    sourceSha256: 'd1f22712d1eb5f8c9aed0caa8bd48d3d0fcf02b66601c398a866a20412726f26', expectedPenCount: 136,
   },
   {
     id: 'network-key-process', combinationKey: 'network+key-process', layerIds: Object.freeze(['network', 'key-process']),
     topologyPath: 'variants/network-key-process/topology.json',
-    sourceSha256: 'cdf47939407e68faf936c7941a550578101e914f6ea53de91c518be5f8515a66', expectedPenCount: 127,
+    sourceSha256: 'd5da5e0b32d778d4d4e828eee3c88b1cf990228244573ce4f28e42198020a98b', expectedPenCount: 127,
   },
   {
     id: 'business-key-process', combinationKey: 'business+key-process', layerIds: Object.freeze(['business', 'key-process']),
@@ -89,7 +89,7 @@ export const COAL_TOPOLOGY_VARIANTS = Object.freeze([
     id: 'network-business-key-process', combinationKey: 'network+business+key-process',
     layerIds: Object.freeze(['network', 'business', 'key-process']),
     topologyPath: 'variants/network-business-key-process/topology.json',
-    sourceSha256: 'fbb0daec7020ca6c9dce8102062e0c45641dbc15cc89a3d0551176f6e6a3e165', expectedPenCount: 159,
+    sourceSha256: '4c3a1f9f21660ff44f25d5c48d7784b3dbb9f738947451b274c8646e187629ac', expectedPenCount: 159,
     isDefault: true,
   },
 ] as const satisfies readonly CoalTopologyVariantManifestEntry[])
@@ -107,8 +107,8 @@ export const COAL_PROCESS_DETAIL_VARIANTS: readonly CoalProcessDetailVariantMani
     id: 'process-detail-steam-turbine',
     // 与燃气关键环节一致，发布目录为 shell/topology/process-detail，回退一层即可定位独立 JSON。
     topologyPath: '../process-detail/coal-power/steam-turbine/topology.json',
-    sourceSha256: '038c8c639d98ecbe30b650a8315e1bfc3a09fc57cc1904e6ab8bef0c219243cc',
-    expectedPenCount: 19,
+    sourceSha256: '5c7262f198f4b4443d863d07a8b39f5bd0d9d841cb03d820b5535c736c78a79c',
+    expectedPenCount: 45,
     isProcessDetail: true,
   }),
 ])

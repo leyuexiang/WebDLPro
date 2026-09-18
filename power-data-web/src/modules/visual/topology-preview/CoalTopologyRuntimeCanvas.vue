@@ -105,9 +105,12 @@ const sourceLinePresentationById = new Map<string, SourceLinePresentation>()
 const appliedStatusByPenId = new Map<string, TopologyDeviceStatus>()
 let highlightedLineIds: ReadonlySet<string> = new Set()
 
-/** 状态快照未覆盖的节点回退到正式清单基线，维持现有完整快照语义。 */
+/**
+ * 状态快照未覆盖的节点回退到正式清单基线；理论上清单已统一为正常。
+ * 最后的正常兜底仅处理异步切层中暂未建立节点索引的瞬间，不会修改或拦截外部状态快照。
+ */
 function getEffectiveNodeStatus(nodeId: ProcessNodeId): TopologyDeviceStatus {
-  return runtimeStatuses.value.get(nodeId) ?? activeNodeById.value.get(nodeId)?.deviceStatus ?? 'offline'
+  return runtimeStatuses.value.get(nodeId) ?? activeNodeById.value.get(nodeId)?.deviceStatus ?? 'normal'
 }
 
 /** 实时状态只遍历当前文件的显式绑定，批量写入后最多统一重绘一次。 */

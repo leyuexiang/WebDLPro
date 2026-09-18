@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { toSceneId } from '@/config/scene-topology/identifiers'
 import { getCameraPoseNavigationButtons } from '@/modules/visual/components/camera-pose-navigation'
 
-describe('燃气与燃煤命名镜头按钮映射', () => {
+describe('燃气、燃煤、风电与光伏命名镜头按钮映射', () => {
   it('按接口说明为燃气场景返回六个固定镜头点', () => {
     const buttons = getCameraPoseNavigationButtons(toSceneId('gas-power'))
 
@@ -31,19 +31,57 @@ describe('燃气与燃煤命名镜头按钮映射', () => {
     ])
   })
 
-  it('未登记场景不复用燃气或燃煤按钮', () => {
-    expect(getCameraPoseNavigationButtons(toSceneId('wind-power'))).toEqual([])
+  it('按接口说明为风电场景返回四个固定镜头点', () => {
+    const buttons = getCameraPoseNavigationButtons(toSceneId('wind-power'))
+
+    expect(buttons).toHaveLength(4)
+    expect(buttons.map(({ cameraPoseId }) => cameraPoseId)).toEqual([
+      'wind-power.camera.wind-generation',
+      'wind-power.camera.step-up-transmission',
+      'wind-power.camera.energy-storage',
+      'wind-power.camera.grid-output',
+    ])
+    expect(buttons.map(({ label }) => label)).toEqual([
+      '风能转化电能',
+      '电能升压传输',
+      '储能箱存储',
+      '并网输出',
+    ])
+  })
+
+  it('按接口说明为光伏场景返回四个固定镜头点', () => {
+    const buttons = getCameraPoseNavigationButtons(toSceneId('solar-power'))
+
+    expect(buttons).toHaveLength(4)
+    expect(buttons.map(({ cameraPoseId }) => cameraPoseId)).toEqual([
+      'solar-power.camera.solar-array',
+      'solar-power.camera.combiner-inverter',
+      'solar-power.camera.energy-storage',
+      'solar-power.camera.grid-output',
+    ])
+    expect(buttons.map(({ label }) => label)).toEqual([
+      '太阳能转换直流电',
+      '汇流并转交流电',
+      '储能箱存储',
+      '并网输出',
+    ])
+  })
+
+  it('未登记场景不复用其他业务场景按钮', () => {
+    expect(getCameraPoseNavigationButtons(toSceneId('substation'))).toEqual([])
     expect(getCameraPoseNavigationButtons(undefined)).toEqual([])
   })
 
-  it('十二个镜头步骤均提供独立且非空的临时说明', () => {
+  it('二十个镜头步骤均提供独立且非空的临时说明', () => {
     const descriptions = [
       ...getCameraPoseNavigationButtons(toSceneId('gas-power')),
       ...getCameraPoseNavigationButtons(toSceneId('coal-power')),
+      ...getCameraPoseNavigationButtons(toSceneId('wind-power')),
+      ...getCameraPoseNavigationButtons(toSceneId('solar-power')),
     ].map(({ description }) => description)
 
-    expect(descriptions).toHaveLength(12)
+    expect(descriptions).toHaveLength(20)
     expect(descriptions.every((description) => description.trim().length > 0)).toBe(true)
-    expect(new Set(descriptions).size).toBe(12)
+    expect(new Set(descriptions).size).toBe(20)
   })
 })

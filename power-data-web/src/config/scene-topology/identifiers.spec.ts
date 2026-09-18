@@ -35,24 +35,26 @@ export type StableIdentifierBrandContract = [
 
 /** 任务-004回归：固定场景目录与三类不互换标识必须同时在运行时和类型层受到保护。 */
 describe('场景拓扑稳定标识', () => {
-  it('只发布九个固定场景标识', () => {
-    expect(SCENE_IDS).toHaveLength(9)
+  it('只发布十一个固定场景标识', () => {
+    expect(SCENE_IDS).toHaveLength(11)
+    expect(toSceneId('step-up-substation')).toBe('step-up-substation')
+    expect(toSceneId('step-down-substation')).toBe('step-down-substation')
     expect(toSceneId('gas-power')).toBe('gas-power')
     expect(isSceneId('gas-power')).toBe(true)
     expect(isSceneId('gas-overview')).toBe(false)
-    expect(() => toSceneId('gas-overview')).toThrow('固定九场景目录')
-    expect(() => toSceneId('SampleScene')).toThrow('固定九场景目录')
-    expect(() => toSceneId('Assets/Scenes/SampleScene.unity')).toThrow('固定九场景目录')
+    expect(() => toSceneId('gas-overview')).toThrow('固定十一场景目录')
+    expect(() => toSceneId('SampleScene')).toThrow('固定十一场景目录')
+    expect(() => toSceneId('Assets/Scenes/SampleScene.unity')).toThrow('固定十一场景目录')
   })
 
-  it('独立发布平台总览视图标识，但不扩展九项业务场景闭集', () => {
-    expect(SCENE_IDS).toHaveLength(9)
+  it('独立发布平台总览视图标识，但不扩展十一项业务场景闭集', () => {
+    expect(SCENE_IDS).toHaveLength(11)
     expect(SCENE_IDS).not.toContain(OVERVIEW_SCENE_ID)
     expect(isSceneId('overview')).toBe(false)
     expect(isOverviewSceneId('overview')).toBe(true)
     expect(isViewSceneId('overview')).toBe(true)
     expect(toViewSceneId('overview')).toBe(OVERVIEW_SCENE_ID)
-    expect(() => toSceneId('overview')).toThrow('固定九场景目录')
+    expect(() => toSceneId('overview')).toThrow('固定十一场景目录')
   })
 
   it('拒绝标题、路径和资源文件名作为外部标识', () => {

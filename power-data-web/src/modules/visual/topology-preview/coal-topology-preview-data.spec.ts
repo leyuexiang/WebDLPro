@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Meta2dData } from '@meta2d/core'
 import { getCoalTopologyResourceManifest } from './coal-topology-manifest'
-import { COAL_TOPOLOGY_VARIANTS } from './coal-topology-variant-manifest'
+import { COAL_TOPOLOGY_VARIANT_BY_ID, COAL_TOPOLOGY_VARIANTS } from './coal-topology-variant-manifest'
 import {
   clearCoalTopologyPreviewDataCacheForTests,
   getCoalTopologyPreviewIconPath,
@@ -17,7 +17,8 @@ const originalFetch = globalThis.fetch
 function installTopologyFetch(): void {
   globalThis.fetch = vi.fn(async (input) => {
     const url = String(input)
-    const variant = COAL_TOPOLOGY_VARIANTS.find((entry) => url.endsWith(entry.topologyPath))
+    // 第三层文件通过相对路径回退到 topology/process-detail，统一从版本清单精确定位本地输入。
+    const variant = [...COAL_TOPOLOGY_VARIANT_BY_ID.values()].find((entry) => url.endsWith(entry.topologyPath))
     if (!variant) return new Response('', { status: 404 })
     return new Response(readFileSync(resolve(topologyRoot, variant.topologyPath), 'utf8'), {
       status: 200,
@@ -87,5 +88,29 @@ describe('燃煤拓扑独立数据与公共资源', () => {
     expect(getCoalTopologyPreviewIconPath('network', '44ac4f2f', 'normal')).toBe('icons/normal/router.webp')
     expect(getCoalTopologyPreviewIconPath('network', '44ac4f2f', 'alarm')).toBe('icons/alarm/router.webp')
     expect(existsSync(resolve(process.cwd(), 'public/topology/shared/icons/alarm/router.webp'))).toBe(true)
+  })
+
+  it('蒸汽轮机关键环节的全部图片均本地化，主设备使用公共四态图元', async () => {
+    installTopologyFetch()
+    const data = await loadCoalTopologyPreviewData('process-detail-steam-turbine')
+    const manifest = getCoalTopologyResourceManifest('process-detail-steam-turbine')
+    const imagePens = data.pens.filter((pen) => pen.image?.trim())
+
+    // 三个区域标题、三个四态主设备和五个已审核静态控制资源均来自 public/topology/shared。
+    expect(imagePens).toHaveLength(11)
+    for (const pen of imagePens) expect(pen.image).toContain('/topology/shared/')
+    expect([...manifest.devicePenIds]).toEqual(['9533a1f', '8be4fc2', '429749ea'])
+    expect(manifest.staticImagePathByPenId).toEqual(new Map([
+      ['6de883f', 'assets/turbine-governor.png'],
+      ['c6c435c', 'assets/boiler-safety-control.png'],
+      ['57ad893', 'assets/coordination-control.png'],
+      ['6ec996f', 'assets/generator-excitation-control.png'],
+      ['7902e1f', 'assets/unit-coordination.png'],
+    ]))
+    // 静态控制图和区域背景必须在公共资源目录真实存在，防止运行时退回外部云端地址。
+    for (const relativePath of manifest.staticImagePathByPenId.values()) {
+      expect(existsSync(resolve(process.cwd(), 'public/topology/shared', relativePath))).toBe(true)
+    }
+    expect(existsSync(resolve(process.cwd(), 'public/topology/shared/background/flow-light-3.png'))).toBe(true)
   })
 })

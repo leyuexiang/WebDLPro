@@ -38,7 +38,6 @@ namespace WebDLPro.Unity.SceneRuntime
                 "init",
                 "resize",
                 "switchScene",
-                "enterProcessStep",
                 "moveCameraToPose",
                 "prepareProcessDetail",
                 "commitProcessDetail",
@@ -258,14 +257,6 @@ namespace WebDLPro.Unity.SceneRuntime
     /// </summary>
     public static class SceneActionProtocolValidator
     {
-        /// <summary>流程的机组标识可以省略，由场景控制器基于受控默认值解析；其余标识必须存在。</summary>
-        public static bool IsValidProcessStep(string processId, string stepId, string unitId)
-        {
-            return SceneSwitchProtocolValidator.IsBoundedIdentifier(processId) &&
-                   SceneSwitchProtocolValidator.IsBoundedIdentifier(stepId) &&
-                   (string.IsNullOrWhiteSpace(unitId) || SceneSwitchProtocolValidator.IsBoundedIdentifier(unitId));
-        }
-
         /// <summary>命名镜头点只接受有界稳定标识；具体 Transform 由当前 Unity 场景本地注册表解析。</summary>
         public static bool IsValidCameraPoseId(string cameraPoseId)
         {

@@ -27,6 +27,7 @@ const gasDetailTopologyId = toTopologyId('topology.gas.detail')
 const windOverviewTopologyId = toTopologyId('topology.wind.overview')
 const windDetailTopologyId = toTopologyId('topology.wind.detail')
 const solarOverviewTopologyId = toTopologyId('topology.solar-power.overview')
+const overviewActionId = toActionId('action.scene.overview')
 const windOpenActionId = toActionId('action.wind.open')
 const windResetActionId = toActionId('action.wind.reset')
 
@@ -69,6 +70,17 @@ function createManifest(): SceneTopologyManifest {
     }))),
     actions: [
       {
+        actionId: overviewActionId,
+        title: '平台总览动作',
+        targetSceneId: OVERVIEW_SCENE_ID,
+        targetViewMode: 'overview',
+        allowedParameters: [],
+        // 平台总览夹具只验证统一动作入口到既有无拓扑事务的投影，不能调用额外 Unity 动作。
+        unityAction: { type: 'none' },
+        failurePolicy: 'keep-current-context',
+        configVersion: manifestVersion,
+      },
+      {
         actionId: windOpenActionId,
         title: '风电总览动作',
         targetSceneId: toSceneId('wind-power'),
@@ -95,7 +107,6 @@ function createManifest(): SceneTopologyManifest {
     unitySceneMappings: scenes.map((scene) => ({
       sceneId: scene.sceneId,
       mappingVersion: scene.sceneMappingVersion,
-      processSteps: [],
       sceneNodeIds: [],
       routeIds: [],
     })),
@@ -544,8 +555,10 @@ describe('view.open 原子切换事务', () => {
     await handler.submit(createViewOpen())
     const result = await handler.submit(createViewOpen(toSceneId('wind-power'), windDetailTopologyId, windResetActionId))
 
-    expect(result).toMatchObject({ success: false, status: 'failed', error: { code: 'action.execute.failed', recoverable: false } })
+    // 回退失败清空不可信场景组合，但失败回执仍携带最后一个单调版本，避免父页面被迫从版本一回退到零。
+    expect(result).toMatchObject({ success: false, status: 'failed', contextRevision: 1, error: { code: 'action.execute.failed', recoverable: false } })
     expect(store.stableContext).toBeNull()
+    expect(store.contextRevision).toBe(1)
     expect(store.runtimeStatus).toBe('error')
     expect(store.unityStatus).toBe('failed')
     expect(store.topologyStatus).toBe('failed')
@@ -591,6 +604,26 @@ describe('view.open 原子切换事务', () => {
     expect(unity.executeAction).not.toHaveBeenCalled()
     expect(canvas.setTopology).toHaveBeenCalledTimes(2)
     expect(store.stableContext).toEqual({ sceneId: toSceneId('wind-power'), topologyId: windOverviewTopologyId, actionId: windOpenActionId, contextRevision: 2 })
+  })
+
+  it('合作方通过统一动作入口返回平台总览时复用无拓扑事务且不执行额外Unity动作', async () => {
+    const { handler, registry, facade, unity, canvas, store } = createHandler()
+    const workflow = new WorkflowTriggerTransactionHandler(registry, handler, facade, 'cross-scene')
+    await handler.submit(createViewOpen(toSceneId('wind-power'), windOverviewTopologyId))
+
+    const result = await workflow.submit({
+      type: 'workflow.trigger',
+      correlationId: 'workflow-trigger-overview',
+      payload: { actionId: overviewActionId, expectedContextRevision: 1 },
+    })
+
+    expect(result).toMatchObject({ success: true, status: 'completed', contextRevision: 2 })
+    expect(unity.switchScene).toHaveBeenLastCalledWith(OVERVIEW_SCENE_ID, 'mapping.runtime.test.1', toTransitionId('transition.view-open.2'))
+    expect(unity.executeAction).not.toHaveBeenCalled()
+    expect(canvas.setTopology).toHaveBeenCalledTimes(1)
+    expect(store.topologyStatus).toBe('idle')
+    // 总览稳定上下文按公开协议不携带占位 topologyId 或 actionId，动作只负责进入该受控事务。
+    expect(store.stableContext).toEqual({ sceneId: OVERVIEW_SCENE_ID, actionId: null, contextRevision: 2 })
   })
 
   it('同场景流程动作携带过期上下文版本时，不执行 Unity 动作或激活新拓扑', async () => {

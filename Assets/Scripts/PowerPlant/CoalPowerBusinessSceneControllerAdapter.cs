@@ -26,7 +26,6 @@ public sealed class CoalPowerBusinessSceneControllerAdapter : IBusinessSceneCont
         {
             BusinessSceneCapability capabilities =
                 BusinessSceneCapability.Initialize |
-                BusinessSceneCapability.EnterProcessStep |
                 BusinessSceneCapability.FocusNode |
                 BusinessSceneCapability.ClearSelection |
                 BusinessSceneCapability.SetNodeVisibility |
@@ -77,7 +76,7 @@ public sealed class CoalPowerBusinessSceneControllerAdapter : IBusinessSceneCont
         }
         if (_processDetailCoordinator != null)
         {
-            // 后登记使释放时先退出锅炉第三层并销毁独立实例，再清理二层控制器资源。
+            // 后登记使释放时先退出汽轮机第三层并销毁独立实例，再清理二层控制器资源。
             _resourceScope.TrackReleaseAction(() => _processDetailCoordinator.Release());
         }
     }
@@ -111,19 +110,6 @@ public sealed class CoalPowerBusinessSceneControllerAdapter : IBusinessSceneCont
         completed?.Invoke(BusinessSceneCommandResult.Completed("燃煤业务场景控制器初始化完成。"));
     }
 
-    public BusinessSceneCommandResult EnterProcessStep(string processId, string stepId, string unitId, bool isolate)
-    {
-        if (!TryUseSecondLayerInteraction(out BusinessSceneCommandResult unavailable))
-        {
-            return unavailable;
-        }
-
-        bool success = _controller.TryEnterProcessStep(processId, stepId, unitId, isolate, out string message);
-        return success
-            ? BusinessSceneCommandResult.Completed(message)
-            : BusinessSceneCommandResult.Failed("invalid-process-step", message);
-    }
-
     /// <summary>
     /// 播放独立命名镜头点动画。燃煤场景当前只预留组件与协议接口，未登记点位时返回明确错误。
     /// </summary>
@@ -140,8 +126,8 @@ public sealed class CoalPowerBusinessSceneControllerAdapter : IBusinessSceneCont
     }
 
     /// <summary>
-    /// 平滑恢复燃煤场景初始镜头，并将流程、命名镜头和交互产生的临时视觉恢复到总览。
-    /// 当前设备四态由流程控制器原样保留并重新应用；该入口不改写流程字段或状态表。
+    /// 按当前展示层级恢复镜头：第三层活动时回到当前关键环节的默认观察位；
+    /// 第二层活动时恢复燃煤场景初始镜头和总览视觉，并保留当前设备四态与流程字段。
     /// </summary>
     public BusinessSceneCommandResult ResetCamera()
     {
@@ -149,12 +135,18 @@ public sealed class CoalPowerBusinessSceneControllerAdapter : IBusinessSceneCont
         {
             return unavailable;
         }
+
+        // 第三层拥有独立默认镜头。此分支禁止恢复二层总览视觉，否则会造成第三层拓扑、模型与二层画面错配。
+        if (_processDetailCoordinator != null && _processDetailCoordinator.IsActive)
+        {
+            return _processDetailCoordinator.ResetActiveCameraPose();
+        }
         if (_cameraPoseRegistry == null)
         {
             return BusinessSceneCommandResult.Failed("camera-reset-unavailable", "燃煤场景缺少相机复位控制器。");
         }
 
-        // 先验证并启动镜头复位。镜头配置无效时不得先改变场景视觉，避免失败命令留下半完成状态。
+        // 二层先验证并启动镜头复位。镜头配置无效时不得先改变场景视觉，避免失败命令留下半完成状态。
         BusinessSceneCommandResult cameraResult = _cameraPoseRegistry.ResetCamera();
         if (!cameraResult.Success)
         {
@@ -481,8 +473,9 @@ public sealed class CoalPowerBusinessSceneControllerAdapter : IBusinessSceneCont
     }
 
     /// <summary>
-    /// 二层流程、聚焦、选择清除、显隐、镜头和复位共用第三层隔离门。
-    /// 设备四态不经过该门，保证锅炉关键环节展示期间仍能接收并重放实时状态。
+    /// 二层流程、聚焦、选择清除、显隐和命名镜头共用第三层隔离门。
+    /// 设备四态不经过该门，保证汽轮机关键环节展示期间仍能接收并重放实时状态；
+    /// 相机复位由 ResetCamera 按当前层级路由，不经过该二层隔离门。
     /// </summary>
     private bool TryUseSecondLayerInteraction(out BusinessSceneCommandResult failure)
     {
@@ -494,7 +487,7 @@ public sealed class CoalPowerBusinessSceneControllerAdapter : IBusinessSceneCont
         {
             failure = BusinessSceneCommandResult.Failed(
                 "process-detail-interaction-blocked",
-                "燃煤锅炉关键环节展示期间已阻断旧二层流程、聚焦、显隐、镜头和复位交互。");
+                "燃煤汽轮机关键环节展示期间已阻断旧二层流程、聚焦、显隐和命名镜头交互。");
             return false;
         }
 

@@ -52,7 +52,9 @@
 
       // 保持 Unity 渲染目标与 CSS 画布同步；像素比设上限，避免高分屏将显存开销无界放大。
       config.matchWebGLToCanvasSize = true;
-      config.devicePixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+      // 提高 WebGL 绘制缓冲区像素密度，配合 Unity 端 MSAA（多重采样抗锯齿）和 URP 超采样，
+      // 重点改善文字牌、管线等高对比度细线的阶梯边缘；上限 2.5 防止高分屏显存无界增长。
+      config.devicePixelRatio = Math.min(window.devicePixelRatio || 1, 2.5);
       loadingBar.style.display = 'block';
 
       /*

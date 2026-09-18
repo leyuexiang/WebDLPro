@@ -331,7 +331,7 @@ namespace WebDLPro.Unity.Tests
 
                 // 每轮都在当前已配置发电场景创建一组真实运行时材质，下一轮切换必须在卸载前主动清理。
                 // 这样九次请求验证的是实际资源生命周期，而不是仅统计协调器或场景实例数量。
-                string fadeNodeId = stableSceneId == "coal-power" ? "node.coal-boiler" : "gas-turbine";
+                string fadeNodeId = stableSceneId == "coal-power" ? "node.coal-boiler" : "node.gas-turbine";
                 BusinessSceneCommandResult fadeResult = _coordinator.ActiveController.SetNodeVisibility(fadeNodeId, false);
                 Assert.That(fadeResult.Success, Is.True, fadeResult.Message);
                 Assert.That(CountRuntimeContextMaterials(), Is.GreaterThan(0), "测试前置条件失败：未创建运行时半透明材质。");
@@ -370,14 +370,14 @@ namespace WebDLPro.Unity.Tests
             SubscribeBridgeOutboundLogs();
 
             int previousLogCount = _bridgeOutboundLogs.Count;
-            InvokeBridgeMethod("ReportObjectSelected", "gas-turbine", "测试燃气轮机对象");
+            InvokeBridgeMethod("ReportObjectSelected", "node.gas-turbine", "测试燃气轮机对象");
             yield return null;
 
             Assert.That(_bridgeOutboundLogs.Count, Is.EqualTo(previousLogCount + 1), "对象选择必须产生且只产生一条上行桥接事件。");
             string outboundLog = _bridgeOutboundLogs[_bridgeOutboundLogs.Count - 1];
             Assert.That(outboundLog, Does.Contain("\"type\":\"objectSelected\""));
             Assert.That(outboundLog, Does.Contain("\"sceneId\":\"gas-power\""));
-            Assert.That(outboundLog, Does.Contain("\"sceneNodeId\":\"gas-turbine\""));
+            Assert.That(outboundLog, Does.Contain("\"sceneNodeId\":\"node.gas-turbine\""));
             Assert.That(_coordinator.ActiveSceneActivationId, Does.StartWith("scene-activation-"), "真实场景提交必须生成可区分的物理实例标识。");
             Assert.That(outboundLog, Does.Contain($"\"sceneActivationId\":\"{_coordinator.ActiveSceneActivationId}\""));
             // 回归保护：二维 nodeId（拓扑节点标识）即使值碰巧相同，也不得由 Unity 上行事件写入。
@@ -421,7 +421,7 @@ namespace WebDLPro.Unity.Tests
 
         /// <summary>
         /// 动作命令必须经真实桥接器进入当前燃气控制器，且只传递稳定业务标识。
-        /// 本用例使用正式场景中显式登记的燃机、余热锅炉和蒸汽轮机验证四态与清除都实际到达模型登记器；
+        /// 本用例使用正式场景中显式登记的燃机、余热锅炉、蒸汽轮机和现场发电机验证四态与清除都实际到达模型登记器；
         /// 路径能力仍未交付，格式错误、未登记状态节点和未知流程则必须保留可供前端关联的稳定错误码。
         /// </summary>
         [UnityTest]
@@ -449,25 +449,19 @@ namespace WebDLPro.Unity.Tests
                 "未知三维节点未返回命令结果。");
             Assert.That(HasBridgeLogFragmentForRequest("request.bridge.actions.focus-missing", "\"errorCode\":\"invalid-node\""), Is.True);
 
-            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage("enterProcessStep", "{\"processId\":\"process.not-registered\",\"stepId\":\"overview\",\"unitId\":\"all\",\"isolate\":true}", "request.bridge.actions.process-missing"));
-            yield return WaitForCompletion(
-                () => HasNotice("commandResult", "request.bridge.actions.process-missing", string.Empty),
-                "未知流程未返回命令结果。");
-            Assert.That(HasBridgeLogFragmentForRequest("request.bridge.actions.process-missing", "\"errorCode\":\"invalid-process-step\""), Is.True);
-
-            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage("setNodeVisualState", "{\"sceneNodeId\":\"gas-turbine\",\"visualState\":\"alarm\",\"snapshotSequence\":1,\"statusUpdatedAt\":\"2026-08-08T10:00:00.000Z\",\"sourceRevision\":0}", "request.bridge.actions.visual-gas-turbine"));
+            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage("setNodeVisualState", "{\"sceneNodeId\":\"node.gas-turbine\",\"visualState\":\"alarm\",\"snapshotSequence\":1,\"statusUpdatedAt\":\"2026-08-08T10:00:00.000Z\",\"sourceRevision\":0}", "request.bridge.actions.visual-gas-turbine"));
             yield return WaitForCompletion(
                 () => HasNotice("commandResult", "request.bridge.actions.visual-gas-turbine", string.Empty),
                 "燃气轮机四态命令未返回结果。");
             Assert.That(HasBridgeLogFragmentForRequest("request.bridge.actions.visual-gas-turbine", "\"success\":true"), Is.True);
 
-            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage("setNodeVisualState", "{\"sceneNodeId\":\"hrsg\",\"visualState\":\"fault\",\"snapshotSequence\":1,\"statusUpdatedAt\":\"2026-08-08T10:00:00.000Z\",\"sourceRevision\":0}", "request.bridge.actions.visual-hrsg"));
+            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage("setNodeVisualState", "{\"sceneNodeId\":\"node.gas-hrsg\",\"visualState\":\"fault\",\"snapshotSequence\":1,\"statusUpdatedAt\":\"2026-08-08T10:00:00.000Z\",\"sourceRevision\":0}", "request.bridge.actions.visual-hrsg"));
             yield return WaitForCompletion(
                 () => HasNotice("commandResult", "request.bridge.actions.visual-hrsg", string.Empty),
                 "余热锅炉四态命令未返回结果。");
             Assert.That(HasBridgeLogFragmentForRequest("request.bridge.actions.visual-hrsg", "\"success\":true"), Is.True);
 
-            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage("setNodeVisualState", "{\"sceneNodeId\":\"steam-turbine\",\"visualState\":\"offline\",\"snapshotSequence\":1,\"statusUpdatedAt\":\"2026-08-08T10:00:00.000Z\",\"sourceRevision\":0}", "request.bridge.actions.visual-steam-turbine"));
+            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage("setNodeVisualState", "{\"sceneNodeId\":\"node.gas-steam-turbine\",\"visualState\":\"offline\",\"snapshotSequence\":1,\"statusUpdatedAt\":\"2026-08-08T10:00:00.000Z\",\"sourceRevision\":0}", "request.bridge.actions.visual-steam-turbine"));
             yield return WaitForCompletion(
                 () => HasNotice("commandResult", "request.bridge.actions.visual-steam-turbine", string.Empty),
                 "蒸汽轮机四态命令未返回结果。");
@@ -475,17 +469,23 @@ namespace WebDLPro.Unity.Tests
 
             // 清除与设置共用同一节点的本地快照序号。第二个序号证明真实模型能撤销动态颜色，
             // 既不把设备缺失伪装成正常，也不依赖场景卸载才能恢复基础材质。
-            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage("clearNodeVisualState", "{\"sceneNodeId\":\"gas-turbine\",\"snapshotSequence\":2}", "request.bridge.actions.visual-gas-turbine-clear"));
+            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage("clearNodeVisualState", "{\"sceneNodeId\":\"node.gas-turbine\",\"snapshotSequence\":2}", "request.bridge.actions.visual-gas-turbine-clear"));
             yield return WaitForCompletion(
                 () => HasNotice("commandResult", "request.bridge.actions.visual-gas-turbine-clear", string.Empty),
                 "燃气轮机四态清除命令未返回结果。");
             Assert.That(HasBridgeLogFragmentForRequest("request.bridge.actions.visual-gas-turbine-clear", "\"success\":true"), Is.True);
 
-            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage("setNodeVisualState", "{\"sceneNodeId\":\"generator\",\"visualState\":\"normal\",\"snapshotSequence\":1,\"statusUpdatedAt\":\"2026-08-08T10:00:00.000Z\",\"sourceRevision\":0}", "request.bridge.actions.visual-unmapped"));
+            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage("setNodeVisualState", "{\"sceneNodeId\":\"node.gas-generator\",\"visualState\":\"normal\",\"snapshotSequence\":1,\"statusUpdatedAt\":\"2026-08-08T10:00:00.000Z\",\"sourceRevision\":0}", "request.bridge.actions.visual-generator"));
             yield return WaitForCompletion(
-                () => HasNotice("commandResult", "request.bridge.actions.visual-unmapped", string.Empty),
-                "未映射的发电机节点未返回结果。");
-            Assert.That(HasBridgeLogFragmentForRequest("request.bridge.actions.visual-unmapped", "\"errorCode\":\"invalid-node\""), Is.True);
+                () => HasNotice("commandResult", "request.bridge.actions.visual-generator", string.Empty),
+                "现场发电机四态命令未返回结果。");
+            Assert.That(HasBridgeLogFragmentForRequest("request.bridge.actions.visual-generator", "\"success\":true"), Is.True);
+
+            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage("setNodeVisualState", "{\"sceneNodeId\":\"node.gas-generator\",\"visualState\":\"normal\",\"snapshotSequence\":2,\"statusUpdatedAt\":\"2026-08-08T10:00:01.000Z\",\"sourceRevision\":1}", "request.bridge.actions.visual-generator-refresh"));
+            yield return WaitForCompletion(
+                () => HasNotice("commandResult", "request.bridge.actions.visual-generator-refresh", string.Empty),
+                "现场发电机四态刷新命令未返回结果。");
+            Assert.That(HasBridgeLogFragmentForRequest("request.bridge.actions.visual-generator-refresh", "\"success\":true"), Is.True);
 
             InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage("setRouteFlow", "{\"routeId\":\"route.not-registered\",\"enabled\":true}", "request.bridge.actions.route-unsupported"));
             yield return WaitForCompletion(
@@ -503,7 +503,8 @@ namespace WebDLPro.Unity.Tests
         /// <summary>
         /// 使用只存在于测试程序集的全能力控制器验证统一桥接的正向分派。
         /// 该控制器不进入场景目录、资源包或正式映射；它只记录经过协议校验后的稳定标识和固定枚举，
-        /// 从而证明流程、聚焦、四态、路径、显隐和复位均能到达当前活动控制器，而不是只验证“不支持”分支。
+            /// 从而证明聚焦、四态、路径、显隐和复位均能到达当前活动控制器，而不是只验证“不支持”分支。
+
         /// </summary>
         [UnityTest]
         public IEnumerator 全能力测试控制器通过桥接接收受控场景动作()
@@ -518,10 +519,6 @@ namespace WebDLPro.Unity.Tests
             Assert.That(activeControllerField, Is.Not.Null, "多场景协调器缺少当前控制器字段，测试不能绕过正式活动控制器读取路径。");
             activeControllerField.SetValue(_coordinator, controller);
 
-            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage(
-                "enterProcessStep",
-                "{\"processId\":\"test-process\",\"stepId\":\"test-step\",\"unitId\":\"all\",\"isolate\":true}",
-                "request.bridge.full-capability.process"));
             InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage(
                 "focusNode",
                 "{\"sceneNodeId\":\"scene-node.test\",\"selectionId\":\"selection.bridge.full-capability.focus\",\"isolate\":false}",
@@ -571,11 +568,6 @@ namespace WebDLPro.Unity.Tests
                 "request.bridge.full-capability.route-missing"));
             yield return null;
 
-            Assert.That(controller.ProcessStepCalls, Is.EqualTo(1));
-            Assert.That(controller.LastProcessId, Is.EqualTo("test-process"));
-            Assert.That(controller.LastStepId, Is.EqualTo("test-step"));
-            Assert.That(controller.LastUnitId, Is.EqualTo("all"));
-            Assert.That(controller.LastProcessIsolate, Is.True);
             Assert.That(controller.FocusCalls, Is.EqualTo(1));
             Assert.That(controller.LastFocusedNodeId, Is.EqualTo("scene-node.test"));
             Assert.That(controller.LastFocusIsolate, Is.False);
@@ -598,7 +590,6 @@ namespace WebDLPro.Unity.Tests
 
             string[] successfulRequestIds =
             {
-                "request.bridge.full-capability.process",
                 "request.bridge.full-capability.focus",
                 "request.bridge.full-capability.focus-retry",
                 "request.bridge.full-capability.clear-selection",
@@ -667,52 +658,8 @@ namespace WebDLPro.Unity.Tests
         }
 
         /// <summary>
-        /// 燃气流程的每个已发布步骤都必须解析到场景序列化登记的三维节点。
-        /// 通过真实桥接器逐项下发单机组请求，防止流程代码拼接未登记节点后被镜头方法静默忽略，
-        /// 同时不把步骤名称扩展为设备标识或二维拓扑映射。
-        /// </summary>
-        [UnityTest]
-        public IEnumerator 燃气已发布流程步骤均使用已登记三维节点()
-        {
-            yield return LoadBootstrap();
-            _bridgeManager = FindBridgeManager();
-            Assert.That(_bridgeManager, Is.Not.Null, "Bootstrap 未创建常驻 Unity 桥接管理器。");
-            SubscribeBridgeOutboundLogs();
-
-            InvokeBridgeMethod("ReceiveFromParent", CreateSceneSwitchMessage("gas-power", "transition.bridge.process-node-registration", "request.bridge.process-node-registration.scene"));
-            yield return WaitForCompletion(
-                () => HasNotice("sceneChanged", "request.bridge.process-node-registration.scene", "transition.bridge.process-node-registration"),
-                "燃气场景未在流程节点登记验证前完成加载。");
-
-            // gas-turbine 已迁移为独立第三层关键环节，只能由 enterProcessDetail 进入，
-            // 不得再作为旧 enterProcessStep 流程步骤下发；其状态视觉、状态驱动播放及返回链路
-            // 由本文件“燃气轮机第三层状态视觉与状态驱动播放”专项用例覆盖。
-            // gas-network 尚无独立场景节点登记，必须明确拒绝，不能为满足测试而借用进气或总览节点。
-            string[] publishedStepIds = { "overview", "inlet-duct", "hrsg", "steam-turbine", "generator", "grid-output" };
-            for (int stepIndex = 0; stepIndex < publishedStepIds.Length; stepIndex++)
-            {
-                string stepId = publishedStepIds[stepIndex];
-                string requestId = $"request.bridge.process-node-registration.{stepId}";
-                string payload = $"{{\"processId\":\"gas-power-generation\",\"stepId\":\"{stepId}\",\"unitId\":\"1\",\"isolate\":true}}";
-                InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage("enterProcessStep", payload, requestId));
-                yield return WaitForCompletion(
-                    () => HasNotice("commandResult", requestId, string.Empty),
-                    $"燃气流程步骤 {stepId} 未返回命令结果。");
-                Assert.That(HasBridgeLogFragmentForRequest(requestId, "\"success\":true"), Is.True, $"燃气流程步骤 {stepId} 引用了未登记三维节点或未成功执行。");
-            }
-
-            const string gasNetworkRequestId = "request.bridge.process-node-registration.gas-network";
-            const string gasNetworkPayload = "{\"processId\":\"gas-power-generation\",\"stepId\":\"gas-network\",\"unitId\":\"1\",\"isolate\":true}";
-            InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage("enterProcessStep", gasNetworkPayload, gasNetworkRequestId));
-            yield return WaitForCompletion(
-                () => HasNotice("commandResult", gasNetworkRequestId, string.Empty),
-                "未登记燃气管网步骤未返回明确拒绝结果。");
-            Assert.That(HasBridgeLogFragmentForRequest(gasNetworkRequestId, "\"errorCode\":\"invalid-process-step\""), Is.True, "未登记燃气管网步骤不得伪造成功或聚焦到其他节点。");
-        }
-
-        /// <summary>
         /// 通过正式启动场景、统一桥接和燃煤真实控制器验证完整业务链。
-        /// 用例只使用燃煤场景属性面板中显式登记的流程与三维节点标识，依次覆盖流程步骤、选择描边、
+        /// 用例使用燃煤场景属性面板中显式登记的三维节点标识，依次覆盖选择描边、
         /// 选择清除、上下文半透明、五个一对一设备节点的四态、复位和未交付路径能力，避免只验证“场景能加载”却遗漏核心交互。
         /// </summary>
         [UnityTest]
@@ -738,37 +685,6 @@ namespace WebDLPro.Unity.Tests
             // 燃煤总览会按正式配置将非核心模型显示为半透明上下文，因此初始态本身允许持有有限运行时材质。
             // 后续复位应回到这个稳定基线，而不是错误断言为零；这样仍能准确发现聚焦、显隐或四态操作泄漏的新材质。
             int initialOverviewContextMaterialCount = CountRuntimeContextMaterials();
-
-            // 四个步骤逐一经过正式桥接分派。每步使用独立请求标识，防止前一步成功日志掩盖后一步失败。
-            string[] stepIds = { "overview", "combustion", "water-steam-cycle", "power-output" };
-            for (int stepIndex = 0; stepIndex < stepIds.Length; stepIndex++)
-            {
-                string stepId = stepIds[stepIndex];
-                string requestId = $"request.bridge.coal-actions.step.{stepId}";
-                string payload = $"{{\"processId\":\"coal-power-generation\",\"stepId\":\"{stepId}\",\"unitId\":\"all\",\"isolate\":true}}";
-                InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage("enterProcessStep", payload, requestId));
-                yield return WaitForCompletion(
-                    () => HasNotice("commandResult", requestId, string.Empty),
-                    $"燃煤流程步骤 {stepId} 未返回命令结果。");
-                Assert.That(HasBridgeLogFragmentForRequest(requestId, "\"success\":true"), Is.True, $"燃煤流程步骤 {stepId} 未成功执行。");
-            }
-            Assert.That(_coordinator.ActiveController.GetStateDescription(), Does.Contain("step=power-output"));
-
-            // 上述循环及断言必须保留 power-output 的执行覆盖；锅炉只属于 combustion 步骤的新白名单，
-            // 因此聚焦前需再次通过正式桥接切回 combustion，避免测试依赖旧版“跨步骤任意聚焦”的宽松行为。
-            const string combustionBeforeFocusRequestId = "request.bridge.coal-actions.step.combustion-before-focus";
-            const string combustionBeforeFocusPayload = "{\"processId\":\"coal-power-generation\",\"stepId\":\"combustion\",\"unitId\":\"all\",\"isolate\":true}";
-            InvokeBridgeMethod(
-                "ReceiveFromParent",
-                CreateBridgeCommandMessage("enterProcessStep", combustionBeforeFocusPayload, combustionBeforeFocusRequestId));
-            yield return WaitForCompletion(
-                () => HasNotice("commandResult", combustionBeforeFocusRequestId, string.Empty),
-                "燃煤锅炉聚焦前切回燃烧步骤未返回命令结果。");
-            Assert.That(
-                HasBridgeLogFragmentForRequest(combustionBeforeFocusRequestId, "\"success\":true"),
-                Is.True,
-                "燃煤锅炉聚焦前未成功切回允许该节点的燃烧步骤。");
-            Assert.That(_coordinator.ActiveController.GetStateDescription(), Does.Contain("step=combustion"));
 
             const string focusRequestId = "request.bridge.coal-actions.focus";
             InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage(
@@ -841,7 +757,7 @@ namespace WebDLPro.Unity.Tests
                 Assert.That(HasBridgeLogFragmentForRequest(clearStateRequestId, "\"success\":true"), Is.True, $"燃煤四态节点 {nodeId} 未成功清除状态。");
             }
 
-            // 相机复位必须保留故障设备状态，同时恢复总览视觉但不能把当前流程字段改写为 overview。
+            // 相机复位必须保留故障设备状态，同时恢复场景默认视觉。
             const string retainedFaultRequestId = "request.bridge.coal-actions.visual.retained-fault";
             InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage(
                 "setNodeVisualState",
@@ -858,7 +774,6 @@ namespace WebDLPro.Unity.Tests
                 () => HasNotice("commandResult", resetCameraRequestId, string.Empty),
                 "燃煤相机与总览视觉复位未返回命令结果。");
             Assert.That(HasBridgeLogFragmentForRequest(resetCameraRequestId, "\"success\":true"), Is.True);
-            Assert.That(_coordinator.ActiveController.GetStateDescription(), Does.Contain("step=combustion"), "相机复位不得改写当前流程步骤字段。");
             Assert.That(HasOutboundEvent("selectionCleared", "coal-power"), Is.True, "相机复位成功后必须通知前端清空拓扑选择。");
 
             Scene coalScene = SceneManager.GetSceneByPath(CoalPowerScenePath);
@@ -1071,12 +986,30 @@ namespace WebDLPro.Unity.Tests
                       Quaternion.Angle(cameraRoot.transform.rotation, binding.CameraPose.rotation) < 0.05f,
                 "第三层相机未移动到显式观察位。");
 
+            // resetCamera（相机复位）按当前展示层级路由。第三层中先模拟用户自由移动镜头，
+            // 再确认命令只恢复当前关键环节的 CameraPose（默认镜头位），不退出详情、不恢复二层总览。
+            cameraRoot.transform.SetPositionAndRotation(
+                binding.CameraPose.position + new Vector3(12f, 5f, -7f),
+                Quaternion.Euler(16f, 42f, 3f));
+            const string resetDetailCameraRequestId = "request.bridge.process-detail.reset-camera";
+            InvokeBridgeMethod(
+                "ReceiveFromParent",
+                CreateBridgeCommandMessage("resetCamera", "{}", resetDetailCameraRequestId));
+            yield return WaitForCompletion(
+                () => HasNotice("commandResult", resetDetailCameraRequestId, string.Empty),
+                "第三层相机复位未返回命令结果。");
+            Assert.That(HasBridgeLogFragmentForRequest(resetDetailCameraRequestId, "\"success\":true"), Is.True);
+            yield return WaitForCompletion(
+                () => Vector3.Distance(cameraRoot.transform.position, binding.CameraPose.position) < 0.01f &&
+                      Quaternion.Angle(cameraRoot.transform.rotation, binding.CameraPose.rotation) < 0.05f,
+                "第三层相机复位未回到当前关键环节默认视角。");
+            Assert.That(binding.gameObject.activeInHierarchy, Is.True, "相机复位不得退出或隐藏第三层实例。");
+            Assert.That(interactionsBlockedProperty.GetValue(processController), Is.EqualTo(true), "相机复位不得解除第三层交互隔离。");
+
             // 第三层期间必须由 Unity 侧再做一次硬隔离，不能仅依赖网页遮罩：即使旧命令迟到、
-            // 被重放或直接从桥接注入，也不得触发二层的流程过滤、聚焦描边、选择清除、显隐或复位。
-            // 这些命令被拒绝后，独立模型、当前播放许可和显式相机位都必须保持不变。
+            // 被拒绝后，独立模型、播放许可和显式相机位必须保持不变。
             string[] blockedCommandTypes =
             {
-                "enterProcessStep",
                 "focusNode",
                 "clearSelection",
                 "setNodeVisibility",
@@ -1084,7 +1017,6 @@ namespace WebDLPro.Unity.Tests
             };
             string[] blockedPayloads =
             {
-                "{\"processId\":\"gas-power-generation\",\"stepId\":\"inlet-duct\",\"unitId\":\"1\",\"isolate\":true}",
                 "{\"sceneNodeId\":\"gas-turbine\",\"isolate\":true,\"selectionId\":\"selection.process-detail.blocked\"}",
                 "{}",
                 "{\"sceneNodeId\":\"gas-turbine\",\"enabled\":false}",
@@ -1218,7 +1150,6 @@ namespace WebDLPro.Unity.Tests
         {
             private const BusinessSceneCapability AllCapabilities =
                 BusinessSceneCapability.Initialize |
-                BusinessSceneCapability.EnterProcessStep |
                 BusinessSceneCapability.FocusNode |
                 BusinessSceneCapability.ClearSelection |
                 BusinessSceneCapability.UpdateNodeVisualState |
@@ -1230,11 +1161,6 @@ namespace WebDLPro.Unity.Tests
 
             public string SceneId => "test-full-capability";
             public BusinessSceneCapability Capabilities => AllCapabilities;
-            public int ProcessStepCalls { get; private set; }
-            public string LastProcessId { get; private set; }
-            public string LastStepId { get; private set; }
-            public string LastUnitId { get; private set; }
-            public bool LastProcessIsolate { get; private set; }
             public int FocusCalls { get; private set; }
             public string LastFocusedNodeId { get; private set; }
             public bool LastFocusIsolate { get; private set; }
@@ -1257,16 +1183,6 @@ namespace WebDLPro.Unity.Tests
             {
                 completed?.Invoke(BusinessSceneCommandResult.Completed("测试控制器初始化完成。"));
                 yield break;
-            }
-
-            public BusinessSceneCommandResult EnterProcessStep(string processId, string stepId, string unitId, bool isolate)
-            {
-                ProcessStepCalls++;
-                LastProcessId = processId;
-                LastStepId = stepId;
-                LastUnitId = unitId;
-                LastProcessIsolate = isolate;
-                return BusinessSceneCommandResult.Completed("流程命令已记录。");
             }
 
             public BusinessSceneCommandResult FocusNode(string sceneNodeId, bool isolate)

@@ -15,34 +15,36 @@ const PROCESS_DETAIL_TOPOLOGY_CONTEXTS: readonly TopologyDataContext[] = Object.
     sourceSha256: '30652c2a8a2b5bf0af76c70501baa94e2ece57edb57fd35d164486546103b9ba',
     expectedPenCount: 32,
     bindings: Object.freeze([
-      // 主燃气轮机和压缩机均属于现有燃机入口节点，状态图片同步到同一业务节点。
-      Object.freeze({ penId: '14d76d6', nodeId: 'inlet-duct' }),
-      Object.freeze({ penId: '35d969bb', nodeId: 'inlet-duct' }),
-      // 脱硝装置与现有余热/脱硝状态节点显式对应；控制系统图元没有可靠三维节点证据，不绑定状态。
-      Object.freeze({ penId: '621bf39b', nodeId: 'hrsg' }),
-    ]),
-  }),
-  Object.freeze({
-    contextId: 'process-detail.coal-power.boiler',
-    renderer: 'coal-v2',
-    // 当前锅炉第三层沿用已登记的关键环节输入文件；它仍由同一公共画布加载，不复制图元资源。
-    topologyPath: 'variants/key-process/topology.json',
-    sourceSha256: '513344c1af2d80f5a3eeca016a00e46916340b3684924bca7afd92125a86c49f',
-    expectedPenCount: 46,
-    bindings: Object.freeze([
-      Object.freeze({ penId: '2a01627b', nodeId: 'system.boiler-dcs' }),
+      // 主燃气轮机和压缩机均对应下层现场设备节点，状态图片同步到同一燃气轮机设备。
+      Object.freeze({ penId: '14d76d6', nodeId: 'asset.gas-turbine' }),
+      Object.freeze({ penId: '35d969bb', nodeId: 'asset.gas-turbine' }),
+      // 脱硝装置沿用余热锅炉现场设备状态；控制系统图元没有可靠三维节点证据，不绑定状态。
+      Object.freeze({ penId: '621bf39b', nodeId: 'asset.gas-hrsg' }),
     ]),
   }),
   Object.freeze({
     contextId: 'process-detail.coal-power.steam-turbine',
     renderer: 'coal-v2',
     topologyPath: 'process-detail/coal-power/steam-turbine/topology.json',
-    sourceSha256: '038c8c639d98ecbe30b650a8315e1bfc3a09fc57cc1904e6ab8bef0c219243cc',
+    sourceSha256: '5c7262f198f4b4443d863d07a8b39f5bd0d9d841cb03d820b5535c736c78a79c',
+    expectedPenCount: 45,
+    bindings: Object.freeze([
+      // 新输入中的汽轮机、锅炉和发电机均对应下层现场设备节点，状态由公共四态资源表达。
+      Object.freeze({ penId: '429749ea', nodeId: 'asset.coal-steam-turbine' }),
+      Object.freeze({ penId: '8be4fc2', nodeId: 'asset.coal-boiler' }),
+      Object.freeze({ penId: '9533a1f', nodeId: 'asset.coal-generator' }),
+    ]),
+  }),
+  Object.freeze({
+    contextId: 'process-detail.solar-power.inverter',
+    renderer: 'solar',
+    topologyPath: 'process-detail/solar-power/inverter/topology.json',
+    sourceSha256: '6391b1212c07664721cbccfea4bb9d5f7ef06487655b08fbf09d4b09e9018686',
     expectedPenCount: 19,
     bindings: Object.freeze([
-      // 汽轮机和数字电调共同呈现同一汽机控制单元，四态切换必须保持同步。
-      Object.freeze({ penId: 'baf5ab7', nodeId: 'system.steam-turbine-dcs' }),
-      Object.freeze({ penId: 'b9ae43', nodeId: 'system.steam-turbine-dcs' }),
+      // 控制器和实体设备分别沿用光伏总览的正式业务节点；机组主控制器没有可靠映射，保持静态。
+      Object.freeze({ penId: 'df25e45', nodeId: 'system.solar-inverter-control' }),
+      Object.freeze({ penId: '2cf7b170', nodeId: 'asset.solar-inverter' }),
     ]),
   }),
 ])

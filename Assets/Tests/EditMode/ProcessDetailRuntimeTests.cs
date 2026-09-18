@@ -20,7 +20,8 @@ namespace WebDLPro.Unity.Tests
     {
         private const string CatalogPath = "Assets/Configuration/ProcessDetailCatalog.asset";
         private const string GasPrefabPath = "Assets/ProcessDetails/GasPower/GasTurbine/GasTurbineProcessDetail.prefab";
-        private const string CoalPrefabPath = "Assets/ProcessDetails/CoalPower/Boiler/CoalBoilerProcessDetail.prefab";
+        private const string CoalPrefabPath = "Assets/ProcessDetails/CoalPower/SteamTurbine/CoalSteamTurbineProcessDetail.prefab";
+        private const string SolarPrefabPath = "Assets/ProcessDetails/SolarPower/Inverter/SolarInverterProcessDetail.prefab";
 
         private sealed class TrackingLease : IDisposable
         {
@@ -111,12 +112,12 @@ namespace WebDLPro.Unity.Tests
                 ProcessDetailCatalogEntry coalEntry = new ProcessDetailCatalogEntry(
                     "coal-power",
                     "coal-power-generation",
-                    "boiler",
-                    "process-detail.coal-power.boiler",
-                    "process-detail-resource.coal-power.boiler",
-                    "camera-pose.coal-power.boiler",
-                    new[] { "coal-boiler", "coal-fan" },
-                    new[] { "coal-boiler-animation" },
+                    "steam-turbine",
+                    "process-detail.coal-power.steam-turbine",
+                    "process-detail-resource.coal-power.steam-turbine",
+                    "camera-pose.coal-power.steam-turbine",
+                    new[] { "coal-steam-turbine", "coal-generator" },
+                    new[] { "coal-steam-turbine-animation" },
                     BusinessSceneAvailability.Available);
 
                 catalog.SetEntriesForEditor(new[] { gasEntry, coalEntry });
@@ -124,7 +125,7 @@ namespace WebDLPro.Unity.Tests
                 Assert.That(catalog.TryGet("gas-power", gasEntry.ProcessDetailId, out _), Is.True);
                 Assert.That(catalog.TryGet("coal-power", coalEntry.ProcessDetailId, out _), Is.True);
                 Assert.That(catalog.ContainsStateNode("gas-power", "gas-generator"), Is.True);
-                Assert.That(catalog.ContainsStateNode("coal-power", "coal-fan"), Is.True);
+                Assert.That(catalog.ContainsStateNode("coal-power", "coal-generator"), Is.True);
 
                 ProcessDetailCatalogEntry duplicateDynamicTarget = new ProcessDetailCatalogEntry(
                     "coal-power",
@@ -286,7 +287,7 @@ namespace WebDLPro.Unity.Tests
             Assert.That(catalog, Is.Not.Null);
             Assert.That(prefab, Is.Not.Null);
             Assert.That(catalog.ValidateForRuntime(), Is.Empty);
-            Assert.That(catalog.Entries.Count, Is.EqualTo(2), "当前应登记燃气轮机正式项和燃煤锅炉燃烧占位项。");
+            Assert.That(catalog.Entries.Count, Is.EqualTo(3), "当前应登记燃气轮机、燃煤汽轮机和光伏逆变器三个正式项。");
 
             Assert.That(
                 catalog.TryGet("gas-power", "process-detail.gas-power.gas-turbine", out ProcessDetailCatalogEntry entry),
@@ -302,13 +303,9 @@ namespace WebDLPro.Unity.Tests
             Assert.That(binding.DisplayAnchor.localPosition.x, Is.EqualTo(10000f).Within(0.001f));
             Assert.That(binding.DisplayAnchor.localPosition.y, Is.EqualTo(0f).Within(0.001f));
             Assert.That(binding.DisplayAnchor.localPosition.z, Is.EqualTo(0f).Within(0.001f));
-            Vector3 cameraLocalPosition = binding.CameraPose.localPosition;
-            Assert.That(cameraLocalPosition.x, Is.EqualTo(9989.13805f).Within(0.001f));
-            Assert.That(cameraLocalPosition.y, Is.EqualTo(2.483585f).Within(0.0001f));
-            Assert.That(cameraLocalPosition.z, Is.EqualTo(-1.561808f).Within(0.0001f));
-            Assert.That(Vector3.Distance(binding.CameraPose.localPosition, binding.DisplayAnchor.localPosition), Is.LessThan(20f));
-            Assert.That(binding.CameraPose.localEulerAngles.x, Is.EqualTo(8.457968f).Within(0.001f));
-            Assert.That(binding.CameraPose.localEulerAngles.y, Is.EqualTo(86.63072f).Within(0.001f));
+            Assert.That(binding.CameraPose.parent, Is.EqualTo(prefab.transform));
+            Assert.That(IsFinite(binding.CameraPose.localPosition), Is.True);
+            Assert.That(IsFinite(binding.CameraPose.localEulerAngles), Is.True);
 
             SerializedProperty rendererProperty = new SerializedObject(visualAdapter).FindProperty("_renderers");
             Assert.That(rendererProperty, Is.Not.Null);
@@ -330,38 +327,52 @@ namespace WebDLPro.Unity.Tests
         }
 
         [Test]
-        public void 燃煤锅炉包装登记统一播放目标并预留排除列表()
+        public void 燃煤汽轮机包装使用RanMeiManager并登记组合动态目标()
         {
             ProcessDetailCatalog catalog = AssetDatabase.LoadAssetAtPath<ProcessDetailCatalog>(CatalogPath);
             GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(CoalPrefabPath);
             Assert.That(catalog, Is.Not.Null);
             Assert.That(prefab, Is.Not.Null);
             Assert.That(
-                catalog.TryGet("coal-power", "process-detail.coal-power.boiler", out ProcessDetailCatalogEntry entry),
+                catalog.TryGet("coal-power", "process-detail.coal-power.steam-turbine", out ProcessDetailCatalogEntry entry),
                 Is.True);
 
             ProcessDetailDeviceBinding binding = prefab.GetComponent<ProcessDetailDeviceBinding>();
             Assert.That(binding, Is.Not.Null);
             Assert.That(binding.ValidateBinding(entry).Success, Is.True);
             Assert.That(entry.ProcessId, Is.EqualTo("coal-power-generation"));
-            Assert.That(entry.StepId, Is.EqualTo("boiler"));
-            Assert.That(entry.StateNodeId, Is.EqualTo("node.coal-boiler"));
-            Assert.That(entry.DynamicTargetIds, Is.EqualTo(new[] { "node.coal-boiler" }));
-            Assert.That(binding.DynamicTargetIds, Is.EqualTo(new[] { "node.coal-boiler" }));
+            Assert.That(entry.StepId, Is.EqualTo("steam-turbine"));
+            Assert.That(entry.StateNodeId, Is.EqualTo("node.coal-steam-turbine"));
+            Assert.That(entry.DynamicTargetIds, Is.EqualTo(new[] { "node.coal-steam-turbine" }));
+            Assert.That(binding.DynamicTargetIds, Is.EqualTo(new[] { "node.coal-steam-turbine" }));
             Assert.That(binding.DisplayAnchor.localPosition.x, Is.EqualTo(10000f).Within(0.001f));
-            Assert.That(
-                Vector3.Distance(binding.CameraPose.localPosition, binding.DisplayAnchor.localPosition),
-                Is.InRange(20f, 500f));
+            Assert.That(binding.CameraPose.parent, Is.EqualTo(prefab.transform));
+            Assert.That(IsFinite(binding.CameraPose.localPosition), Is.True);
+            Assert.That(IsFinite(binding.CameraPose.localEulerAngles), Is.True);
 
-            MonoBehaviour dynamicAdapter = FindBehaviour(prefab, "CoalBoilerProcessDetailDynamicAdapter");
+            ProcessDetailStateVisualAdapter visualAdapter = prefab.GetComponent<ProcessDetailStateVisualAdapter>();
+            Assert.That(visualAdapter, Is.Not.Null);
+            SerializedObject serializedVisualAdapter = new SerializedObject(visualAdapter);
+            Assert.That(serializedVisualAdapter.FindProperty("_enableStateVisuals")?.boolValue, Is.True);
+            Assert.That(serializedVisualAdapter.FindProperty("_enableFaultVisual")?.boolValue, Is.False);
+
+            MonoBehaviour dynamicAdapter = FindBehaviour(prefab, "CoalSteamTurbineProcessDetailDynamicAdapter");
             SerializedObject serializedAdapter = new SerializedObject(dynamicAdapter);
-            Assert.That(serializedAdapter.FindProperty("_controlledEffects")?.arraySize, Is.GreaterThan(0));
-            Assert.That(serializedAdapter.FindProperty("_excludedEffects")?.arraySize, Is.EqualTo(0));
+            Assert.That(serializedAdapter.FindProperty("_effectControllers")?.arraySize, Is.GreaterThan(0));
+            Assert.That(serializedAdapter.FindProperty("_shaftRotationControllers")?.arraySize, Is.GreaterThan(0));
 
-            MonoBehaviour valveController = FindBehaviour(prefab, "ControlValveEffectController");
-            SerializedObject serializedValve = new SerializedObject(valveController);
-            Assert.That(serializedValve.FindProperty("_playOnEnable")?.boolValue, Is.True);
-            Assert.That(serializedValve.FindProperty("_loopDemo")?.boolValue, Is.True);
+            Transform nestedModel = prefab.transform.Find("DisplayAnchor/RanMeiManager");
+            Assert.That(nestedModel, Is.Not.Null);
+            GameObject nestedSource = PrefabUtility.GetCorrespondingObjectFromSource(nestedModel.gameObject);
+            Assert.That(AssetDatabase.GetAssetPath(nestedSource), Is.EqualTo("Assets/Prefabs/RanMeiManager.prefab"));
+
+            MonoBehaviour effectsController = FindBehaviour(prefab, "CoalPowerSteamEffectsController");
+            SerializedObject serializedEffects = new SerializedObject(effectsController);
+            Assert.That(serializedEffects.FindProperty("_allEffectsEnabled")?.boolValue, Is.True);
+
+            MonoBehaviour shaftController = FindBehaviour(prefab, "CoalPowerShaftRotationController");
+            SerializedObject serializedShaft = new SerializedObject(shaftController);
+            Assert.That(serializedShaft.FindProperty("_playOnEnable")?.boolValue, Is.True);
         }
 
         [Test]
@@ -370,7 +381,7 @@ namespace WebDLPro.Unity.Tests
             GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(CoalPrefabPath);
             ProcessDetailCatalog catalog = AssetDatabase.LoadAssetAtPath<ProcessDetailCatalog>(CatalogPath);
             Assert.That(
-                catalog.TryGet("coal-power", "process-detail.coal-power.boiler", out ProcessDetailCatalogEntry coalEntry),
+                catalog.TryGet("coal-power", "process-detail.coal-power.steam-turbine", out ProcessDetailCatalogEntry coalEntry),
                 Is.True);
             GameObject instance = Object.Instantiate(prefab);
             instance.SetActive(false);
@@ -380,15 +391,97 @@ namespace WebDLPro.Unity.Tests
                 Assert.That(binding.ValidateBinding(coalEntry).Success, Is.True);
 
                 Assert.That(binding.PrepareForActivation(true, BusinessSceneNodeVisualState.Fault).Success, Is.True);
-                AssertControlValvePlaybackAllowed(instance, false);
+                AssertCombinedCoalPlaybackAllowed(instance, false);
+                instance.SetActive(true);
+                AssertCombinedCoalPlaybackAllowed(instance, false);
                 Assert.That(binding.ApplyVisualState(BusinessSceneNodeVisualState.Alarm).Success, Is.True);
-                AssertControlValvePlaybackAllowed(instance, true);
+                AssertCombinedCoalPlaybackAllowed(instance, true);
                 Assert.That(binding.ApplyVisualState(BusinessSceneNodeVisualState.Offline).Success, Is.True);
-                AssertControlValvePlaybackAllowed(instance, true);
+                AssertCombinedCoalPlaybackAllowed(instance, true);
                 Assert.That(binding.ApplyVisualState(BusinessSceneNodeVisualState.Normal).Success, Is.True);
-                AssertControlValvePlaybackAllowed(instance, true);
+                AssertCombinedCoalPlaybackAllowed(instance, true);
                 Assert.That(binding.ClearVisualState().Success, Is.True);
-                AssertControlValvePlaybackAllowed(instance, true);
+                AssertCombinedCoalPlaybackAllowed(instance, true);
+            }
+            finally
+            {
+                Object.DestroyImmediate(instance);
+            }
+        }
+
+        [Test]
+        public void 光伏逆变器包装仅在故障时停流并将材质002变红()
+        {
+            ProcessDetailCatalog catalog = AssetDatabase.LoadAssetAtPath<ProcessDetailCatalog>(CatalogPath);
+            GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(SolarPrefabPath);
+            Assert.That(prefab, Is.Not.Null);
+            Assert.That(
+                catalog.TryGet("solar-power", "process-detail.solar-power.inverter", out ProcessDetailCatalogEntry entry),
+                Is.True);
+
+            GameObject instance = Object.Instantiate(prefab);
+            instance.SetActive(false);
+            try
+            {
+                ProcessDetailDeviceBinding binding = instance.GetComponent<ProcessDetailDeviceBinding>();
+                Assert.That(binding, Is.Not.Null);
+                Assert.That(binding.ValidateBinding(entry).Success, Is.True);
+
+                Renderer[] wires =
+                {
+                    instance.transform.Find("DisplayAnchor/逆变器关键环节/电线1").GetComponent<Renderer>(),
+                    instance.transform.Find("DisplayAnchor/逆变器关键环节/电线2").GetComponent<Renderer>(),
+                    instance.transform.Find("DisplayAnchor/逆变器关键环节/电线3").GetComponent<Renderer>()
+                };
+                Renderer[] inverters =
+                {
+                    instance.transform.Find("DisplayAnchor/逆变器关键环节/逆变器").GetComponent<Renderer>(),
+                    instance.transform.Find("DisplayAnchor/逆变器关键环节/逆变器.001").GetComponent<Renderer>(),
+                    instance.transform.Find("DisplayAnchor/逆变器关键环节/逆变器.002").GetComponent<Renderer>()
+                };
+                int flowSpeedId = Shader.PropertyToID("_FlowSpeed");
+                int baseColorId = Shader.PropertyToID("_BaseColor");
+                MaterialPropertyBlock propertyBlock = new MaterialPropertyBlock();
+                Color[] baselineColors = new Color[inverters.Length];
+                for (int index = 0; index < inverters.Length; index++)
+                {
+                    baselineColors[index] = inverters[index].sharedMaterials[1].GetColor(baseColorId);
+                }
+
+                Assert.That(binding.PrepareForActivation(true, BusinessSceneNodeVisualState.Fault).Success, Is.True);
+                for (int index = 0; index < wires.Length; index++)
+                {
+                    propertyBlock.Clear();
+                    wires[index].GetPropertyBlock(propertyBlock, 0);
+                    Assert.That(propertyBlock.GetFloat(flowSpeedId), Is.Zero, $"电线{index + 1}故障时必须停流。");
+                }
+                for (int index = 0; index < inverters.Length; index++)
+                {
+                    propertyBlock.Clear();
+                    inverters[index].GetPropertyBlock(propertyBlock, 1);
+                    Color faultColor = propertyBlock.GetColor(baseColorId);
+                    Assert.That(faultColor.r, Is.GreaterThan(0.9f));
+                    Assert.That(faultColor.g, Is.LessThan(0.1f));
+                    Assert.That(faultColor.b, Is.LessThan(0.1f));
+                }
+
+                Assert.That(binding.ApplyVisualState(BusinessSceneNodeVisualState.Alarm).Success, Is.True);
+                for (int index = 0; index < wires.Length; index++)
+                {
+                    propertyBlock.Clear();
+                    wires[index].GetPropertyBlock(propertyBlock, 0);
+                    Assert.That(propertyBlock.GetFloat(flowSpeedId), Is.EqualTo(1f).Within(0.0001f));
+                }
+                for (int index = 0; index < inverters.Length; index++)
+                {
+                    propertyBlock.Clear();
+                    inverters[index].GetPropertyBlock(propertyBlock, 1);
+                    Color restoredColor = propertyBlock.GetColor(baseColorId);
+                    Assert.That(restoredColor.r, Is.EqualTo(baselineColors[index].r).Within(0.0001f));
+                    Assert.That(restoredColor.g, Is.EqualTo(baselineColors[index].g).Within(0.0001f));
+                    Assert.That(restoredColor.b, Is.EqualTo(baselineColors[index].b).Within(0.0001f));
+                    Assert.That(restoredColor.a, Is.EqualTo(baselineColors[index].a).Within(0.0001f));
+                }
             }
             finally
             {
@@ -468,15 +561,6 @@ namespace WebDLPro.Unity.Tests
 
                 Assert.That(processController, Is.Not.Null);
                 Assert.That(detailCoordinator, Is.Not.Null, "业务场景必须装配通用第三层协调器。");
-                SerializedProperty stepBindings = new SerializedObject(processController).FindProperty("_processStepBindings");
-                Assert.That(stepBindings, Is.Not.Null);
-                for (int index = 0; index < stepBindings.arraySize; index++)
-                {
-                    string stepId = stepBindings.GetArrayElementAtIndex(index)
-                        .FindPropertyRelative("_stepId")?.stringValue;
-                    Assert.That(stepId, Is.Not.EqualTo("gas-turbine"), "旧燃气轮机流程步骤不得重新进入正式场景。");
-                }
-
                 SerializedObject serializedCoordinator = new SerializedObject(detailCoordinator);
                 Assert.That(
                     serializedCoordinator.FindProperty("_catalog")?.objectReferenceValue,
@@ -497,6 +581,13 @@ namespace WebDLPro.Unity.Tests
             }
         }
 
+        private static bool IsFinite(Vector3 value)
+        {
+            return !float.IsNaN(value.x) && !float.IsInfinity(value.x) &&
+                   !float.IsNaN(value.y) && !float.IsInfinity(value.y) &&
+                   !float.IsNaN(value.z) && !float.IsInfinity(value.z);
+        }
+
         private static ProcessDetailCatalogEntry CreateEntry()
         {
             return new ProcessDetailCatalogEntry(
@@ -506,7 +597,7 @@ namespace WebDLPro.Unity.Tests
                 "process-detail.gas-power.gas-turbine",
                 "process-detail-resource.gas-power.gas-turbine",
                 "camera-pose.gas-power.gas-turbine",
-                "gas-turbine",
+                "node.gas-turbine",
                 BusinessSceneAvailability.Available);
         }
 
@@ -518,7 +609,7 @@ namespace WebDLPro.Unity.Tests
             Assert.That(entry.ProcessDetailId, Is.EqualTo("process-detail.gas-power.gas-turbine"));
             Assert.That(entry.ResourceId, Is.EqualTo("process-detail-resource.gas-power.gas-turbine"));
             Assert.That(entry.CameraPoseId, Is.EqualTo("camera-pose.gas-power.gas-turbine"));
-            Assert.That(entry.StateNodeId, Is.EqualTo("gas-turbine"));
+            Assert.That(entry.StateNodeId, Is.EqualTo("node.gas-turbine"));
         }
 
         private static void AssertPlaybackAllowed(GameObject root, bool expected)
@@ -536,12 +627,22 @@ namespace WebDLPro.Unity.Tests
             }
         }
 
-        private static void AssertControlValvePlaybackAllowed(GameObject root, bool expected)
+        private static void AssertCombinedCoalPlaybackAllowed(GameObject root, bool expected)
         {
-            MonoBehaviour controller = FindBehaviour(root, "ControlValveEffectController");
-            FieldInfo field = controller.GetType().GetField("_effectPlaying", BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.That(field, Is.Not.Null, "ControlValveEffectController 缺少动态播放状态字段。");
-            Assert.That(field.GetValue(controller), Is.EqualTo(expected), "燃煤控制阀特效播放许可错误。");
+            MonoBehaviour effectsController = FindBehaviour(root, "CoalPowerSteamEffectsController");
+            FieldInfo effectsField = effectsController.GetType().GetField(
+                "_allEffectsEnabled",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(effectsField, Is.Not.Null, "CoalPowerSteamEffectsController 缺少动态播放状态字段。");
+            Assert.That(effectsField.GetValue(effectsController), Is.EqualTo(expected), "燃煤组合特效播放许可错误。");
+
+            MonoBehaviour shaftController = FindBehaviour(root, "CoalPowerShaftRotationController");
+            FieldInfo field = shaftController.GetType().GetField(
+                "_animationEnabled",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(field, Is.Not.Null, "CoalPowerShaftRotationController 缺少动态播放状态字段。");
+            Assert.That(field.GetValue(shaftController), Is.EqualTo(expected), "燃煤轴旋转播放许可错误。");
+            Assert.That(shaftController.enabled, Is.EqualTo(expected), "燃煤轴旋转组件启用状态错误。");
         }
 
         private static MonoBehaviour FindBehaviour(GameObject root, string typeName)

@@ -27,12 +27,12 @@ MonoBehaviour:
     _unitySceneKey: wind-power
     _scenePath: Assets/Scenes/Business/WindPower.unity
     _availability: 1
-    _declaredCapabilities: 64
+    _declaredCapabilities: 1121
   - _sceneId: solar-power
     _unitySceneKey: solar-power
     _scenePath: Assets/Scenes/Business/SolarPower.unity
     _availability: 1
-    _declaredCapabilities: 64
+    _declaredCapabilities: 1901
   - _sceneId: substation
     _unitySceneKey: substation
     _scenePath: Assets/Scenes/Business/Substation.unity
@@ -58,3 +58,13 @@ MonoBehaviour:
     _scenePath: Assets/Scenes/Business/Dispatch.unity
     _availability: 1
     _declaredCapabilities: 64
+  - _sceneId: step-up-substation
+    _unitySceneKey: step-up-substation
+    _scenePath: Assets/Scenes/Business/StepUpSubstation.unity
+    _availability: 1
+    _declaredCapabilities: 97
+  - _sceneId: step-down-substation
+    _unitySceneKey: step-down-substation
+    _scenePath: Assets/Scenes/Business/StepDownSubstation.unity
+    _availability: 1
+    _declaredCapabilities: 97

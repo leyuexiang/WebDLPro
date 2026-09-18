@@ -12,25 +12,46 @@ export interface CoalTopologyRuntimeBinding {
   readonly sceneNodeId?: SceneNodeId
 }
 
-/** 三个已确认现场设备复用正式业务编号与唯一三维模型编号，模块加载时只校验一次。 */
-const COAL_BOILER_NODE_ID = toProcessNodeId('system.boiler-dcs')
-const COAL_STEAM_TURBINE_NODE_ID = toProcessNodeId('system.steam-turbine-dcs')
-const COAL_GENERATOR_NODE_ID = toProcessNodeId('system.generator-excitation-controller')
-const COAL_BOILER_SCENE_NODE_ID = toSceneNodeId('node.coal-boiler')
-const COAL_STEAM_TURBINE_SCENE_NODE_ID = toSceneNodeId('node.coal-steam-turbine')
-const COAL_GENERATOR_SCENE_NODE_ID = toSceneNodeId('node.coal-generator')
+/** 三个上层控制系统与三个下层现场设备使用不同业务编号和场景节点编号。 */
+const COAL_BOILER_CONTROL_NODE_ID = toProcessNodeId('system.coal-boiler-control')
+const COAL_STEAM_TURBINE_CONTROL_NODE_ID = toProcessNodeId('system.coal-steam-turbine-control')
+const COAL_GENERATOR_CONTROL_NODE_ID = toProcessNodeId('system.coal-generator-control')
+const COAL_BOILER_DEVICE_NODE_ID = toProcessNodeId('asset.coal-boiler')
+const COAL_STEAM_TURBINE_DEVICE_NODE_ID = toProcessNodeId('asset.coal-steam-turbine')
+const COAL_GENERATOR_DEVICE_NODE_ID = toProcessNodeId('asset.coal-generator')
+const COAL_BOILER_CONTROL_SCENE_NODE_ID = toSceneNodeId('unit.coal-boiler.control')
+const COAL_STEAM_TURBINE_CONTROL_SCENE_NODE_ID = toSceneNodeId('unit.coal-steam-turbine.control')
+const COAL_GENERATOR_CONTROL_SCENE_NODE_ID = toSceneNodeId('unit.coal-generator.control')
+const COAL_BOILER_DEVICE_SCENE_NODE_ID = toSceneNodeId('node.coal-boiler')
+const COAL_STEAM_TURBINE_DEVICE_SCENE_NODE_ID = toSceneNodeId('node.coal-steam-turbine')
+const COAL_GENERATOR_DEVICE_SCENE_NODE_ID = toSceneNodeId('node.coal-generator')
 
-/** 按目标文件中的独立图元编号创建三个已确认设备的不可变绑定。 */
-function bindConfirmedDevices(ids: {
-  readonly boiler: string
-  readonly steamTurbine: string
-  readonly generator: string
-}): readonly CoalTopologyRuntimeBinding[] {
-  return Object.freeze([
-    Object.freeze({ penId: ids.boiler, nodeId: COAL_BOILER_NODE_ID, sceneNodeId: COAL_BOILER_SCENE_NODE_ID }),
-    Object.freeze({ penId: ids.steamTurbine, nodeId: COAL_STEAM_TURBINE_NODE_ID, sceneNodeId: COAL_STEAM_TURBINE_SCENE_NODE_ID }),
-    Object.freeze({ penId: ids.generator, nodeId: COAL_GENERATOR_NODE_ID, sceneNodeId: COAL_GENERATOR_SCENE_NODE_ID }),
-  ])
+interface CoalControlAndDevicePenIds {
+  readonly boilerControl: string
+  readonly steamTurbineControl: string
+  readonly generatorControl: string
+  readonly boilerDevice?: string
+  readonly steamTurbineDevice?: string
+  readonly generatorDevice?: string
+}
+
+/** 控制系统只负责拓扑到三维聚焦；现场设备负责单模型聚焦、三维反选和四态。 */
+function bindControlAndDeviceNodes(ids: CoalControlAndDevicePenIds): readonly CoalTopologyRuntimeBinding[] {
+  const bindings: CoalTopologyRuntimeBinding[] = [
+    Object.freeze({ penId: ids.boilerControl, nodeId: COAL_BOILER_CONTROL_NODE_ID, sceneNodeId: COAL_BOILER_CONTROL_SCENE_NODE_ID }),
+    Object.freeze({ penId: ids.steamTurbineControl, nodeId: COAL_STEAM_TURBINE_CONTROL_NODE_ID, sceneNodeId: COAL_STEAM_TURBINE_CONTROL_SCENE_NODE_ID }),
+    Object.freeze({ penId: ids.generatorControl, nodeId: COAL_GENERATOR_CONTROL_NODE_ID, sceneNodeId: COAL_GENERATOR_CONTROL_SCENE_NODE_ID }),
+  ]
+  if (ids.boilerDevice) {
+    bindings.push(Object.freeze({ penId: ids.boilerDevice, nodeId: COAL_BOILER_DEVICE_NODE_ID, sceneNodeId: COAL_BOILER_DEVICE_SCENE_NODE_ID }))
+  }
+  if (ids.steamTurbineDevice) {
+    bindings.push(Object.freeze({ penId: ids.steamTurbineDevice, nodeId: COAL_STEAM_TURBINE_DEVICE_NODE_ID, sceneNodeId: COAL_STEAM_TURBINE_DEVICE_SCENE_NODE_ID }))
+  }
+  if (ids.generatorDevice) {
+    bindings.push(Object.freeze({ penId: ids.generatorDevice, nodeId: COAL_GENERATOR_DEVICE_NODE_ID, sceneNodeId: COAL_GENERATOR_DEVICE_SCENE_NODE_ID }))
+  }
+  return Object.freeze(bindings)
 }
 
 /**
@@ -41,25 +62,44 @@ export const COAL_TOPOLOGY_RUNTIME_BINDINGS_BY_VARIANT_ID: ReadonlyMap<
   CoalTopologyVariantId,
   readonly CoalTopologyRuntimeBinding[]
 > = new Map([
-  ['architecture', bindConfirmedDevices({ boiler: '6e5fb55c', steamTurbine: '89854a4', generator: 'f13c58a' })],
-  ['network', Object.freeze([])],
+  ['architecture', bindControlAndDeviceNodes({
+    boilerControl: 'a2dad7b', steamTurbineControl: 'a1d78e1', generatorControl: '61fc2f3',
+    boilerDevice: '6e5fb55c', steamTurbineDevice: '89854a4', generatorDevice: 'f13c58a',
+  })],
+  ['network', bindControlAndDeviceNodes({
+    boilerControl: '5c4ccdc3', steamTurbineControl: '54656a8f', generatorControl: '1020cee',
+  })],
   ['business', Object.freeze([])],
-  ['key-process', bindConfirmedDevices({ boiler: '2a01627b', steamTurbine: '271db7a', generator: '8e17c6' })],
-  ['network-business', Object.freeze([])],
-  ['network-key-process', bindConfirmedDevices({ boiler: '37330c6c', steamTurbine: 'cd9d874', generator: '3253036' })],
-  ['business-key-process', bindConfirmedDevices({ boiler: '138c356', steamTurbine: '6ca4ed1', generator: '49768f46' })],
-  ['network-business-key-process', bindConfirmedDevices({
-    boiler: '4d87c9a3', steamTurbine: '69d36f83', generator: 'c1ee89f',
+  ['key-process', bindControlAndDeviceNodes({
+    boilerControl: '4f007812', steamTurbineControl: '1965c29e', generatorControl: '61224818',
+    boilerDevice: '2a01627b', steamTurbineDevice: '271db7a', generatorDevice: '8e17c6',
+  })],
+  ['network-business', bindControlAndDeviceNodes({
+    boilerControl: '28ad5ca', steamTurbineControl: '6d7e2838', generatorControl: 'b3d4c7b',
+  })],
+  ['network-key-process', bindControlAndDeviceNodes({
+    boilerControl: '077b9d', steamTurbineControl: '092ecd', generatorControl: '1247290',
+    boilerDevice: '37330c6c', steamTurbineDevice: 'cd9d874', generatorDevice: '3253036',
+  })],
+  ['business-key-process', bindControlAndDeviceNodes({
+    boilerControl: '51b2dfb', steamTurbineControl: '5e8a7a7a', generatorControl: '0d79b6',
+    boilerDevice: '138c356', steamTurbineDevice: '6ca4ed1', generatorDevice: '49768f46',
+  })],
+  ['network-business-key-process', bindControlAndDeviceNodes({
+    boilerControl: 'b6c2c58', steamTurbineControl: '21136a0', generatorControl: '11d93d44',
+    boilerDevice: '4d87c9a3', steamTurbineDevice: '69d36f83', generatorDevice: 'c1ee89f',
   })],
   ['process-detail-boiler', Object.freeze([
-    Object.freeze({ penId: '2a01627b', nodeId: COAL_BOILER_NODE_ID, sceneNodeId: COAL_BOILER_SCENE_NODE_ID }),
-    Object.freeze({ penId: '271db7a', nodeId: COAL_STEAM_TURBINE_NODE_ID, sceneNodeId: COAL_STEAM_TURBINE_SCENE_NODE_ID }),
-    Object.freeze({ penId: '8e17c6', nodeId: COAL_GENERATOR_NODE_ID, sceneNodeId: COAL_GENERATOR_SCENE_NODE_ID }),
+    Object.freeze({ penId: '2a01627b', nodeId: COAL_BOILER_DEVICE_NODE_ID, sceneNodeId: COAL_BOILER_DEVICE_SCENE_NODE_ID }),
+    Object.freeze({ penId: '271db7a', nodeId: COAL_STEAM_TURBINE_DEVICE_NODE_ID, sceneNodeId: COAL_STEAM_TURBINE_DEVICE_SCENE_NODE_ID }),
+    Object.freeze({ penId: '8e17c6', nodeId: COAL_GENERATOR_DEVICE_NODE_ID, sceneNodeId: COAL_GENERATOR_DEVICE_SCENE_NODE_ID }),
   ])],
   ['process-detail-steam-turbine', Object.freeze([
-    // 关键环节文件中的汽轮机与数字电调均明确属于汽机控制单元，两个图元同步四态。
-    Object.freeze({ penId: 'baf5ab7', nodeId: COAL_STEAM_TURBINE_NODE_ID, sceneNodeId: COAL_STEAM_TURBINE_SCENE_NODE_ID }),
-    Object.freeze({ penId: 'b9ae43', nodeId: COAL_STEAM_TURBINE_NODE_ID, sceneNodeId: COAL_STEAM_TURBINE_SCENE_NODE_ID }),
+    // 新关键环节文件中的主汽轮机使用公共四态汽轮机图标。
+    Object.freeze({ penId: '429749ea', nodeId: COAL_STEAM_TURBINE_DEVICE_NODE_ID, sceneNodeId: COAL_STEAM_TURBINE_DEVICE_SCENE_NODE_ID }),
+    // 锅炉和发电机复用燃煤下层现场设备的稳定业务及三维节点，切换时同步中央状态快照。
+    Object.freeze({ penId: '8be4fc2', nodeId: COAL_BOILER_DEVICE_NODE_ID, sceneNodeId: COAL_BOILER_DEVICE_SCENE_NODE_ID }),
+    Object.freeze({ penId: '9533a1f', nodeId: COAL_GENERATOR_DEVICE_NODE_ID, sceneNodeId: COAL_GENERATOR_DEVICE_SCENE_NODE_ID }),
   ])],
 ])
 

@@ -287,7 +287,10 @@ namespace WebDLPro.Unity.SceneRuntime
             CompleteAsDisposed(_pendingRequest);
             CompleteAsDisposed(_processingRequest);
             _pendingRequest = null;
-            if (_activeController != null)
+            // 接口引用不会使用 UnityEngine.Object 的已销毁判空；停止播放时场景控制器可能先被销毁。
+            // 普通 C# 适配器仍需正常释放，仅跳过原生对象已经失效的 Unity 控制器。
+            if (_activeController != null &&
+                !(_activeController is UnityEngine.Object unityController && unityController == null))
             {
                 _activeController.ReleaseScene();
             }

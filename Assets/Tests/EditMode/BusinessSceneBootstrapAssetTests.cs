@@ -33,7 +33,7 @@ namespace WebDLPro.Unity.Tests
         private static readonly string[] SceneIds =
         {
             "coal-power", "gas-power", "wind-power", "solar-power", "substation",
-            "distribution", "consumption", "microgrid", "dispatch"
+            "distribution", "consumption", "microgrid", "dispatch", "step-up-substation", "step-down-substation"
         };
 
         private static readonly string[] ScenePaths =
@@ -46,7 +46,9 @@ namespace WebDLPro.Unity.Tests
             "Assets/Scenes/Business/Distribution.unity",
             "Assets/Scenes/Business/Consumption.unity",
             "Assets/Scenes/Business/Microgrid.unity",
-            "Assets/Scenes/Business/Dispatch.unity"
+            "Assets/Scenes/Business/Dispatch.unity",
+            "Assets/Scenes/Business/StepUpSubstation.unity",
+            "Assets/Scenes/Business/StepDownSubstation.unity"
         };
 
         /// <summary>
@@ -69,7 +71,6 @@ namespace WebDLPro.Unity.Tests
                 bool isConfiguredPowerPlant = SceneIds[index] == "gas-power" || SceneIds[index] == "coal-power";
                 BusinessSceneCapability expectedCapabilities = isConfiguredPowerPlant
                     ? BusinessSceneCapability.Initialize |
-                       BusinessSceneCapability.EnterProcessStep |
                        BusinessSceneCapability.FocusNode |
                        BusinessSceneCapability.ClearSelection |
                        BusinessSceneCapability.UpdateNodeVisualState |
@@ -78,7 +79,18 @@ namespace WebDLPro.Unity.Tests
                        BusinessSceneCapability.SetNodeVisibility |
                       BusinessSceneCapability.ResetScene |
                       BusinessSceneCapability.Release
-                    : BusinessSceneCapability.Release;
+                    : SceneIds[index] == "solar-power"
+                        ? BusinessSceneCapability.Initialize |
+                          BusinessSceneCapability.FocusNode |
+                          BusinessSceneCapability.ClearSelection |
+                          BusinessSceneCapability.UpdateNodeVisualState |
+                          BusinessSceneCapability.ClearNodeVisualState |
+                          BusinessSceneCapability.MoveCameraToPose |
+                          BusinessSceneCapability.ResetScene |
+                          BusinessSceneCapability.Release
+                    : (SceneIds[index] == "step-up-substation" || SceneIds[index] == "step-down-substation")
+                        ? SubstationOverviewController.SupportedCapabilities
+                        : BusinessSceneCapability.Release;
                 Assert.That(entry.DeclaredCapabilities, Is.EqualTo(expectedCapabilities));
                 Assert.That(AssetDatabase.LoadAssetAtPath<SceneAsset>(entry.ScenePath), Is.Not.Null);
             }
@@ -147,7 +159,7 @@ namespace WebDLPro.Unity.Tests
             {
                 GameObject[] roots = overviewScene.GetRootGameObjects();
                 OverviewBuildingPlaceholder[] buildings = roots[0].GetComponentsInChildren<OverviewBuildingPlaceholder>(true);
-                Assert.That(buildings, Has.Length.EqualTo(9));
+                Assert.That(buildings, Has.Length.EqualTo(SceneIds.Length));
                 Dictionary<string, string> replacedModelNames = new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     { "coal-power", "燃煤" },
@@ -157,6 +169,37 @@ namespace WebDLPro.Unity.Tests
                     { "substation", "升压站" },
                     { "distribution", "配电站" }
                 };
+                Dictionary<string, string[]> expectedFaultSourceNodeIds = new Dictionary<string, string[]>(StringComparer.Ordinal)
+                {
+                    {
+                        "gas-power",
+                        new[]
+                        {
+                            "system.gas-turbine-control",
+                            "asset.gas-turbine",
+                            "system.gas-hrsg-control",
+                            "asset.gas-hrsg",
+                            "system.gas-steam-turbine-control",
+                            "asset.gas-steam-turbine",
+                            "system.gas-generator-control",
+                            "asset.gas-generator"
+                        }
+                    },
+                    {
+                        "coal-power",
+                        new[]
+                        {
+                            "asset.coal-mill-actuator",
+                            "system.coal-boiler-control",
+                            "system.coal-steam-turbine-control",
+                            "system.coal-generator-control",
+                            "asset.coal-boiler",
+                            "asset.coal-steam-turbine",
+                            "asset.coal-generator",
+                            "system.coal-handling-ash-plc"
+                        }
+                    }
+                };
                 for (int index = 0; index < SceneIds.Length; index++)
                 {
                     OverviewBuildingPlaceholder building = Array.Find(
@@ -165,6 +208,13 @@ namespace WebDLPro.Unity.Tests
                     Assert.That(building, Is.Not.Null, $"总览缺少目标场景映射：{SceneIds[index]}");
                     Assert.That(building.OverviewBuildingId, Is.EqualTo($"overview-building.{SceneIds[index]}"));
                     Assert.That(building.name, Is.EqualTo($"OverviewBuilding_{ToPascalCase(SceneIds[index])}"));
+                    if (expectedFaultSourceNodeIds.TryGetValue(SceneIds[index], out string[] expectedFaultSources))
+                    {
+                        Assert.That(
+                            building.FaultSourceNodeIds,
+                            Is.EquivalentTo(expectedFaultSources),
+                            $"总览建筑 {SceneIds[index]} 的故障来源节点配置与当前业务绑定不一致。");
+                    }
 
                     if (!replacedModelNames.TryGetValue(SceneIds[index], out string expectedModelName))
                     {
@@ -453,6 +503,17 @@ namespace WebDLPro.Unity.Tests
                         continue;
                     }
 
+                    if (SceneIds[index] == "step-up-substation" || SceneIds[index] == "step-down-substation" ||
+                        SceneIds[index] == "wind-power" || SceneIds[index] == "solar-power")
+                    {
+                        Assert.That(ContainsRenderer(roots), Is.True, ScenePaths[index]);
+                        Assert.That(ContainsCamera(roots), Is.True, ScenePaths[index]);
+                        string controllerType = SceneIds[index].EndsWith("substation", StringComparison.Ordinal)
+                            ? "SubstationOverviewController" : "PowerPlantProcessController";
+                        Assert.That(ContainsComponentNamed(roots, controllerType), Is.True, ScenePaths[index]);
+                        continue;
+                    }
+
                     Assert.That(roots, Has.Length.EqualTo(1), ScenePaths[index]);
                     Assert.That(roots[0].name, Is.EqualTo("BusinessSceneRuntime"), ScenePaths[index]);
                     UnavailableBusinessSceneController controller = roots[0].GetComponent<UnavailableBusinessSceneController>();
@@ -480,6 +541,7 @@ namespace WebDLPro.Unity.Tests
         {
             RegisterGasPowerAdapterFactory();
             RegisterCoalPowerAdapterFactory();
+            RegisterSolarPowerAdapterFactory();
             BusinessSceneCatalog catalog = AssetDatabase.LoadAssetAtPath<BusinessSceneCatalog>(CatalogAssetPath);
 
             for (int index = 0; index < ScenePaths.Length; index++)
@@ -488,7 +550,7 @@ namespace WebDLPro.Unity.Tests
                 Scene businessScene = EditorSceneManager.OpenScene(ScenePaths[index], OpenSceneMode.Additive);
                 try
                 {
-                    if (SceneIds[index] == "gas-power" || SceneIds[index] == "coal-power")
+                    if (SceneIds[index] == "gas-power" || SceneIds[index] == "coal-power" || SceneIds[index] == "solar-power")
                     {
                         // 编辑器资产测试仅加载场景，不会像播放器那样自动执行 MonoBehaviour.Awake。
                         // 两个发电场景的节点索引和四态登记正是在该生命周期前段建立；这里精确补齐
@@ -504,11 +566,23 @@ namespace WebDLPro.Unity.Tests
                     Assert.That(resolved, Is.True, error);
                     Assert.That(controller.SceneId, Is.EqualTo(entry.SceneId));
                     Assert.That(controller.Capabilities, Is.EqualTo(entry.DeclaredCapabilities));
-                    if (SceneIds[index] == "gas-power" || SceneIds[index] == "coal-power")
+                    if (SceneIds[index] == "gas-power" || SceneIds[index] == "coal-power" || SceneIds[index] == "solar-power")
                     {
-                        // 两个已开放关键环节目录的发电场景都必须实现第三层执行接口；
+                        // 三个已开放关键环节目录的发电场景都必须实现第三层执行接口；
                         // 仅有清单和资源而缺少该接口时，打包后会在 Unity 桥接层返回 process-detail-unsupported。
                         Assert.That(controller, Is.AssignableTo<IBusinessSceneProcessDetailController>(), ScenePaths[index]);
+                    }
+
+                    if (SceneIds[index] == "solar-power")
+                    {
+                        Assert.That(controller.Capabilities.HasFlag(BusinessSceneCapability.FocusNode), Is.True);
+                        Assert.That(controller.Capabilities.HasFlag(BusinessSceneCapability.ClearSelection), Is.True);
+                        Assert.That(controller.Capabilities.HasFlag(BusinessSceneCapability.UpdateNodeVisualState), Is.True);
+                        Assert.That(controller.Capabilities.HasFlag(BusinessSceneCapability.ClearNodeVisualState), Is.True);
+                        Assert.That(controller.Capabilities.HasFlag(BusinessSceneCapability.MoveCameraToPose), Is.True);
+                        Assert.That(controller, Is.AssignableTo<IBusinessSceneNamedCameraPoseController>());
+                        Assert.That(controller, Is.AssignableTo<IBusinessSceneCameraResetController>());
+                        continue;
                     }
 
                     if (SceneIds[index] != "gas-power" && SceneIds[index] != "coal-power")
@@ -591,6 +665,227 @@ namespace WebDLPro.Unity.Tests
         }
 
         /// <summary>
+        /// 燃煤上层三个控制系统必须各自聚合主设备、指定控制线和控制柜，且只允许拓扑发起聚焦；
+        /// 下层设备继续保持单模型绑定并独占三维鼠标反向选择和四态状态。
+        /// </summary>
+        [Test]
+        public void 燃煤上下层控制节点绑定与三维反选边界正确()
+        {
+            Scene coalPowerScene = SceneManager.GetSceneByPath(ScenePaths[0]);
+            bool openedForTest = !coalPowerScene.IsValid() || !coalPowerScene.isLoaded;
+            if (openedForTest)
+            {
+                coalPowerScene = EditorSceneManager.OpenScene(ScenePaths[0], OpenSceneMode.Additive);
+            }
+
+            try
+            {
+                MonoBehaviour controller = FindComponentByTypeName(
+                    coalPowerScene.GetRootGameObjects(),
+                    "PowerPlantProcessController");
+                Assert.That(controller, Is.Not.Null, "燃煤场景缺少 PowerPlantProcessController。 ");
+
+                Dictionary<string, (bool TopologyOnly, string[] TargetPaths)> expectedBindings =
+                    new Dictionary<string, (bool TopologyOnly, string[] TargetPaths)>
+                    {
+                        { "unit.coal-boiler.control", (true, new[] { "SceneRoot  (1)/Equipment/锅炉", "SceneRoot  (1)/Equipment/dcs控制线", "SceneRoot  (1)/Equipment/控制柜.006" }) },
+                        { "unit.coal-steam-turbine.control", (true, new[] { "SceneRoot  (1)/Equipment/汽轮机", "SceneRoot  (1)/Equipment/deh控制线", "SceneRoot  (1)/Equipment/控制柜.008" }) },
+                        { "unit.coal-generator.control", (true, new[] { "SceneRoot  (1)/Equipment/发电机", "SceneRoot  (1)/Equipment/ecs控制线", "SceneRoot  (1)/Equipment/控制柜.007" }) },
+                        { "node.coal-boiler", (false, new[] { "SceneRoot  (1)/Equipment/锅炉" }) },
+                        { "node.coal-steam-turbine", (false, new[] { "SceneRoot  (1)/Equipment/汽轮机" }) },
+                        { "node.coal-generator", (false, new[] { "SceneRoot  (1)/Equipment/发电机" }) }
+                    };
+
+                SerializedProperty nodes = new SerializedObject(controller).FindProperty("_nodes");
+                Assert.That(nodes, Is.Not.Null, "燃煤控制器缺少场景节点绑定字段。 ");
+                HashSet<string> verifiedSceneNodeIds = new HashSet<string>();
+                for (int nodeIndex = 0; nodeIndex < nodes.arraySize; nodeIndex++)
+                {
+                    SerializedProperty node = nodes.GetArrayElementAtIndex(nodeIndex);
+                    Assert.That(node.FindPropertyRelative("_focusCameraPose"), Is.Not.Null,
+                        $"燃煤节点绑定[{nodeIndex}]缺少可选聚焦相机点位字段。 ");
+                    string sceneNodeId = node.FindPropertyRelative("_id").stringValue;
+                    if (!expectedBindings.TryGetValue(sceneNodeId, out var expectedBinding))
+                    {
+                        continue;
+                    }
+
+                    Assert.That(node.FindPropertyRelative("_topologyOnlySelection").boolValue,
+                        Is.EqualTo(expectedBinding.TopologyOnly),
+                        $"节点 {sceneNodeId} 的三维反向选择边界错误。 ");
+                    SerializedProperty targets = node.FindPropertyRelative("_targets");
+                    Assert.That(targets.arraySize, Is.EqualTo(expectedBinding.TargetPaths.Length),
+                        $"节点 {sceneNodeId} 的绑定目标数量错误。 ");
+                    for (int targetIndex = 0; targetIndex < expectedBinding.TargetPaths.Length; targetIndex++)
+                    {
+                        GameObject target = targets.GetArrayElementAtIndex(targetIndex).objectReferenceValue as GameObject;
+                        Assert.That(target, Is.Not.Null, $"节点 {sceneNodeId} 的目标[{targetIndex}]为空。 ");
+                        Assert.That(GetSceneHierarchyPath(target.transform), Is.EqualTo(expectedBinding.TargetPaths[targetIndex]),
+                            $"节点 {sceneNodeId} 的目标[{targetIndex}]绑定错误。 ");
+                    }
+
+                    verifiedSceneNodeIds.Add(sceneNodeId);
+                }
+
+                Assert.That(verifiedSceneNodeIds, Is.EquivalentTo(expectedBindings.Keys),
+                    "燃煤场景缺少一个或多个上下层节点绑定。 ");
+
+                InvokePrivateInstanceMethod(controller.GetType(), controller, "CacheSceneBindings");
+                FieldInfo selectionMapField = controller.GetType().GetField(
+                    "_selectionNodeByObject",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.That(selectionMapField, Is.Not.Null, "燃煤控制器缺少三维反向选择索引。 ");
+                System.Collections.IDictionary selectionMap =
+                    selectionMapField.GetValue(controller) as System.Collections.IDictionary;
+                Assert.That(selectionMap, Is.Not.Null);
+                Dictionary<string, string> actualPointerBindings = new Dictionary<string, string>();
+                foreach (System.Collections.DictionaryEntry entry in selectionMap)
+                {
+                    GameObject target = entry.Key as GameObject;
+                    string sceneNodeId = entry.Value as string;
+                    Assert.That(target, Is.Not.Null);
+                    actualPointerBindings.Add(GetSceneHierarchyPath(target.transform), sceneNodeId);
+                }
+
+                Assert.That(actualPointerBindings, Is.EquivalentTo(new Dictionary<string, string>
+                {
+                    { "SceneRoot  (1)/Equipment/给煤机", "node.coal-feeder" },
+                    { "SceneRoot  (1)/Equipment/锅炉", "node.coal-boiler" },
+                    { "SceneRoot  (1)/Equipment/汽轮机", "node.coal-steam-turbine" },
+                    { "SceneRoot  (1)/Equipment/发电机", "node.coal-generator" },
+                    { "SceneRoot  (1)/Equipment/除尘器", "node.coal-precipitator" }
+                }), "燃煤三维反向选择索引只能包含下层现场设备模型。 ");
+
+                SerializedProperty visualBindings = new SerializedObject(controller).FindProperty("_visualStateBindings");
+                Assert.That(visualBindings, Is.Not.Null, "燃煤控制器缺少四态视觉绑定字段。 ");
+                Dictionary<string, string> expectedVisualTargets = new Dictionary<string, string>
+                {
+                    { "node.coal-feeder", "SceneRoot  (1)/Equipment/给煤机" },
+                    { "node.coal-boiler", "SceneRoot  (1)/Equipment/锅炉" },
+                    { "node.coal-steam-turbine", "SceneRoot  (1)/Equipment/汽轮机" },
+                    { "node.coal-generator", "SceneRoot  (1)/Equipment/发电机" },
+                    { "node.coal-precipitator", "SceneRoot  (1)/Equipment/除尘器" }
+                };
+                Dictionary<string, string> actualVisualTargets = new Dictionary<string, string>();
+                for (int bindingIndex = 0; bindingIndex < visualBindings.arraySize; bindingIndex++)
+                {
+                    SerializedProperty binding = visualBindings.GetArrayElementAtIndex(bindingIndex);
+                    string sceneNodeId = binding.FindPropertyRelative("_sceneNodeId").stringValue;
+                    SerializedProperty targets = binding.FindPropertyRelative("_targets");
+                    Assert.That(targets.arraySize, Is.EqualTo(1),
+                        $"燃煤状态节点 {sceneNodeId} 必须只绑定一个下层现场设备模型。 ");
+                    GameObject target = targets.GetArrayElementAtIndex(0).objectReferenceValue as GameObject;
+                    Assert.That(target, Is.Not.Null, $"燃煤状态节点 {sceneNodeId} 的模型引用为空。 ");
+                    actualVisualTargets.Add(sceneNodeId, GetSceneHierarchyPath(target.transform));
+                }
+                Assert.That(actualVisualTargets, Is.EquivalentTo(expectedVisualTargets),
+                    "燃煤四态视觉必须绑定到与三维反选一致的五个下层现场设备模型。 ");
+            }
+            finally
+            {
+                if (openedForTest)
+                {
+                    EditorSceneManager.CloseScene(coalPowerScene, true);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 燃气上层控制系统节点必须聚合主设备、对应地面电线和控制柜，并禁止三维鼠标反向选择；
+        /// 下层现场设备节点必须各自只绑定一个主设备，并独占三维反向选择和四态视觉能力。
+        /// </summary>
+        [Test]
+        public void 燃气上下层节点绑定与三维反选边界正确()
+        {
+            Scene gasPowerScene = EditorSceneManager.OpenScene(ScenePaths[1], OpenSceneMode.Additive);
+            try
+            {
+                MonoBehaviour controller = FindComponentByTypeName(
+                    gasPowerScene.GetRootGameObjects(),
+                    "PowerPlantProcessController");
+                Assert.That(controller, Is.Not.Null, "燃气场景缺少 PowerPlantProcessController。 ");
+
+                Dictionary<string, (bool TopologyOnly, string[] TargetPaths)> expectedBindings =
+                    new Dictionary<string, (bool TopologyOnly, string[] TargetPaths)>
+                    {
+                        { "unit.gas-hrsg.control", (true, new[] { "场景/控制柜/控制柜01", "场景/地面电线/地面电线01", "场景/余热锅炉" }) },
+                        { "unit.gas-turbine.control", (true, new[] { "场景/燃气轮机", "场景/地面电线/地面电线02", "场景/控制柜/控制柜02" }) },
+                        { "unit.gas-steam-turbine.control", (true, new[] { "场景/低中高压汽轮机", "场景/地面电线/地面电线03", "场景/控制柜/控制柜03" }) },
+                        { "unit.gas-generator.control", (true, new[] { "场景/发电机", "场景/地面电线/地面电线04", "场景/控制柜/控制柜04" }) },
+                        { "node.gas-turbine", (false, new[] { "场景/燃气轮机" }) },
+                        { "node.gas-hrsg", (false, new[] { "场景/余热锅炉" }) },
+                        { "node.gas-steam-turbine", (false, new[] { "场景/低中高压汽轮机" }) },
+                        { "node.gas-generator", (false, new[] { "场景/发电机" }) }
+                    };
+
+                SerializedProperty nodes = new SerializedObject(controller).FindProperty("_nodes");
+                Assert.That(nodes, Is.Not.Null, "燃气控制器缺少场景节点绑定字段。 ");
+                HashSet<string> verifiedSceneNodeIds = new HashSet<string>();
+                for (int nodeIndex = 0; nodeIndex < nodes.arraySize; nodeIndex++)
+                {
+                    SerializedProperty node = nodes.GetArrayElementAtIndex(nodeIndex);
+                    Assert.That(node.FindPropertyRelative("_focusCameraPose"), Is.Not.Null,
+                        $"节点绑定[{nodeIndex}]缺少可选聚焦相机点位字段。 ");
+                    string sceneNodeId = node.FindPropertyRelative("_id").stringValue;
+                    if (!expectedBindings.TryGetValue(sceneNodeId, out var expectedBinding))
+                    {
+                        continue;
+                    }
+
+                    Assert.That(node.FindPropertyRelative("_topologyOnlySelection").boolValue,
+                        Is.EqualTo(expectedBinding.TopologyOnly),
+                        $"节点 {sceneNodeId} 的三维反向选择边界错误。 ");
+                    SerializedProperty targets = node.FindPropertyRelative("_targets");
+                    Assert.That(targets.arraySize, Is.EqualTo(expectedBinding.TargetPaths.Length),
+                        $"节点 {sceneNodeId} 的绑定目标数量错误。 ");
+                    for (int targetIndex = 0; targetIndex < expectedBinding.TargetPaths.Length; targetIndex++)
+                    {
+                        GameObject target = targets.GetArrayElementAtIndex(targetIndex).objectReferenceValue as GameObject;
+                        Assert.That(target, Is.Not.Null, $"节点 {sceneNodeId} 的目标[{targetIndex}]为空。 ");
+                        Assert.That(GetSceneHierarchyPath(target.transform), Is.EqualTo(expectedBinding.TargetPaths[targetIndex]),
+                            $"节点 {sceneNodeId} 的目标[{targetIndex}]绑定错误。 ");
+                    }
+
+                    verifiedSceneNodeIds.Add(sceneNodeId);
+                }
+
+                Assert.That(verifiedSceneNodeIds, Is.EquivalentTo(expectedBindings.Keys),
+                    "燃气场景缺少一个或多个上下层节点绑定。 ");
+
+                // 直接执行运行时缓存逻辑，确保共享主设备只登记到下层节点，点击模型不会反选上层控制系统。
+                InvokePrivateInstanceMethod(controller.GetType(), controller, "CacheSceneBindings");
+                FieldInfo selectionMapField = controller.GetType().GetField(
+                    "_selectionNodeByObject",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.That(selectionMapField, Is.Not.Null, "燃气控制器缺少三维反向选择索引。 ");
+                System.Collections.IDictionary selectionMap =
+                    selectionMapField.GetValue(controller) as System.Collections.IDictionary;
+                Assert.That(selectionMap, Is.Not.Null);
+
+                Dictionary<string, string> actualPointerBindings = new Dictionary<string, string>();
+                foreach (System.Collections.DictionaryEntry entry in selectionMap)
+                {
+                    GameObject target = entry.Key as GameObject;
+                    string sceneNodeId = entry.Value as string;
+                    Assert.That(target, Is.Not.Null);
+                    actualPointerBindings.Add(GetSceneHierarchyPath(target.transform), sceneNodeId);
+                }
+
+                Assert.That(actualPointerBindings, Is.EquivalentTo(new Dictionary<string, string>
+                {
+                    { "场景/燃气轮机", "node.gas-turbine" },
+                    { "场景/余热锅炉", "node.gas-hrsg" },
+                    { "场景/低中高压汽轮机", "node.gas-steam-turbine" },
+                    { "场景/发电机", "node.gas-generator" }
+                }), "三维反向选择索引只能包含四个下层现场设备模型。 ");
+            }
+            finally
+            {
+                EditorSceneManager.CloseScene(gasPowerScene, true);
+            }
+        }
+
+        /// <summary>
         /// 燃气真实模型的四态视觉能力必须在资产层满足运行时登记的全部前置条件。
         /// 此测试故意不引用默认程序集中的燃气控制器类型，而是通过序列化字段读取其已保存的绑定，
         /// 逐项复现运行时的渲染器收集、材质槽校验和跨节点归属校验。这样模型或材质被编辑后，
@@ -610,7 +905,32 @@ namespace WebDLPro.Unity.Tests
                 SerializedObject serializedController = new SerializedObject(controller);
                 SerializedProperty bindings = serializedController.FindProperty("_visualStateBindings");
                 Assert.That(bindings, Is.Not.Null, "燃气控制器缺少已序列化的四态视觉绑定字段。 ");
-                Assert.That(bindings.arraySize, Is.EqualTo(3), "燃气场景必须显式绑定燃气轮机、余热锅炉和蒸汽轮机三个真实模型。 ");
+                Assert.That(bindings.arraySize, Is.EqualTo(4), "燃气场景必须显式绑定燃气轮机、余热锅炉、蒸汽轮机和发电机四个真实模型。 ");
+
+                Dictionary<string, string> expectedSceneNodeIds = new Dictionary<string, string>
+                {
+                    { "node.gas-turbine", "场景/燃气轮机" },
+                    { "node.gas-hrsg", "场景/余热锅炉" },
+                    { "node.gas-steam-turbine", "场景/低中高压汽轮机" },
+                    { "node.gas-generator", "场景/发电机" }
+                };
+                HashSet<string> actualSceneNodeIds = new HashSet<string>();
+                for (int bindingIndex = 0; bindingIndex < bindings.arraySize; bindingIndex++)
+                {
+                    SerializedProperty binding = bindings.GetArrayElementAtIndex(bindingIndex);
+                    string sceneNodeId = binding.FindPropertyRelative("_sceneNodeId").stringValue;
+                    SerializedProperty targets = binding.FindPropertyRelative("_targets");
+                    Assert.That(expectedSceneNodeIds.ContainsKey(sceneNodeId), Is.True,
+                        $"燃气四态绑定包含未登记节点：{sceneNodeId}。 ");
+                    Assert.That(targets.arraySize, Is.EqualTo(1), $"节点 {sceneNodeId} 必须只绑定对应主设备。 ");
+                    GameObject target = targets.GetArrayElementAtIndex(0).objectReferenceValue as GameObject;
+                    Assert.That(target, Is.Not.Null, $"节点 {sceneNodeId} 的四态目标为空。 ");
+                    Assert.That(GetSceneHierarchyPath(target.transform), Is.EqualTo(expectedSceneNodeIds[sceneNodeId]),
+                        $"节点 {sceneNodeId} 的四态目标不是对应主设备。 ");
+                    actualSceneNodeIds.Add(sceneNodeId);
+                }
+                Assert.That(actualSceneNodeIds, Is.EquivalentTo(expectedSceneNodeIds.Keys),
+                    "燃气四态绑定必须完整覆盖四个主设备节点。 ");
 
                 SerializedProperty colorPropertyNames = serializedController.FindProperty("_visualStateColorPropertyNames");
                 Assert.That(colorPropertyNames, Is.Not.Null);
@@ -797,6 +1117,20 @@ namespace WebDLPro.Unity.Tests
         }
 
         /// <summary>
+        /// 构建场景内对象的完整层级路径；只用于资产回归测试，不参与运行时节点解析或业务映射。
+        /// </summary>
+        private static string GetSceneHierarchyPath(Transform target)
+        {
+            List<string> segments = new List<string>();
+            for (Transform current = target; current != null; current = current.parent)
+            {
+                segments.Insert(0, current.name);
+            }
+
+            return string.Join("/", segments);
+        }
+
+        /// <summary>
         /// 在指定根节点下读取体积控制器序列化引用，直接校验运行时真实使用的红色叠加粒子。
         /// 校验不按对象名重新查找粒子系统，避免测试通过但控制器仍引用旧对象或错误层。
         /// </summary>
@@ -973,6 +1307,22 @@ namespace WebDLPro.Unity.Tests
             Assert.That(adapterType, Is.Not.Null, "未加载燃煤业务场景适配器类型。 ");
             MethodInfo registerFactory = adapterType.GetMethod("RegisterFactory", BindingFlags.Static | BindingFlags.NonPublic);
             Assert.That(registerFactory, Is.Not.Null, "燃煤业务场景适配器缺少工厂登记入口。 ");
+            registerFactory.Invoke(null, null);
+        }
+
+        /// <summary>编辑器测试显式登记光伏适配器，模拟播放器桥接器启动时的工厂注册。</summary>
+        private static void RegisterSolarPowerAdapterFactory()
+        {
+            Type adapterType = null;
+            Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
+            for (int assemblyIndex = 0; assemblyIndex < assemblies.Length && adapterType == null; assemblyIndex++)
+            {
+                adapterType = assemblies[assemblyIndex].GetType("SolarPowerBusinessSceneControllerAdapter", false);
+            }
+
+            Assert.That(adapterType, Is.Not.Null, "未加载光伏业务场景适配器类型。 ");
+            MethodInfo registerFactory = adapterType.GetMethod("RegisterFactory", BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.That(registerFactory, Is.Not.Null, "光伏业务场景适配器缺少工厂登记入口。 ");
             registerFactory.Invoke(null, null);
         }
     }

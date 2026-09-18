@@ -1,5 +1,5 @@
 import type { ActionDefinition, ProcessDetailDefinition } from '@/config/scene-topology/types'
-import type { ProcessDetailId, SceneId, TransitionId } from '@/config/scene-topology/identifiers'
+import type { ActionId, ProcessDetailId, SceneId, TopologyId, TransitionId } from '@/config/scene-topology/identifiers'
 import { toTransitionId } from '@/config/scene-topology/identifiers'
 import type { TopologyRegistry } from '@/config/scene-topology/topology-registry'
 import type { HostCommandExecutionResult } from '@/host-bridge/host-command-lifecycle'
@@ -86,8 +86,35 @@ export class ProcessDetailTransactionHandler {
     }
 
     if (action.targetViewMode === 'process-detail') return this.enter(action, context.contextRevision, command.correlationId)
+    // 平台总览必须由跨场景流程处理器先退出当前第三层，再复用无拓扑视图事务；本处理器不直接提交总览。
+    if (action.targetViewMode === 'overview') {
+      return this.failure('action.context.mismatch', 'validation', '平台总览动作应由跨场景导航事务处理。')
+    }
     if (isProcessDetailVisualizationStableContext(context)) return this.exit(action, context.contextRevision, command.correlationId)
     return this.failure('action.context.mismatch', 'validation', '当前动作不属于关键环节进入或返回事务。')
+  }
+
+  /**
+   * 跨场景导航必须先把当前第三层恢复为同场景默认业务拓扑。
+   * 该中间步骤不绑定外部动作标识，避免把目标场景动作伪装成当前场景的退出动作；
+   * 成功后调用方可基于返回的新上下文版本继续执行受控场景切换。
+   */
+  public async exitCurrentToDefaultBusiness(
+    expectedContextRevision: number,
+    correlationId: string,
+  ): Promise<HostCommandExecutionResult> {
+    const snapshot = this.coordinator.getSnapshot()
+    const context = snapshot.stableContext
+    if (!context || snapshot.runtimeStatus !== 'ready' || !isProcessDetailVisualizationStableContext(context)) {
+      return this.failure('action.context.mismatch', 'validation', '当前没有可退出的稳定关键环节。')
+    }
+    if (expectedContextRevision !== context.contextRevision) {
+      return this.failure('context.revision.conflict', 'validation', '关键环节退出使用的上下文版本已经失效。')
+    }
+
+    const scene = this.registry.getScene(context.sceneId)
+    if (!scene) return this.failure('scene.unknown', 'validation', '当前关键环节所属场景未在清单中登记。')
+    return this.exitToBusiness(scene.sceneId, scene.defaultTopologyId, null, context.contextRevision, correlationId)
   }
 
   /**
@@ -265,28 +292,48 @@ export class ProcessDetailTransactionHandler {
     }
   }
 
-  /** 返回只接受同场景第二层动作；预备拓扑不绘制，直到 Unity 确认恢复业务相机并释放独立资源。 */
+  /** 返回动作只接受同场景第二层；跨场景编排则调用 exitCurrentToDefaultBusiness 先建立可恢复的中间态。 */
   private async exit(
     action: Extract<ActionDefinition, { targetViewMode: 'business' }>,
     expectedContextRevision: number,
     correlationId: string,
   ): Promise<HostCommandExecutionResult> {
+    return this.exitToBusiness(
+      action.targetSceneId,
+      action.targetTopologyId,
+      action.actionId,
+      expectedContextRevision,
+      correlationId,
+    )
+  }
+
+  /**
+   * 统一执行第三层退出事务。外部同场景返回保留动作标识；跨场景前置退出使用 null，
+   * 使失败恢复基线成为无业务副作用的默认拓扑，可由后续场景事务安全恢复。
+   */
+  private async exitToBusiness(
+    targetSceneId: SceneId,
+    targetTopologyId: TopologyId,
+    actionId: ActionId | null,
+    expectedContextRevision: number,
+    correlationId: string,
+  ): Promise<HostCommandExecutionResult> {
     const currentContext = this.coordinator.getSnapshot().stableContext
-    if (!currentContext || !isProcessDetailVisualizationStableContext(currentContext) || currentContext.sceneId !== action.targetSceneId) {
+    if (!currentContext || !isProcessDetailVisualizationStableContext(currentContext) || currentContext.sceneId !== targetSceneId) {
       return this.failure('action.context.mismatch', 'validation', '返回动作与当前关键环节场景不匹配。')
     }
     const detail = this.registry.getProcessDetail(currentContext.processDetailId)
     if (!detail) return this.failure('action.context.mismatch', 'validation', '当前关键环节未在目录中登记。')
 
     const transitionId = this.createTransitionId()
-    const prepared = this.topologyRuntime.prepare(action.targetSceneId, action.targetTopologyId, transitionId)
+    const prepared = this.topologyRuntime.prepare(targetSceneId, targetTopologyId, transitionId)
     if (!prepared) return this.failure('topology.prepare.failed', 'preparing-topology', '返回目标拓扑未能预备。')
     const begin = this.coordinator.submit({
       type: 'transition.begin',
       transitionId,
-      sceneId: action.targetSceneId,
-      topologyId: action.targetTopologyId,
-      actionId: action.actionId,
+      sceneId: targetSceneId,
+      topologyId: targetTopologyId,
+      actionId,
       expectedContextRevision,
     })
     if (begin.status !== 'accepted') return this.failure('context.revision.conflict', 'validation', '返回事务未能取得当前上下文提交权。')
@@ -321,9 +368,9 @@ export class ProcessDetailTransactionHandler {
       const commit = this.coordinator.submit({
         type: 'transition.commit',
         transitionId,
-        sceneId: action.targetSceneId,
-        topologyId: action.targetTopologyId,
-        actionId: action.actionId,
+        sceneId: targetSceneId,
+        topologyId: targetTopologyId,
+        actionId,
         sceneActivationId: this.coordinator.getSnapshot().sceneActivationId ?? null,
       })
       if (commit.status !== 'accepted') return this.superseded(transitionId)

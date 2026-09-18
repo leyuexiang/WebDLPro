@@ -96,7 +96,8 @@ export class HostCommandDispatcher {
     }
 
     const expectedContextRevision = readExpectedContextRevision(command)
-    const currentContextRevision = snapshot.stableContext?.contextRevision ?? 0
+    // 错误态可能已清空不可信稳定内容；版本必须读取独立单调时钟，兼容旧快照时才回退到稳定上下文。
+    const currentContextRevision = snapshot.contextRevision ?? snapshot.stableContext?.contextRevision ?? 0
     if (expectedContextRevision !== undefined && expectedContextRevision !== currentContextRevision) {
       return this.failure('context.revision.conflict', 'validation', '父页面命令基于旧的稳定上下文版本。', true, currentContextRevision)
     }

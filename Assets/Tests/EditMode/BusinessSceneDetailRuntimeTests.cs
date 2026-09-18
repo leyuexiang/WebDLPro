@@ -65,7 +65,7 @@ namespace WebDLPro.Unity.Tests
                 Assert.That(coalEntry.DetailResourceId, Is.EqualTo("detail.coal-power.equipment"));
 
                 entries[entries.Length - 1] = new BusinessSceneDetailCatalogEntry(
-                    "dispatch",
+                    sceneIds[sceneIds.Count - 1],
                     "detail.coal-power.equipment",
                     BusinessSceneAvailability.Available);
                 catalog.SetEntriesForEditor(entries);

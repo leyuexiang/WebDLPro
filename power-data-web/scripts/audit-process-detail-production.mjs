@@ -2,6 +2,7 @@ import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createConfiguredPowerScenesManifest } from './build-gas-power-smoke-release.mjs'
+import { validateProcessDetailTopologies } from './process-detail-topology-contract.mjs'
 
 const webProjectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const workspaceRoot = path.resolve(webProjectRoot, '..')
@@ -150,12 +151,16 @@ export async function auditProcessDetailProduction(releaseId = 'process-detail-s
   const manifest = await createConfiguredPowerScenesManifest(releaseId, 'gas-power')
   const gasDetails = manifest.processDetails.filter((detail) => detail.sceneId === 'gas-power')
   const coalDetails = manifest.processDetails.filter((detail) => detail.sceneId === 'coal-power')
+  const solarDetails = manifest.processDetails.filter((detail) => detail.sceneId === 'solar-power')
   const gasDetailAction = manifest.actions.find((action) => action.actionId === 'action.gas-power.gas-turbine')
-  const coalDetailAction = manifest.actions.find((action) => action.actionId === 'action.coal-power.boiler')
+  const coalDetailAction = manifest.actions.find((action) => action.actionId === 'action.coal-power.steam-turbine')
+  const solarDetailAction = manifest.actions.find((action) => action.actionId === 'action.solar-power.inverter')
   const gasMapping = manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'gas-power')
   const coalMapping = manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'coal-power')
+  const solarMapping = manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'solar-power')
   if (gasDetails.length !== 1 || gasDetails[0]?.processDetailId !== 'process-detail.gas-power.gas-turbine' ||
-      coalDetails.length !== 1 || coalDetails[0]?.processDetailId !== 'process-detail.coal-power.boiler') {
+      coalDetails.length !== 1 || coalDetails[0]?.processDetailId !== 'process-detail.coal-power.steam-turbine' ||
+      solarDetails.length !== 1 || solarDetails[0]?.processDetailId !== 'process-detail.solar-power.inverter') {
     issues.push({ code: 'process-detail.catalog-not-approved', file: 'power-data-web/scripts/build-gas-power-smoke-release.mjs' })
   }
   if (!gasDetailAction || gasDetailAction.targetViewMode !== 'process-detail' ||
@@ -163,12 +168,23 @@ export async function auditProcessDetailProduction(releaseId = 'process-detail-s
       gasDetailAction.unityAction?.type !== 'enterProcessDetail' ||
       !coalDetailAction || coalDetailAction.targetViewMode !== 'process-detail' ||
       Object.prototype.hasOwnProperty.call(coalDetailAction, 'targetTopologyId') ||
-      coalDetailAction.unityAction?.type !== 'enterProcessDetail') {
+      coalDetailAction.unityAction?.type !== 'enterProcessDetail' ||
+      !solarDetailAction || solarDetailAction.targetViewMode !== 'process-detail' ||
+      Object.prototype.hasOwnProperty.call(solarDetailAction, 'targetTopologyId') ||
+      solarDetailAction.unityAction?.type !== 'enterProcessDetail') {
     issues.push({ code: 'process-detail.action-uses-legacy-path', file: 'power-data-web/scripts/build-gas-power-smoke-release.mjs' })
   }
-  if (gasMapping?.processSteps.some((step) => step.stepId === 'gas-turbine') ||
-      coalMapping?.processSteps.some((step) => step.stepId === 'boiler')) {
-    issues.push({ code: 'process-detail.legacy-step-published', file: 'power-data-web/scripts/build-gas-power-smoke-release.mjs' })
+
+  /**
+   * 清单正确并不代表独立二维文件已经随源码就绪。这里复用发布包同一合同，提前阻断文件缺失、
+   * 内容漂移、图元编号冲突、绑定丢失或第三层目录混入图片副本等无法由类型检查发现的问题。
+   */
+  const topologyIssues = await validateProcessDetailTopologies(path.join(webProjectRoot, 'public', 'topology'))
+  for (const issue of topologyIssues) {
+    issues.push({
+      code: issue.code,
+      file: `power-data-web/public/topology/${issue.file}`,
+    })
   }
 
   return Object.freeze({ files: Object.freeze(files.map((file) => path.relative(workspaceRoot, file).split(path.sep).join('/'))), issues: Object.freeze(issues) })

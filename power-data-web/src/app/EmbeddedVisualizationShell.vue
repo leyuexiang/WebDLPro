@@ -23,7 +23,7 @@ import {
   getCameraPoseNavigationButtons,
   type CameraPoseNavigationButton,
 } from '@/modules/visual/components/camera-pose-navigation'
-import { shouldShowPipelineLegend } from '@/modules/visual/components/pipeline-legend-visibility'
+import { resolvePipelineLegendVariant } from '@/modules/visual/components/pipeline-legend-visibility'
 import ManifestTopologyRuntimePanel from '@/modules/visual/topology/ManifestTopologyRuntimePanel.vue'
 import VisualizationRuntimeHost from '@/modules/visual/runtime/VisualizationRuntimeHost.vue'
 import { VisualizationCoordinator } from '@/modules/visual/orchestration/visualization-coordinator'
@@ -172,17 +172,18 @@ const overviewActive = computed(() => (
 /** 第三层仍保持三维与二维双区布局；只有平台总览（第一层）隐藏拓扑画布。 */
 const topologySuppressed = computed(() => overviewActive.value)
 /**
- * 图例使用已提交稳定上下文统一判断第二层，不按燃气、燃煤或其他场景名称分支。
- * 原生全屏状态不参与该计算，因此进入全屏和退出全屏都复用同一个图例节点。
+ * 图例只按已提交稳定上下文决议可见性和资源语义：燃煤使用专用图例，当前其余第二层保持既有燃气图例。
+ * 原生全屏状态不参与该计算，因此进入全屏和退出全屏都复用同一个图例节点及同一份已解析资源。
  */
-const pipelineLegendVisible = computed(() => shouldShowPipelineLegend(
+const pipelineLegendVariant = computed(() => resolvePipelineLegendVariant(
   visualizationStore.runtimeStatus,
   visualizationStore.stableContext,
 ))
 
 /**
  * 命名镜头按钮只属于燃气、燃煤第二层业务视图。平台总览没有对应镜头，第三层关键环节又会拒绝
- * 第二层镜头命令，因此必须先用稳定上下文的业务类型守卫排除这两种无拓扑全屏状态。
+ * 第二层镜头命令，因此必须先用稳定上下文的业务类型守卫排除平台总览和不携带第二层拓扑编号的第三层状态。
+ * 第三层的独立二维拓扑由 topologyDataContextId 驱动，不属于这组第二层镜头控制。
  */
 const cameraPoseButtons = computed(() => {
   const context = visualizationStore.stableContext
@@ -740,7 +741,7 @@ onBeforeUnmount(() => {
         >
           <ProcessScenePanel
             :result="sceneBaseline"
-            :show-pipeline-legend="pipelineLegendVisible"
+            :pipeline-legend-variant="pipelineLegendVariant"
             @camera-reset="handleCameraReset"
           >
             <template #overlays>

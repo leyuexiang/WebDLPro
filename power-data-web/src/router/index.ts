@@ -28,6 +28,18 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '燃气 V3 拓扑图 JSON 预览' },
   },
   {
+    path: '/wind-topology-json-preview',
+    name: 'wind-topology-json-preview',
+    component: () => import('@/modules/visual/topology-preview/WindTopologyJsonPreview.vue'),
+    meta: { title: '风电拓扑图 JSON 预览' },
+  },
+  {
+    path: '/solar-topology-json-preview',
+    name: 'solar-topology-json-preview',
+    component: () => import('@/modules/visual/topology-preview/SolarTopologyJsonPreview.vue'),
+    meta: { title: '光伏拓扑图 JSON 预览' },
+  },
+  {
     path: '/coal-topology-json-preview',
     name: 'coal-topology-json-preview',
     // 燃煤拓扑使用独立数据与资源目录，不依赖已移除的第一版燃气预览。

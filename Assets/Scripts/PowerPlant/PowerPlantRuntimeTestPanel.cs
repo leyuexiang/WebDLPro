@@ -13,23 +13,11 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
     private const string GasTurbineProcessDetailId = "process-detail.gas-power.gas-turbine";
     private const string DefaultBridgeInstanceId = "local-demo-001";
 
-    private static readonly string[] StepIds =
-    {
-        "overview",
-        "grid-output",
-        "gas-network",
-        "inlet-duct",
-        "gas-turbine",
-        "hrsg",
-        "steam-turbine",
-        "generator"
-    };
-
     private static readonly string[] VisualStateNodeIds =
     {
-        "gas-turbine",
-        "hrsg",
-        "steam-turbine"
+        "node.gas-turbine",
+        "node.gas-hrsg",
+        "node.gas-steam-turbine"
     };
 
     private readonly GUIContent[] _visualStateNodeLabels =
@@ -65,22 +53,9 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
     [SerializeField, Min(0.5f)] private float _autoTestInterval = 2.5f;
     [SerializeField] private string _bridgeInstanceId = DefaultBridgeInstanceId;
 
-    private readonly GUIContent[] _stepLabels =
-    {
-        new GUIContent("总览"),
-        new GUIContent("电网送出"),
-        new GUIContent("燃气网络"),
-        new GUIContent("进气系统"),
-        new GUIContent("燃气轮机"),
-        new GUIContent("余热锅炉"),
-        new GUIContent("汽轮机"),
-        new GUIContent("发电机")
-    };
-
     private bool _isolate = true;
-    private string _unitId = "all";
     // 默认使用场景已登记的稳定节点标识，避免打开面板后节点测试立即落入无效节点错误路径。
-    private string _nodeId = "gas-turbine";
+    private string _nodeId = "node.gas-turbine";
     private int _visualStateNodeIndex;
     // 保存最近一次桥接聚焦使用的选择标识，供“重复聚焦”按钮原样重发以验证幂等处理。
     private string _lastFocusSelectionId;
@@ -204,23 +179,7 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
     private void DrawProcessControls()
     {
         GUILayout.Space(4f);
-        GUILayout.Label("流程、显隐与描边", _sectionStyle);
-        GUILayout.BeginHorizontal();
-        GUILayout.Label("机组", GUILayout.Width(38f));
-        DrawUnitButton("全部", "all");
-        DrawUnitButton("1 号", "1");
-        DrawUnitButton("2 号", "2");
-        _isolate = GUILayout.Toggle(_isolate, "隔离上下文", GUILayout.Width(110f));
-        GUILayout.EndHorizontal();
-
-        for (int row = 0; row < 4; row++)
-        {
-            GUILayout.BeginHorizontal();
-            DrawStepButton(row * 2);
-            DrawStepButton(row * 2 + 1);
-            GUILayout.EndHorizontal();
-        }
-
+        GUILayout.Label("场景复位与节点交互", _sectionStyle);
         GUILayout.BeginHorizontal();
         if (GUILayout.Button("重置场景"))
         {
@@ -416,15 +375,9 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
             InitializeBridgeSession();
         }
 
-        if (GUILayout.Button("当前步骤"))
+        if (GUILayout.Button("恢复默认状态"))
         {
-            SendBridgeCommand("enterProcessStep", new TestBridgePayload
-            {
-                processId = ProcessId,
-                stepId = GetSelectedStepId(),
-                unitId = _unitId,
-                isolate = _isolate
-            });
+            SendBridgeCommand("resetScene", new TestBridgePayload());
         }
 
         if (GUILayout.Button("重置"))
@@ -470,51 +423,6 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
         }
         GUILayout.EndHorizontal();
 
-        GUILayout.BeginHorizontal();
-        if (GUILayout.Button("旧测试指令"))
-        {
-            SendBridgeCommand("test-command", new TestBridgePayload { text = "runtime-test-panel" });
-        }
-
-        if (GUILayout.Button("无效步骤（错误路径）"))
-        {
-            SendBridgeCommand("enterProcessStep", new TestBridgePayload
-            {
-                processId = ProcessId,
-                stepId = "invalid-step",
-                unitId = _unitId,
-                isolate = _isolate
-            });
-        }
-        GUILayout.EndHorizontal();
-    }
-
-    private void DrawUnitButton(string label, string unitId)
-    {
-        bool selected = _unitId == unitId;
-        if (GUILayout.Toggle(selected, label, "Button", GUILayout.Width(54f)) && !selected)
-        {
-            _unitId = unitId;
-        }
-    }
-
-    private void DrawStepButton(int index)
-    {
-        if (GUILayout.Button(_stepLabels[index], GUILayout.ExpandWidth(true)))
-        {
-            EnterStep(StepIds[index], _unitId, _isolate);
-        }
-    }
-
-    private void EnterStep(string stepId, string unitId, bool isolate)
-    {
-        if (!EnsureProcessController())
-        {
-            return;
-        }
-
-        bool success = _processController.TryEnterProcessStep(ProcessId, stepId, unitId, isolate, out string message);
-        Report(success ? $"流程测试通过：{message}" : $"流程测试失败：{message}");
     }
 
     private void ResetScene()
@@ -768,15 +676,8 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
 
     private IEnumerator RunAutoTest()
     {
-        _unitId = "all";
         ResetScene();
         yield return new WaitForSecondsRealtime(_autoTestInterval);
-
-        for (int index = 0; index < StepIds.Length; index++)
-        {
-            EnterStep(StepIds[index], "all", true);
-            yield return new WaitForSecondsRealtime(_autoTestInterval);
-        }
 
         ResetScene();
         _autoTestRoutine = null;
@@ -992,7 +893,7 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
 
     private string GetSelectedStepId()
     {
-        return _processController != null ? _processController.CurrentStepId : StepIds[0];
+        return "默认状态";
     }
 
     private void Report(string message)

@@ -85,18 +85,7 @@ export class DeviceStatesUpdateCoordinator {
   private frameHandle: unknown | undefined
   private unityDispatchActive = false
   private latestSnapshotSequence = 0
-  /** 仅登记当前已确认的燃气、燃煤二层故障来源；未列入的节点不影响沙盘入口模型。 */
-  private readonly overviewFaultSourceNodeIds = new Map<string, readonly string[]>([
-    ['overview-building.gas-power', ['inlet-duct', 'hrsg', 'steam-turbine']],
-    ['overview-building.coal-power', [
-      'asset.coal-mill-actuator',
-      'system.boiler-dcs',
-      'system.steam-turbine-dcs',
-      'system.generator-excitation-controller',
-      'system.coal-handling-ash-plc',
-    ]],
-  ])
-  /** 保存最新两场景沙盘故障投影，切入沙盘时直接重放，不需要重新等待前端上报。 */
+  /** 保存最新完整快照中的全部故障来源节点；具体节点属于哪座沙盘建筑由 Unity 场景资产配置。 */
   private readonly latestOverviewTargets = new Map<SceneNodeId, UnityNodeVisualStateOperation>()
   private activeOverviewSceneActivationId: SceneActivationId | undefined
   /**
@@ -146,11 +135,12 @@ export class DeviceStatesUpdateCoordinator {
     }
 
     this.latestSnapshotSequence = topologyResult.snapshotSequence
-    this.updateLatestOverviewTargets(command, topologyResult)
+    const clearedOverviewTargets = this.updateLatestOverviewTargets(command, topologyResult)
     const diagnostic = this.createDiagnostic(command, startedAt, topologyResult)
     const unityTargets = this.createUnityTargets(topologyResult)
     if (this.activeOverviewSceneActivationId) {
       this.latestOverviewTargets.forEach((operation, sceneNodeId) => unityTargets.set(sceneNodeId, operation))
+      clearedOverviewTargets.forEach((operation, sceneNodeId) => unityTargets.set(sceneNodeId, operation))
     }
     // 目标数量必须取最终操作表：同一节点的设置/清除会去重，历史清除债务也会在这里合并。
     diagnostic.unityTargetCount = unityTargets.size
@@ -192,7 +182,7 @@ export class DeviceStatesUpdateCoordinator {
     this.invalidatePendingBatchForSceneChange()
   }
 
-  /** 切入沙盘后重放最近一次已提交的燃气、燃煤入口故障结果。 */
+  /** 切入沙盘后重放最近一次完整快照中的故障来源节点；建筑归属由 Unity 场景配置解析。 */
   public resynchronizeLatestOverviewSnapshot(sceneActivationId?: SceneActivationId): void {
     if (this.disposed || !sceneActivationId) return
     this.activeOverviewSceneActivationId = sceneActivationId
@@ -202,7 +192,7 @@ export class DeviceStatesUpdateCoordinator {
       this.pendingClearSequenceBySceneNodeId.clear()
       this.invalidatePendingBatchForSceneChange()
     }
-    // 尚无设备快照时只登记沙盘活动实例；首份快照提交后会立即生成并发送两个入口状态。
+    // 尚无设备快照时只登记沙盘活动实例；首份快照提交后会立即发送当前故障来源节点。
     if (this.latestSnapshotSequence <= 0) return
     const diagnostic = this.createReplayDiagnostic('overview-state-replay')
     this.recordDiagnostic(diagnostic)
@@ -211,43 +201,35 @@ export class DeviceStatesUpdateCoordinator {
   }
 
   /**
-   * 根据完整设备快照计算两个入口模型的故障状态；任一已登记设备故障即显示故障，否则清除。
-   * 该判断只遍历本批状态项和两个固定来源表，不扫描场景对象，也不创建运行时材质。
+   * 将完整设备快照中的全部故障节点投给沙盘。前端不判断节点属于哪座建筑；Unity 根据场景资产配置聚合。
+   * 返回上一快照存在、本次已恢复或消失的故障来源，供同一沙盘实例立即清除；新实例只需重放当前故障。
    */
   private updateLatestOverviewTargets(
     command: Extract<HostDispatchableDomainCommand, { type: 'device.states.update' }>,
     result: TopologyNodeStateApplyResult,
-  ): void {
+  ): ReadonlyMap<SceneNodeId, UnityNodeVisualStateOperation> {
     const acceptedNodeIds = new Set(result.acceptedNodeIds)
-    const statusByNodeId = new Map<string, { deviceStatus: DeviceVisualStatus; statusUpdatedAt: string }>()
+    const latestStateByNodeId = new Map<string, { deviceStatus: DeviceVisualStatus; statusUpdatedAt: string }>()
     for (const item of command.payload.items) {
-      if (acceptedNodeIds.has(item.nodeId)) {
-        statusByNodeId.set(item.nodeId, item)
-      }
+      if (acceptedNodeIds.has(item.nodeId)) latestStateByNodeId.set(item.nodeId, item)
     }
 
+    const previousFaultNodeIds = new Set(this.latestOverviewTargets.keys())
     this.latestOverviewTargets.clear()
-    this.overviewFaultSourceNodeIds.forEach((sourceNodeIds, overviewBuildingId) => {
-      let faultState: { statusUpdatedAt: string } | undefined
-      for (const sourceNodeId of sourceNodeIds) {
-        const state = statusByNodeId.get(sourceNodeId)
-        if (state?.deviceStatus === 'fault') {
-          faultState = state
-          break
-        }
-      }
-
-      this.latestOverviewTargets.set(
-        toSceneNodeId(overviewBuildingId),
-        faultState
-          ? { kind: 'set', state: {
-            visualState: 'fault',
-            statusUpdatedAt: faultState.statusUpdatedAt,
-            sourceRevision: command.payload.sourceRevision,
-          } }
-          : { kind: 'clear' },
-      )
+    latestStateByNodeId.forEach((state, nodeId) => {
+      if (state.deviceStatus !== 'fault') return
+      const faultSourceNodeId = toSceneNodeId(nodeId)
+      previousFaultNodeIds.delete(faultSourceNodeId)
+      this.latestOverviewTargets.set(faultSourceNodeId, { kind: 'set', state: {
+        visualState: 'fault',
+        statusUpdatedAt: state.statusUpdatedAt,
+        sourceRevision: command.payload.sourceRevision,
+      } })
     })
+
+    const clearedTargets = new Map<SceneNodeId, UnityNodeVisualStateOperation>()
+    previousFaultNodeIds.forEach((faultSourceNodeId) => clearedTargets.set(faultSourceNodeId, { kind: 'clear' }))
+    return clearedTargets
   }
 
   /** 生成总览重放所需的最小诊断对象，不把建筑状态加入外层业务回执。 */

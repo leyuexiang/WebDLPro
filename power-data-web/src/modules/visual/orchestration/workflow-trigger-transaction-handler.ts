@@ -34,7 +34,7 @@ export class WorkflowTriggerTransactionHandler {
     private readonly viewOpen: Pick<ViewOpenTransactionHandler, 'submit'>,
     private readonly coordinator: VisualizationCoordinatorFacade,
     private readonly scope: WorkflowTriggerScope = 'same-scene',
-    private readonly processDetail?: Pick<ProcessDetailTransactionHandler, 'submit' | 'cancelTimedOutCommand'>,
+    private readonly processDetail?: Pick<ProcessDetailTransactionHandler, 'submit' | 'exitCurrentToDefaultBusiness' | 'cancelTimedOutCommand'>,
     private readonly synchronizeCrossSceneProcessDetailState: CrossSceneProcessDetailStateSynchronizer = async () => true,
   ) {}
 
@@ -93,10 +93,29 @@ export class WorkflowTriggerTransactionHandler {
 
     /**
      * 第三层动作和从第三层返回的业务动作统一交给独立事务处理器。
-     * 跨场景进入关键环节时，必须先复用受控 view.open 建立目标业务场景和默认拓扑，
-     * 再等待最新状态重放，最后进入第三层；外层仍只会在整个 workflow.trigger 成功后发布一次稳定视图事件。
+     * 跨场景离开关键环节时，先恢复当前场景的默认业务拓扑，形成可回退的稳定中间态；
+     * 随后再执行目标场景切换，避免目标动作被同场景退出校验提前拒绝。
      */
-    if (action.targetViewMode === 'process-detail' || isProcessDetailVisualizationStableContext(currentContext)) {
+    const startsInProcessDetail = isProcessDetailVisualizationStableContext(currentContext)
+    if (startsInProcessDetail && this.scope === 'cross-scene') {
+      if (!this.processDetail) return this.failure('protocol.capability.undeclared', 'validation', '当前发布未接入关键环节事务能力。')
+      return this.exitProcessDetailAndContinue(action, payload, correlationId, currentContext.contextRevision)
+    }
+    if (action.targetViewMode === 'overview') {
+      /*
+       * 合作方从统一动作清单触发平台总览，但底层仍复用既有无拓扑 view.open（视图打开）事务。
+       * 总览载荷按协议不得携带 actionId 或占位 topologyId，避免污染稳定上下文和业务拓扑注册表。
+       */
+      return this.viewOpen.submit({
+        type: 'view.open',
+        correlationId,
+        payload: {
+          sceneId: action.targetSceneId,
+          expectedContextRevision: payload.expectedContextRevision ?? currentContext.contextRevision,
+        },
+      })
+    }
+    if (action.targetViewMode === 'process-detail' || startsInProcessDetail) {
       if (!this.processDetail) return this.failure('protocol.capability.undeclared', 'validation', '当前发布未接入关键环节事务能力。')
       if (action.targetViewMode === 'process-detail' && this.scope === 'cross-scene') {
         return this.enterCrossSceneProcessDetail(action, payload, correlationId, currentContext.contextRevision)
@@ -116,6 +135,51 @@ export class WorkflowTriggerTransactionHandler {
         topologyId: action.targetTopologyId,
         actionId: action.actionId,
         expectedContextRevision: payload.expectedContextRevision ?? currentContext.contextRevision,
+      },
+    })
+  }
+
+  /**
+   * 从第三层跨场景时先完成当前资源退出和默认拓扑恢复，再基于最新上下文版本继续目标事务。
+   * 这样目标加载失败时，现有 view.open 补偿逻辑可以恢复到来源业务总览，而不是落入不可重放的第三层错误态。
+   */
+  private async exitProcessDetailAndContinue(
+    action: ActionDefinition,
+    payload: WorkflowTriggerPayload,
+    correlationId: string,
+    expectedContextRevision: number,
+  ): Promise<HostCommandExecutionResult> {
+    const exited = await this.processDetail!.exitCurrentToDefaultBusiness(expectedContextRevision, correlationId)
+    if (!exited.success) return exited
+
+    const sourceSnapshot = this.coordinator.getSnapshot()
+    const sourceContext = sourceSnapshot.stableContext
+    if (!sourceContext || sourceSnapshot.runtimeStatus !== 'ready' || !('topologyId' in sourceContext)) {
+      return this.failure('action.execute.failed', 'executing-action', '当前关键环节退出后未形成可切换场景的稳定业务上下文。')
+    }
+
+    if (action.targetViewMode === 'process-detail') {
+      return this.enterCrossSceneProcessDetail(action, payload, correlationId, sourceContext.contextRevision)
+    }
+    if (action.targetViewMode === 'overview') {
+      // 退出第三层后的最新上下文版本必须继续传给同一个无拓扑总览事务，防止旧命令覆盖新视图。
+      return this.viewOpen.submit({
+        type: 'view.open',
+        correlationId,
+        payload: {
+          sceneId: action.targetSceneId,
+          expectedContextRevision: sourceContext.contextRevision,
+        },
+      })
+    }
+    return this.viewOpen.submit({
+      type: 'view.open',
+      correlationId,
+      payload: {
+        sceneId: action.targetSceneId,
+        topologyId: action.targetTopologyId,
+        actionId: action.actionId,
+        expectedContextRevision: sourceContext.contextRevision,
       },
     })
   }

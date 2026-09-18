@@ -139,7 +139,7 @@ namespace WebDLPro.Unity.SceneRuntime
     }
 
     /// <summary>
-    /// 业务场景可选的第三层能力。它与第二层流程步骤接口分离，禁止新命令降级调用 EnterProcessStep。
+    /// 业务场景可选的第三层能力。它与第二层节点聚焦接口分离，禁止新命令降级到已废弃流程协议。
     /// </summary>
     public interface IBusinessSceneProcessDetailController
     {

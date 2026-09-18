@@ -112,6 +112,8 @@ export type VisualizationCoordinatorResult =
  */
 export interface VisualizationCoordinatorStatePort {
   readonly stableContext: VisualizationStableContext | null
+  /** 会话级单调版本；旧测试替身缺失时由协调器兼容读取稳定上下文版本。 */
+  readonly contextRevision?: number
   /** 与稳定上下文绑定的真实 Unity 场景实例；旧测试替身缺失时视为不可证明。 */
   readonly sceneActivationId?: SceneActivationId | null
   readonly activeTransitionId: TransitionId | null
@@ -168,6 +170,8 @@ export interface VisualizationCoordinatorStatePort {
 /** 只读快照全部由原始值和数组副本组成，不暴露响应式引用或可修改的仓库对象。 */
 export interface VisualizationCoordinatorSnapshot {
   stableContext: VisualizationStableContext | null
+  /** 稳定内容失效后仍保留的会话级单调版本；旧替身可以省略。 */
+  contextRevision?: number
   /** 当前稳定 Unity 物理实例标识；缺失时对象选择协调器会安全拒绝。 */
   sceneActivationId?: SceneActivationId | null
   activeTransitionId: TransitionId | null
@@ -234,6 +238,8 @@ export class VisualizationCoordinator {
   public getSnapshot(): VisualizationCoordinatorSnapshot {
     return {
       stableContext: this.state.stableContext ? { ...this.state.stableContext } : null,
+      // 生产仓库始终提供独立版本；回退兼容只服务于尚未迁移的轻量测试替身。
+      contextRevision: this.state.contextRevision ?? this.state.stableContext?.contextRevision ?? 0,
       sceneActivationId: this.state.sceneActivationId ?? null,
       activeTransitionId: this.state.activeTransitionId,
       targetSceneId: this.state.targetSceneId,
@@ -260,7 +266,7 @@ export class VisualizationCoordinator {
    * 但旧稳定上下文继续可见，直至新事务完整提交。
    */
   private beginTransition(command: Extract<VisualizationDomainCommand, { type: 'transition.begin' }>): VisualizationCoordinatorResult {
-    const currentRevision = this.state.stableContext?.contextRevision ?? 0
+    const currentRevision = this.state.contextRevision ?? this.state.stableContext?.contextRevision ?? 0
     if (command.expectedContextRevision !== undefined && command.expectedContextRevision !== currentRevision) {
       return this.rejected('context.revision.conflict', 'validation', '调用方期望的上下文版本与当前稳定版本不一致。', true)
     }
@@ -388,7 +394,7 @@ export class VisualizationCoordinator {
     return {
       status: 'accepted',
       transitionId: command.transitionId,
-      contextRevision: this.state.stableContext?.contextRevision ?? 0,
+      contextRevision: this.state.contextRevision ?? this.state.stableContext?.contextRevision ?? 0,
     }
   }
 
@@ -401,7 +407,7 @@ export class VisualizationCoordinator {
   ): VisualizationCoordinatorResult {
     if (transitionId !== this.state.activeTransitionId) return { status: 'ignored', reason: 'stale-transition' }
     return this.state.failTransition(transitionId, diagnostic, outcome, restoredSceneActivationId)
-      ? { status: 'accepted', transitionId, contextRevision: this.state.stableContext?.contextRevision ?? 0 }
+      ? { status: 'accepted', transitionId, contextRevision: this.state.contextRevision ?? this.state.stableContext?.contextRevision ?? 0 }
       : { status: 'ignored', reason: 'stale-transition' }
   }
 
@@ -412,7 +418,8 @@ export class VisualizationCoordinator {
   private failTransitionToError(transitionId: TransitionId, diagnostic: VisualizationDiagnostic): VisualizationCoordinatorResult {
     if (transitionId !== this.state.activeTransitionId) return { status: 'ignored', reason: 'stale-transition' }
     return this.state.failTransitionToError(transitionId, diagnostic)
-      ? { status: 'accepted', transitionId }
+      // 错误态会清空不可信稳定内容，但仍返回会话单调版本，供外层失败回执与后续查询继续对齐。
+      ? { status: 'accepted', transitionId, contextRevision: this.state.contextRevision ?? this.state.stableContext?.contextRevision ?? 0 }
       : { status: 'ignored', reason: 'stale-transition' }
   }
 

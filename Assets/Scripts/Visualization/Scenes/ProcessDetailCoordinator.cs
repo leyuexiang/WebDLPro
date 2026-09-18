@@ -417,6 +417,30 @@ namespace WebDLPro.Unity.SceneRuntime
             return BusinessSceneCommandResult.Completed("已恢复业务视图相机并释放关键环节资源；第二层资源始终保持加载。");
         }
 
+        /// <summary>
+        /// 将相机平滑恢复到当前活动关键环节包装预制体显式配置的默认观察位。
+        /// 该操作只重启相机补间，不退出第三层、不切换拓扑、不释放资源，也不改写设备状态或播放许可。
+        /// </summary>
+        public BusinessSceneCommandResult ResetActiveCameraPose()
+        {
+            if (!_initialized && !Initialize().Success)
+            {
+                return _initializationResult;
+            }
+            if (_released)
+            {
+                return BusinessSceneCommandResult.Failed("process-detail-coordinator-released", "关键环节协调器已经释放。");
+            }
+            if (!IsActive)
+            {
+                return BusinessSceneCommandResult.Failed("process-detail-not-active", "当前没有活动的关键环节，无法恢复第三层默认视角。");
+            }
+
+            // CameraPose 已在准备阶段完成非空与远端挂载距离校验；这里直接复用稳定绑定，避免运行时搜索对象或计算包围盒。
+            _cameraController.MoveToPose(_activeInstance.CameraPose);
+            return BusinessSceneCommandResult.Completed("已恢复当前关键环节的默认视角。");
+        }
+
         public BusinessSceneCommandResult SetPlayback(string sceneId, string processDetailId, bool playing)
         {
             if (!_initialized && !Initialize().Success)

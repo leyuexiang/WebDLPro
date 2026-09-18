@@ -137,16 +137,17 @@ describe('设备状态批量协调器', () => {
     expect(coordinator.getDiagnostics()[0]).toEqual(expect.objectContaining({ unitySucceededCount: 1, unityFailedCount: 0 }))
   })
 
-  it('沙盘活动时燃气轮机故障设置燃气入口，恢复后清除且不误触发燃煤入口', async () => {
+  it('沙盘活动时把燃气轮机故障节点原样发送给 Unity，恢复后清除同一节点', async () => {
+    const gasTurbineNodeId = toNodeId('asset.gas-turbine')
     const first = createTopologyResult({
       snapshotSequence: 1,
-      acceptedNodeIds: [toNodeId('inlet-duct')],
+      acceptedNodeIds: [gasTurbineNodeId],
       activeSceneNodeStatuses: new Map(),
       activeSceneNodeStateUpdates: new Map(),
     })
     const second = createTopologyResult({
       snapshotSequence: 2,
-      acceptedNodeIds: [toNodeId('inlet-duct')],
+      acceptedNodeIds: [gasTurbineNodeId],
       activeSceneNodeStatuses: new Map(),
       activeSceneNodeStateUpdates: new Map(),
     })
@@ -161,34 +162,93 @@ describe('设备状态批量协调器', () => {
       correlationId: 'overview-gas-fault',
       payload: {
         sourceRevision: 1,
-        items: [{ nodeId: toNodeId('inlet-duct'), deviceStatus: 'fault', statusUpdatedAt: '2026-08-05T00:00:00.000Z' }],
+        items: [{ nodeId: gasTurbineNodeId, deviceStatus: 'fault', statusUpdatedAt: '2026-08-05T00:00:00.000Z' }],
       },
     })
     frameScheduler.flush()
     await flushPromises()
 
     expect(unity.setNodeVisualState).toHaveBeenCalledWith(
-      toSceneNodeId('overview-building.gas-power'),
+      gasTurbineNodeId,
       'fault',
       1,
       '2026-08-05T00:00:00.000Z',
       1,
     )
     expect(unity.setNodeVisualState).toHaveBeenCalledTimes(1)
-    expect(unity.clearNodeVisualState).toHaveBeenCalledWith(toSceneNodeId('overview-building.coal-power'), 1)
+    expect(unity.clearNodeVisualState).not.toHaveBeenCalled()
 
     await coordinator.submit({
       type: 'device.states.update',
       correlationId: 'overview-gas-recovered',
       payload: {
         sourceRevision: 2,
-        items: [{ nodeId: toNodeId('inlet-duct'), deviceStatus: 'normal', statusUpdatedAt: '2026-08-05T00:00:01.000Z' }],
+        items: [{ nodeId: gasTurbineNodeId, deviceStatus: 'normal', statusUpdatedAt: '2026-08-05T00:00:01.000Z' }],
       },
     })
     frameScheduler.flush()
     await flushPromises()
 
-    expect(unity.clearNodeVisualState).toHaveBeenCalledWith(toSceneNodeId('overview-building.gas-power'), 2)
+    expect(unity.clearNodeVisualState).toHaveBeenCalledWith(gasTurbineNodeId, 2)
+  })
+
+  it.each([
+    ['锅炉', 'asset.coal-boiler'],
+    ['汽轮机', 'asset.coal-steam-turbine'],
+    ['发电机', 'asset.coal-generator'],
+  ])('沙盘活动时把燃煤%s现场设备故障节点原样发送给 Unity，恢复后清除同一节点', async (_deviceLabel, rawNodeId) => {
+    const coalDeviceNodeId = toNodeId(rawNodeId)
+    const first = createTopologyResult({
+      snapshotSequence: 1,
+      acceptedNodeIds: [coalDeviceNodeId],
+      activeSceneNodeStatuses: new Map(),
+      activeSceneNodeStateUpdates: new Map(),
+    })
+    const second = createTopologyResult({
+      snapshotSequence: 2,
+      acceptedNodeIds: [coalDeviceNodeId],
+      activeSceneNodeStatuses: new Map(),
+      activeSceneNodeStateUpdates: new Map(),
+    })
+    const { runtime } = createTopologyRuntime([first, second])
+    const unity = createUnityPort()
+    const frameScheduler = createFrameScheduler()
+    const coordinator = new DeviceStatesUpdateCoordinator(runtime, unity, { frameScheduler })
+    coordinator.resynchronizeLatestOverviewSnapshot(toSceneActivationId('scene-activation.overview'))
+
+    await coordinator.submit({
+      type: 'device.states.update',
+      correlationId: `overview-coal-fault-${rawNodeId}`,
+      payload: {
+        sourceRevision: 1,
+        items: [{ nodeId: coalDeviceNodeId, deviceStatus: 'fault', statusUpdatedAt: '2026-08-05T00:00:00.000Z' }],
+      },
+    })
+    frameScheduler.flush()
+    await flushPromises()
+
+    expect(unity.setNodeVisualState).toHaveBeenCalledWith(
+      coalDeviceNodeId,
+      'fault',
+      1,
+      '2026-08-05T00:00:00.000Z',
+      1,
+    )
+    expect(unity.setNodeVisualState).toHaveBeenCalledTimes(1)
+    expect(unity.clearNodeVisualState).not.toHaveBeenCalled()
+
+    await coordinator.submit({
+      type: 'device.states.update',
+      correlationId: `overview-coal-recovered-${rawNodeId}`,
+      payload: {
+        sourceRevision: 2,
+        items: [{ nodeId: coalDeviceNodeId, deviceStatus: 'normal', statusUpdatedAt: '2026-08-05T00:00:01.000Z' }],
+      },
+    })
+    frameScheduler.flush()
+    await flushPromises()
+
+    expect(unity.clearNodeVisualState).toHaveBeenCalledWith(coalDeviceNodeId, 2)
   })
 
   it('Unity能力缺失或节点失败只进入内部诊断，不改变、延迟或补发外层成功', async () => {

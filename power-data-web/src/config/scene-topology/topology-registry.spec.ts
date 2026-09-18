@@ -46,7 +46,6 @@ function createManifest(): unknown {
     unitySceneMappings: SCENE_IDS.map((sceneId) => ({
       sceneId,
       mappingVersion: version,
-      processSteps: [],
       sceneNodeIds: [],
       routeIds: [],
     })),

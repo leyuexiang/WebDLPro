@@ -54,7 +54,7 @@ export const GAS_V3_TOPOLOGY_VARIANTS = Object.freeze([
     combinationKey: 'architecture',
     layerIds: Object.freeze(['architecture']),
     topologyPath: 'variants/architecture/topology.json',
-    sourceSha256: 'ebce03dcd096b781fadc90134e47fde14b967577d6b6a42896004b6fe639afae',
+    sourceSha256: 'fa38291d1361c58c4f73574a4d7e93bcc0370eb3ddbae8eced503b7132617006',
     expectedPenCount: 62,
   },
   {
@@ -62,7 +62,7 @@ export const GAS_V3_TOPOLOGY_VARIANTS = Object.freeze([
     combinationKey: 'network',
     layerIds: Object.freeze(['network']),
     topologyPath: 'variants/network/topology.json',
-    sourceSha256: 'a1f09bc40e55830060cc8fb7f481f19b16511e5dd1e8959fe5b4473373ab96e7',
+    sourceSha256: 'a24b9407e8641197e9cb1b75020357f760df4aec33911b0d0992d79f995ff0c1',
     expectedPenCount: 101,
   },
   {
@@ -88,7 +88,7 @@ export const GAS_V3_TOPOLOGY_VARIANTS = Object.freeze([
     topologyPath: 'variants/network-business/topology.json',
     // 2026-09-07 用户纠正输入：燃气 网+业 (1).zip 内 public/json/v.json。
     // 使用原始文件散列锁定本次燃气数据，防止误恢复为此前含燃煤内容的输入。
-    sourceSha256: '87d0fd5b77a2a308570859eed142d22613a32aed05cdb07a13f6d8e832248206',
+    sourceSha256: '536124e12bef5ce743eda38838dfb4549783da27249b0745e67fc91d4712fa41',
     expectedPenCount: 124,
   },
   {
@@ -96,7 +96,7 @@ export const GAS_V3_TOPOLOGY_VARIANTS = Object.freeze([
     combinationKey: 'network+key-process',
     layerIds: Object.freeze(['network', 'key-process']),
     topologyPath: 'variants/network-key-process/topology.json',
-    sourceSha256: '5e7b0c5fdd7f183c67a9c8018421a94d9e7e8eaa10551b3e5db0d81bd055c571',
+    sourceSha256: '013fcedc684fd8549563cc85584b26e70cfb7c73612868ed42e098efb92e4cbd',
     expectedPenCount: 118,
   },
   {
@@ -112,7 +112,7 @@ export const GAS_V3_TOPOLOGY_VARIANTS = Object.freeze([
     combinationKey: 'network+business+key-process',
     layerIds: Object.freeze(['network', 'business', 'key-process']),
     topologyPath: 'variants/network-business-key-process/topology.json',
-    sourceSha256: '6a50c4b0ed4eaba2793fafff5bacabd4487f6c03087d230313e62388c728bc53',
+    sourceSha256: '9bc8ef0bbebaf0cc02acc46c989d6859c68d9fc73f472c72079d9a1a4c505483',
     expectedPenCount: 144,
     isDefault: true,
   },

@@ -1,6 +1,7 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
   calculateDirectoryResourceDigest,
@@ -8,18 +9,47 @@ import {
   writeReleaseArtifactIntegrity,
 } from '../scripts/release-artifact-contract.mjs'
 
-/** 生成发布门禁需要的最小燃气结构清单；23个来源节点数量直接锁定合作方联调契约。 */
+const webProjectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+
+/**
+ * 生成发布门禁需要的最小联合结构清单。夹具保留当前十项公开动作和六个动作目标场景，
+ * 使正向用例本身不能再把“只有燃气、燃煤动作”的旧清单当成合格发布基线。
+ */
 function createTopologyManifest() {
+  const manifestVersion = 'gas-power-smoke.artifact-contract'
+  const navigationScenes = [
+    ['wind-power', '风力发电'],
+    ['solar-power', '光伏发电'],
+    ['step-up-substation', '升压站'],
+    ['step-down-substation', '降压站'],
+  ]
   return {
-    manifestVersion: 'gas-power-smoke.artifact-contract',
+    manifestVersion,
     unityBuildId: 'unity-contract',
     unityRuntimeKey: 'gas-plant-release',
-    scenes: [],
+    scenes: [{
+      sceneId: 'gas-power',
+      defaultTopologyId: 'topology.gas-power.overview',
+      topologyIds: ['topology.gas-power.overview'],
+      supportedActionIds: ['action.gas-power.overview', 'action.gas-power.gas-turbine'],
+    }, {
+      sceneId: 'coal-power',
+      defaultTopologyId: 'topology.coal-power.overview',
+      topologyIds: ['topology.coal-power.overview'],
+      supportedActionIds: ['action.coal-power.overview', 'action.coal-power.steam-turbine'],
+    }, ...navigationScenes.map(([sceneId]) => ({
+      sceneId,
+      defaultTopologyId: `topology.${sceneId}.overview`,
+      topologyIds: [`topology.${sceneId}.overview`],
+      supportedActionIds: sceneId === 'solar-power'
+        ? ['action.solar-power.overview', 'action.solar-power.inverter']
+        : [`action.${sceneId}.overview`],
+    }))],
     topologies: [{
       topologyId: 'topology.gas-power.overview',
       sceneId: 'gas-power',
       title: '燃气总览',
-      configVersion: 'gas-power-smoke.artifact-contract',
+      configVersion: manifestVersion,
       nodes: Array.from({ length: 23 }, (_, index) => ({
         nodeId: `node-${index + 1}`,
         title: `节点${index + 1}`,
@@ -30,8 +60,34 @@ function createTopologyManifest() {
         doubleClickBehavior: 'emit-node',
       })),
       edges: [],
-    }],
+    }, ...['coal-power', ...navigationScenes.map(([sceneId]) => sceneId)].map((sceneId) => ({
+      topologyId: `topology.${sceneId}.overview`,
+      sceneId,
+      title: `${sceneId}总览`,
+      configVersion: manifestVersion,
+      nodes: [],
+      edges: [],
+    }))],
     actions: [{
+      actionId: 'action.scene.overview',
+      title: '返回全局总览',
+      targetSceneId: 'overview',
+      targetViewMode: 'overview',
+      allowedParameters: [],
+      unityAction: { type: 'none' },
+      failurePolicy: 'keep-current-context',
+      configVersion: manifestVersion,
+    }, {
+      actionId: 'action.gas-power.overview',
+      title: '返回燃气总览',
+      targetSceneId: 'gas-power',
+      targetViewMode: 'business',
+      targetTopologyId: 'topology.gas-power.overview',
+      allowedParameters: [],
+      unityAction: { type: 'resetScene' },
+      failurePolicy: 'keep-current-context',
+      configVersion: manifestVersion,
+    }, {
       actionId: 'action.gas-power.gas-turbine',
       title: '进入燃气轮机关键环节',
       targetSceneId: 'gas-power',
@@ -40,17 +96,47 @@ function createTopologyManifest() {
       allowedParameters: [],
       unityAction: { type: 'enterProcessDetail', processDetailId: 'process-detail.gas-power.gas-turbine' },
       failurePolicy: 'keep-current-context',
-      configVersion: 'gas-power-smoke.artifact-contract',
+      configVersion: manifestVersion,
     }, {
-      actionId: 'action.coal-power.boiler',
-      title: '进入燃煤锅炉关键环节',
+      actionId: 'action.coal-power.overview',
+      title: '进入燃煤总览',
+      targetSceneId: 'coal-power',
+      targetViewMode: 'business',
+      targetTopologyId: 'topology.coal-power.overview',
+      allowedParameters: [],
+      unityAction: { type: 'resetScene' },
+      failurePolicy: 'keep-current-context',
+      configVersion: manifestVersion,
+    }, {
+      actionId: 'action.coal-power.steam-turbine',
+      title: '进入燃煤汽轮机关键环节',
       targetSceneId: 'coal-power',
       targetViewMode: 'process-detail',
-      processDetailId: 'process-detail.coal-power.boiler',
+      processDetailId: 'process-detail.coal-power.steam-turbine',
       allowedParameters: [],
-      unityAction: { type: 'enterProcessDetail', processDetailId: 'process-detail.coal-power.boiler' },
+      unityAction: { type: 'enterProcessDetail', processDetailId: 'process-detail.coal-power.steam-turbine' },
       failurePolicy: 'keep-current-context',
-      configVersion: 'gas-power-smoke.artifact-contract',
+      configVersion: manifestVersion,
+    }, ...navigationScenes.map(([sceneId, title]) => ({
+      actionId: `action.${sceneId}.overview`,
+      title: `进入${title}总览`,
+      targetSceneId: sceneId,
+      targetViewMode: 'business',
+      targetTopologyId: `topology.${sceneId}.overview`,
+      allowedParameters: [],
+      unityAction: { type: 'none' },
+      failurePolicy: 'keep-current-context',
+      configVersion: manifestVersion,
+    })), {
+      actionId: 'action.solar-power.inverter',
+      title: '进入光伏逆变器关键环节',
+      targetSceneId: 'solar-power',
+      targetViewMode: 'process-detail',
+      processDetailId: 'process-detail.solar-power.inverter',
+      allowedParameters: [],
+      unityAction: { type: 'enterProcessDetail', processDetailId: 'process-detail.solar-power.inverter' },
+      failurePolicy: 'keep-current-context',
+      configVersion: manifestVersion,
     }],
     processDetails: [{
       sceneId: 'gas-power',
@@ -59,29 +145,43 @@ function createTopologyManifest() {
       processDetailId: 'process-detail.gas-power.gas-turbine',
       resourceId: 'process-detail-resource.gas-power.gas-turbine',
       cameraPoseId: 'camera-pose.gas-power.gas-turbine',
-      stateNodeId: 'gas-turbine',
+      stateNodeId: 'node.gas-turbine',
+      topologyDataContextId: 'process-detail.gas-power.gas-turbine',
     }, {
       sceneId: 'coal-power',
       processId: 'coal-power-generation',
-      stepId: 'boiler',
-      processDetailId: 'process-detail.coal-power.boiler',
-      resourceId: 'process-detail-resource.coal-power.boiler',
-      cameraPoseId: 'camera-pose.coal-power.boiler',
-      stateNodeId: 'node.coal-boiler',
+      stepId: 'steam-turbine',
+      processDetailId: 'process-detail.coal-power.steam-turbine',
+      resourceId: 'process-detail-resource.coal-power.steam-turbine',
+      cameraPoseId: 'camera-pose.coal-power.steam-turbine',
+      stateNodeId: 'node.coal-steam-turbine',
+      topologyDataContextId: 'process-detail.coal-power.steam-turbine',
+    }, {
+      sceneId: 'solar-power',
+      processId: 'solar-power-generation',
+      stepId: 'inverter',
+      processDetailId: 'process-detail.solar-power.inverter',
+      resourceId: 'process-detail-resource.solar-power.inverter',
+      cameraPoseId: 'camera-pose.solar-power.inverter',
+      stateNodeId: 'node.solar-inverter',
+      topologyDataContextId: 'process-detail.solar-power.inverter',
     }],
     unitySceneMappings: [{
       sceneId: 'gas-power',
       mappingVersion: 'mapping.gas-power.1',
-      processSteps: [{ processId: 'gas-power-generation', stepId: 'overview' }],
-      sceneNodeIds: ['gas-turbine'],
+      sceneNodeIds: ['node.gas-turbine'],
       routeIds: [],
     }, {
       sceneId: 'coal-power',
       mappingVersion: 'mapping.coal-power.1',
-      processSteps: [{ processId: 'coal-power-generation', stepId: 'overview' }],
-      sceneNodeIds: ['node.coal-boiler'],
+      sceneNodeIds: ['node.coal-steam-turbine'],
       routeIds: [],
-    }],
+    }, ...navigationScenes.map(([sceneId]) => ({
+      sceneId,
+      mappingVersion: `mapping.${sceneId}.1`,
+      sceneNodeIds: [],
+      routeIds: [],
+    }))],
   }
 }
 
@@ -100,10 +200,11 @@ function createReleaseManifest() {
     selfTestIncluded: false,
     includedCapabilities: ['node-events', 'node-states', 'node-scene-mapping', 'process-detail'],
     protocolVersions: { host: 2, unity: 2 },
-    // 第二版协议把15秒外层就绪与120秒 Unity 初始稳定视图拆成两个独立阶段。
+    // 第二版协议把15秒外层就绪、120秒 Unity 初始稳定视图与120秒场景终态拆成独立阶段。
     runtimeTimeouts: {
       outerReadyMilliseconds: 15_000,
       unityAndInitialViewMilliseconds: 120_000,
+      sceneSwitchResultMilliseconds: 120_000,
     },
     // Unity 大资源缓存策略属于发布摘要强制字段，测试夹具必须与真实发布器保持一致。
     cachePolicy: {
@@ -112,6 +213,15 @@ function createReleaseManifest() {
       unityLargeResourcePaths: ['unity/Build/', 'unity/SceneBundles/', 'unity/ProcessDetailBundles/'],
     },
     excludedCapabilities: ['route-mapping', 'other-eight-scene-content'],
+    // 合作方动作菜单读取该摘要；从当前十项结构动作生成相同公开投影，避免测试夹具手工维护时再次漏项。
+    workflowActions: createTopologyManifest().actions.map((action) => ({
+      actionId: action.actionId,
+      title: action.title,
+      targetSceneId: action.targetSceneId,
+      targetViewMode: action.targetViewMode,
+      ...('targetTopologyId' in action ? { targetTopologyId: action.targetTopologyId } : {}),
+      ...('processDetailId' in action ? { processDetailId: action.processDetailId } : {}),
+    })),
     gasTopology: { nodeCount: 23, edgeCount: 0 },
     nodeProtocolPolicy: {
       mode: 'node-id-owned-by-shell',
@@ -146,7 +256,7 @@ async function createArtifact() {
     protocolVersion: 2,
     unityReleaseId: 'unity-contract',
     commandCapabilities: [
-      'init', 'resize', 'switchScene', 'enterProcessStep', 'moveCameraToPose', 'enterProcessDetail', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'resetCamera', 'focusNode', 'clearSelection',
+      'init', 'resize', 'switchScene', 'moveCameraToPose', 'enterProcessDetail', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'resetCamera', 'focusNode', 'clearSelection',
       'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose',
     ],
     eventCapabilities: ['ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'selectionCleared', 'disposed'],
@@ -169,6 +279,15 @@ async function createArtifact() {
     `const buildId = "unity-contract"; const resourceDigest = "${unityResourceDigest}";\n`,
     'utf8',
   )
+  /**
+   * 正向夹具复制经过散列锁定的真实第三层拓扑，使测试同时覆盖构建产物目录结构和内容合同；
+   * 使用真实文件而非手造数据，可防止生产拓扑更新后测试基线静默偏离。
+   */
+  cpSync(
+    path.join(webProjectRoot, 'public', 'topology', 'process-detail'),
+    path.join(root, 'shell', 'topology', 'process-detail'),
+    { recursive: true },
+  )
   // 内容安全策略必须记录实际平台、Unity和清单来源；这里用最小静态服务文本模拟构建产物。
   writeFileSync(path.join(root, 'server.mjs'), 'frame-ancestors http://platform.example.com; frame-src http://visual.example.com; connect-src http://platform.example.com\n', 'utf8')
   writeFileSync(path.join(root, 'index.html'), `<!doctype html>
@@ -184,6 +303,156 @@ describe('发布产物输出标准', () => {
     const root = await createArtifact()
     try {
       expect(await validateReleaseArtifact(root)).toEqual([])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('发布包缺少光伏逆变器独立拓扑时阻断交付', async () => {
+    const root = await createArtifact()
+    try {
+      rmSync(path.join(root, 'shell', 'topology', 'process-detail', 'solar-power', 'inverter', 'topology.json'))
+      // 重写普通完整性清单，证明专用拓扑合同能独立发现漏拷，而不是依赖通用文件摘要偶然报错。
+      await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
+
+      expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
+        expect.stringContaining('第三层拓扑文件缺失：process-detail/solar-power/inverter/topology.json'),
+      ]))
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('发布包第三层拓扑被篡改且重写完整性清单时仍阻断交付', async () => {
+    const root = await createArtifact()
+    try {
+      const topologyPath = path.join(root, 'shell', 'topology', 'process-detail', 'solar-power', 'inverter', 'topology.json')
+      const topology = JSON.parse(readFileSync(topologyPath, 'utf8'))
+      topology.pens[0].x += 1
+      writeFileSync(topologyPath, `${JSON.stringify(topology)}\n`, 'utf8')
+      await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
+
+      expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
+        expect.stringContaining('第三层拓扑文件散列与验收版本不一致'),
+      ]))
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('第三层拓扑目录混入未登记资源时阻断交付', async () => {
+    const root = await createArtifact()
+    try {
+      const extraResourcePath = path.join(root, 'shell', 'topology', 'process-detail', 'solar-power', 'inverter', 'copied-image.png')
+      // 即使额外文件被写入通用完整性清单，第三层目录合同仍只允许登记的 topology.json。
+      writeFileSync(extraResourcePath, '不应进入第三层目录的资源副本', 'utf8')
+      await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
+
+      expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
+        expect.stringContaining('第三层拓扑目录包含合同外资源'),
+      ]))
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('光伏逆变器状态绑定图元丢失时阻断交付', async () => {
+    const root = await createArtifact()
+    try {
+      const topologyPath = path.join(root, 'shell', 'topology', 'process-detail', 'solar-power', 'inverter', 'topology.json')
+      const topology = JSON.parse(readFileSync(topologyPath, 'utf8'))
+      const bindingPen = topology.pens.find((pen: { id?: string }) => pen.id === 'df25e45')
+      if (!bindingPen) throw new Error('测试夹具缺少光伏逆变器控制系统绑定图元。')
+      bindingPen.id = 'binding-removed-for-test'
+      writeFileSync(topologyPath, `${JSON.stringify(topology)}\n`, 'utf8')
+      await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
+
+      expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
+        expect.stringContaining('第三层拓扑缺少已登记的状态绑定图元'),
+      ]))
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('发布摘要遗漏结构清单动作时阻断交付', async () => {
+    const root = await createArtifact()
+    try {
+      const releaseManifest = createReleaseManifest()
+      // 模拟结构清单已经新增场景动作、发布摘要仍停留在旧数量的合作方反馈场景。
+      releaseManifest.workflowActions = releaseManifest.workflowActions.slice(0, 1)
+      writeFileSync(path.join(root, 'release-manifest.json'), `${JSON.stringify(releaseManifest, null, 2)}\n`, 'utf8')
+      await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
+
+      expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
+        expect.stringContaining('流程动作必须与结构清单逐项一致'),
+      ]))
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('结构清单与发布摘要同时遗漏新增场景动作时仍阻断交付', async () => {
+    const root = await createArtifact()
+    try {
+      const topologyManifest = createTopologyManifest()
+      const releaseManifest = createReleaseManifest()
+      // 模拟生成器整体回退：两份清单同时删除风电动作，并同步清空场景反向引用，旧相对一致性检查无法发现该问题。
+      topologyManifest.actions = topologyManifest.actions.filter((action) => action.actionId !== 'action.wind-power.overview')
+      const windScene = topologyManifest.scenes.find((scene) => scene.sceneId === 'wind-power')
+      if (windScene) windScene.supportedActionIds = []
+      releaseManifest.workflowActions = releaseManifest.workflowActions.filter((action) => action.actionId !== 'action.wind-power.overview')
+      writeFileSync(path.join(root, 'scene-topology-manifest.json'), `${JSON.stringify(topologyManifest, null, 2)}\n`, 'utf8')
+      writeFileSync(path.join(root, 'release-manifest.json'), `${JSON.stringify(releaseManifest, null, 2)}\n`, 'utf8')
+      await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
+
+      expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
+        expect.stringContaining('完整发布当前十项公开动作'),
+      ]))
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('新增场景导航伪造流程动作或流程步骤时阻断交付', async () => {
+    const root = await createArtifact()
+    try {
+      const topologyManifest = createTopologyManifest()
+      const windAction = topologyManifest.actions.find((action) => action.actionId === 'action.wind-power.overview')
+      const windMapping = topologyManifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'wind-power')
+      if (!windAction || !windMapping) throw new Error('测试夹具缺少风电导航契约。')
+      // 模拟旧版错误：普通场景导航被包装成控制器没有声明的流程步骤，公开摘要表面仍保持不变。
+      windAction.unityAction = { type: 'enterProcessStep', processId: 'wind-power-generation', stepId: 'overview' } as never
+      ;(windMapping as unknown as Record<string, unknown>).processSteps = [{ processId: 'wind-power-generation', stepId: 'overview' }]
+      writeFileSync(path.join(root, 'scene-topology-manifest.json'), `${JSON.stringify(topologyManifest, null, 2)}\n`, 'utf8')
+      await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
+
+      expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
+        expect.stringContaining('固定目标'),
+      ]))
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('全局总览动作使用旧标识时阻断交付', async () => {
+    const root = await createArtifact()
+    try {
+      const topologyManifest = createTopologyManifest()
+      const releaseManifest = createReleaseManifest()
+      const overviewAction = topologyManifest.actions.find((action) => action.actionId === 'action.scene.overview')
+      const overviewSummary = releaseManifest.workflowActions.find((action) => action.actionId === 'action.scene.overview')
+      if (!overviewAction || !overviewSummary) throw new Error('测试夹具缺少全局总览动作。')
+      // 两份清单同步写入曾被误用的大小写标识，证明门禁校验稳定值而不只比较两边相等。
+      overviewAction.actionId = 'Scene.overview'
+      overviewSummary.actionId = 'Scene.overview'
+      writeFileSync(path.join(root, 'scene-topology-manifest.json'), `${JSON.stringify(topologyManifest, null, 2)}\n`, 'utf8')
+      writeFileSync(path.join(root, 'release-manifest.json'), `${JSON.stringify(releaseManifest, null, 2)}\n`, 'utf8')
+      await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
+
+      expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
+        expect.stringContaining('完整发布当前十项公开动作'),
+      ]))
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
@@ -266,17 +535,17 @@ describe('发布产物输出标准', () => {
     }
   })
 
-  it('外层15秒或 Unity 120秒任一分阶段声明不正确时阻断交付', async () => {
+  it('外层15秒、Unity初始视图120秒或场景终态120秒任一声明不正确时阻断交付', async () => {
     const root = await createArtifact()
     try {
       const releaseManifest = createReleaseManifest()
-      // 模拟平台仍沿用旧 15 秒 Unity 等待值；门禁应在交付前明确拒绝，而不是留到联调现场超时。
-      releaseManifest.runtimeTimeouts.unityAndInitialViewMilliseconds = 15_000
+      // 模拟产物仍沿用旧三十秒场景终态等待值；门禁应在交付前明确拒绝，而不是留到冷缓存联调时超时。
+      releaseManifest.runtimeTimeouts.sceneSwitchResultMilliseconds = 30_000
       writeFileSync(path.join(root, 'release-manifest.json'), `${JSON.stringify(releaseManifest, null, 2)}\n`, 'utf8')
       await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
 
       expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
-        expect.stringContaining('外层就绪15秒、Unity与初始稳定视图120秒'),
+        expect.stringContaining('外层就绪15秒、Unity初始稳定视图120秒、场景终态120秒'),
       ]))
     } finally {
       rmSync(root, { recursive: true, force: true })

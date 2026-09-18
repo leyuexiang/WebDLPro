@@ -35,7 +35,7 @@ function createValidMetadata(overrides: Record<string, unknown> = {}): Record<st
     unityReleaseId: 'unity-release-test',
     channel: 'power3d-unity',
     protocolVersion: 2,
-    commandCapabilities: ['init', 'resize', 'switchScene', 'enterProcessStep', 'moveCameraToPose', 'enterProcessDetail', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'resetCamera', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
+    commandCapabilities: ['init', 'resize', 'switchScene', 'moveCameraToPose', 'enterProcessDetail', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'resetCamera', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
     eventCapabilities: ['ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'selectionCleared', 'disposed'],
     sceneChangedSchemaVersion: 2,
     sceneChangedRequiredFields: ['requestId', 'sceneId', 'transitionId', 'sceneActivationId', 'success'],
@@ -108,7 +108,7 @@ describe('Unity 网页图形协议兼容性门禁', () => {
 
   it('元数据缺少三维动态状态清除能力或快照序号时明确阻断发布', async () => {
     const missingCapabilityDirectory = await createTemporaryUnityBuild(createValidMetadata({
-      commandCapabilities: ['init', 'resize', 'switchScene', 'enterProcessStep', 'moveCameraToPose', 'enterProcessDetail', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'resetCamera', 'focusNode', 'clearSelection', 'setNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
+      commandCapabilities: ['init', 'resize', 'switchScene', 'moveCameraToPose', 'enterProcessDetail', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'resetCamera', 'focusNode', 'clearSelection', 'setNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
     }))
     const missingFieldDirectory = await createTemporaryUnityBuild(createValidMetadata({
       clearNodeVisualStateRequiredFields: ['sceneNodeId'],
@@ -121,7 +121,7 @@ describe('Unity 网页图形协议兼容性门禁', () => {
 
   it('元数据缺少命名镜头定位能力时明确阻断发布', async () => {
     const directory = await createTemporaryUnityBuild(createValidMetadata({
-      commandCapabilities: ['init', 'resize', 'switchScene', 'enterProcessStep', 'enterProcessDetail', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'resetCamera', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
+      commandCapabilities: ['init', 'resize', 'switchScene', 'enterProcessDetail', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'resetCamera', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
     }))
     temporaryDirectories.push(directory)
 
@@ -130,7 +130,7 @@ describe('Unity 网页图形协议兼容性门禁', () => {
 
   it('元数据缺少独立相机复位能力时明确阻断发布', async () => {
     const directory = await createTemporaryUnityBuild(createValidMetadata({
-      commandCapabilities: ['init', 'resize', 'switchScene', 'enterProcessStep', 'moveCameraToPose', 'enterProcessDetail', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
+      commandCapabilities: ['init', 'resize', 'switchScene', 'moveCameraToPose', 'enterProcessDetail', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
     }))
     temporaryDirectories.push(directory)
 
@@ -139,7 +139,7 @@ describe('Unity 网页图形协议兼容性门禁', () => {
 
   it('元数据缺少清除三维交互描边能力时明确阻断发布', async () => {
     const directory = await createTemporaryUnityBuild(createValidMetadata({
-      commandCapabilities: ['init', 'resize', 'switchScene', 'enterProcessStep', 'moveCameraToPose', 'enterProcessDetail', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'resetCamera', 'focusNode', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
+      commandCapabilities: ['init', 'resize', 'switchScene', 'moveCameraToPose', 'enterProcessDetail', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'resetCamera', 'focusNode', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
     }))
     temporaryDirectories.push(directory)
 
@@ -148,13 +148,13 @@ describe('Unity 网页图形协议兼容性门禁', () => {
 
   it('元数据缺少第三层两阶段命令时明确阻断发布', async () => {
     const missingCommandDirectory = await createTemporaryUnityBuild(createValidMetadata({
-      commandCapabilities: ['init', 'resize', 'switchScene', 'enterProcessStep', 'moveCameraToPose', 'enterProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'resetCamera', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
+      commandCapabilities: ['init', 'resize', 'switchScene', 'moveCameraToPose', 'enterProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'resetCamera', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
     }))
     const missingCommitCommandDirectory = await createTemporaryUnityBuild(createValidMetadata({
-      commandCapabilities: ['init', 'resize', 'switchScene', 'enterProcessStep', 'moveCameraToPose', 'enterProcessDetail', 'prepareProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'resetCamera', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
+      commandCapabilities: ['init', 'resize', 'switchScene', 'moveCameraToPose', 'enterProcessDetail', 'prepareProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'resetCamera', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
     }))
     const missingAbortCommandDirectory = await createTemporaryUnityBuild(createValidMetadata({
-      commandCapabilities: ['init', 'resize', 'switchScene', 'enterProcessStep', 'moveCameraToPose', 'enterProcessDetail', 'prepareProcessDetail', 'commitProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'resetCamera', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
+      commandCapabilities: ['init', 'resize', 'switchScene', 'moveCameraToPose', 'enterProcessDetail', 'prepareProcessDetail', 'commitProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'resetCamera', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
     }))
     temporaryDirectories.push(missingCommandDirectory, missingCommitCommandDirectory, missingAbortCommandDirectory)
 

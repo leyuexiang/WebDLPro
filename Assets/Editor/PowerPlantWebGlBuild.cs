@@ -72,6 +72,9 @@ public static class PowerPlantWebGlBuild
     private const int InitialWebGlMemorySizeInMegabytes = 256;
     private const int MaximumWebGlMemorySizeInMegabytes = 2048;
     private const int WebGlGeometricMemoryGrowthCapInMegabytes = 256;
+    // 高质量包通过提高 URP（通用渲染管线）内部渲染分辨率改善斜边和细线锯齿；
+    // 该值只在高质量构建期间写入，构建结束后恢复各质量档原渲染比例。
+    private const float HighQualityRenderScale = 1.5f;
 
     /// <summary>
     /// 兼容既有“高亮流程”命令行入口：该入口语义固定为开发构建，
@@ -94,6 +97,22 @@ public static class PowerPlantWebGlBuild
     [MenuItem("Tools/WebDLPro/WebGL/构建正式包")]
     public static void BuildProductionWebGl()
     {
+        BuildProductionWebGlWithQuality(false);
+    }
+
+    /// <summary>
+    /// 构建高渲染质量正式包。该入口只在本次构建期间把 WebGL 质量档切换到
+    /// High Fidelity（高保真）档，启用 4 倍多重采样抗锯齿和高保真 URP（通用渲染管线）；
+    /// 构建结束后恢复编辑器原质量档，避免影响日常编辑器预览和普通交付包。
+    /// </summary>
+    [MenuItem("Tools/WebDLPro/WebGL/构建高质量正式包")]
+    public static void BuildHighQualityProductionWebGl()
+    {
+        BuildProductionWebGlWithQuality(true);
+    }
+
+    private static void BuildProductionWebGlWithQuality(bool highQuality)
+    {
         string releaseId = ResolveReleaseId();
         string releaseDirectory = Path.Combine(ProductionOutputPath, releaseId);
         string finalUnityDirectory = Path.Combine(releaseDirectory, "unity");
@@ -109,7 +128,40 @@ public static class PowerPlantWebGlBuild
             ".staging",
             $"{releaseId}-{Guid.NewGuid():N}",
             "unity");
-        BuildWebGl(stagingDirectory, false, releaseId);
+        int originalQualityLevel = QualitySettings.GetQualityLevel();
+        float originalHighQualityRenderScale = 1f;
+        try
+        {
+            if (highQuality)
+            {
+                // 质量档索引来自 ProjectSettings/QualitySettings.asset 的显式顺序：
+                // Performant=0、Balanced=1、High Fidelity=2。只在构建期间切换，避免持久化修改项目设置。
+                QualitySettings.SetQualityLevel(2, true);
+                // 高保真质量档默认比例为 1.0；临时提升到 1.5 可用超采样降低几何边缘阶梯感。
+                // URP 资源对象由质量档切换后提供，避免修改项目资产文件或污染普通构建。
+                var highQualityPipeline = UnityEngine.Rendering.GraphicsSettings.renderPipelineAsset as UnityEngine.Rendering.Universal.UniversalRenderPipelineAsset;
+                if (highQualityPipeline != null)
+                {
+                    originalHighQualityRenderScale = highQualityPipeline.renderScale;
+                    highQualityPipeline.renderScale = HighQualityRenderScale;
+                }
+            }
+            BuildWebGl(stagingDirectory, false, releaseId);
+        }
+        finally
+        {
+            if (highQuality)
+            {
+                var highQualityPipeline = UnityEngine.Rendering.GraphicsSettings.renderPipelineAsset as UnityEngine.Rendering.Universal.UniversalRenderPipelineAsset;
+                if (highQualityPipeline != null)
+                {
+                    // 恢复高保真管线资源原比例，防止本次构建改变编辑器质量预览状态。
+                    highQualityPipeline.renderScale = originalHighQualityRenderScale;
+                }
+            }
+            // 无论构建成功、失败还是异常退出，都恢复编辑器原质量档，避免后续工作被高质量设置意外影响。
+            QualitySettings.SetQualityLevel(originalQualityLevel, true);
+        }
         Directory.CreateDirectory(ProductionOutputPath);
         Directory.Move(Path.GetDirectoryName(stagingDirectory), releaseDirectory);
 

@@ -524,7 +524,7 @@ export class ViewOpenTransactionHandler {
     transitionId: TransitionId,
     payload: ViewOpenPayload,
   ): HostCommandExecutionResult {
-    this.coordinator.submit({
+    const recoveryFailure = this.coordinator.submit({
       type: 'transition.recovery.fail',
       transitionId,
       diagnostic: this.createDiagnostic('transition.recovery.failed', correlationId),
@@ -533,6 +533,10 @@ export class ViewOpenTransactionHandler {
       success: false,
       status: 'failed',
       transitionId,
+      // 只有当前事务能进入此分支；协调器返回的版本来自独立单调时钟，稳定内容清空后也不会退回零。
+      ...(recoveryFailure.status === 'accepted' && recoveryFailure.contextRevision !== undefined
+        ? { contextRevision: recoveryFailure.contextRevision }
+        : {}),
       error: {
         code,
         stage,

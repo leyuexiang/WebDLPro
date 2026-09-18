@@ -58,6 +58,8 @@ describe('可视化稳定上下文状态仓库', () => {
     expect(store.stableContext).toBeNull()
     expect(store.selectedNodeIds).toEqual([])
     expect(store.runtimeStatus).toBe('error')
+    // 稳定内容已失效不等于会话历史倒退；版本保持为一，父页面才能继续使用同一单调版本对齐错误态。
+    expect(store.contextRevision).toBe(1)
   })
 
   it('事务摘要固定保留最近 32 条，并标识被新事务取代与恢复失败的受控终态', () => {

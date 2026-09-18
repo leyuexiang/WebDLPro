@@ -52,13 +52,6 @@ export class VisualizationRuntimeViewOpenPort implements ViewOpenUnityPort, Proc
     switch (action.type) {
       case 'none':
         return { success: true }
-      case 'enterProcessStep':
-        return this.execute('enterProcessStep', {
-          processId: action.processId,
-          stepId: action.stepId,
-          ...(action.defaultUnitId ? { unitId: action.defaultUnitId } : {}),
-          isolate: action.isolate,
-        })
       case 'enterProcessDetail':
         // 第三层需要完整目录项并由独立事务切换公共拓扑数据上下文；旧 view.open 动作执行器不能降级拼装该命令。
         return { success: false, errorCode: 'action.execute.failed' }
@@ -134,7 +127,7 @@ export class VisualizationRuntimeViewOpenPort implements ViewOpenUnityPort, Proc
   }
 
   /** 等待宿主结算已验证的原请求回执；失败统一映射为动作执行失败，避免泄露内层原因。 */
-  private async execute(command: 'enterProcessStep' | 'focusNode' | 'resetScene' | 'setRouteFlow', payload: unknown): Promise<ViewOpenUnityPortResult> {
+  private async execute(command: 'focusNode' | 'resetScene' | 'setRouteFlow', payload: unknown): Promise<ViewOpenUnityPortResult> {
     const result = await this.runtime.sendCommandAndWait(command, payload)
     return result.success ? { success: true } : { success: false, errorCode: 'action.execute.failed' }
   }

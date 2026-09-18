@@ -4,16 +4,18 @@ import type { ProcessConfigLoadResult } from '@/config/process/types'
 import {
   visualizationRuntimeHostKey,
 } from '@/modules/visual/runtime/visualization-runtime-host'
+import type { PipelineLegendVariant } from '@/modules/visual/components/pipeline-legend-visibility'
 import AppStatePanel from '@/shared/components/AppStatePanel.vue'
-import pipelineLegendUrl from '@/assets/pipeline-legend-horizontal.png'
+import coalPipelineLegendUrl from '@/assets/pipeline-legend-horizontal-coal.png'
+import gasPipelineLegendUrl from '@/assets/pipeline-legend-horizontal.png'
 
 const props = defineProps<{
   result: ProcessConfigLoadResult
   /**
-   * 仅由外层已提交的第二层稳定上下文开启；图例本身不读取场景名或运行时对象，
-   * 因而不会把第一层沙盘或第三层关键环节误判为业务厂区。
+   * 仅由外层已提交的第二层稳定上下文解析图例类型；组件不读取场景名或运行时对象，
+   * 因而不会把第一层沙盘或第三层关键环节误判为业务厂区，也不会将燃气图例覆盖到燃煤场景。
    */
-  showPipelineLegend?: boolean
+  pipelineLegendVariant?: PipelineLegendVariant | null
 }>()
 
 const emit = defineEmits<{
@@ -39,6 +41,26 @@ const requestedRuntime = computed(() => {
 
 /** 宿主失败时展示与静态预览一致的明确降级，而非保留可能失效的 iframe。 */
 const isRuntimeFailed = computed(() => runtimeHost?.status.value === 'failed')
+
+/**
+ * 两个图例资源在模块加载期各登记一次，渲染期只按外层已决议的类型读取固定对象。
+ * 该做法不创建额外图片节点、监听器或运行时资源，普通视图与原生全屏继续复用同一个 img 节点。
+ */
+const pipelineLegendPresentations = {
+  coal: {
+    url: coalPipelineLegendUrl,
+    alt: '燃煤场景管线图例：蓝色代表水，红色代表蒸汽，青色代表电缆，绿色代表控制线',
+  },
+  gas: {
+    url: gasPipelineLegendUrl,
+    alt: '燃气场景管线图例：橙色代表天然气，蓝色代表水，红色代表蒸汽，青色代表电缆，绿色代表控制线',
+  },
+} as const
+
+/** 外层返回空值时不创建图例；存在类型时只返回对应的静态资源描述。 */
+const pipelineLegendPresentation = computed(() => (
+  props.pipelineLegendVariant ? pipelineLegendPresentations[props.pipelineLegendVariant] : null
+))
 
 /**
  * 将配置校验或运行时失败压缩为中文降级说明，页面不显示运行时原始原因或错误码；
@@ -183,12 +205,12 @@ onBeforeUnmount(() => {
           不监听全屏事件、不接管鼠标命中，也不触发 Unity（三维引擎）画布重排或资源重建。
         -->
         <img
-          v-if="props.showPipelineLegend"
+          v-if="pipelineLegendPresentation"
           class="process-scene__pipeline-legend"
-          :src="pipelineLegendUrl"
+          :src="pipelineLegendPresentation.url"
           width="500"
           height="60"
-          alt="管线图例：橙色代表天然气，蓝色代表水，红色代表蒸汽，青色代表电缆，绿色代表控制线"
+          :alt="pipelineLegendPresentation.alt"
           draggable="false"
         >
         <!-- 复位使用独立命令：恢复初始镜头和总览视觉、保留设备状态，并清除跨端选择。 -->

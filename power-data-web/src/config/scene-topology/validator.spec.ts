@@ -91,7 +91,6 @@ function createValidManifest(options: { gasNodes?: SceneTopologyManifest['topolo
     unitySceneMappings: scenes.map((scene) => ({
       sceneId: scene.sceneId,
       mappingVersion: scene.sceneMappingVersion,
-      processSteps: [],
       sceneNodeIds: scene.sceneId === 'gas-power' ? gasNodes.flatMap((node) => node.sceneNodeId ? [node.sceneNodeId] : []) : [],
       routeIds: [],
     })),

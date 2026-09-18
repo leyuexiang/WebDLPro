@@ -35,5 +35,27 @@ describe('燃煤拓扑版本清单', () => {
       .every((variant) => !(variant.layerIds as readonly string[]).includes('architecture'))).toBe(true)
     expect(COAL_TOPOLOGY_VARIANTS.filter((variant) => 'isDefault' in variant)).toHaveLength(1)
   })
+
+  it('仅将非工业军事区的企业级防火墙改为工业防火墙，企业办公网保持原文字', () => {
+    // 每份含防火墙的燃煤输入都按稳定图元编号逐项核对，避免用数组顺序误改企业办公网。
+    const expected = new Map([
+      ['architecture', ['5e97c875', '611ca56']],
+      ['network', ['0317f07', '304a751']],
+      ['network-business', ['1005511', '040a992']],
+      ['network-key-process', ['6097ecf', '4757ff3c']],
+      ['network-business-key-process', ['508798a0', '927cfac']],
+    ])
+    for (const variant of COAL_TOPOLOGY_VARIANTS) {
+      const [industrialPenId, enterprisePenId] = expected.get(variant.id) ?? []
+      if (!industrialPenId || !enterprisePenId) continue
+      const data = JSON.parse(readFileSync(resolve(topologyRoot, variant.topologyPath), 'utf8')) as Meta2dData
+      const industrialText = data.pens.find((pen) => pen.id === industrialPenId)?.text
+      const enterpriseText = data.pens.find((pen) => pen.id === enterprisePenId)?.text
+      expect(industrialText).toContain('工业防火墙')
+      expect(industrialText).not.toContain('企业级防火墙')
+      expect(enterpriseText).toContain('企业级防火墙')
+      expect(enterpriseText).not.toContain('工业防火墙')
+    }
+  })
 })
 

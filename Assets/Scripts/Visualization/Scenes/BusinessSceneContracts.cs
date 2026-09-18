@@ -12,7 +12,6 @@ namespace WebDLPro.Unity.SceneRuntime
     {
         None = 0,
         Initialize = 1 << 0,
-        EnterProcessStep = 1 << 1,
         FocusNode = 1 << 2,
         UpdateNodeVisualState = 1 << 3,
         SetRouteFlow = 1 << 4,
@@ -106,7 +105,6 @@ namespace WebDLPro.Unity.SceneRuntime
         string SceneId { get; }
         BusinessSceneCapability Capabilities { get; }
         IEnumerator InitializeAsync(BusinessSceneInitializationContext context, Action<BusinessSceneCommandResult> completed);
-        BusinessSceneCommandResult EnterProcessStep(string processId, string stepId, string unitId, bool isolate);
         BusinessSceneCommandResult FocusNode(string sceneNodeId, bool isolate);
         BusinessSceneCommandResult ClearSelection();
         BusinessSceneCommandResult UpdateNodeVisualState(string sceneNodeId, BusinessSceneNodeVisualState visualState);

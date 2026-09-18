@@ -8,17 +8,21 @@ using WebDLPro.Unity.SceneRuntime;
 /// 总览代表建筑的四态视觉呈现器。
 /// 仅在播放模式首次收到异常状态时创建一个 HighlightEffect（高亮效果）组件；
 /// 正常态和清除态只关闭效果；故障停流仅为显式绑定的电线创建独占运行时材质副本，
-/// 不修改共享材质资产，也不会为每次状态更新重复创建组件或材质。
+/// 并将该副本切换为红色故障外观；不修改共享材质资产，也不会重复创建组件或材质。
 /// </summary>
 [DisallowMultipleComponent]
 public sealed class OverviewBuildingVisualStatePresenter : MonoBehaviour, IOverviewBuildingVisualStatePresenter
 {
     private const float PulseAngularFrequencyMultiplier = Mathf.PI * 2f;
     private static readonly int FlowSpeedPropertyId = Shader.PropertyToID("_FlowSpeed");
+    private static readonly int BaseColorPropertyId = Shader.PropertyToID("_BaseColor");
+    private static readonly int BaseOpacityPropertyId = Shader.PropertyToID("_BaseOpacity");
+    private static readonly int PrimaryFlowColorPropertyId = Shader.PropertyToID("_Color");
+    private static readonly int SecondaryFlowColorPropertyId = Shader.PropertyToID("_Color2");
 
     /// <summary>
     /// 单个绑定电线材质槽的运行时实例。
-    /// 原共享材质始终只读，故障速度只写入该渲染器独占的材质副本，确保共用材质的其它电线不受影响。
+    /// 原共享材质始终只读，故障流速和红色外观只写入该渲染器独占的材质副本，确保共用材质的其它电线不受影响。
     /// </summary>
     private sealed class FaultFlowMaterialInstance
     {
@@ -32,7 +36,7 @@ public sealed class OverviewBuildingVisualStatePresenter : MonoBehaviour, IOverv
     [SerializeField] private PowerPlantVisualStateConfig _visualStateConfig;
 
     [Header("故障联动")]
-    [Tooltip("该厂房故障时需要停止流动的电线渲染器。支持显式绑定多条电线；运行时为包含 _FlowSpeed 的材质槽创建渲染器独占副本，不修改共享材质球。")]
+    [Tooltip("该厂房故障时需要停止流动并变红的电线渲染器。支持显式绑定多条电线；运行时为包含 _FlowSpeed 的材质槽创建渲染器独占副本，不修改共享材质球。")]
     [SerializeField] private Renderer[] _faultFlowRenderers = Array.Empty<Renderer>();
     [Tooltip("总览场景共享的球形脉冲特效管理器。不同厂房通过动态目标接口共用同一个实例。")]
     [SerializeField] private BuildingSphericalPulseEffect _sphericalPulseEffect;
@@ -186,7 +190,8 @@ public sealed class OverviewBuildingVisualStatePresenter : MonoBehaviour, IOverv
     }
 
     /// <summary>
-    /// 仅修改已绑定电线渲染器的独占运行时材质实例；共享材质球始终保持原流速。
+    /// 仅修改已绑定电线渲染器的独占运行时材质实例；共享材质球始终保持原流速和颜色。
+    /// 故障时停止纹理流动，并统一使用视觉状态配置中的故障红色覆盖底色和两层流动纹理。
     /// 清除故障时立即恢复共享材质引用并销毁实例，正常状态不保留额外材质。
     /// </summary>
     private void SetFlowStopped(bool stopped)
@@ -198,12 +203,35 @@ public sealed class OverviewBuildingVisualStatePresenter : MonoBehaviour, IOverv
         }
 
         EnsureFlowMaterialInstances();
+        Color faultColor = _visualStateConfig != null ? _visualStateConfig.FaultColor : Color.red;
         for (int materialIndex = 0; materialIndex < _flowMaterialInstances.Count; materialIndex++)
         {
             Material runtimeMaterial = _flowMaterialInstances[materialIndex].RuntimeMaterial;
-            if (runtimeMaterial != null)
+            if (runtimeMaterial == null)
             {
-                runtimeMaterial.SetFloat(FlowSpeedPropertyId, 0f);
+                continue;
+            }
+
+            // 所有故障参数仅写入当前电线的运行时副本；底色设为全不透明，保证静止后整条电线清晰变红。
+            runtimeMaterial.SetFloat(FlowSpeedPropertyId, 0f);
+            if (runtimeMaterial.HasProperty(BaseColorPropertyId))
+            {
+                runtimeMaterial.SetColor(BaseColorPropertyId, faultColor);
+            }
+
+            if (runtimeMaterial.HasProperty(BaseOpacityPropertyId))
+            {
+                runtimeMaterial.SetFloat(BaseOpacityPropertyId, 1f);
+            }
+
+            if (runtimeMaterial.HasProperty(PrimaryFlowColorPropertyId))
+            {
+                runtimeMaterial.SetColor(PrimaryFlowColorPropertyId, faultColor);
+            }
+
+            if (runtimeMaterial.HasProperty(SecondaryFlowColorPropertyId))
+            {
+                runtimeMaterial.SetColor(SecondaryFlowColorPropertyId, faultColor);
             }
         }
     }
@@ -241,7 +269,7 @@ public sealed class OverviewBuildingVisualStatePresenter : MonoBehaviour, IOverv
 
                 Material runtimeMaterial = new Material(originalMaterial)
                 {
-                    name = originalMaterial.name + " (故障停流实例)",
+                    name = originalMaterial.name + " (故障停流红色实例)",
                     hideFlags = HideFlags.DontSave
                 };
                 rendererMaterials[materialIndex] = runtimeMaterial;

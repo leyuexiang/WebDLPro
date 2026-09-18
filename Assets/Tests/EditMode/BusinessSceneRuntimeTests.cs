@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using NUnit.Framework;
+using UnityEditor;
 using UnityEngine;
 using WebDLPro.Unity.SceneRuntime;
 
@@ -26,6 +27,91 @@ namespace WebDLPro.Unity.Tests
             }
         }
 
+        [Test]
+        public void 节点聚焦相机点位可选且空值回退默认包围盒聚焦()
+        {
+            GameObject runtimeRoot = new GameObject("ProcessControllerCameraPoseTest");
+            GameObject sceneRoot = new GameObject("SceneRoot");
+            GameObject target = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            GameObject cameraObject = new GameObject("InteractionCamera");
+            GameObject poseObject = new GameObject("ConfiguredFocusPose");
+            try
+            {
+                target.transform.SetParent(sceneRoot.transform, false);
+                target.transform.position = new Vector3(8f, 2f, 6f);
+                poseObject.transform.SetPositionAndRotation(
+                    new Vector3(31f, 17f, -24f),
+                    Quaternion.Euler(19f, 42f, 0f));
+                Camera interactionCamera = cameraObject.AddComponent<Camera>();
+                System.Type cameraControllerType = System.Type.GetType("PowerPlantFreeCameraController, Assembly-CSharp");
+                System.Type processControllerType = System.Type.GetType("PowerPlantProcessController, Assembly-CSharp");
+                Assert.That(cameraControllerType, Is.Not.Null, "未找到自由相机控制器运行时类型。");
+                Assert.That(processControllerType, Is.Not.Null, "未找到发电场景控制器运行时类型。");
+                Component cameraController = cameraObject.AddComponent(cameraControllerType);
+                Component processController = runtimeRoot.AddComponent(processControllerType);
+
+                SerializedObject cameraProperties = new SerializedObject(cameraController);
+                cameraProperties.FindProperty("_focusDuration").floatValue = 0f;
+                cameraProperties.ApplyModifiedPropertiesWithoutUndo();
+
+                SerializedObject controllerProperties = new SerializedObject(processController);
+                controllerProperties.FindProperty("_sceneRoot").objectReferenceValue = sceneRoot.transform;
+                controllerProperties.FindProperty("_interactionCamera").objectReferenceValue = interactionCamera;
+                controllerProperties.FindProperty("_focusOnSelection").boolValue = true;
+                SerializedProperty nodes = controllerProperties.FindProperty("_nodes");
+                nodes.arraySize = 1;
+                SerializedProperty node = nodes.GetArrayElementAtIndex(0);
+                node.FindPropertyRelative("_id").stringValue = "node.camera-pose-test";
+                node.FindPropertyRelative("_topologyOnlySelection").boolValue = false;
+                node.FindPropertyRelative("_focusCameraPose").objectReferenceValue = poseObject.transform;
+                SerializedProperty targets = node.FindPropertyRelative("_targets");
+                targets.arraySize = 1;
+                targets.GetArrayElementAtIndex(0).objectReferenceValue = target;
+                controllerProperties.ApplyModifiedPropertiesWithoutUndo();
+
+                MethodInfo cacheSceneBindings = processControllerType.GetMethod(
+                    "CacheSceneBindings",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                MethodInfo tryFocusNode = processControllerType.GetMethod(
+                    "TryFocusNode",
+                    BindingFlags.Instance | BindingFlags.Public);
+                Assert.That(cacheSceneBindings, Is.Not.Null);
+                Assert.That(tryFocusNode, Is.Not.Null);
+                cacheSceneBindings.Invoke(processController, null);
+
+                cameraObject.transform.SetPositionAndRotation(
+                    new Vector3(-12f, 4f, -18f),
+                    Quaternion.identity);
+                object[] configuredArguments = { "node.camera-pose-test", false, null };
+                Assert.That((bool)tryFocusNode.Invoke(processController, configuredArguments),
+                    Is.True, configuredArguments[2] as string);
+                Assert.That(cameraObject.transform.position, Is.EqualTo(poseObject.transform.position));
+                Assert.That(Quaternion.Angle(cameraObject.transform.rotation, poseObject.transform.rotation), Is.LessThan(0.01f));
+
+                // 清空可选点位并重建节点索引；同一节点必须退回现有 FocusBounds（包围盒聚焦）逻辑。
+                controllerProperties.Update();
+                controllerProperties.FindProperty("_nodes").GetArrayElementAtIndex(0)
+                    .FindPropertyRelative("_focusCameraPose").objectReferenceValue = null;
+                controllerProperties.ApplyModifiedPropertiesWithoutUndo();
+                cacheSceneBindings.Invoke(processController, null);
+
+                Vector3 fallbackStartPosition = new Vector3(-12f, 4f, -18f);
+                cameraObject.transform.SetPositionAndRotation(fallbackStartPosition, Quaternion.identity);
+                object[] fallbackArguments = { "node.camera-pose-test", false, null };
+                Assert.That((bool)tryFocusNode.Invoke(processController, fallbackArguments),
+                    Is.True, fallbackArguments[2] as string);
+                Assert.That(Vector3.Distance(cameraObject.transform.position, fallbackStartPosition), Is.GreaterThan(0.1f));
+                Assert.That(Vector3.Distance(cameraObject.transform.position, poseObject.transform.position), Is.GreaterThan(0.1f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(poseObject);
+                Object.DestroyImmediate(cameraObject);
+                Object.DestroyImmediate(target);
+                Object.DestroyImmediate(sceneRoot);
+                Object.DestroyImmediate(runtimeRoot);
+            }
+        }
         /// <summary>
         /// 未配置碰撞体的已登记模型仍应由渲染器包围盒命中；这是燃煤场景三维反向选择的低成本后备路径。
         /// 测试目标只携带显式 sceneNodeId（三维节点标识），不使用对象名称推断映射。
@@ -903,8 +989,6 @@ namespace WebDLPro.Unity.Tests
         [Test]
         public void 场景动作协议拒绝空标识和未知四态()
         {
-            Assert.That(SceneActionProtocolValidator.IsValidProcessStep("gas-power-generation", "gas-turbine", "unit-01"), Is.True);
-            Assert.That(SceneActionProtocolValidator.IsValidProcessStep("gas-power-generation", string.Empty, "unit-01"), Is.False);
             Assert.That(SceneActionProtocolValidator.IsValidSceneNodeId("node.gas-turbine"), Is.True);
             Assert.That(SceneActionProtocolValidator.IsValidSceneNodeId(string.Empty), Is.False);
             Assert.That(SceneActionProtocolValidator.IsValidSelectionId("selection.topology.01"), Is.True);
@@ -1209,7 +1293,6 @@ namespace WebDLPro.Unity.Tests
                 yield break;
             }
 
-            public BusinessSceneCommandResult EnterProcessStep(string processId, string stepId, string unitId, bool isolate) => BusinessSceneCommandResult.Unsupported(BusinessSceneCapability.EnterProcessStep);
             public BusinessSceneCommandResult FocusNode(string sceneNodeId, bool isolate) => BusinessSceneCommandResult.Unsupported(BusinessSceneCapability.FocusNode);
             public BusinessSceneCommandResult ClearSelection() => BusinessSceneCommandResult.Unsupported(BusinessSceneCapability.ClearSelection);
             public BusinessSceneCommandResult UpdateNodeVisualState(string sceneNodeId, BusinessSceneNodeVisualState visualState) => BusinessSceneCommandResult.Unsupported(BusinessSceneCapability.UpdateNodeVisualState);

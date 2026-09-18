@@ -4,7 +4,10 @@ import type { DeviceVisualStatus } from '@/config/scene-topology/types'
 
 /** 外层父页面与可视化子应用的固定通道；禁止与 Unity 内层通道混用。 */
 export const HOST_PROTOCOL_CHANNEL = 'power-scene-topology-shell' as const
-/** 第二版显式区分沙盘、业务拓扑与无拓扑关键环节，第一版父页面会在握手前被拒绝。 */
+/**
+ * 第二版显式区分沙盘、第二层业务拓扑与第三层关键环节，第一版父页面会在握手前被拒绝。
+ * 第三层不携带第二层 topologyId，但可以由内部 topologyDataContextId 加载独立拓扑。
+ */
 export const HOST_PROTOCOL_VERSION = 2 as const
 
 /** 协议中的所有容量上限集中声明，窗口桥不得自行扩大数组、缓存或消息大小。 */

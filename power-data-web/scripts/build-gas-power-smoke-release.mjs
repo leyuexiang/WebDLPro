@@ -6,7 +6,6 @@ import { fileURLToPath } from 'node:url'
 import { assertReleaseArtifact, calculateDirectoryResourceDigest, writeReleaseArtifactIntegrity } from './release-artifact-contract.mjs'
 import {
   coalPowerEdgeColors,
-  coalPowerProcessSteps,
   coalPowerSceneNodeMappings,
   createCoalPowerActions,
   createCoalPowerTopologies,
@@ -38,16 +37,18 @@ let platformParentOrigin = hostOrigin
 let unityParentOrigin = hostOrigin
 let unityEntryUrl = `${hostOrigin}/unity/index.html`
 let topologyManifestUrl = `${hostOrigin}/scene-topology-manifest.json`
-// 发布脚本默认仍构建燃气回归包；场景参数只在显式选择燃煤时切换清单和入口初始视图。
+// 发布脚本默认仍构建燃气回归包；场景参数可显式选择燃煤或光伏入口。
 let releaseSceneId = 'gas-power'
-const unitySceneMappingVersion = '2026.08.01-local.2'
+const unitySceneMappingVersion = '2026.09.10-coal-layer-split.1'
 
 /**
  * 网页壳按发布场景选择对应运行时键；两个键仍指向同一个九场景 Unity 构建和同一资源摘要。
  * 这样燃煤包的握手元数据不再伪装成燃气入口，同时继续满足全页只创建一个 Unity 实例的约束。
  */
 function getUnityRuntimeKey(sceneId) {
-  return sceneId === 'coal-power' ? 'coal-plant-release' : 'gas-plant-release'
+  if (sceneId === 'coal-power') return 'coal-plant-release'
+  if (sceneId === 'solar-power') return 'solar-plant-release'
+  return 'gas-plant-release'
 }
 
 const unityProtocolMetadataFileName = 'webgl-protocol-capabilities.json'
@@ -78,7 +79,7 @@ const requiredUnityCommandCapabilities = Object.freeze([
   'init',
   'resize',
   'switchScene',
-  'enterProcessStep',
+  
   'moveCameraToPose',
   // enterProcessDetail 仅保留旧宿主兼容；新前端只通过以下三条事务命令进入或同场景切换关键环节。
   'enterProcessDetail',
@@ -123,6 +124,8 @@ const partnerIntegrationPort = 5575
 // 外层不下载 Unity 大资源，保持15秒短门限；只有 Unity 启动与初始稳定视图使用120秒。
 const outerReadyTimeoutMilliseconds = 15_000
 const unityAndInitialViewTimeoutMilliseconds = 120_000
+// 场景命令接收确认后，网页连接器等待 Unity 最终场景结果的预算也必须覆盖冷缓存加载。
+const sceneSwitchResultTimeoutMilliseconds = 120_000
 const supportedReleaseOptions = new Set([
   '--release-id', '--unity-release-id', '--package-type', '--listen-host', '--port', '--include-self-test',
   '--public-origin', '--platform-parent-origin', '--unity-parent-origin',
@@ -137,11 +140,51 @@ const supportedReleaseOptions = new Set([
  * 三维联动仍通过下方逐项核验的节点映射完成，不能根据相同字符串自动关联。
  */
 const verifiedGasSceneNodeIdByTopologyNodeId = new Map([
-  // 权威总图中的 Mark VIe 控制器是燃机流程的二维入口；它与 Unity 中已核验的燃机逻辑节点显式对应。
-  ['inlet-duct', 'gas-turbine'],
-  ['hrsg', 'hrsg'],
-  ['steam-turbine', 'steam-turbine'],
+  // 上层控制系统只接受拓扑图发起的聚焦，不参与 Unity 场景对象的反向选中。
+  ['system.gas-turbine-control', 'unit.gas-turbine.control'],
+  ['system.gas-hrsg-control', 'unit.gas-hrsg.control'],
+  ['system.gas-steam-turbine-control', 'unit.gas-steam-turbine.control'],
+  ['system.gas-generator-control', 'unit.gas-generator.control'],
+  // 下层现场设备各自绑定一个真实模型，负责二维到三维、三维到二维和设备四态联动。
+  ['asset.gas-turbine', 'node.gas-turbine'],
+  ['asset.gas-hrsg', 'node.gas-hrsg'],
+  ['asset.gas-steam-turbine', 'node.gas-steam-turbine'],
+  ['asset.gas-generator', 'node.gas-generator'],
 ])
+
+/**
+ * 光伏场景只发布 Unity 场景中已经显式登记的两个节点。
+ * 控制节点用于二维发起镜头聚焦；逆变器设备节点同时承担三维反向选择和四态视觉投影。
+ */
+const verifiedSolarSceneNodeIdByTopologyNodeId = new Map([
+  ['system.solar-inverter-control', 'unit.solar-inverter.control'],
+  ['asset.solar-inverter', 'node.solar-inverter'],
+])
+
+/** 外部 JSON 图纸负责完整绘制；结构清单只登记需要状态与三维联动的两个稳定节点。 */
+function createSolarPowerTopology(manifestVersion) {
+  return {
+    topologyId: 'topology.solar-power.overview',
+    sceneId: 'solar-power',
+    title: '光伏发电总览',
+    configVersion: manifestVersion,
+    nodes: [
+      {
+        nodeId: 'system.solar-inverter-control',
+        title: '逆变器控制',
+        sceneNodeId: verifiedSolarSceneNodeIdByTopologyNodeId.get('system.solar-inverter-control'),
+        iconKey: 'solar', x: 42, y: 72, deviceStatus: 'normal', doubleClickBehavior: 'emit-node',
+      },
+      {
+        nodeId: 'asset.solar-inverter',
+        title: '逆变器',
+        sceneNodeId: verifiedSolarSceneNodeIdByTopologyNodeId.get('asset.solar-inverter'),
+        iconKey: 'solar', x: 58, y: 88, deviceStatus: 'normal', doubleClickBehavior: 'emit-node',
+      },
+    ],
+    edges: [],
+  }
+}
 
 /**
  * 仅发布已由 GasPower 场景播放模式逐项验证的“流程标识 + 步骤标识”组合。
@@ -165,24 +208,39 @@ const gasProcessDetails = Object.freeze([
     processDetailId: 'process-detail.gas-power.gas-turbine',
     resourceId: 'process-detail-resource.gas-power.gas-turbine',
     cameraPoseId: 'camera-pose.gas-power.gas-turbine',
-    stateNodeId: 'gas-turbine',
+    stateNodeId: 'node.gas-turbine',
     // 第三层目录显式绑定同名拓扑数据上下文，运行时不得按资源名猜测。
     topologyDataContextId: 'process-detail.gas-power.gas-turbine',
   }),
 ])
 
-/** 燃煤只开放已在 Unity 目录、资源包和场景协调器中逐项核验的锅炉第三层。 */
+/** 燃煤只开放已在 Unity 目录、资源包和场景协调器中逐项核验的汽轮机第三层。 */
 const coalProcessDetails = Object.freeze([
   Object.freeze({
     sceneId: 'coal-power',
     processId: 'coal-power-generation',
-    stepId: 'boiler',
-    processDetailId: 'process-detail.coal-power.boiler',
-    resourceId: 'process-detail-resource.coal-power.boiler',
-    cameraPoseId: 'camera-pose.coal-power.boiler',
-    stateNodeId: 'node.coal-boiler',
-    // 锅炉继续复用已登记关键环节输入文件的公共画布上下文。
-    topologyDataContextId: 'process-detail.coal-power.boiler',
+    stepId: 'steam-turbine',
+    processDetailId: 'process-detail.coal-power.steam-turbine',
+    resourceId: 'process-detail-resource.coal-power.steam-turbine',
+    cameraPoseId: 'camera-pose.coal-power.steam-turbine',
+    stateNodeId: 'node.coal-steam-turbine',
+    // 汽轮机使用独立关键环节输入文件的公共画布上下文。
+    topologyDataContextId: 'process-detail.coal-power.steam-turbine',
+  }),
+])
+
+/** 光伏逆变器已具备正式预制体、相机位、故障状态节点和独立二维数据，按稳定编号登记第三层目录。 */
+const solarProcessDetails = Object.freeze([
+  Object.freeze({
+    sceneId: 'solar-power',
+    processId: 'solar-power-generation',
+    stepId: 'inverter',
+    processDetailId: 'process-detail.solar-power.inverter',
+    resourceId: 'process-detail-resource.solar-power.inverter',
+    cameraPoseId: 'camera-pose.solar-power.inverter',
+    stateNodeId: 'node.solar-inverter',
+    // 二维画布按同名上下文加载唯一逆变器拓扑，不能由动作标题或三维资源名推断路径。
+    topologyDataContextId: 'process-detail.solar-power.inverter',
   }),
 ])
 
@@ -209,7 +267,7 @@ export function readReleaseConfiguration(argumentsList) {
     includeSelfTest: false,
     // 合作方联调包和正式包在未提供实际来源时都使用运行时同源模式；固定来源仍可显式启用。
     addressMode: 'fixed-origin',
-    // 默认保持历史燃气回归包；燃煤发布必须通过 --scene coal-power 显式选择。
+    // 默认保持历史燃气回归包；燃煤、光伏发布必须通过 --scene 显式选择。
     sceneId: 'gas-power',
   }
 
@@ -234,8 +292,8 @@ export function readReleaseConfiguration(argumentsList) {
       continue
     }
     if (option === '--scene') {
-      if (value !== 'gas-power' && value !== 'coal-power') {
-        throw new Error('发布场景只能是 gas-power 或 coal-power。')
+      if (!['gas-power', 'coal-power', 'solar-power'].includes(value)) {
+        throw new Error('发布场景只能是 gas-power、coal-power 或 solar-power。')
       }
       configuration.sceneId = value
       continue
@@ -585,30 +643,35 @@ const ccgtOtTopology = Object.freeze({
     Object.freeze({ layerId: 'unit-control', title: '单元控制层', y: 69, color: '#22c55e' }),
     Object.freeze({ layerId: 'field-device', title: '现场设备层', y: 88, color: '#fb923c' }),
   ]),
+  /**
+   * title（节点名称）面向合作方清单，基础名称与当前燃气拓扑图可见文字保持一致。
+   * 所有名称统一增加“燃气-”前缀；同类工作站、交换机继续追加位置限定词，确保平台脱离
+   * sceneId（场景标识）单独展示名称时也不会与燃煤设备混淆。nodeId 与三维映射不得随名称变化。
+   */
   nodes: Object.freeze([
-    Object.freeze({ nodeId: 'ems-system', title: 'EMS 能量管理系统', iconKey: 'server', x: 24, y: 8, layerId: 'enterprise-it' }),
-    Object.freeze({ nodeId: 'enterprise-core-switch', title: '企业核心交换机', iconKey: 'core-switch', x: 50, y: 8, layerId: 'enterprise-it' }),
-    Object.freeze({ nodeId: 'enterprise-firewall', title: '企业防火墙', iconKey: 'firewall', x: 76, y: 8, layerId: 'enterprise-it' }),
-    Object.freeze({ nodeId: 'historian-data-server', title: 'PI 历史数据服务器', iconKey: 'server', x: 24, y: 28, layerId: 'production-dmz' }),
-    Object.freeze({ nodeId: 'dmz-industrial-firewall', title: 'DMZ 工业防火墙', iconKey: 'firewall', x: 50, y: 28, layerId: 'production-dmz' }),
-    Object.freeze({ nodeId: 'scada-security-gateway', title: '燃气管网 SCADA 网关', iconKey: 'data-gateway', x: 76, y: 28, layerId: 'production-dmz' }),
-    Object.freeze({ nodeId: 'operator-station', title: '机组操作员站', iconKey: 'workstation', x: 14, y: 50, layerId: 'plant-control' }),
-    Object.freeze({ nodeId: 'gas-network', title: 'DCS 监控核心交换机', iconKey: 'core-switch', x: 38, y: 50, layerId: 'plant-control' }),
-    Object.freeze({ nodeId: 'plant-engineering-station', title: '燃机专用工程师站', iconKey: 'workstation', x: 62, y: 50, layerId: 'plant-control' }),
-    Object.freeze({ nodeId: 'plant-data-station', title: '性能优化工作站', iconKey: 'workstation', x: 86, y: 50, layerId: 'plant-control' }),
-    Object.freeze({ nodeId: 'inlet-duct', title: '燃机 Mark VIe 控制器', iconKey: 'plc', x: 12, y: 69, layerId: 'unit-control' }),
-    Object.freeze({ nodeId: 'hrsg', title: 'HRSG 余热锅炉 DCS', iconKey: 'dcs', x: 30, y: 69, layerId: 'unit-control' }),
-    Object.freeze({ nodeId: 'steam-turbine', title: '蒸汽轮机控制器', iconKey: 'steam-turbine', x: 44, y: 69, layerId: 'unit-control' }),
-    Object.freeze({ nodeId: 'generator', title: '发电机励磁保护装置', iconKey: 'excitation-system', x: 59, y: 69, layerId: 'unit-control' }),
-    Object.freeze({ nodeId: 'auxiliary-plc', title: '辅机系统 PLC', iconKey: 'plc', x: 74, y: 69, layerId: 'unit-control' }),
-    Object.freeze({ nodeId: 'grid-output', title: '燃机安全 SIL 控制器', iconKey: 'sis-system', x: 89, y: 69, layerId: 'unit-control' }),
-    Object.freeze({ nodeId: 'fuel-gas-pressure-valve', title: '燃气调压控制阀组', iconKey: 'instrument', x: 6, y: 88, layerId: 'field-device' }),
-    Object.freeze({ nodeId: 'fuel-gas-electric-actuator', title: '燃机燃烧器执行机构', iconKey: 'instrument', x: 18, y: 88, layerId: 'field-device' }),
-    Object.freeze({ nodeId: 'hrsg-drum-level-sensor', title: '余热锅炉温度变送器', iconKey: 'instrument', x: 30, y: 88, layerId: 'field-device' }),
-    Object.freeze({ nodeId: 'steam-main-control-valve', title: '汽机主汽调节阀', iconKey: 'instrument', x: 44, y: 88, layerId: 'field-device' }),
-    Object.freeze({ nodeId: 'generator-outlet-breaker', title: '发电机出口断路器', iconKey: 'circuit-breaker', x: 59, y: 88, layerId: 'field-device' }),
-    Object.freeze({ nodeId: 'condensate-pump-vfd', title: '循环水泵变频器', iconKey: 'plc', x: 74, y: 88, layerId: 'field-device' }),
-    Object.freeze({ nodeId: 'fuel-gas-leak-detector', title: '燃气泄漏检测探头', iconKey: 'instrument', x: 89, y: 88, layerId: 'field-device' }),
+    Object.freeze({ nodeId: 'ems-system', title: '燃气-厂级信息监控系统（MES/SIS）', iconKey: 'server', x: 24, y: 8, layerId: 'enterprise-it' }),
+    Object.freeze({ nodeId: 'enterprise-core-switch', title: '燃气-交换机（企业办公网）', iconKey: 'core-switch', x: 50, y: 8, layerId: 'enterprise-it' }),
+    Object.freeze({ nodeId: 'enterprise-firewall', title: '燃气-企业级防火墙', iconKey: 'firewall', x: 76, y: 8, layerId: 'enterprise-it' }),
+    Object.freeze({ nodeId: 'historian-data-server', title: '燃气-历史服务器', iconKey: 'server', x: 24, y: 28, layerId: 'production-dmz' }),
+    Object.freeze({ nodeId: 'dmz-industrial-firewall', title: '燃气-工业防火墙', iconKey: 'firewall', x: 50, y: 28, layerId: 'production-dmz' }),
+    Object.freeze({ nodeId: 'scada-security-gateway', title: '燃气-天然气输配调度终端', iconKey: 'data-gateway', x: 76, y: 28, layerId: 'production-dmz' }),
+    Object.freeze({ nodeId: 'operator-station', title: '燃气-操作员站（机组）', iconKey: 'workstation', x: 14, y: 50, layerId: 'plant-control' }),
+    Object.freeze({ nodeId: 'gas-network', title: '燃气-交换机（监控层）', iconKey: 'core-switch', x: 38, y: 50, layerId: 'plant-control' }),
+    Object.freeze({ nodeId: 'plant-engineering-station', title: '燃气-工程师站（机组）', iconKey: 'workstation', x: 62, y: 50, layerId: 'plant-control' }),
+    Object.freeze({ nodeId: 'plant-data-station', title: '燃气-数据服务器', iconKey: 'workstation', x: 86, y: 50, layerId: 'plant-control' }),
+    Object.freeze({ nodeId: 'system.gas-turbine-control', title: '燃气-燃机控制系统', iconKey: 'plc', x: 12, y: 69, layerId: 'unit-control' }),
+    Object.freeze({ nodeId: 'system.gas-hrsg-control', title: '燃气-余热锅炉控制系统', iconKey: 'dcs', x: 30, y: 69, layerId: 'unit-control' }),
+    Object.freeze({ nodeId: 'system.gas-steam-turbine-control', title: '燃气-汽轮机控制系统', iconKey: 'steam-turbine', x: 44, y: 69, layerId: 'unit-control' }),
+    Object.freeze({ nodeId: 'system.gas-generator-control', title: '燃气-发电机励磁与电控', iconKey: 'excitation-system', x: 59, y: 69, layerId: 'unit-control' }),
+    Object.freeze({ nodeId: 'auxiliary-plc', title: '燃气-化学水处理控制', iconKey: 'plc', x: 74, y: 69, layerId: 'unit-control' }),
+    Object.freeze({ nodeId: 'grid-output', title: '燃气-环保脱硝控制系统', iconKey: 'sis-system', x: 89, y: 69, layerId: 'unit-control' }),
+    Object.freeze({ nodeId: 'fuel-gas-pressure-valve', title: '燃气-天然气调压站控制', iconKey: 'instrument', x: 6, y: 88, layerId: 'field-device' }),
+    Object.freeze({ nodeId: 'asset.gas-turbine', title: '燃气-燃气轮机', iconKey: 'gas-turbine', x: 18, y: 88, layerId: 'field-device' }),
+    Object.freeze({ nodeId: 'asset.gas-hrsg', title: '燃气-余热锅炉', iconKey: 'dcs', x: 30, y: 88, layerId: 'field-device' }),
+    Object.freeze({ nodeId: 'asset.gas-steam-turbine', title: '燃气-蒸汽轮机', iconKey: 'steam-turbine', x: 44, y: 88, layerId: 'field-device' }),
+    Object.freeze({ nodeId: 'asset.gas-generator', title: '燃气-发电机', iconKey: 'excitation-system', x: 59, y: 88, layerId: 'field-device' }),
+    Object.freeze({ nodeId: 'condensate-pump-vfd', title: '燃气-高压水泵', iconKey: 'plc', x: 74, y: 88, layerId: 'field-device' }),
+    Object.freeze({ nodeId: 'fuel-gas-leak-detector', title: '燃气-脱硝装置', iconKey: 'instrument', x: 89, y: 88, layerId: 'field-device' }),
   ]),
   /**
    * 总览图中与已核验三维入口对应的重点区域。成员集合显式登记，发布构建不会按标题、坐标或连线猜测子节点。
@@ -617,20 +680,20 @@ const ccgtOtTopology = Object.freeze({
   focusRegions: Object.freeze([
     Object.freeze({
       regionId: 'focus.gas-turbine-control',
-      anchorNodeId: 'inlet-duct',
-      nodeIds: Object.freeze(['inlet-duct', 'fuel-gas-pressure-valve', 'fuel-gas-electric-actuator']),
+      anchorNodeId: 'system.gas-turbine-control',
+      nodeIds: Object.freeze(['system.gas-turbine-control', 'fuel-gas-pressure-valve', 'asset.gas-turbine']),
       label: '燃机控制区域',
     }),
     Object.freeze({
       regionId: 'focus.hrsg-control',
-      anchorNodeId: 'hrsg',
-      nodeIds: Object.freeze(['hrsg', 'hrsg-drum-level-sensor']),
+      anchorNodeId: 'system.gas-hrsg-control',
+      nodeIds: Object.freeze(['system.gas-hrsg-control', 'asset.gas-hrsg']),
       label: '余热锅炉控制区域',
     }),
     Object.freeze({
       regionId: 'focus.steam-turbine-control',
-      anchorNodeId: 'steam-turbine',
-      nodeIds: Object.freeze(['steam-turbine', 'steam-main-control-valve']),
+      anchorNodeId: 'system.gas-steam-turbine-control',
+      nodeIds: Object.freeze(['system.gas-steam-turbine-control', 'asset.gas-steam-turbine']),
       label: '蒸汽轮机控制区域',
     }),
   ]),
@@ -650,21 +713,28 @@ const ccgtOtTopology = Object.freeze({
     Object.freeze({ edgeId: 'route.dcs-core-to-operator', fromNodeId: 'gas-network', toNodeId: 'operator-station', title: '机组操作网络', lineColor: coalPowerEdgeColors.blue, lineStyle: 'solid' }),
     Object.freeze({ edgeId: 'route.dcs-core-to-engineering', fromNodeId: 'gas-network', toNodeId: 'plant-engineering-station', title: '燃机工程维护网络', lineColor: coalPowerEdgeColors.blue, lineStyle: 'solid' }),
     Object.freeze({ edgeId: 'route.dcs-core-to-performance', fromNodeId: 'gas-network', toNodeId: 'plant-data-station', title: '性能优化网络', lineColor: coalPowerEdgeColors.blue, lineStyle: 'solid' }),
-    Object.freeze({ edgeId: 'route.dcs-core-to-markvie', fromNodeId: 'gas-network', toNodeId: 'inlet-duct', title: '燃机控制链路', protocolLabel: '专用控制总线', lineColor: coalPowerEdgeColors.green, lineStyle: 'solid' }),
-    Object.freeze({ edgeId: 'route.dcs-core-to-hrsg', fromNodeId: 'gas-network', toNodeId: 'hrsg', title: '余热锅炉控制链路', lineColor: coalPowerEdgeColors.green, lineStyle: 'solid' }),
-    Object.freeze({ edgeId: 'route.dcs-core-to-steam', fromNodeId: 'gas-network', toNodeId: 'steam-turbine', title: '汽机控制链路', lineColor: coalPowerEdgeColors.green, lineStyle: 'solid' }),
-    Object.freeze({ edgeId: 'route.dcs-core-to-generator', fromNodeId: 'gas-network', toNodeId: 'generator', title: '发电机保护链路', lineColor: coalPowerEdgeColors.green, lineStyle: 'solid' }),
+    Object.freeze({ edgeId: 'route.dcs-core-to-markvie', fromNodeId: 'gas-network', toNodeId: 'system.gas-turbine-control', title: '燃机控制链路', protocolLabel: '专用控制总线', lineColor: coalPowerEdgeColors.green, lineStyle: 'solid' }),
+    Object.freeze({ edgeId: 'route.dcs-core-to-hrsg', fromNodeId: 'gas-network', toNodeId: 'system.gas-hrsg-control', title: '余热锅炉控制链路', lineColor: coalPowerEdgeColors.green, lineStyle: 'solid' }),
+    Object.freeze({ edgeId: 'route.dcs-core-to-steam', fromNodeId: 'gas-network', toNodeId: 'system.gas-steam-turbine-control', title: '汽机控制链路', lineColor: coalPowerEdgeColors.green, lineStyle: 'solid' }),
+    Object.freeze({ edgeId: 'route.dcs-core-to-generator', fromNodeId: 'gas-network', toNodeId: 'system.gas-generator-control', title: '发电机保护链路', lineColor: coalPowerEdgeColors.green, lineStyle: 'solid' }),
     Object.freeze({ edgeId: 'route.dcs-core-to-auxiliary', fromNodeId: 'gas-network', toNodeId: 'auxiliary-plc', title: '辅机控制链路', lineColor: coalPowerEdgeColors.green, lineStyle: 'solid' }),
     Object.freeze({ edgeId: 'route.dcs-core-to-sil', fromNodeId: 'gas-network', toNodeId: 'grid-output', title: '燃机安全联锁链路', lineColor: coalPowerEdgeColors.green, lineStyle: 'dashed' }),
-    Object.freeze({ edgeId: 'route.markvie-to-pressure-valve', fromNodeId: 'inlet-duct', toNodeId: 'fuel-gas-pressure-valve', title: '燃气调压控制', lineColor: coalPowerEdgeColors.orange, lineStyle: 'solid' }),
-    Object.freeze({ edgeId: 'route.markvie-to-actuator', fromNodeId: 'inlet-duct', toNodeId: 'fuel-gas-electric-actuator', title: '燃烧器执行控制', lineColor: coalPowerEdgeColors.orange, lineStyle: 'solid' }),
-    Object.freeze({ edgeId: 'route.hrsg-to-temperature-transmitter', fromNodeId: 'hrsg', toNodeId: 'hrsg-drum-level-sensor', title: '余热锅炉温度采集', lineColor: coalPowerEdgeColors.orange, lineStyle: 'solid' }),
-    Object.freeze({ edgeId: 'route.steam-to-main-control-valve', fromNodeId: 'steam-turbine', toNodeId: 'steam-main-control-valve', title: '主汽调节控制', lineColor: coalPowerEdgeColors.orange, lineStyle: 'solid' }),
-    Object.freeze({ edgeId: 'route.generator-to-outlet-breaker', fromNodeId: 'generator', toNodeId: 'generator-outlet-breaker', title: '发电机出口保护', lineColor: coalPowerEdgeColors.orange, lineStyle: 'solid' }),
+    Object.freeze({ edgeId: 'route.markvie-to-pressure-valve', fromNodeId: 'system.gas-turbine-control', toNodeId: 'fuel-gas-pressure-valve', title: '燃气调压控制', lineColor: coalPowerEdgeColors.orange, lineStyle: 'solid' }),
+    Object.freeze({ edgeId: 'route.markvie-to-device', fromNodeId: 'system.gas-turbine-control', toNodeId: 'asset.gas-turbine', title: '燃气轮机设备控制', lineColor: coalPowerEdgeColors.orange, lineStyle: 'solid' }),
+    Object.freeze({ edgeId: 'route.hrsg-to-device', fromNodeId: 'system.gas-hrsg-control', toNodeId: 'asset.gas-hrsg', title: '余热锅炉设备控制', lineColor: coalPowerEdgeColors.orange, lineStyle: 'solid' }),
+    Object.freeze({ edgeId: 'route.steam-to-device', fromNodeId: 'system.gas-steam-turbine-control', toNodeId: 'asset.gas-steam-turbine', title: '蒸汽轮机设备控制', lineColor: coalPowerEdgeColors.orange, lineStyle: 'solid' }),
+    Object.freeze({ edgeId: 'route.generator-to-device', fromNodeId: 'system.gas-generator-control', toNodeId: 'asset.gas-generator', title: '发电机励磁与电控', lineColor: coalPowerEdgeColors.orange, lineStyle: 'solid' }),
     Object.freeze({ edgeId: 'route.auxiliary-to-vfd', fromNodeId: 'auxiliary-plc', toNodeId: 'condensate-pump-vfd', title: '循环水泵控制', lineColor: coalPowerEdgeColors.orange, lineStyle: 'solid' }),
     Object.freeze({ edgeId: 'route.sil-to-leak-detector', fromNodeId: 'grid-output', toNodeId: 'fuel-gas-leak-detector', title: '燃气泄漏安全联锁', lineColor: coalPowerEdgeColors.orange, lineStyle: 'solid' }),
   ]),
 })
+
+/**
+ * 正式燃气清单在未接收外部状态快照时统一展示正常。
+ * 此发布基线只负责首次渲染；运行时仍完全以外部数据按 nodeId 覆盖为正常、告警、故障或离线，
+ * 不通过构建脚本、缺失数据或超时猜测离线状态。
+ */
+const DEFAULT_TOPOLOGY_NODE_STATUS = 'normal'
 
 /** 将唯一总图和只读流程过滤规则转换为当前发布清单格式。 */
 function createCcgtTopologies(manifestVersion) {
@@ -679,7 +749,7 @@ function createCcgtTopologies(manifestVersion) {
       return {
         ...node,
         ...(sceneNodeId ? { sceneNodeId } : {}),
-        deviceStatus: 'offline',
+        deviceStatus: DEFAULT_TOPOLOGY_NODE_STATUS,
         /*
          * 所有来源节点都用稳定 nodeId（节点标识）参与外部协议。平台读取该标识并在自身系统内
          * 维护真实设备映射；本清单和运行时均不得保存、接收或推导平台设备编号。
@@ -715,11 +785,8 @@ export async function createGasOnlyManifest(releaseId) {
       targetViewMode: 'business',
       targetTopologyId: 'topology.gas-power.overview',
       allowedParameters: [],
-      /*
-       * 总览必须复用 Unity 已验证的流程入口：该步骤会清除流程与告警描边、恢复上下文材质、
-       * 显示场景根模型并重新框选总场景。失败时保留原二维和三维上下文，禁止只恢复二维总图。
-       */
-      unityAction: { type: 'enterProcessStep', processId: 'gas-power-generation', stepId: 'overview', defaultUnitId: 'all', isolate: true },
+      /* 总览统一恢复场景资产保存的默认显隐、材质和初始镜头。 */
+      unityAction: { type: 'resetScene' },
       failurePolicy: 'keep-current-context',
       configVersion: manifestVersion,
     },
@@ -742,7 +809,7 @@ export async function createGasOnlyManifest(releaseId) {
 
   const scenes = fixture.scenes.map((scene) => ({
     ...scene,
-    title: scene.sceneId === 'gas-power' ? '燃气发电' : `待交付场景：${scene.sceneId}`,
+    title: scene.sceneId === 'gas-power' ? '燃气发电' : ({ 'wind-power': '风力发电', 'solar-power': '光伏发电', 'step-up-substation': '升压站', 'step-down-substation': '降压站' }[scene.sceneId] ?? `待交付场景：${scene.sceneId}`),
     // Unity 当前桥接器只接受该已验证映射版本；其余占位场景同样保持契约一致，但不会被测试宿主选择。
     sceneMappingVersion: unitySceneMappingVersion,
     resourceVersion: scene.sceneId === 'gas-power' ? `resource.${unityReleaseId}.gas-power` : `placeholder.${scene.sceneId}`,
@@ -763,16 +830,11 @@ export async function createGasOnlyManifest(releaseId) {
         }
   )).flat()
 
-  const unitySceneMappings = fixture.unitySceneMappings.map((mapping) => ({
+  const unitySceneMappings = fixture.unitySceneMappings.map(({ processSteps: _obsoleteProcessSteps, ...mapping }) => ({
     ...mapping,
     mappingVersion: unitySceneMappingVersion,
-    // 只发布总览步骤及已核验的三维节点映射；没有三维路由证据，因此路径始终为空。
+    // 只发布已核验的三维节点映射；默认状态由 resetScene 恢复，当前没有三维路由证据。
     sceneNodeIds: mapping.sceneId === 'gas-power' ? [...verifiedGasSceneNodeIdByTopologyNodeId.values()] : [],
-    // 第二层流程能力独立于二维节点点击映射：这里只保留总览步骤；燃机第三层由 processDetails（关键环节目录）承载。
-    // 复制对象而非复用冻结数组中的对象，防止后续清单处理代码意外修改共享声明。
-    processSteps: mapping.sceneId === 'gas-power'
-      ? verifiedGasProcessSteps.map((step) => ({ ...step }))
-      : [],
     routeIds: [],
   }))
 
@@ -807,14 +869,15 @@ export async function createCoalPowerManifest(releaseId) {
   const coalActionDefinitions = [
     ...createCoalPowerActions(manifestVersion),
     {
-      actionId: 'action.coal-power.boiler',
-      title: '进入燃煤锅炉关键环节',
+      actionId: 'action.coal-power.steam-turbine',
+      title: '进入燃煤汽轮机关键环节',
       targetSceneId: 'coal-power',
       targetViewMode: 'process-detail',
-      processDetailId: 'process-detail.coal-power.boiler',
+      processDetailId: 'process-detail.coal-power.steam-turbine',
       allowedParameters: [],
-      // 锅炉关键环节使用独立第三层事务，不发布同名二层流程步骤，也不携带二维拓扑。
-      unityAction: { type: 'enterProcessDetail', processDetailId: 'process-detail.coal-power.boiler' },
+      // 汽轮机关键环节使用独立第三层事务，不发布同名二层流程步骤，也不携带第二层目标拓扑编号；
+      // 独立二维拓扑由关键环节目录中的 topologyDataContextId 在子应用内部加载。
+      unityAction: { type: 'enterProcessDetail', processDetailId: 'process-detail.coal-power.steam-turbine' },
       failurePolicy: 'keep-current-context',
       configVersion: manifestVersion,
     },
@@ -843,14 +906,11 @@ export async function createCoalPowerManifest(releaseId) {
   )).flat()
 
   const coalSceneNodeIds = coalPowerSceneNodeMappings.map((mapping) => mapping.sceneNodeId)
-  const unitySceneMappings = fixture.unitySceneMappings.map((mapping) => ({
+  const unitySceneMappings = fixture.unitySceneMappings.map(({ processSteps: _obsoleteProcessSteps, ...mapping }) => ({
     ...mapping,
     mappingVersion: unitySceneMappingVersion,
-    // 只发布属性面板中真实登记的三个节点和四个流程步骤；煤电当前没有已确认的三维路径。
+    // 只发布属性面板中真实登记的三维节点；默认状态由 resetScene 恢复，煤电没有已确认的三维路径。
     sceneNodeIds: mapping.sceneId === 'coal-power' ? [...coalSceneNodeIds] : [],
-    processSteps: mapping.sceneId === 'coal-power'
-      ? coalPowerProcessSteps.map((step) => ({ ...step }))
-      : [],
     routeIds: [],
   }))
 
@@ -863,7 +923,7 @@ export async function createCoalPowerManifest(releaseId) {
     // 产品已下线下钻，燃煤清单同样不再发布旧说明内容。
     drilldowns: [],
     actions: coalActionDefinitions,
-    // 返回新对象，防止构建流程修改冻结的燃煤锅炉唯一目录源。
+    // 返回新对象，防止构建流程修改冻结的燃煤汽轮机唯一目录源。
     processDetails: coalProcessDetails.map((detail) => ({ ...detail })),
     unitySceneMappings,
   }
@@ -873,12 +933,12 @@ export async function createCoalPowerManifest(releaseId) {
  * 生成同时承载燃气、燃煤真实配置的原子结构清单。
  *
  * 两个独立清单生成器继续保留为场景专项回归夹具；正式发布改用本函数一次装配两张真实总览拓扑、
- * 两个受控总览动作、两项已核验第三层动作和八组三维映射。initialSceneId（初始场景标识）只决定当前入口使用的运行时别名，
+ * 七个受控导航动作、三项已核验第三层动作和十八组三维映射。initialSceneId（初始场景标识）只决定当前入口使用的运行时别名，
  * 不再裁剪另一场景内容，因此同一 Unity 实例可在燃气、燃煤之间往返并保持双向选中。
  */
 export async function createConfiguredPowerScenesManifest(releaseId, initialSceneId = 'gas-power') {
-  if (initialSceneId !== 'gas-power' && initialSceneId !== 'coal-power') {
-    throw new Error('联合清单初始场景只能是 gas-power 或 coal-power。')
+  if (!['gas-power', 'coal-power', 'solar-power'].includes(initialSceneId)) {
+    throw new Error('联合清单初始场景只能是 gas-power、coal-power 或 solar-power。')
   }
 
   const [gasManifest, coalManifest] = await Promise.all([
@@ -899,10 +959,85 @@ export async function createConfiguredPowerScenesManifest(releaseId, initialScen
     ...gasManifest.topologies.filter((topology) => topology.sceneId !== 'coal-power'),
     ...coalManifest.topologies.filter((topology) => topology.sceneId === 'coal-power'),
   ].map((topology) => ({ ...topology, configVersion: manifestVersion }))
-  const actions = [...gasManifest.actions, ...coalManifest.actions]
-    .map((action) => ({ ...action, configVersion: manifestVersion }))
-  const processDetails = [...gasManifest.processDetails, ...coalManifest.processDetails]
+  // 光伏外部 JSON 图纸由专用画布读取；清单保留两个真实业务节点，供状态协调器和 Unity 映射校验使用。
+  const solarTopologyIndex = topologies.findIndex((topology) => topology.sceneId === 'solar-power')
+  const solarTopology = createSolarPowerTopology(manifestVersion)
+  if (solarTopologyIndex >= 0) topologies[solarTopologyIndex] = solarTopology
+  else topologies.push(solarTopology)
+  /*
+   * 合作方当前只从 workflowActions（流程动作摘要）生成可绑定菜单，因此四个新增场景必须登记稳定导航动作。
+   * 这些动作复用原子视图事务且 unityAction（Unity动作）固定为 none（无动作），不会伪造控制器未声明的工艺步骤。
+   */
+  const addedSceneNavigations = [
+    { sceneId: 'wind-power', title: '风力发电', actionId: 'action.wind-power.overview', actionTitle: '进入风力发电总览' },
+    { sceneId: 'solar-power', title: '光伏发电', actionId: 'action.solar-power.overview', actionTitle: '进入光伏发电总览' },
+    { sceneId: 'step-up-substation', title: '升压站', actionId: 'action.step-up-substation.overview', actionTitle: '进入升压站总览' },
+    { sceneId: 'step-down-substation', title: '降压站', actionId: 'action.step-down-substation.overview', actionTitle: '进入降压站总览' },
+  ]
+  const solarProcessDetailAction = {
+    actionId: 'action.solar-power.inverter',
+    title: '进入光伏逆变器关键环节',
+    targetSceneId: 'solar-power',
+    targetViewMode: 'process-detail',
+    processDetailId: 'process-detail.solar-power.inverter',
+    allowedParameters: [],
+    // 关键环节固定字段全部由目录提供，外部入口不能注入资源、相机位或状态节点编号。
+    unityAction: { type: 'enterProcessDetail', processDetailId: 'process-detail.solar-power.inverter' },
+    failurePolicy: 'keep-current-context',
+    configVersion: manifestVersion,
+  }
+  const actions = [
+    {
+      actionId: 'action.scene.overview',
+      title: '返回全局总览',
+      targetSceneId: 'overview',
+      targetViewMode: 'overview',
+      allowedParameters: [],
+      // 平台总览只切换现有 overview（总览）场景，不调用额外 Unity 方法或创建占位拓扑。
+      unityAction: { type: 'none' },
+      failurePolicy: 'keep-current-context',
+      configVersion: manifestVersion,
+    },
+    ...gasManifest.actions,
+    ...coalManifest.actions,
+    ...addedSceneNavigations.map((navigation) => ({
+      actionId: navigation.actionId,
+      title: navigation.actionTitle,
+      targetSceneId: navigation.sceneId,
+      targetViewMode: 'business',
+      targetTopologyId: `topology.${navigation.sceneId}.overview`,
+      allowedParameters: [],
+      unityAction: { type: 'none' },
+      failurePolicy: 'keep-current-context',
+      configVersion: manifestVersion,
+    })),
+    solarProcessDetailAction,
+  ].map((action) => ({ ...action, configVersion: manifestVersion }))
+  const processDetails = [...gasManifest.processDetails, ...coalManifest.processDetails, ...solarProcessDetails]
     .map((detail) => ({ ...detail }))
+  for (const navigation of addedSceneNavigations) {
+    const { sceneId } = navigation
+    const scene = scenes.find((item) => item.sceneId === sceneId)
+    if (scene) {
+      scene.title = navigation.title
+      // 四个场景通过公开流程动作进入默认拓扑，资源版本使用本次 Unity 发布号。
+      scene.resourceVersion = `resource.${unityReleaseId}.${sceneId}`
+      scene.defaultTopologyId = `topology.${sceneId}.overview`
+      scene.topologyIds = [scene.defaultTopologyId]
+      // 光伏同时开放已核验的逆变器第三层；其余新增场景仍只有无三维副作用的总览导航。
+      scene.supportedActionIds = sceneId === 'solar-power'
+        ? [navigation.actionId, solarProcessDetailAction.actionId]
+        : [navigation.actionId]
+    }
+    const topologyId = `topology.${sceneId}.overview`
+    const existingTopologyIndex = topologies.findIndex((item) => item.topologyId === topologyId)
+    // 光伏上方已经登记两个已核验节点，不能被通用空占位逻辑覆盖。
+    if (sceneId !== 'solar-power') {
+      const emptyTopology = { topologyId, sceneId, title: `${scene?.title ?? sceneId}总览`, configVersion: manifestVersion, nodes: [], edges: [] }
+      if (existingTopologyIndex >= 0) topologies[existingTopologyIndex] = emptyTopology
+      else topologies.push(emptyTopology)
+    }
+  }
   // 两张新版图均不支持下钻，联合清单不再合并任何历史说明内容。
   const drilldowns = []
   const unitySceneMappings = gasManifest.unitySceneMappings.map((gasMapping) => {
@@ -911,6 +1046,15 @@ export async function createConfiguredPowerScenesManifest(releaseId, initialScen
     if (!coalMapping) throw new Error('燃煤 Unity 映射缺失，无法生成联合清单。')
     return { ...coalMapping }
   })
+  // 光伏发布两个已核验三维节点；四个场景均不登记未实现的工艺步骤，避免能力清单与控制器不一致。
+  for (const sceneId of ['wind-power', 'solar-power', 'step-up-substation', 'step-down-substation']) {
+    const mapping = unitySceneMappings.find((item) => item.sceneId === sceneId)
+    if (mapping) {
+      mapping.mappingVersion = unitySceneMappingVersion
+      mapping.sceneNodeIds = sceneId === 'solar-power' ? [...verifiedSolarSceneNodeIdByTopologyNodeId.values()] : []
+      mapping.routeIds = []
+    } else unitySceneMappings.push({ sceneId, mappingVersion: unitySceneMappingVersion, sceneNodeIds: sceneId === 'solar-power' ? [...verifiedSolarSceneNodeIdByTopologyNodeId.values()] : [], routeIds: [] })
+  }
 
   return {
     manifestVersion,
@@ -927,9 +1071,9 @@ export async function createConfiguredPowerScenesManifest(releaseId, initialScen
 }
 
 /**
- * 内部自测宿主页覆盖两条已交付纵向链路：全局沙盘 → 燃气/燃煤业务总览 → 各自独立关键环节。
+ * 内部自测宿主页覆盖所有对外可绑定动作：全局沙盘、六个业务总览和三项独立关键环节。
  * 页面中的状态按钮只通过第二版外层协议提交完整设备状态快照；它们不直连 Unity，也不伪造
- * 拓扑图元。每次提交同时携带燃气轮机和燃煤锅炉两个 nodeId，确保切换场景或层级后仍能观察
+ * 拓扑图元。每次提交同时携带燃气轮机和燃煤汽轮机两个 nodeId，确保切换场景或层级后仍能观察
  * 同一份权威状态在二维拓扑、沙盘和关键环节模型中的投影结果。
  */
 export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power') {
@@ -952,6 +1096,7 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
        .test-controls__title { font-weight: 700; }
        .test-controls__hint { margin: 0; color: #bae6fd; }
        .test-controls__actions { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; padding-block-start: 6px; border-block-start: 1px solid rgb(103 232 249 / 25%); }
+       .test-controls__scene-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; padding-block-start: 6px; border-block-start: 1px solid rgb(103 232 249 / 25%); }
        .test-controls__playback { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
        .test-controls__states { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; padding-block-start: 6px; border-block-start: 1px solid rgb(103 232 249 / 25%); }
        .test-controls__state { display: grid; gap: 4px; min-inline-size: 0; }
@@ -967,29 +1112,43 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
   <body>
     <!-- 仅承载嵌入壳；真实 Unity iframe 由壳内唯一宿主创建，外层测试页绝不直连 Unity。 -->
     <iframe id="visualization-shell" title="燃气发电场景与拓扑嵌入壳" allow="fullscreen"></iframe>
-    <section class="test-controls" aria-label="燃气燃煤双场景外部消息测试操作">
-      <span class="test-controls__title">燃气、燃煤双场景全链路自测</span>
-      <p class="test-controls__hint">可往返验证沙盘、两套业务总览及各自关键环节；状态按钮用于观察绑定设备在正常/故障之间切换后的二维、三维效果。</p>
+    <section class="test-controls" aria-label="燃气燃煤光伏三场景外部消息测试操作">
+      <span class="test-controls__title">燃气、燃煤、光伏三场景全链路自测</span>
+      <p class="test-controls__hint">可往返验证沙盘、三套业务总览及各自关键环节；状态按钮用于观察绑定设备在正常/故障之间切换后的二维、三维效果。</p>
       <div class="test-controls__actions" aria-label="视图链路操作">
-        <button type="button" data-command="overview" disabled>沙盘</button>
+        <button type="button" data-action-id="action.scene.overview" disabled>沙盘</button>
         <button type="button" data-action-id="action.gas-power.overview" disabled>燃气总览</button>
         <button type="button" data-action-id="action.gas-power.gas-turbine" disabled>燃气关键</button>
         <button type="button" data-action-id="action.coal-power.overview" disabled>燃煤总览</button>
-        <button type="button" data-action-id="action.coal-power.boiler" disabled>燃煤关键</button>
+        <button type="button" data-action-id="action.coal-power.steam-turbine" disabled>燃煤关键</button>
+      </div>
+      <div class="test-controls__scene-actions" aria-label="新增场景跳转操作">
+        <button type="button" data-action-id="action.wind-power.overview" disabled>风电场景</button>
+        <button type="button" data-action-id="action.solar-power.overview" disabled>光伏场景</button>
+        <button type="button" data-action-id="action.solar-power.inverter" disabled>光伏关键</button>
+        <button type="button" data-action-id="action.step-up-substation.overview" disabled>升压站场景</button>
+        <button type="button" data-action-id="action.step-down-substation.overview" disabled>降压站场景</button>
       </div>
       <div class="test-controls__states" aria-label="关键设备状态切换">
         <div class="test-controls__state">
-          <span class="test-controls__state-label">燃气轮机绑定设备：<output data-device-state-output="inlet-duct" class="test-controls__state-output">正常</output></span>
+          <span class="test-controls__state-label">燃气轮机绑定设备：<output data-device-state-output="asset.gas-turbine" class="test-controls__state-output">正常</output></span>
           <div class="test-controls__state-buttons">
-            <button type="button" data-device-node-id="inlet-duct" data-device-status="normal" disabled>正常</button>
-            <button type="button" data-device-node-id="inlet-duct" data-device-status="fault" disabled>故障</button>
+            <button type="button" data-device-node-id="asset.gas-turbine" data-device-status="normal" disabled>正常</button>
+            <button type="button" data-device-node-id="asset.gas-turbine" data-device-status="fault" disabled>故障</button>
           </div>
         </div>
         <div class="test-controls__state">
-          <span class="test-controls__state-label">燃煤锅炉绑定设备：<output data-device-state-output="system.boiler-dcs" class="test-controls__state-output">正常</output></span>
+          <span class="test-controls__state-label">燃煤汽轮机绑定设备：<output data-device-state-output="asset.coal-steam-turbine" class="test-controls__state-output">正常</output></span>
           <div class="test-controls__state-buttons">
-            <button type="button" data-device-node-id="system.boiler-dcs" data-device-status="normal" disabled>正常</button>
-            <button type="button" data-device-node-id="system.boiler-dcs" data-device-status="fault" disabled>故障</button>
+            <button type="button" data-device-node-id="asset.coal-steam-turbine" data-device-status="normal" disabled>正常</button>
+            <button type="button" data-device-node-id="asset.coal-steam-turbine" data-device-status="fault" disabled>故障</button>
+          </div>
+        </div>
+        <div class="test-controls__state">
+          <span class="test-controls__state-label">光伏逆变器绑定设备：<output data-device-state-output="asset.solar-inverter" class="test-controls__state-output">正常</output></span>
+          <div class="test-controls__state-buttons">
+            <button type="button" data-device-node-id="asset.solar-inverter" data-device-status="normal" disabled>正常</button>
+            <button type="button" data-device-node-id="asset.solar-inverter" data-device-status="fault" disabled>故障</button>
           </div>
         </div>
       </div>
@@ -1012,18 +1171,26 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
         const deviceStateButtons = Array.from(document.querySelectorAll('[data-device-node-id][data-device-status]'));
         const deviceStateOutputs = new Map(Array.from(document.querySelectorAll('[data-device-state-output]'))
           .map((output) => [output.dataset.deviceStateOutput, output]));
-        const overviewButton = document.querySelector('[data-command="overview"]');
-        const commandButtons = [...actionButtons, overviewButton, ...deviceStateButtons].filter(Boolean);
-        // 页面只允许联合清单中已登记的四个场景动作；状态节点也采用清单稳定 nodeId，禁止使用设备私有编号。
+        const commandButtons = [...actionButtons, ...deviceStateButtons];
+        // 仅用于校验新增场景返回的稳定视图；实际跳转与合作方一致，全部通过动作标识触发。
+        const allowedSceneIds = new Set(['wind-power', 'solar-power', 'step-up-substation', 'step-down-substation']);
+        // 页面只允许联合清单中已登记的十项动作；固定闭集禁止页面输入拼接任意场景或内部 Unity 方法。
         const allowedActionIds = new Set([
+          'action.scene.overview',
           'action.gas-power.overview',
           'action.gas-power.gas-turbine',
           'action.coal-power.overview',
-          'action.coal-power.boiler',
+          'action.coal-power.steam-turbine',
+          'action.wind-power.overview',
+          'action.solar-power.overview',
+          'action.solar-power.inverter',
+          'action.step-up-substation.overview',
+          'action.step-down-substation.overview',
         ]);
         const deviceStates = new Map([
-          ['inlet-duct', 'normal'],
-          ['system.boiler-dcs', 'normal'],
+          ['asset.gas-turbine', 'normal'],
+          ['asset.coal-steam-turbine', 'normal'],
+          ['asset.solar-inverter', 'normal'],
         ]);
         const shellOrigin = window.location.origin;
         let sessionId = '';
@@ -1099,7 +1266,7 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
         }
 
         /**
-         * 仅向当前已协商的嵌入壳发送清单中登记的四项动作之一，并携带最近稳定上下文版本。
+         * 仅向当前已协商的嵌入壳发送清单中登记的十项动作之一，并携带最近稳定上下文版本。
          * 版本不匹配由壳返回明确冲突，页面不会绕过事务直接切换拓扑或调用 Unity 方法。
          */
         function triggerWorkflow(actionId) {
@@ -1114,7 +1281,7 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
         });
 
         /**
-         * 提交完整设备状态快照。协议采用“当前快照覆盖”语义，因此每次切换必须同时发送燃气轮机和燃煤锅炉，
+         * 提交完整设备状态快照。协议采用“当前快照覆盖”语义，因此每次切换必须同时发送三个关键设备，
          * 不能只发送被点击的节点，否则另一场景切换回来时会被误清除。提交成功前保留旧值，失败则回滚页面显示。
          */
         function updateDeviceState(nodeId, deviceStatus) {
@@ -1122,7 +1289,9 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
           if (pendingMessageIds.size > 0) return;
           const previousStatus = deviceStates.get(nodeId);
           if (previousStatus === deviceStatus) {
-            status.textContent = (nodeId === 'inlet-duct' ? '燃气轮机绑定设备' : '燃煤锅炉绑定设备') + '已是' + (deviceStatus === 'fault' ? '故障' : '正常') + '状态。';
+            const deviceLabel = nodeId === 'asset.gas-turbine' ? '燃气轮机绑定设备'
+              : nodeId === 'asset.coal-steam-turbine' ? '燃煤汽轮机绑定设备' : '光伏逆变器绑定设备';
+            status.textContent = deviceLabel + '已是' + (deviceStatus === 'fault' ? '故障' : '正常') + '状态。';
             return;
           }
           deviceStates.set(nodeId, deviceStatus);
@@ -1133,7 +1302,7 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
           const snapshotTimestamp = createStatusTimestamp();
           const messageId = sendCommand('device.states.update', {
             sourceRevision,
-            // 完整快照必须保留两个稳定 nodeId，状态协调器才能跨燃气/燃煤场景重放最新值。
+            // 完整快照必须保留三个稳定节点，状态协调器才能跨燃气、燃煤和光伏场景重放最新值。
             items: Array.from(deviceStates, ([snapshotNodeId, snapshotStatus]) => ({
               nodeId: snapshotNodeId,
               deviceStatus: snapshotStatus,
@@ -1141,21 +1310,14 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
             })),
           }, 'device-state-self-test');
           if (messageId) pendingDeviceStateByMessageId.set(messageId, { nodeId, previousStatus, deviceStatus });
-          status.textContent = '正在提交' + (nodeId === 'inlet-duct' ? '燃气轮机' : '燃煤锅炉') + '绑定设备' + (deviceStatus === 'fault' ? '故障' : '正常') + '状态。';
+          const deviceLabel = nodeId === 'asset.gas-turbine' ? '燃气轮机'
+            : nodeId === 'asset.coal-steam-turbine' ? '燃煤汽轮机' : '光伏逆变器';
+          status.textContent = '正在提交' + deviceLabel + '绑定设备' + (deviceStatus === 'fault' ? '故障' : '正常') + '状态。';
         }
 
         deviceStateButtons.forEach((button) => {
           button.addEventListener('click', () => updateDeviceState(button.dataset.deviceNodeId ?? '', button.dataset.deviceStatus ?? ''));
         });
-
-        /** 返回沙盘只调用外层受控视图命令，不能伪造一张空拓扑代表第一层。 */
-        function returnToOverview() {
-          if (!Number.isSafeInteger(contextRevision)) return;
-          setCommandButtonsDisabled(true);
-          sendCommand('view.open', { sceneId: 'overview', expectedContextRevision: contextRevision }, 'gas-turbine-self-test-overview');
-        }
-
-        overviewButton?.addEventListener('click', returnToOverview);
 
         /** 播放/停止只携带布尔开关和稳定上下文版本，场景与关键环节编号由子应用从当前上下文读取。 */
         function setProcessDetailPlayback(playing) {
@@ -1198,11 +1360,17 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
               const validDetail = (message.payload.sceneId === 'gas-power' &&
                 message.payload.processDetailId === 'process-detail.gas-power.gas-turbine' ||
                 message.payload.sceneId === 'coal-power' &&
-                message.payload.processDetailId === 'process-detail.coal-power.boiler') &&
+                message.payload.processDetailId === 'process-detail.coal-power.steam-turbine' ||
+                message.payload.sceneId === 'solar-power' &&
+                message.payload.processDetailId === 'process-detail.solar-power.inverter') &&
                 message.payload.topologyId === undefined;
+              const detailLabel = message.payload.sceneId === 'gas-power' ? '燃气轮机'
+                : message.payload.sceneId === 'coal-power' ? '燃煤汽轮机' : '光伏逆变器';
               status.textContent = validDetail
-                ? (message.payload.sceneId === 'gas-power' ? '燃气轮机' : '燃煤锅炉') + '独立模型已提交：全屏三维且无拓扑。'
-                : '失败：第三层稳定状态包含错误编号或残留拓扑。';
+                // 第三层协议不携带第二层 topologyId，但前端会按目录中的 topologyDataContextId
+                // 在同一画布加载独立拓扑；自测文案必须与正式界面的双区提交结果一致。
+                ? detailLabel + '关键环节已提交：三维模型与二维拓扑已同步切换。'
+                : '失败：第三层稳定状态包含错误编号或意外的第二层拓扑编号。';
             } else if (stableViewMode === 'business' &&
               (message.payload.topologyId === 'topology.gas-power.overview' && message.payload?.actionId === 'action.gas-power.overview' ||
                message.payload.topologyId === 'topology.coal-power.overview' && message.payload?.actionId === 'action.coal-power.overview')) {
@@ -1210,6 +1378,11 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
               status.textContent = message.payload.sceneId === 'gas-power' ? '燃气业务场景与燃气总拓扑已稳定提交。' : '燃煤业务场景与燃煤总拓扑已稳定提交。';
             } else if (stableViewMode === 'overview' && message.payload.sceneId === 'overview' && message.payload.topologyId === undefined) {
               status.textContent = '全局沙盘已稳定提交，当前无拓扑。';
+            } else if (stableViewMode === 'business' && allowedSceneIds.has(message.payload.sceneId) &&
+              message.payload.topologyId === 'topology.' + message.payload.sceneId + '.overview' &&
+              message.payload.actionId === 'action.' + message.payload.sceneId + '.overview') {
+              // 新增场景必须由公开动作成功提交；动作本身保持 none，不虚构流程步骤、关键环节或三维能力。
+              status.textContent = '新增场景 ' + message.payload.sceneId + ' 已稳定提交（当前为场景浏览入口）。';
             } else {
               status.textContent = '失败：收到不属于本轮链路的稳定视图。';
             }
@@ -1227,7 +1400,7 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
                 deviceStates.set(pendingDeviceState.nodeId, pendingDeviceState.previousStatus);
                 renderDeviceStates();
               } else {
-                status.textContent = (pendingDeviceState.nodeId === 'inlet-duct' ? '燃气轮机' : '燃煤锅炉') + '绑定设备已切换为' + (pendingDeviceState.deviceStatus === 'fault' ? '故障' : '正常') + '，可切换场景继续观察效果。';
+                status.textContent = (pendingDeviceState.nodeId === 'asset.gas-turbine' ? '燃气轮机' : '燃煤汽轮机') + '绑定设备已切换为' + (pendingDeviceState.deviceStatus === 'fault' ? '故障' : '正常') + '，可切换场景继续观察效果。';
               }
             }
             if (message.payload?.success !== true) {
@@ -1292,7 +1465,7 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
  * 通过同一套 system.ready → system.init（系统就绪→系统初始化）握手显示燃气总览，不改变平台嵌入路径。
  */
 function createIndependentServiceEntryPage(sceneId = 'gas-power') {
-  const sceneTitle = sceneId === 'coal-power' ? '燃煤' : '燃气'
+  const sceneTitle = sceneId === 'coal-power' ? '燃煤' : sceneId === 'solar-power' ? '光伏' : '燃气'
   const directAccessInstanceId = `${sceneId}-direct-access`
   return `<!doctype html>
 <html lang="zh-CN">
@@ -1335,14 +1508,14 @@ function createIndependentServiceEntryPage(sceneId = 'gas-power') {
  */
 export function createHostPage(manifestVersion, packageType = 'local-test', sceneId = 'gas-power') {
   if (!releasePackageTypes.includes(packageType)) throw new Error('无法为未知包类型生成发布入口。')
-  if (sceneId !== 'gas-power' && sceneId !== 'coal-power') throw new Error('无法为未知发布场景生成入口。')
+  if (!['gas-power', 'coal-power', 'solar-power'].includes(sceneId)) throw new Error('无法为未知发布场景生成入口。')
   if (packageType !== 'local-test') return createIndependentServiceEntryPage(sceneId)
 
-  const sceneTitle = sceneId === 'coal-power' ? '燃煤' : '燃气'
+  const sceneTitle = sceneId === 'coal-power' ? '燃煤' : sceneId === 'solar-power' ? '光伏' : '燃气'
   const sceneInstanceId = `${sceneId}-platform-host`
   const sceneTopologyId = `topology.${sceneId}.overview`
   const sceneInitMessageId = `${sceneId}-platform-init-`
-  const initializeFunctionName = sceneId === 'coal-power' ? 'initializeCoalPower' : 'initializeGasPower'
+  const initializeFunctionName = sceneId === 'coal-power' ? 'initializeCoalPower' : sceneId === 'solar-power' ? 'initializeSolarPower' : 'initializeGasPower'
 
   return `<!doctype html>
 <html lang="zh-CN">
@@ -1432,7 +1605,7 @@ export function createStaticServer(packageType = 'local-test') {
   const unityOrigin = runtimeSelfOrigin ? undefined : new URL(unityEntryUrl).origin
   const manifestOrigin = runtimeSelfOrigin ? undefined : new URL(topologyManifestUrl).origin
   const publicOrigin = runtimeSelfOrigin ? undefined : hostOrigin
-  const serviceLabel = releaseSceneId === 'coal-power' ? '燃煤' : '燃气'
+  const serviceLabel = releaseSceneId === 'coal-power' ? '燃煤' : releaseSceneId === 'solar-power' ? '光伏' : '燃气'
   /**
    * 只有本地测试包生成清理旧回环缓存的路径分支。合作方和正式服务从源代码层面移除
    * 自测页名称与本机地址说明，避免不可达的死分支仍污染交付文本和安全审阅结果。
@@ -1720,14 +1893,14 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
  */
 function readUnityMappingSummary(manifest, sceneId) {
   const mapping = manifest.unitySceneMappings.find((candidate) => candidate.sceneId === sceneId)
-  if (!mapping || !Array.isArray(mapping.sceneNodeIds) || !Array.isArray(mapping.processSteps) || !Array.isArray(mapping.routeIds)) {
-    throw new Error(`${sceneId === 'coal-power' ? '燃煤' : '燃气'} Unity 映射摘要不完整，已停止生成可能与清单不一致的发布说明。`)
+  if (!mapping || !Array.isArray(mapping.sceneNodeIds) || !Array.isArray(mapping.routeIds)) {
+    const sceneTitle = sceneId === 'coal-power' ? '燃煤' : sceneId === 'solar-power' ? '光伏' : '燃气'
+    throw new Error(`${sceneTitle} Unity 映射摘要不完整，已停止生成可能与清单不一致的发布说明。`)
   }
 
   return Object.freeze({
     mappingVersion: mapping.mappingVersion,
     sceneNodeCount: mapping.sceneNodeIds.length,
-    processStepCount: mapping.processSteps.length,
     routeCount: mapping.routeIds.length,
   })
 }
@@ -1744,7 +1917,7 @@ function readGasUnityMappingSummary(manifest) {
  */
 function createReadme(releaseConfiguration, sourceNodeCount, sourceEdgeCount) {
   const sceneId = releaseConfiguration.sceneId ?? 'gas-power'
-  const sceneTitle = sceneId === 'coal-power' ? '燃煤' : '燃气'
+  const sceneTitle = sceneId === 'coal-power' ? '燃煤' : sceneId === 'solar-power' ? '光伏' : '燃气'
   const sceneTopologyId = `topology.${sceneId}.overview`
   const isLocalTest = releaseConfiguration.packageType === 'local-test'
   const isRuntimeSelfOrigin = releaseConfiguration.addressMode === 'runtime-self-origin'
@@ -1764,8 +1937,8 @@ function createReadme(releaseConfiguration, sourceNodeCount, sourceEdgeCount) {
     ? `
 ## 浏览器手动测试入口
 
-打开同目录的 \`self-test.html\`，不要只打开根入口。页面会先初始化全局沙盘，提供“沙盘”“燃气总览”“燃气关键”“燃煤总览”“燃煤关键”五个导航按钮。
-页面同时提供燃气轮机、燃煤锅炉绑定设备的“正常/故障”切换；每次操作提交包含两个 nodeId 的完整状态快照，然后可往返各场景和关键环节观察二维、三维状态投影。进入任一关键环节后，使用“播放”“停止”按钮验收当前模型动态。
+打开同目录的 \`self-test.html\`，不要只打开根入口。页面会先初始化全局沙盘，提供全局总览、燃气、燃煤、风电、光伏、升压站、降压站及三项关键环节共十个动作按钮。
+页面同时提供燃气轮机、燃煤汽轮机和光伏逆变器绑定设备的“正常/故障”切换；每次操作提交包含三个稳定节点的完整状态快照，然后可往返各场景和关键环节观察二维、三维状态投影。进入任一关键环节后，使用“播放”“停止”按钮验收当前模型动态。
 加载失败测试应使用缺少第三层资源的专用内部构建；页面会显示受控错误码并保留上一稳定视图，不向正式协议注入模拟失败参数。
 `
     : ''
@@ -1830,12 +2003,12 @@ ${localSelfTestGuidance}
 - 页面显示${sceneTitle}发电三维模型。
 - 页面显示${sceneTitle}总拓扑图，共 ${sourceNodeCount} 个节点、${sourceEdgeCount} 条连线。
 - 页面只有一个三维实例和一个拓扑画布。
-- 燃气轮机与燃煤锅炉关键环节均使用独立模型，全屏三维且不携带拓扑；返回后恢复各自来源总拓扑。
-- 燃气轮机四态只更新视觉，动态播放许可由独立 Unity 交互控制；燃煤锅炉当前未登记播放目标，协议壳不得伪造播放能力或额外网页按钮。
+- 燃气轮机、燃煤汽轮机与光伏逆变器关键环节均使用独立模型，并与各自独立二维拓扑保持双区展示；第三层不携带第二层 \`topologyId\`，返回后恢复进入前的业务拓扑、筛选、选择和状态。
+- 燃气轮机四态只更新视觉，动态播放许可由独立 Unity 交互控制；燃煤汽轮机当前未登记播放目标，协议壳不得伪造播放能力或额外网页按钮。
 - 单击已映射的拓扑节点，三维模型聚焦并显示描边。
 - 单击拓扑空白区域，取消二维选中和三维交互描边。
 - 支持三维全屏、拓扑全屏，以及拓扑缩放、平移和重置。
-- ${sourceNodeCount} 个总览源节点都可上报稳定 \`nodeId\`；燃气轮机与燃煤锅炉第三层均使用固定关键环节、资源、相机位和状态节点编号。
+- ${sourceNodeCount} 个总览源节点都可上报稳定 \`nodeId\`；燃气轮机与燃煤汽轮机第三层均使用固定关键环节、资源、相机位和状态节点编号。
 ${manifestGuidance}
 
 ## 联调范围
@@ -1895,11 +2068,14 @@ async function main() {
   const unityResourceDigest = await calculateDirectoryResourceDigest(unitySourceDirectory)
   await mkdir(manifestArtifactDirectory, { recursive: true })
 
-  // 正式包始终携带燃气、燃煤两套真实配置；--scene 只决定根入口初始视图，不能再把另一场景降为空占位。
+  // 正式包携带燃气、燃煤和光伏真实配置；--scene 只决定根入口初始视图。
   const manifest = await createConfiguredPowerScenesManifest(releaseId, releaseSceneId)
   const selectedUnityRuntimeKey = getUnityRuntimeKey(releaseSceneId)
   const sourceTopology = manifest.topologies.find((topology) => topology.topologyId === `topology.${releaseSceneId}.overview`)
-  if (!sourceTopology) throw new Error(`未生成${releaseSceneId === 'coal-power' ? '燃煤' : '燃气'}来源总拓扑，已停止打包。`)
+  if (!sourceTopology) {
+    const sceneTitle = releaseSceneId === 'coal-power' ? '燃煤' : releaseSceneId === 'solar-power' ? '光伏' : '燃气'
+    throw new Error(`未生成${sceneTitle}来源总拓扑，已停止打包。`)
+  }
   // 映射摘要和发布文件复用同一内存清单，避免发布说明、契约报告与运行时结构发生漂移。
   const unityMapping = readUnityMappingSummary(manifest, releaseSceneId)
   /*
@@ -1946,7 +2122,7 @@ async function main() {
   // 根入口交付给平台，绝不混入内部测试按钮；自测页仅在内部验证构建显式启用时生成。
   await writeFile(path.join(stagingDirectory, 'index.html'), createHostPage(manifest.manifestVersion, releaseConfiguration.packageType, releaseSceneId), 'utf8')
   if (includeSelfTest) {
-    // 本地自测页使用联合清单，因此无论入口初始场景为何，都能在同一个 Unity 实例内往返燃气与燃煤。
+    // 本地自测页使用联合清单，因此无论入口初始场景为何，都能在同一个 Unity 实例内往返燃气、燃煤与光伏。
     await writeFile(path.join(stagingDirectory, 'self-test.html'), createSelfTestPage(manifest.manifestVersion, releaseSceneId), 'utf8')
   }
   await writeFile(path.join(stagingDirectory, 'server.mjs'), createStaticServer(releaseConfiguration.packageType), 'utf8')
@@ -1957,7 +2133,8 @@ async function main() {
     packageType: releaseConfiguration.packageType,
     deploymentMode: releaseConfiguration.packageType === 'local-test' ? 'local-loopback' : 'independent-service-iframe',
     platformArtifactPatchingAllowed: false,
-    scope: 'gas-and-coal-overview-with-gas-turbine-and-coal-boiler-process-details',
+    // 发布范围按最终清单声明三套已接入总览，以及燃机、汽轮机和逆变器三项关键环节。
+    scope: 'gas-coal-solar-overviews-with-three-verified-process-details',
     unityReleaseId,
     runtimeIdentity: {
       buildId: unityReleaseId,
@@ -1972,6 +2149,7 @@ async function main() {
     runtimeTimeouts: {
       outerReadyMilliseconds: outerReadyTimeoutMilliseconds,
       unityAndInitialViewMilliseconds: unityAndInitialViewTimeoutMilliseconds,
+      sceneSwitchResultMilliseconds: sceneSwitchResultTimeoutMilliseconds,
     },
     // 平台包必须为 false；该字段让交付审阅无需扫描 HTML 即可确认内部自测页是否随包生成。
     selfTestIncluded: includeSelfTest,
@@ -2024,11 +2202,15 @@ async function main() {
     includedCapabilities: ['node-events', 'node-states', 'node-scene-mapping', 'process-detail'],
     workflowActions: manifest.actions.map((action) => ({
       actionId: action.actionId,
+      title: action.title,
+      // 合作方可只读取发布摘要构造菜单，无需再从拓扑编号反推目标场景。
+      targetSceneId: action.targetSceneId,
       targetViewMode: action.targetViewMode,
       ...(action.targetTopologyId ? { targetTopologyId: action.targetTopologyId } : {}),
       ...(action.processDetailId ? { processDetailId: action.processDetailId } : {}),
     })),
-    excludedCapabilities: ['route-mapping', 'other-seven-scene-content'],
+    // 当前四个新增场景已开放总览跳转，仅保留尚未接入的路由映射能力排除声明。
+    excludedCapabilities: ['route-mapping'],
   }, null, 2)}\n`, 'utf8')
 
   /*

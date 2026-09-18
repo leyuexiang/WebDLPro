@@ -87,12 +87,12 @@ export const deploymentConfigurationIssues = Object.freeze([
 /**
  * 为一个业务入口生成只读 Unity 运行时登记。
  *
- * 燃气和燃煤共用同一份九场景 Unity 构建、资源摘要和单实例预算；runtimeKey（运行时键）
+ * 燃气、燃煤和光伏共用同一份多场景 Unity 构建、资源摘要和单实例预算；runtimeKey（运行时键）
  * 只用于区分网页入口归属，不能据此创建第二个播放器或复制资源。统一工厂还能保证两个入口
  * 的命令能力完全一致，避免新增场景时漏掉空白清除、节点聚焦或场景切换能力。
  */
 function createPowerPlantRuntimeRegistration(
-  runtimeKey: 'gas-plant-release' | 'coal-plant-release',
+  runtimeKey: 'gas-plant-release' | 'coal-plant-release' | 'solar-plant-release',
   configuration: DeploymentConfiguration,
   identity: WebglRuntimeIdentity,
 ): WebglRuntimeRegistration {
@@ -107,7 +107,7 @@ function createPowerPlantRuntimeRegistration(
     childOrigin: configuration.unityChildOrigin,
     // Unity iframe 的直接父窗口是本嵌入壳；必须使用独立精确来源，不能错误沿用外层宿主页来源。
     allowedParentOrigin: configuration.unityParentOrigin,
-    capabilities: ['init', 'resize', 'switchScene', 'enterProcessStep', 'moveCameraToPose', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'enterProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'resetCamera', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
+    capabilities: ['init', 'resize', 'switchScene', 'moveCameraToPose', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'enterProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'resetCamera', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
     eventCapabilities: ['ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'selectionCleared', 'disposed'],
     resourceBudget: {
       initialMemoryMb: 256,
@@ -118,7 +118,7 @@ function createPowerPlantRuntimeRegistration(
 }
 
 /**
- * 只有部署配置完整时才同时发布燃气与燃煤入口登记；构造时不接受业务页面提供的 URL。
+ * 只有部署配置完整时才同时发布燃气、燃煤与光伏入口登记；构造时不接受业务页面提供的 URL。
  * 测试可显式传入受控读取结果，生产代码只能使用当前构建环境的全局读取结果。
  */
 export function createRuntimeRegistry(
@@ -131,6 +131,8 @@ export function createRuntimeRegistry(
     ? [
         createPowerPlantRuntimeRegistration('gas-plant-release', configuration, identity),
         createPowerPlantRuntimeRegistration('coal-plant-release', configuration, identity),
+        // 光伏入口与成熟场景共享同一个 Unity 实例，仅用独立运行时键表达页面归属。
+        createPowerPlantRuntimeRegistration('solar-plant-release', configuration, identity),
       ]
     : []
 

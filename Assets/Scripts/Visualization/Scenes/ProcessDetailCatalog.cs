@@ -124,7 +124,7 @@ namespace WebDLPro.Unity.SceneRuntime
 
     /// <summary>
     /// 第三层关键环节目录。目录允许任意业务场景登记零到多个环节；当前已登记燃气轮机正式项和
-    /// 燃煤锅炉燃烧占位项，其他未交付场景保持空缺，不创建伪资源或占位动作。
+    /// 燃煤汽轮机正式项，其他未交付场景保持空缺，不创建伪资源或占位动作。
     /// </summary>
     [CreateAssetMenu(fileName = "ProcessDetailCatalog", menuName = "WebDLPro/Process Detail Catalog")]
     public sealed class ProcessDetailCatalog : ScriptableObject

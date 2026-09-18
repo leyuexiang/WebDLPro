@@ -46,7 +46,7 @@ function createRegistry(): TopologyRegistry {
       { topologyId: 'gas-power.detail', sceneId: 'gas-power', title: '燃气测试明细拓扑', configVersion: version, nodes: [], edges: [] },
     ],
     actions: [],
-    unitySceneMappings: SCENE_IDS.map((sceneId) => ({ sceneId, mappingVersion: version, processSteps: [], sceneNodeIds: sceneId === 'gas-power' ? [gasSceneNodeId, passiveSceneNodeId] : [], routeIds: [] })),
+    unitySceneMappings: SCENE_IDS.map((sceneId) => ({ sceneId, mappingVersion: version, sceneNodeIds: sceneId === 'gas-power' ? [gasSceneNodeId, passiveSceneNodeId] : [], routeIds: [] })),
   })
   if (result.status !== 'ready') throw new Error('测试清单必须通过注册表校验。')
   return result.registry

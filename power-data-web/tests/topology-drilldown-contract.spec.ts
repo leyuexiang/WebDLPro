@@ -20,7 +20,7 @@ describe('燃气与燃煤拓扑无下钻发布契约', () => {
 
     for (const [manifest, overviewTopologyId, expectedActionIds] of [
       [gasManifest, 'topology.gas-power.overview', ['action.gas-power.overview', 'action.gas-power.gas-turbine']],
-      [coalManifest, 'topology.coal-power.overview', ['action.coal-power.overview', 'action.coal-power.boiler']],
+      [coalManifest, 'topology.coal-power.overview', ['action.coal-power.overview', 'action.coal-power.steam-turbine']],
     ] as const) {
       /** 空数组明确表达能力已下线，并让注册表与外部消费者保持一致。 */
       expect(manifest.drilldowns).toEqual([])
@@ -50,11 +50,29 @@ describe('燃气与燃煤拓扑无下钻发布契约', () => {
     ])
     expect(manifest.topologies.every((topology) => topology.filter === undefined)).toBe(true)
     expect(manifest.actions.map((action) => action.actionId)).toEqual([
+      'action.scene.overview',
       'action.gas-power.overview',
       'action.gas-power.gas-turbine',
       'action.coal-power.overview',
-      'action.coal-power.boiler',
+      'action.coal-power.steam-turbine',
+      'action.wind-power.overview',
+      'action.solar-power.overview',
+      'action.step-up-substation.overview',
+      'action.step-down-substation.overview',
+      'action.solar-power.inverter',
     ])
+
+    // 风电和两站只增加无副作用导航动作，Unity 未声明的 overview（总览）流程步骤仍必须为空。
+    for (const sceneId of ['wind-power', 'step-up-substation', 'step-down-substation']) {
+      expect(manifest.scenes.find((scene) => scene.sceneId === sceneId)?.supportedActionIds).toEqual([`action.${sceneId}.overview`])
+      expect(manifest.unitySceneMappings.find((mapping) => mapping.sceneId === sceneId)).not.toHaveProperty('processSteps')
+    }
+    // 光伏额外开放已核验的逆变器第三层，但仍不把关键环节伪装成第二层流程步骤。
+    expect(manifest.scenes.find((scene) => scene.sceneId === 'solar-power')?.supportedActionIds).toEqual([
+      'action.solar-power.overview',
+      'action.solar-power.inverter',
+    ])
+    expect(manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'solar-power')).not.toHaveProperty('processSteps')
 
     // 历史键只能返回缺失，不能为了兼容旧页面保留隐藏说明内容。
     expect(result.registry.getDrilldownContent('gas.mark-vie', manifest.manifestVersion).status).toBe('missing')
@@ -70,7 +88,6 @@ describe('燃气与燃煤拓扑无下钻发布契约', () => {
       .not.toContainEqual(expect.stringMatching(/gas-turbine|hrsg|steam-turbine|combustion|water-steam-cycle|power-output/))
     expect(manifest.actions.filter((action) => action.targetViewMode === 'business').map((action) => action.targetTopologyId))
       .not.toContainEqual(expect.stringMatching(/gas-turbine|hrsg|steam-turbine|combustion|water-steam-cycle|power-output/))
-    expect(manifest.unitySceneMappings.flatMap((mapping) => mapping.processSteps.map((step) => step.stepId)))
-      .not.toContainEqual(expect.stringMatching(/gas-turbine|hrsg|steam-turbine|combustion|water-steam-cycle|power-output/))
+    expect(manifest.unitySceneMappings.every((mapping) => !Object.prototype.hasOwnProperty.call(mapping, 'processSteps'))).toBe(true)
   })
 })

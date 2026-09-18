@@ -32,7 +32,10 @@ type VisualizationStableContextBase = {
 
 export type BusinessVisualizationStableContext = VisualizationStableContextBase & { sceneId: SceneId; topologyId: TopologyId }
 export type OverviewVisualizationStableContext = VisualizationStableContextBase & { sceneId: OverviewSceneId; topologyId?: never }
-/** 第三层只保存稳定环节编号，明确禁止 topologyId 进入无拓扑全屏状态。 */
+/**
+ * 第三层只保存稳定环节编号，明确禁止第二层 topologyId 进入该状态。
+ * 独立二维拓扑由关键环节目录中的 topologyDataContextId 另行解析，不与第二层编号混用。
+ */
 export type ProcessDetailVisualizationStableContext = VisualizationStableContextBase & {
   sceneId: SceneId
   topologyId?: never
@@ -47,7 +50,7 @@ export function isBusinessVisualizationStableContext(
   return !isOverviewSceneId(value.sceneId) && 'topologyId' in value
 }
 
-/** 只有带关键环节编号且无拓扑的业务场景属于第三层。 */
+/** 带关键环节编号且不携带第二层 topologyId 的业务场景属于第三层。 */
 export function isProcessDetailVisualizationStableContext(
   value: VisualizationStableContext,
 ): value is ProcessDetailVisualizationStableContext {
@@ -114,11 +117,14 @@ export const useVisualizationStore = defineStore('visualization', () => {
   const activeTransitionStartedAt = ref<number | null>(null)
   const recentTransitionSummaries = ref<readonly VisualizationTransitionSummary[]>([])
 
+  /**
+   * 会话级单调上下文版本与稳定内容分离保存。物理回退失败时必须清空无法证明的场景组合，
+   * 但不能把已经发布过的版本回退到零，否则父页面会把错误态误判成一次全新会话。
+   */
+  const contextRevision = ref(0)
+
   /** 稳定上下文存在才允许外层桥对外声明可用，切换中的目标字段永远不会提前暴露为当前视图。 */
   const hasStableContext = computed(() => stableContext.value !== null && runtimeStatus.value === 'ready')
-
-  /** 当前上下文版本只从稳定上下文派生，未提交状态一律返回 0。 */
-  const contextRevision = computed(() => stableContext.value?.contextRevision ?? 0)
 
   /**
    * 开始新的场景—拓扑事务。旧事务在协调器创建新 transitionId（切换事务标识）后失去提交权；
@@ -184,7 +190,8 @@ export const useVisualizationStore = defineStore('visualization', () => {
     if (targetsOverview && (topologyId !== null || processDetailId !== null)) return false
 
     appendActiveTransitionSummary('completed')
-    const nextContextRevision = (stableContext.value?.contextRevision ?? 0) + 1
+    const nextContextRevision = contextRevision.value + 1
+    contextRevision.value = nextContextRevision
     if (targetsOverview) {
       stableContext.value = { sceneId, actionId: null, contextRevision: nextContextRevision }
     } else if (targetsProcessDetail) {
@@ -322,7 +329,8 @@ export const useVisualizationStore = defineStore('visualization', () => {
       topologyId: targetTopologyId.value,
       processDetailId: targetProcessDetailId.value,
       actionId: targetActionId.value,
-      previousContextRevision: stableContext.value?.contextRevision ?? 0,
+      // 即使上一次物理恢复失败并清空稳定内容，摘要仍引用会话单调版本，不能倒退为零。
+      previousContextRevision: contextRevision.value,
       outcome,
       elapsedMs: Math.max(0, Date.now() - startedAt),
       diagnosticCode,
@@ -353,6 +361,8 @@ export const useVisualizationStore = defineStore('visualization', () => {
     latestDiagnostic.value = null
     activeTransitionStartedAt.value = null
     recentTransitionSummaries.value = []
+    // release（释放）终止当前会话；下一次会创建新仓库和新会话，因此允许从零重新开始。
+    contextRevision.value = 0
   }
 
   return {

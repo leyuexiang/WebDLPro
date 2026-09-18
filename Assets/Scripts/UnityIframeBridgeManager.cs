@@ -21,8 +21,6 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
     // JavaScript 可无损表达的最大整数；来源修订号超过该边界会在浏览器与 C# 之间产生精度歧义，必须拒绝。
     private const long MaxJavaScriptSafeInteger = 9007199254740991L;
     private const string LocalSceneMappingVersion = "unpublished";
-    private const string CoalOverviewBuildingId = "overview-building.coal-power";
-    private const string GasOverviewBuildingId = "overview-building.gas-power";
 
     /// <summary>
     /// 当前物理场景中单个三维节点最近成功应用的壳内快照序号。
@@ -332,6 +330,8 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         // 当作“无场景引用”的代码裁掉。重复登记只覆盖同名工厂，不创建第二个实例。
         GasPowerBusinessSceneControllerAdapter.RegisterFactory();
         CoalPowerBusinessSceneControllerAdapter.RegisterFactory();
+        // 光伏场景复用 PowerPlantProcessController，但通过独立适配器声明已核验的聚焦与四态能力。
+        SolarPowerBusinessSceneControllerAdapter.RegisterFactory();
         _instanceId = ReadQueryParameter("instanceId", _instanceId);
         _sceneMappingVersion = ReadQueryParameter("sceneMappingVersion", _sceneMappingVersion);
 
@@ -478,9 +478,6 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
                 break;
             case "switchScene":
                 HandleSwitchScene(message);
-                break;
-            case "enterProcessStep":
-                HandleEnterProcessStep(message);
                 break;
             case "moveCameraToPose":
                 HandleMoveCameraToPose(message);
@@ -773,29 +770,8 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         SendRequestAcknowledgement("disposed", command.messageId, success, resultMessage, GetSceneStateDescription());
     }
 
-    private void HandleEnterProcessStep(BridgeMessage message)
-    {
-        BridgePayload payload = message.payload;
-        string processId = payload?.processId;
-        string stepId = payload?.stepId;
-        string unitId = payload?.unitId;
-        if (!SceneActionProtocolValidator.IsValidProcessStep(processId, stepId, unitId))
-        {
-            SendCommandResult(message, false, "process-step-payload-invalid", "流程命令缺少合法流程、步骤或机组标识。");
-            return;
-        }
-        if (!TryGetSceneController(message, BusinessSceneCapability.EnterProcessStep, out IBusinessSceneController controller))
-        {
-            return;
-        }
-        bool isolate = payload == null || payload.isolate;
-        BusinessSceneCommandResult result = controller.EnterProcessStep(processId, stepId, unitId, isolate);
-        SendSceneCommandResult(message, result);
-    }
-
     /// <summary>
-    /// 将稳定镜头点标识交给当前业务场景。该命令与 enterProcessStep 完全分离，
-    /// 不携带流程、显隐、描边或状态参数，也不允许网页传入 Unity 坐标。
+    /// 将稳定镜头点标识交给当前业务场景。该命令不携带流程、显隐、描边或状态参数，
     /// </summary>
     private void HandleMoveCameraToPose(BridgeMessage message)
     {
@@ -1311,38 +1287,36 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
     }
 
     /// <summary>
-    /// 沙盘只接受燃气、燃煤两个已登记入口。设置命令只允许故障态；恢复统一走清除命令，
-    /// 并与业务节点共用快照水位，防止旧故障在恢复后迟到写回。
+    /// 沙盘故障来源由 OverviewBuildingPlaceholder 的序列化节点列表解析。
+    /// 设置命令只允许故障态，恢复统一走清除命令；未绑定来源由总览控制器安全忽略。
     /// </summary>
     private void HandleOverviewBuildingVisualState(
         BridgeMessage message,
         OverviewSceneController controller,
-        string overviewBuildingId,
+        string faultSourceNodeId,
         BusinessSceneNodeVisualState visualState,
         bool clearState)
     {
-        if ((!string.Equals(overviewBuildingId, CoalOverviewBuildingId, StringComparison.Ordinal) &&
-             !string.Equals(overviewBuildingId, GasOverviewBuildingId, StringComparison.Ordinal)) ||
-            (!clearState && visualState != BusinessSceneNodeVisualState.Fault))
+        if (!clearState && visualState != BusinessSceneNodeVisualState.Fault)
         {
-            SendCommandResult(message, false, "overview-building-state-unsupported", "沙盘当前只支持燃气、燃煤入口的故障状态。");
+            SendCommandResult(message, false, "overview-building-state-unsupported", "沙盘建筑来源节点只支持故障状态。");
             return;
         }
 
         NodeVisualStateWatermark incomingWatermark = new NodeVisualStateWatermark(message.payload.snapshotSequence);
-        if (_nodeVisualStateWatermarks.TryGetValue(overviewBuildingId, out NodeVisualStateWatermark latestWatermark) &&
+        if (_nodeVisualStateWatermarks.TryGetValue(faultSourceNodeId, out NodeVisualStateWatermark latestWatermark) &&
             IsOutdatedOrDuplicate(incomingWatermark, latestWatermark))
         {
-            SendCommandResult(message, true, string.Empty, "重复或迟到的沙盘入口状态已幂等忽略。");
+            SendCommandResult(message, true, string.Empty, "重复或迟到的沙盘故障来源状态已幂等忽略。");
             return;
         }
 
         BusinessSceneCommandResult result = clearState
-            ? controller.ClearBuildingVisualState(overviewBuildingId)
-            : controller.ApplyBuildingVisualState(overviewBuildingId, BusinessSceneNodeVisualState.Fault);
+            ? controller.ClearFaultSourceVisualState(faultSourceNodeId)
+            : controller.ApplyFaultSourceVisualState(faultSourceNodeId, BusinessSceneNodeVisualState.Fault);
         if (result.Success)
         {
-            _nodeVisualStateWatermarks[overviewBuildingId] = incomingWatermark;
+            _nodeVisualStateWatermarks[faultSourceNodeId] = incomingWatermark;
         }
         SendSceneCommandResult(message, result);
     }

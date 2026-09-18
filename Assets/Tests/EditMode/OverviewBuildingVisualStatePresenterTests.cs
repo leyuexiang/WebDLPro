@@ -143,6 +143,117 @@ namespace WebDLPro.Unity.Tests
         }
 
         [Test]
+        public void 总览建筑按配置聚合多个故障来源且最后一个清除后才恢复()
+        {
+            GameObject runtimeRoot = new GameObject("OverviewConfiguredFaultSourcesRoot");
+            GameObject cameraObject = new GameObject("OverviewConfiguredFaultSourcesCamera");
+            GameObject building = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            try
+            {
+                building.transform.SetParent(runtimeRoot.transform, false);
+                TestPresenter presenter = building.AddComponent<TestPresenter>();
+                OverviewBuildingPlaceholder placeholder = building.AddComponent<OverviewBuildingPlaceholder>();
+                placeholder.ConfigureForEditor(
+                    "overview-building.configured-fault",
+                    "coal-power",
+                    building.GetComponent<Renderer>(),
+                    building.GetComponent<Collider>(),
+                    presenter);
+                placeholder.ConfigureFaultSourceNodeIdsForEditor(new[]
+                {
+                    "asset.test.primary",
+                    "asset.test.backup"
+                });
+
+                OverviewSceneController controller = runtimeRoot.AddComponent<OverviewSceneController>();
+                controller.ConfigureForEditor(cameraObject.AddComponent<Camera>());
+                BusinessSceneCommandResult initializationResult = default;
+                IEnumerator initialization = controller.InitializeAsync(
+                    new BusinessSceneInitializationContext("overview", "overview", "transition.configured-fault", false),
+                    result => initializationResult = result);
+                while (initialization.MoveNext())
+                {
+                }
+
+                Assert.That(initializationResult.Success, Is.True, initializationResult.Message);
+                Assert.That(
+                    controller.ApplyFaultSourceVisualState("asset.test.primary", BusinessSceneNodeVisualState.Fault).Success,
+                    Is.True);
+                Assert.That(
+                    controller.ApplyFaultSourceVisualState("asset.test.backup", BusinessSceneNodeVisualState.Fault).Success,
+                    Is.True);
+                Assert.That(presenter.ApplyCount, Is.EqualTo(1), "同一建筑的第二个故障来源不得重复创建视觉效果。");
+
+                Assert.That(controller.ClearFaultSourceVisualState("asset.test.primary").Success, Is.True);
+                Assert.That(presenter.ClearCount, Is.Zero, "仍有活动故障来源时不得提前清除建筑效果。");
+                Assert.That(controller.ClearFaultSourceVisualState("asset.unbound").Success, Is.True);
+                Assert.That(presenter.ClearCount, Is.Zero, "未绑定节点必须安全忽略。 ");
+
+                Assert.That(controller.ClearFaultSourceVisualState("asset.test.backup").Success, Is.True);
+                Assert.That(presenter.ClearCount, Is.EqualTo(1));
+                Assert.That(
+                    controller.ApplyFaultSourceVisualState("asset.test.primary", BusinessSceneNodeVisualState.Alarm).ErrorCode,
+                    Is.EqualTo("overview-fault-source-state-unsupported"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(building);
+                Object.DestroyImmediate(cameraObject);
+                Object.DestroyImmediate(runtimeRoot);
+            }
+        }
+
+        [Test]
+        public void 总览初始化拒绝跨建筑重复故障来源节点()
+        {
+            GameObject runtimeRoot = new GameObject("OverviewDuplicateFaultSourceRoot");
+            GameObject cameraObject = new GameObject("OverviewDuplicateFaultSourceCamera");
+            GameObject firstBuilding = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            GameObject secondBuilding = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            try
+            {
+                firstBuilding.transform.SetParent(runtimeRoot.transform, false);
+                secondBuilding.transform.SetParent(runtimeRoot.transform, false);
+                OverviewBuildingPlaceholder first = firstBuilding.AddComponent<OverviewBuildingPlaceholder>();
+                first.ConfigureForEditor(
+                    "overview-building.first-fault-source",
+                    "coal-power",
+                    firstBuilding.GetComponent<Renderer>(),
+                    firstBuilding.GetComponent<Collider>(),
+                    firstBuilding.AddComponent<TestPresenter>());
+                first.ConfigureFaultSourceNodeIdsForEditor(new[] { "asset.test.duplicate" });
+                OverviewBuildingPlaceholder second = secondBuilding.AddComponent<OverviewBuildingPlaceholder>();
+                second.ConfigureForEditor(
+                    "overview-building.second-fault-source",
+                    "gas-power",
+                    secondBuilding.GetComponent<Renderer>(),
+                    secondBuilding.GetComponent<Collider>(),
+                    secondBuilding.AddComponent<TestPresenter>());
+                second.ConfigureFaultSourceNodeIdsForEditor(new[] { "asset.test.duplicate" });
+
+                OverviewSceneController controller = runtimeRoot.AddComponent<OverviewSceneController>();
+                controller.ConfigureForEditor(cameraObject.AddComponent<Camera>());
+                BusinessSceneCommandResult initializationResult = default;
+                IEnumerator initialization = controller.InitializeAsync(
+                    new BusinessSceneInitializationContext("overview", "overview", "transition.duplicate-fault-source", false),
+                    result => initializationResult = result);
+                while (initialization.MoveNext())
+                {
+                }
+
+                Assert.That(initializationResult.Success, Is.False);
+                Assert.That(initializationResult.ErrorCode, Is.EqualTo("overview-building-fault-source-duplicate"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(secondBuilding);
+                Object.DestroyImmediate(firstBuilding);
+                Object.DestroyImmediate(cameraObject);
+                Object.DestroyImmediate(runtimeRoot);
+            }
+        }
+
+        [Test]
         public void 总览建筑状态入口按稳定标识调用呈现器并拒绝未知建筑()
         {
             GameObject runtimeRoot = new GameObject("OverviewVisualStateTestRoot");

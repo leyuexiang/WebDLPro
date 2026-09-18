@@ -11,7 +11,8 @@ describe('第三层关键环节拓扑数据上下文', () => {
     // 同时让测试在读取参考文件时保留可检查的文件路径、图元数量和散列字段。
     const expected = new Map<string, readonly [string, number, string]>([
       ['process-detail.gas-power.gas-turbine', ['process-detail/gas-power/gas-turbine/topology.json', 32, '30652c2a8a2b5bf0af76c70501baa94e2ece57edb57fd35d164486546103b9ba']],
-      ['process-detail.coal-power.steam-turbine', ['process-detail/coal-power/steam-turbine/topology.json', 19, '038c8c639d98ecbe30b650a8315e1bfc3a09fc57cc1904e6ab8bef0c219243cc']],
+      ['process-detail.coal-power.steam-turbine', ['process-detail/coal-power/steam-turbine/topology.json', 45, '5c7262f198f4b4443d863d07a8b39f5bd0d9d841cb03d820b5535c736c78a79c']],
+      ['process-detail.solar-power.inverter', ['process-detail/solar-power/inverter/topology.json', 19, '6391b1212c07664721cbccfea4bb9d5f7ef06487655b08fbf09d4b09e9018686']],
     ])
 
     for (const context of PROCESS_DETAIL_TOPOLOGY_DATA_CONTEXTS.filter((item) => expected.has(item.contextId))) {
@@ -30,14 +31,23 @@ describe('第三层关键环节拓扑数据上下文', () => {
 
   it('只按稳定关键环节标识返回显式图元绑定', () => {
     expect(getProcessDetailTopologyDataContext('process-detail.gas-power.gas-turbine')?.bindings).toEqual([
-      { penId: '14d76d6', nodeId: 'inlet-duct' },
-      { penId: '35d969bb', nodeId: 'inlet-duct' },
-      { penId: '621bf39b', nodeId: 'hrsg' },
+      { penId: '14d76d6', nodeId: 'asset.gas-turbine' },
+      { penId: '35d969bb', nodeId: 'asset.gas-turbine' },
+      { penId: '621bf39b', nodeId: 'asset.gas-hrsg' },
     ])
     expect(getProcessDetailTopologyDataContext('process-detail.coal-power.steam-turbine')?.bindings).toEqual([
-      { penId: 'baf5ab7', nodeId: 'system.steam-turbine-dcs' },
-      { penId: 'b9ae43', nodeId: 'system.steam-turbine-dcs' },
+      { penId: '429749ea', nodeId: 'asset.coal-steam-turbine' },
+      { penId: '8be4fc2', nodeId: 'asset.coal-boiler' },
+      { penId: '9533a1f', nodeId: 'asset.coal-generator' },
     ])
+    expect(getProcessDetailTopologyDataContext('process-detail.solar-power.inverter')).toEqual(expect.objectContaining({
+      renderer: 'solar',
+      topologyPath: 'process-detail/solar-power/inverter/topology.json',
+      bindings: [
+        { penId: 'df25e45', nodeId: 'system.solar-inverter-control' },
+        { penId: '2cf7b170', nodeId: 'asset.solar-inverter' },
+      ],
+    }))
     expect(getProcessDetailTopologyDataContext('process-detail.unknown')).toBeUndefined()
   })
 })
