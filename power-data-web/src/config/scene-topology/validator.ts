@@ -662,7 +662,7 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
     } else if (isProcessDetailTarget && (!validateIdentifier(item.processDetailId, '动作关键环节标识', issues) || item.targetTopologyId !== undefined)) {
       appendIssue(issues, 'action.target', '第三层动作必须只携带关键环节标识。')
     } else if (isOverviewTarget && (item.targetTopologyId !== undefined || item.processDetailId !== undefined)) {
-      // 平台总览没有业务拓扑或关键环节；显式拒绝占位编号，避免合作方把总览误当成第十二个业务场景。
+      // 平台总览没有业务拓扑或关键环节；显式拒绝占位编号，避免合作方把总览误当成第十四个业务场景。
       appendIssue(issues, 'action.target', '平台总览动作不得携带拓扑或关键环节标识。')
     }
     if (item.configVersion !== manifestVersion) appendIssue(issues, 'action.version', '动作版本与清单版本不一致。')

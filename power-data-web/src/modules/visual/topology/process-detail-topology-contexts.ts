@@ -1,5 +1,55 @@
 import type { TopologyDataContext } from '@/modules/visual/topology/topology-runtime'
 
+/** 三个站类场景使用相同保护画面，但业务节点标识必须带场景前缀，保证状态缓存绝不串场。 */
+const PROTECTION_SCENES = Object.freeze([
+  'step-down-substation',
+  'step-up-substation',
+  'converter-station',
+] as const)
+
+/** 三份参考资料各落盘一次；九个逻辑上下文通过稳定编号复用同一只读文件。 */
+const PROTECTION_TOPOLOGIES = Object.freeze([
+  Object.freeze({
+    key: 'transformer-protection',
+    topologyPath: 'process-detail/protection/transformer-protection/topology.json',
+    sourceSha256: 'a6b41ef5c00d0a18498d40f06e5a3c91ae90bfcbdf19403b6e4a67b06e824647',
+    expectedPenCount: 37,
+    devicePenIds: Object.freeze(['13641187', '3ca46467', '5c62b7c9', '638bfdc8', '4c977fd', '5ba41a5e', '2afc53b']),
+  }),
+  Object.freeze({
+    key: 'busbar-protection',
+    topologyPath: 'process-detail/protection/busbar-protection/topology.json',
+    sourceSha256: '1b9ad1dd05c718220c00414d1d030a8965e8738ef61b7c2cde1df5e4a59cdd93',
+    expectedPenCount: 35,
+    devicePenIds: Object.freeze(['764bd402', 'cb91449', '3e2176c6', '276dbcd0', '6c957795', '149e5ff']),
+  }),
+  Object.freeze({
+    key: 'line-protection',
+    topologyPath: 'process-detail/protection/line-protection/topology.json',
+    sourceSha256: 'e9fcb283169bfa8e269c28c65e22747e38e8b338d4a5e2b2dc1f754f466d12c6',
+    expectedPenCount: 34,
+    devicePenIds: Object.freeze(['c15baad', '692fe9ae', '16a5c2d1', 'b8f3ceb', 'a5f4bae', '31d8ffd']),
+  }),
+] as const)
+
+/**
+ * 预计算九个上下文和各自的状态节点绑定。相同图元编号只代表同一参考图中的位置，不能成为
+ * 跨场景状态键，因此 nodeId 同时包含场景、保护类型和图元编号。
+ */
+function createProtectionTopologyContexts(): readonly TopologyDataContext[] {
+  return PROTECTION_SCENES.flatMap((sceneId) => PROTECTION_TOPOLOGIES.map((topology) => Object.freeze({
+    contextId: `process-detail.${sceneId}.${topology.key}`,
+    renderer: 'manifest-json' as const,
+    topologyPath: topology.topologyPath,
+    sourceSha256: topology.sourceSha256,
+    expectedPenCount: topology.expectedPenCount,
+    bindings: Object.freeze(topology.devicePenIds.map((penId) => Object.freeze({
+      penId,
+      nodeId: `asset.${sceneId}.${topology.key}.${penId}`,
+    }))),
+  })))
+}
+
 /**
  * 第三层关键环节 JSON 的显式上下文清单。
  *
@@ -47,6 +97,7 @@ const PROCESS_DETAIL_TOPOLOGY_CONTEXTS: readonly TopologyDataContext[] = Object.
       Object.freeze({ penId: '2cf7b170', nodeId: 'asset.solar-inverter' }),
     ]),
   }),
+  ...createProtectionTopologyContexts(),
 ])
 
 const PROCESS_DETAIL_TOPOLOGY_CONTEXT_BY_ID = new Map(

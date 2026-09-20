@@ -63,7 +63,7 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
     expect(manifest.actions.filter((action) => action.targetSceneId === 'gas-power')).toHaveLength(2)
     expect(manifest.actions.filter((action) => action.targetSceneId === 'coal-power')).toHaveLength(2)
     expect(manifest.actions.filter((action) => action.targetSceneId === 'solar-power')).toHaveLength(2)
-    expect(manifest.actions).toHaveLength(10)
+    expect(manifest.actions).toHaveLength(12)
     expect(manifest.actions.find((action) => action.actionId === 'action.scene.overview')).toEqual({
       actionId: 'action.scene.overview',
       title: '返回全局总览',
@@ -218,10 +218,10 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
         'action.solar-power.inverter',
       ])
       /**
-       * 合作方菜单只消费动作清单，因此四个新增场景各登记一个无三维副作用的总览导航动作。
+       * 合作方菜单只消费动作清单，因此六个新增场景各登记一个无三维副作用的总览导航动作。
        * processSteps（流程步骤）字段必须不存在，防止导航兼容层被误解为控制器已实现的工艺能力。
        */
-      for (const sceneId of ['wind-power', 'step-up-substation', 'step-down-substation']) {
+      for (const sceneId of ['wind-power', 'step-up-substation', 'step-down-substation', 'converter-station', 'switching-station']) {
         const actionId = `action.${sceneId}.overview`
         expect(manifest.scenes.find((scene) => scene.sceneId === sceneId)?.supportedActionIds).toEqual([actionId])
         expect(manifest.unitySceneMappings.find((mapping) => mapping.sceneId === sceneId)).not.toHaveProperty('processSteps')

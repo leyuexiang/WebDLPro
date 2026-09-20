@@ -13,7 +13,9 @@
     { "sceneId": "microgrid", "title": "测试微电网场景", "unitySceneKey": "scene.microgrid", "defaultTopologyId": "topology.microgrid.overview", "topologyIds": ["topology.microgrid.overview"], "supportedActionIds": [], "sceneMappingVersion": "mapping.microgrid.1", "resourceVersion": "resource.microgrid.1", "switchStrategy": "unload-first" },
     { "sceneId": "dispatch", "title": "测试调度场景", "unitySceneKey": "scene.dispatch", "defaultTopologyId": "topology.dispatch.overview", "topologyIds": ["topology.dispatch.overview"], "supportedActionIds": [], "sceneMappingVersion": "mapping.dispatch.1", "resourceVersion": "resource.dispatch.1", "switchStrategy": "unload-first" },
     { "sceneId": "step-up-substation", "title": "升压站", "unitySceneKey": "step-up-substation", "defaultTopologyId": "topology.step-up-substation.overview", "topologyIds": ["topology.step-up-substation.overview"], "supportedActionIds": [], "sceneMappingVersion": "mapping.step-up-substation.1", "resourceVersion": "resource.step-up-substation.1", "switchStrategy": "unload-first" },
-    { "sceneId": "step-down-substation", "title": "降压站", "unitySceneKey": "step-down-substation", "defaultTopologyId": "topology.step-down-substation.overview", "topologyIds": ["topology.step-down-substation.overview"], "supportedActionIds": [], "sceneMappingVersion": "mapping.step-down-substation.1", "resourceVersion": "resource.step-down-substation.1", "switchStrategy": "unload-first" }
+    { "sceneId": "step-down-substation", "title": "降压站", "unitySceneKey": "step-down-substation", "defaultTopologyId": "topology.step-down-substation.overview", "topologyIds": ["topology.step-down-substation.overview"], "supportedActionIds": [], "sceneMappingVersion": "mapping.step-down-substation.1", "resourceVersion": "resource.step-down-substation.1", "switchStrategy": "unload-first" },
+    { "sceneId": "converter-station", "title": "换流站", "unitySceneKey": "converter-station", "defaultTopologyId": "topology.converter-station.overview", "topologyIds": ["topology.converter-station.overview"], "supportedActionIds": [], "sceneMappingVersion": "mapping.converter-station.1", "resourceVersion": "resource.converter-station.1", "switchStrategy": "unload-first" },
+    { "sceneId": "switching-station", "title": "开关站", "unitySceneKey": "switching-station", "defaultTopologyId": "topology.switching-station.overview", "topologyIds": ["topology.switching-station.overview"], "supportedActionIds": [], "sceneMappingVersion": "mapping.switching-station.1", "resourceVersion": "resource.switching-station.1", "switchStrategy": "unload-first" }
   ],
   "topologies": [
     { "topologyId": "topology.coal-power.overview", "sceneId": "coal-power", "title": "测试燃煤拓扑", "configVersion": "fixture-contract.1", "nodes": [], "edges": [] },
@@ -26,7 +28,9 @@
     { "topologyId": "topology.microgrid.overview", "sceneId": "microgrid", "title": "测试微电网拓扑", "configVersion": "fixture-contract.1", "nodes": [], "edges": [] },
     { "topologyId": "topology.dispatch.overview", "sceneId": "dispatch", "title": "测试调度拓扑", "configVersion": "fixture-contract.1", "nodes": [], "edges": [] },
     { "topologyId": "topology.step-up-substation.overview", "sceneId": "step-up-substation", "title": "升压站总览", "configVersion": "fixture-contract.1", "nodes": [], "edges": [] },
-    { "topologyId": "topology.step-down-substation.overview", "sceneId": "step-down-substation", "title": "降压站总览", "configVersion": "fixture-contract.1", "nodes": [], "edges": [] }
+    { "topologyId": "topology.step-down-substation.overview", "sceneId": "step-down-substation", "title": "降压站总览", "configVersion": "fixture-contract.1", "nodes": [], "edges": [] },
+    { "topologyId": "topology.converter-station.overview", "sceneId": "converter-station", "title": "换流站总览", "configVersion": "fixture-contract.1", "nodes": [], "edges": [] },
+    { "topologyId": "topology.switching-station.overview", "sceneId": "switching-station", "title": "开关站总览", "configVersion": "fixture-contract.1", "nodes": [], "edges": [] }
   ],
   "actions": [],
   "unitySceneMappings": [
@@ -40,6 +44,8 @@
     { "sceneId": "microgrid", "mappingVersion": "mapping.microgrid.1", "processSteps": [], "sceneNodeIds": [], "routeIds": [] },
     { "sceneId": "dispatch", "mappingVersion": "mapping.dispatch.1", "processSteps": [], "sceneNodeIds": [], "routeIds": [] },
     { "sceneId": "step-up-substation", "mappingVersion": "mapping.step-up-substation.1", "processSteps": [], "sceneNodeIds": [], "routeIds": [] },
-    { "sceneId": "step-down-substation", "mappingVersion": "mapping.step-down-substation.1", "processSteps": [], "sceneNodeIds": [], "routeIds": [] }
+    { "sceneId": "step-down-substation", "mappingVersion": "mapping.step-down-substation.1", "processSteps": [], "sceneNodeIds": [], "routeIds": [] },
+    { "sceneId": "converter-station", "mappingVersion": "mapping.converter-station.1", "processSteps": [], "sceneNodeIds": [], "routeIds": [] },
+    { "sceneId": "switching-station", "mappingVersion": "mapping.switching-station.1", "processSteps": [], "sceneNodeIds": [], "routeIds": [] }
   ]
 }

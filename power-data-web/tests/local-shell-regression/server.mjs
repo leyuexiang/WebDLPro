@@ -20,7 +20,8 @@ const visualBaselinePagePath = fileURLToPath(new URL('../visual-regression/host/
  * 两枚节点服务于“完整快照缺失已绑定设备”的回归，避免为了测试清除语义而构造正式协议禁止的空状态数组。
  */
 function createTestManifest() {
-  const sceneIds = ['coal-power', 'gas-power', 'wind-power', 'solar-power', 'substation', 'distribution', 'consumption', 'microgrid', 'dispatch', 'step-up-substation', 'step-down-substation']
+  // 回归壳覆盖固定十三场景闭集；换流站与开关站虽无三维动作，仍需验证公开导航和拓扑上下文。
+  const sceneIds = ['coal-power', 'gas-power', 'wind-power', 'solar-power', 'substation', 'distribution', 'consumption', 'microgrid', 'dispatch', 'step-up-substation', 'step-down-substation', 'converter-station', 'switching-station']
   const manifestVersion = 'local-shell-regression.1'
   const gasResetActionId = 'action.gas.reset'
   const windResetActionId = 'action.wind.reset'

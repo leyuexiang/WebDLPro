@@ -47,6 +47,41 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '燃煤拓扑图 JSON 预览' },
   },
   {
+    path: '/step-up-substation-topology-json-preview',
+    name: 'step-up-substation-topology-json-preview',
+    // 独立预览与正式升压站总览共用八份变体清单，保证验收结果和业务入口一致。
+    component: () => import('@/modules/visual/topology-preview/StepUpSubstationTopologyJsonPreview.vue'),
+    meta: { title: '升压站拓扑图 JSON 预览' },
+  },
+  {
+    path: '/step-down-substation-topology-json-preview',
+    name: 'step-down-substation-topology-json-preview',
+    // 独立预览与正式降压站总览共用同一清单、资源和公共画布，不维护第二套验收数据。
+    component: () => import('@/modules/visual/topology-preview/StepDownSubstationTopologyJsonPreview.vue'),
+    meta: { title: '降压站拓扑图 JSON 预览' },
+  },
+  {
+    path: '/converter-station-topology-json-preview',
+    name: 'converter-station-topology-json-preview',
+    // 独立预览与正式换流站总览共用八份只读清单，验收不会维护另一份运行时合并数据。
+    component: () => import('@/modules/visual/topology-preview/ConverterStationTopologyJsonPreview.vue'),
+    meta: { title: '换流站拓扑图 JSON 预览' },
+  },
+  {
+    path: '/protection-process-detail-topology-preview',
+    name: 'protection-process-detail-topology-preview',
+    // 仅用于核对三份二维保护图，不登记或模拟尚未交付的 Unity 第三层资源。
+    component: () => import('@/modules/visual/topology-preview/ProtectionProcessDetailTopologyPreview.vue'),
+    meta: { title: '保护关键环节拓扑预览' },
+  },
+  {
+    path: '/switching-station-topology-json-preview',
+    name: 'switching-station-topology-json-preview',
+    // 独立预览和正式开关站总览共享八份不可变拓扑清单及公共画布。
+    component: () => import('@/modules/visual/topology-preview/SwitchingStationTopologyJsonPreview.vue'),
+    meta: { title: '开关站拓扑图 JSON 预览' },
+  },
+  {
     path: '/:pathMatch(.*)*',
     // 对历史地址采取收敛跳转，而不是渲染旧页面或权限提示页。
     redirect: '/embed',

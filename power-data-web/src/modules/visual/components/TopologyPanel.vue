@@ -7,6 +7,10 @@ import CoalTopologyRuntimeCanvas from '@/modules/visual/topology-preview/CoalTop
 import GasV3TopologyRuntimeCanvas from '@/modules/visual/topology-preview/GasV3TopologyRuntimeCanvas.vue'
 import WindTopologyJsonPreview from '@/modules/visual/topology-preview/WindTopologyJsonPreview.vue'
 import SolarTopologyJsonPreview from '@/modules/visual/topology-preview/SolarTopologyJsonPreview.vue'
+import StepUpSubstationTopologyJsonPreview from '@/modules/visual/topology-preview/StepUpSubstationTopologyJsonPreview.vue'
+import StepDownSubstationTopologyJsonPreview from '@/modules/visual/topology-preview/StepDownSubstationTopologyJsonPreview.vue'
+import ConverterStationTopologyJsonPreview from '@/modules/visual/topology-preview/ConverterStationTopologyJsonPreview.vue'
+import SwitchingStationTopologyJsonPreview from '@/modules/visual/topology-preview/SwitchingStationTopologyJsonPreview.vue'
 import { createTopologyPanelPresentation } from '@/modules/visual/components/topology-panel-presentation'
 import type { TopologyCanvasController } from '@/modules/visual/components/topology-canvas-controller'
 import type { TopologyDataContext } from '@/modules/visual/topology/topology-runtime'
@@ -36,8 +40,13 @@ const emit = defineEmits<{
 const topologyCanvas = ref<(TopologyCanvasController & { readonly ready?: boolean }) | null>(null)
 /** 正式面板是全屏公共祖先，重置、筛选和图形需要一起进入全屏。 */
 const panelRoot = ref<HTMLElement | null>(null)
-/** 风电当前只接收窄视口接口；光伏已接入完整画布控制器并复用 topologyCanvas。 */
-const jsonOverviewCanvas = ref<{ readonly ready: boolean; resetView(): void } | null>(null)
+/** 风电、升压站、降压站、换流站只接收窄视口接口；光伏已接入完整画布控制器并复用 topologyCanvas。 */
+const jsonOverviewCanvas = ref<{
+  readonly ready: boolean
+  resetView(): void
+  /** 站类场景在同一窄端口画布上切换第三层，不向面板暴露具体引擎。 */
+  setTopologyDataContext?(context: TopologyDataContext | undefined): void
+} | null>(null)
 
 /**
  * 最新 JSON 组态图接管燃气、燃煤两个“总览”拓扑；两类场景均已下线流程子图。新版燃煤
@@ -52,11 +61,33 @@ const usesLatestJsonOverviewCanvas = computed(() => {
 
 /** 该开关只在已确认的燃煤总览键成立，防止其他场景意外创建燃煤 JSON 运行时画布。 */
 const usesLatestCoalOverviewCanvas = computed(() => String(props.topology.topologyKey) === 'topology.coal-power.overview')
-/** 风电、光伏正式总览复用已经验收的 JSON 预览运行时，避免退回通用空拓扑画布。 */
+/** 风电、光伏、升压站、降压站、换流站正式总览复用清单式 JSON 运行时，避免退回通用空拓扑画布。 */
 const usesWindOverviewCanvas = computed(() => String(props.topology.topologyKey) === 'topology.wind-power.overview')
 const usesSolarOverviewCanvas = computed(() => String(props.topology.topologyKey) === 'topology.solar-power.overview')
-/** 风电、光伏拓扑由 JSON 运行时自行加载，清单中的节点占位为空时不应覆盖真实画布。 */
-const usesExternalJsonOverviewCanvas = computed(() => usesWindOverviewCanvas.value || usesSolarOverviewCanvas.value)
+const usesStepUpSubstationOverviewCanvas = computed(() => (
+  String(props.topology.topologyKey) === 'topology.step-up-substation.overview'
+))
+const usesStepDownSubstationOverviewCanvas = computed(() => (
+  String(props.topology.topologyKey) === 'topology.step-down-substation.overview'
+))
+const usesConverterStationOverviewCanvas = computed(() => (
+  String(props.topology.topologyKey) === 'topology.converter-station.overview'
+))
+const usesSwitchingStationOverviewCanvas = computed(() => (
+  String(props.topology.topologyKey) === 'topology.switching-station.overview'
+))
+/** 窄端口画布只控制视口；其业务场景没有已确认的状态和三维节点绑定。 */
+const usesNarrowJsonOverviewCanvas = computed(() => (
+  usesWindOverviewCanvas.value
+  || usesStepUpSubstationOverviewCanvas.value
+  || usesStepDownSubstationOverviewCanvas.value
+  || usesConverterStationOverviewCanvas.value
+  || usesSwitchingStationOverviewCanvas.value
+))
+/** 外部 JSON 画布自行加载完整文件，空业务节点清单不能覆盖其真实画面。 */
+const usesExternalJsonOverviewCanvas = computed(() => (
+  usesNarrowJsonOverviewCanvas.value || usesSolarOverviewCanvas.value
+))
 
 /**
  * 拓扑切换时 Vue（渐进式网页框架）会在下一渲染批次替换实际画布组件，而运行时会在同一同步事务内
@@ -86,7 +117,10 @@ const stableCanvasController: TopologyCanvasController = Object.freeze({
   },
   setTopologyDataContext(context: TopologyDataContext | undefined) {
     pendingControllerDataContext = context
-    if (!canvasControllerSuspended) topologyCanvas.value?.setTopologyDataContext?.(context)
+    if (!canvasControllerSuspended) {
+      if (usesNarrowJsonOverviewCanvas.value) jsonOverviewCanvas.value?.setTopologyDataContext?.(context)
+      else topologyCanvas.value?.setTopologyDataContext?.(context)
+    }
   },
   setNodeStatuses(statuses: ReadonlyMap<ProcessNodeId, TopologyDeviceStatus>) {
     pendingControllerStatuses = statuses
@@ -105,7 +139,7 @@ const stableCanvasController: TopologyCanvasController = Object.freeze({
     // 显式重置会废弃旧视口快照，避免后续恢复或画布实现替换时再次回放已经失效的位置。
     pendingControllerViewState = undefined
     if (!canvasControllerSuspended) {
-      if (usesWindOverviewCanvas.value) jsonOverviewCanvas.value?.resetView()
+      if (usesNarrowJsonOverviewCanvas.value) jsonOverviewCanvas.value?.resetView()
       else topologyCanvas.value?.resetView()
     }
   },
@@ -149,8 +183,8 @@ defineExpose({ getCanvasController })
 
 /** 展示模型只从当前拓扑计算，切换场景或拓扑时无需复制组件或维护燃气专用条件分支。 */
 const presentation = computed(() => createTopologyPanelPresentation(props.topology))
-/** 外部数据画布依据真实加载状态解锁；空变电站仍禁用，不能以空业务绑定清单判断风光画布为空。 */
-const resetDisabled = computed(() => Boolean(props.suspended) || (usesWindOverviewCanvas.value
+/** 外部数据画布依据真实加载状态解锁；其他空场景仍禁用，不能以空业务绑定判断画布为空。 */
+const resetDisabled = computed(() => Boolean(props.suspended) || (usesNarrowJsonOverviewCanvas.value
   ? !jsonOverviewCanvas.value?.ready
   : usesSolarOverviewCanvas.value
     // 真实光伏画布提供 ready；兼容测试替身未实现该只读字段时沿用公共控制器能力。
@@ -176,6 +210,12 @@ watch(topologyCanvas, (controller) => {
   controller.setNodeStatuses(pendingControllerStatuses)
   controller.setSelection(pendingControllerNodeIds, pendingControllerRouteIds)
   if (pendingControllerViewState) controller.restoreViewState(pendingControllerViewState)
+}, { flush: 'post' })
+
+/** 窄端口画布挂载后补发最新第三层上下文；第二层初始态的 undefined 同样显式恢复筛选文件。 */
+watch(jsonOverviewCanvas, (controller) => {
+  if (!controller || canvasControllerDisposed || canvasControllerSuspended) return
+  controller.setTopologyDataContext?.(pendingControllerDataContext)
 }, { flush: 'post' })
 
 /**
@@ -232,6 +272,34 @@ watch(() => props.nodeStatuses, (statuses) => {
       @double-click-node="emit('doubleClickNode', $event)"
     />
     <WindTopologyJsonPreview v-else-if="usesWindOverviewCanvas" ref="jsonOverviewCanvas" :fullscreen-target="panelRoot" :suspended="props.suspended" />
+    <!-- 升压站复用公共清单画布；源资料未提供业务节点和三维映射，因此只开放本地图元选择。 -->
+    <StepUpSubstationTopologyJsonPreview
+      v-else-if="usesStepUpSubstationOverviewCanvas"
+      ref="jsonOverviewCanvas"
+      :fullscreen-target="panelRoot"
+      :suspended="props.suspended"
+    />
+    <!-- 降压站复用公共清单画布；没有已确认业务节点映射时不接入状态或三维事件。 -->
+    <StepDownSubstationTopologyJsonPreview
+      v-else-if="usesStepDownSubstationOverviewCanvas"
+      ref="jsonOverviewCanvas"
+      :fullscreen-target="panelRoot"
+      :suspended="props.suspended"
+    />
+    <!-- 换流站只接入来源明确的第二层拓扑；源包未提供三维映射，因此本地选择不外推为 Unity 事件。 -->
+    <ConverterStationTopologyJsonPreview
+      v-else-if="usesConverterStationOverviewCanvas"
+      ref="jsonOverviewCanvas"
+      :fullscreen-target="panelRoot"
+      :suspended="props.suspended"
+    />
+    <!-- 开关站只承载已核验的第二层图纸；没有三维资料时不猜测节点绑定或状态事件。 -->
+    <SwitchingStationTopologyJsonPreview
+      v-else-if="usesSwitchingStationOverviewCanvas"
+      ref="jsonOverviewCanvas"
+      :fullscreen-target="panelRoot"
+      :suspended="props.suspended"
+    />
     <!-- 光伏使用完整控制器：中央状态、二维选择和双击事件都沿用成熟场景的公共通道。 -->
     <SolarTopologyJsonPreview
       v-else-if="usesSolarOverviewCanvas"

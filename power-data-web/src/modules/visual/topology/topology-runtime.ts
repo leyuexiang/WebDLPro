@@ -13,7 +13,11 @@ import { TopologyDeviceStateCache, type TopologyNodeStateApplyResult, type Topol
 export interface TopologyDataContext {
   readonly contextId: string
   /** 渲染器标识决定由哪套现有公共画布消费上下文，不允许按文件名或场景标题推断。 */
-  readonly renderer: 'gas-v3' | 'coal-v2' | 'solar'
+  /**
+   * `manifest-json` 表示复用清单式公共画布的第三层只读 JSON；它与第二层筛选文件共用一个
+   * Meta2D 实例，但不会把关键环节文件混入第二层组合状态。
+   */
+  readonly renderer: 'gas-v3' | 'coal-v2' | 'solar' | 'manifest-json'
   readonly topologyPath: string
   readonly sourceSha256: string
   readonly expectedPenCount: number

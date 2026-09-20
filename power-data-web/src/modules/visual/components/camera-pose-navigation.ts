@@ -2,7 +2,7 @@ import { toCameraPoseId, type CameraPoseId, type SceneId } from '@/config/scene-
 
 /**
  * 第二层厂区三维视口允许展示镜头按钮的场景闭集。
- * 该闭集与十一场景目录分开维护，防止其他业务场景因标题相似而误用已登记镜头点。
+ * 该闭集与十三场景目录分开维护，防止其他业务场景因标题相似而误用已登记镜头点。
  */
 export type CameraPoseNavigationSceneId = 'gas-power' | 'coal-power' | 'wind-power' | 'solar-power'
 

@@ -8,6 +8,10 @@ describe('嵌入壳网页历史基础路径', () => {
 
   it('独立拓扑预览同样应保留 shell 前缀', () => {
     expect(resolveRouterHistoryBase('.', '/shell/gas-v3-topology-json-preview')).toBe('/shell/')
+    expect(resolveRouterHistoryBase('.', '/shell/step-up-substation-topology-json-preview')).toBe('/shell/')
+    expect(resolveRouterHistoryBase('.', '/shell/step-down-substation-topology-json-preview')).toBe('/shell/')
+    expect(resolveRouterHistoryBase('.', '/shell/converter-station-topology-json-preview')).toBe('/shell/')
+    expect(resolveRouterHistoryBase('.', '/shell/switching-station-topology-json-preview')).toBe('/shell/')
   })
 
   it('绝对构建前缀不应被发布包规则改写', () => {

@@ -10,7 +10,7 @@ export type StableIdentifier<TKind extends string> = string & {
   readonly [sceneTopologyIdentifierBrand]: TKind
 }
 
-/** 十一个业务场景是固定闭集，外部输入不能动态注册场景或传入 Unity 文件名。 */
+/** 十三个业务场景是固定闭集，外部输入不能动态注册场景或传入 Unity 文件名。 */
 const sceneIdValues = [
   'coal-power',
   'gas-power',
@@ -23,11 +23,13 @@ const sceneIdValues = [
   'dispatch',
   'step-up-substation',
   'step-down-substation',
+  'converter-station',
+  'switching-station',
 ] as const
 
 /** 固定场景值与品牌共同保证原始字符串、错误场景和其他标识类型均不可直接替换。 */
 export type SceneId = (typeof sceneIdValues)[number] & StableIdentifier<'scene'>
-/** 平台总览是独立视图场景，不属于十一项业务场景闭集，也不参与业务清单拓扑校验。 */
+/** 平台总览是独立视图场景，不属于十三项业务场景闭集，也不参与业务清单拓扑校验。 */
 export type OverviewSceneId = 'overview' & StableIdentifier<'overview-scene'>
 /** 所有可由 system.init/view.open 打开的场景联合；业务清单仍只接受 SceneId。 */
 export type ViewSceneId = SceneId | OverviewSceneId
@@ -104,10 +106,10 @@ function createStableIdentifier<TKind extends string>(kind: TKind, value: string
   return value as StableIdentifier<TKind>
 }
 
-/** 仅接受固定十一场景之一；禁止由标题、路径或模型名称推断场景标识。 */
+/** 仅接受固定十三场景之一；禁止由标题、路径或模型名称推断场景标识。 */
 export function toSceneId(value: string): SceneId {
   if (!sceneIdValues.includes(value as (typeof sceneIdValues)[number])) {
-    throw new Error('场景标识不在固定十一场景目录中。')
+    throw new Error('场景标识不在固定十三场景目录中。')
   }
 
   return value as SceneId
@@ -128,7 +130,7 @@ export function isViewSceneId(value: unknown): value is ViewSceneId {
   return isSceneId(value) || isOverviewSceneId(value)
 }
 
-/** 在已验证的视图场景联合中收窄为十一项业务场景，供需要拓扑清单的调用方使用。 */
+/** 在已验证的视图场景联合中收窄为十三项业务场景，供需要拓扑清单的调用方使用。 */
 export function isBusinessViewSceneId(value: ViewSceneId): value is SceneId {
   return isSceneId(value)
 }

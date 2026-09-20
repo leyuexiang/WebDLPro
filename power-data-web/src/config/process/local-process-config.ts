@@ -42,7 +42,7 @@ interface PageSeed {
 }
 
 /**
- * 需求变更后的 11 个工艺域、36 个页面。
+ * 需求变更后的 13 个工艺域、38 个页面。
  * 非燃气总览页也拥有完整原子配置，只是显式使用 empty 场景模式，绝不尝试猜测资源地址。
  */
 const pageSeeds: readonly PageSeed[] = [
@@ -80,8 +80,10 @@ const pageSeeds: readonly PageSeed[] = [
   { pageId: 'microgrid-operation', domainId: 'microgrid', processId: 'microgrid-operation', title: '微电网运行', description: '微电网运行控制流程。', order: 2 },
   { pageId: 'dispatch-overview', domainId: 'dispatch', processId: 'dispatch-operation', title: '调度总览', description: '调度运行全流程入口。', order: 1 },
   { pageId: 'dispatch-analysis', domainId: 'dispatch', processId: 'dispatch-operation', title: '调度分析', description: '调度分析流程。', order: 2 },
-  { pageId: 'step-up-substation-overview', domainId: 'step-up-substation', processId: 'step-up-substation-operation', title: '升压站总览', description: '升压站场景浏览；设备拓扑待业务配置。', order: 1 },
-  { pageId: 'step-down-substation-overview', domainId: 'step-down-substation', processId: 'step-down-substation-operation', title: '降压站总览', description: '降压站场景浏览；设备拓扑待业务配置。', order: 1 },
+  { pageId: 'step-up-substation-overview', domainId: 'step-up-substation', processId: 'step-up-substation-operation', title: '升压站总览', description: '升压站场景浏览与已验证的第二层拓扑。', order: 1 },
+  { pageId: 'step-down-substation-overview', domainId: 'step-down-substation', processId: 'step-down-substation-operation', title: '降压站总览', description: '降压站场景浏览与已验证的第二层拓扑。', order: 1 },
+  { pageId: 'converter-station-overview', domainId: 'converter-station', processId: 'converter-station-operation', title: '换流站总览', description: '换流站纯导航场景浏览与已验证的第二层拓扑。', order: 1 },
+  { pageId: 'switching-station-overview', domainId: 'switching-station', processId: 'switching-station-operation', title: '开关站总览', description: '开关站纯导航场景浏览与已验证的第二层拓扑。', order: 1 },
 ]
 
 /** 只在配置初始化时建立域到页面的索引，工作台渲染时可直接按域读取。 */
@@ -105,6 +107,8 @@ const domainTitles: ReadonlyArray<readonly [string, string]> = [
   ['dispatch', '调度运行'],
   ['step-up-substation', '升压站'],
   ['step-down-substation', '降压站'],
+  ['converter-station', '换流站'],
+  ['switching-station', '开关站'],
 ]
 
 /** 生成所有域导航配置，页面顺序直接沿用任务清单中的领域顺序。 */
@@ -417,7 +421,7 @@ const solarSceneMapping: SceneMappingDefinition = {
   mappedRouteIds: [],
 }
 
-/** 其余 32 页共享明确的空场景契约，页面可以访问但不会进行未经登记的外部资源加载。 */
+/** 其余页面共享明确的空场景契约；换流站拓扑由正式面板按稳定拓扑键加载，不在此复制外部资源。 */
 const emptyPages = pageSeeds
   .filter((seed) => !['gas-overview', 'coal-overview', 'solar-overview'].includes(seed.pageId))
   .map(createEmptyPage)

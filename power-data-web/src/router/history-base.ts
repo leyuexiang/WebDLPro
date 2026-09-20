@@ -9,6 +9,11 @@ const KNOWN_ROUTE_SUFFIXES = Object.freeze([
   '/coal-topology-json-preview',
   '/wind-topology-json-preview',
   '/solar-topology-json-preview',
+  '/step-up-substation-topology-json-preview',
+  '/step-down-substation-topology-json-preview',
+  '/protection-process-detail-topology-preview',
+  '/converter-station-topology-json-preview',
+  '/switching-station-topology-json-preview',
 ])
 
 /**

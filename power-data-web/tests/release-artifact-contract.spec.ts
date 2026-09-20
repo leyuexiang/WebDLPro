@@ -12,7 +12,7 @@ import {
 const webProjectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 /**
- * 生成发布门禁需要的最小联合结构清单。夹具保留当前十项公开动作和六个动作目标场景，
+ * 生成发布门禁需要的最小联合结构清单。夹具保留当前十二项公开动作和八个动作目标场景，
  * 使正向用例本身不能再把“只有燃气、燃煤动作”的旧清单当成合格发布基线。
  */
 function createTopologyManifest() {
@@ -22,6 +22,8 @@ function createTopologyManifest() {
     ['solar-power', '光伏发电'],
     ['step-up-substation', '升压站'],
     ['step-down-substation', '降压站'],
+    ['converter-station', '换流站'],
+    ['switching-station', '开关站'],
   ]
   return {
     manifestVersion,
@@ -213,7 +215,7 @@ function createReleaseManifest() {
       unityLargeResourcePaths: ['unity/Build/', 'unity/SceneBundles/', 'unity/ProcessDetailBundles/'],
     },
     excludedCapabilities: ['route-mapping', 'other-eight-scene-content'],
-    // 合作方动作菜单读取该摘要；从当前十项结构动作生成相同公开投影，避免测试夹具手工维护时再次漏项。
+    // 合作方动作菜单读取该摘要；从当前十二项结构动作生成相同公开投影，避免测试夹具手工维护时再次漏项。
     workflowActions: createTopologyManifest().actions.map((action) => ({
       actionId: action.actionId,
       title: action.title,
@@ -407,7 +409,7 @@ describe('发布产物输出标准', () => {
       await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
 
       expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
-        expect.stringContaining('完整发布当前十项公开动作'),
+        expect.stringContaining('完整发布当前十二项公开动作'),
       ]))
     } finally {
       rmSync(root, { recursive: true, force: true })
@@ -451,7 +453,7 @@ describe('发布产物输出标准', () => {
       await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
 
       expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
-        expect.stringContaining('完整发布当前十项公开动作'),
+        expect.stringContaining('完整发布当前十二项公开动作'),
       ]))
     } finally {
       rmSync(root, { recursive: true, force: true })

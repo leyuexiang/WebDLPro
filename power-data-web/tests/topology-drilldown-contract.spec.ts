@@ -59,11 +59,13 @@ describe('燃气与燃煤拓扑无下钻发布契约', () => {
       'action.solar-power.overview',
       'action.step-up-substation.overview',
       'action.step-down-substation.overview',
+      'action.converter-station.overview',
+      'action.switching-station.overview',
       'action.solar-power.inverter',
     ])
 
     // 风电和两站只增加无副作用导航动作，Unity 未声明的 overview（总览）流程步骤仍必须为空。
-    for (const sceneId of ['wind-power', 'step-up-substation', 'step-down-substation']) {
+    for (const sceneId of ['wind-power', 'step-up-substation', 'step-down-substation', 'converter-station', 'switching-station']) {
       expect(manifest.scenes.find((scene) => scene.sceneId === sceneId)?.supportedActionIds).toEqual([`action.${sceneId}.overview`])
       expect(manifest.unitySceneMappings.find((mapping) => mapping.sceneId === sceneId)).not.toHaveProperty('processSteps')
     }

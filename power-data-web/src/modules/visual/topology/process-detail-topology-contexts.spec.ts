@@ -13,6 +13,9 @@ describe('第三层关键环节拓扑数据上下文', () => {
       ['process-detail.gas-power.gas-turbine', ['process-detail/gas-power/gas-turbine/topology.json', 32, '30652c2a8a2b5bf0af76c70501baa94e2ece57edb57fd35d164486546103b9ba']],
       ['process-detail.coal-power.steam-turbine', ['process-detail/coal-power/steam-turbine/topology.json', 45, '5c7262f198f4b4443d863d07a8b39f5bd0d9d841cb03d820b5535c736c78a79c']],
       ['process-detail.solar-power.inverter', ['process-detail/solar-power/inverter/topology.json', 19, '6391b1212c07664721cbccfea4bb9d5f7ef06487655b08fbf09d4b09e9018686']],
+      ['process-detail.step-down-substation.transformer-protection', ['process-detail/protection/transformer-protection/topology.json', 37, 'a6b41ef5c00d0a18498d40f06e5a3c91ae90bfcbdf19403b6e4a67b06e824647']],
+      ['process-detail.step-down-substation.busbar-protection', ['process-detail/protection/busbar-protection/topology.json', 35, '1b9ad1dd05c718220c00414d1d030a8965e8738ef61b7c2cde1df5e4a59cdd93']],
+      ['process-detail.step-down-substation.line-protection', ['process-detail/protection/line-protection/topology.json', 34, 'e9fcb283169bfa8e269c28c65e22747e38e8b338d4a5e2b2dc1f754f466d12c6']],
     ])
 
     for (const context of PROCESS_DETAIL_TOPOLOGY_DATA_CONTEXTS.filter((item) => expected.has(item.contextId))) {
@@ -26,6 +29,21 @@ describe('第三层关键环节拓扑数据上下文', () => {
       if (context.contextId.endsWith('steam-turbine')) {
         expect(data.pens.some((pen) => pen.parentId === 'dc728ff')).toBe(true)
       }
+    }
+  })
+
+  it('三个场景共用三份源文件，但九个上下文和状态节点完全独立', () => {
+    const protectionContexts = PROCESS_DETAIL_TOPOLOGY_DATA_CONTEXTS.filter((context) => context.renderer === 'manifest-json')
+    expect(protectionContexts).toHaveLength(9)
+    expect(new Set(protectionContexts.map((context) => context.contextId)).size).toBe(9)
+    expect(new Set(protectionContexts.map((context) => context.topologyPath)).size).toBe(3)
+
+    // 节点标识是中央状态缓存的主键；全局不重复即可从数据结构上阻断跨场景状态污染。
+    const nodeIds = protectionContexts.flatMap((context) => context.bindings.map((binding) => binding.nodeId))
+    expect(new Set(nodeIds).size).toBe(nodeIds.length)
+    for (const context of protectionContexts) {
+      const sceneId = context.contextId.split('.')[1]
+      expect(context.bindings.every((binding) => binding.nodeId.includes(`.${sceneId}.`))).toBe(true)
     }
   })
 

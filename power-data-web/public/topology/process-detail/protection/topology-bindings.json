@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "topologies": [
+    { "sceneId": "step-down-substation", "processDetailId": "process-detail.step-down-substation.transformer-protection", "topologyDataContextId": "process-detail.step-down-substation.transformer-protection", "sourceType": "transformer-protection", "topologyPath": "process-detail/protection/transformer-protection/topology.json" },
+    { "sceneId": "step-down-substation", "processDetailId": "process-detail.step-down-substation.busbar-protection", "topologyDataContextId": "process-detail.step-down-substation.busbar-protection", "sourceType": "busbar-protection", "topologyPath": "process-detail/protection/busbar-protection/topology.json" },
+    { "sceneId": "step-down-substation", "processDetailId": "process-detail.step-down-substation.line-protection", "topologyDataContextId": "process-detail.step-down-substation.line-protection", "sourceType": "line-protection", "topologyPath": "process-detail/protection/line-protection/topology.json" },
+    { "sceneId": "step-up-substation", "processDetailId": "process-detail.step-up-substation.transformer-protection", "topologyDataContextId": "process-detail.step-up-substation.transformer-protection", "sourceType": "transformer-protection", "topologyPath": "process-detail/protection/transformer-protection/topology.json" },
+    { "sceneId": "step-up-substation", "processDetailId": "process-detail.step-up-substation.busbar-protection", "topologyDataContextId": "process-detail.step-up-substation.busbar-protection", "sourceType": "busbar-protection", "topologyPath": "process-detail/protection/busbar-protection/topology.json" },
+    { "sceneId": "step-up-substation", "processDetailId": "process-detail.step-up-substation.line-protection", "topologyDataContextId": "process-detail.step-up-substation.line-protection", "sourceType": "line-protection", "topologyPath": "process-detail/protection/line-protection/topology.json" },
+    { "sceneId": "converter-station", "processDetailId": "process-detail.converter-station.transformer-protection", "topologyDataContextId": "process-detail.converter-station.transformer-protection", "sourceType": "transformer-protection", "topologyPath": "process-detail/protection/transformer-protection/topology.json" },
+    { "sceneId": "converter-station", "processDetailId": "process-detail.converter-station.busbar-protection", "topologyDataContextId": "process-detail.converter-station.busbar-protection", "sourceType": "busbar-protection", "topologyPath": "process-detail/protection/busbar-protection/topology.json" },
+    { "sceneId": "converter-station", "processDetailId": "process-detail.converter-station.line-protection", "topologyDataContextId": "process-detail.converter-station.line-protection", "sourceType": "line-protection", "topologyPath": "process-detail/protection/line-protection/topology.json" }
+  ]
+}

@@ -809,7 +809,7 @@ export async function createGasOnlyManifest(releaseId) {
 
   const scenes = fixture.scenes.map((scene) => ({
     ...scene,
-    title: scene.sceneId === 'gas-power' ? '燃气发电' : ({ 'wind-power': '风力发电', 'solar-power': '光伏发电', 'step-up-substation': '升压站', 'step-down-substation': '降压站' }[scene.sceneId] ?? `待交付场景：${scene.sceneId}`),
+    title: scene.sceneId === 'gas-power' ? '燃气发电' : ({ 'wind-power': '风力发电', 'solar-power': '光伏发电', 'step-up-substation': '升压站', 'step-down-substation': '降压站', 'converter-station': '换流站', 'switching-station': '开关站' }[scene.sceneId] ?? `待交付场景：${scene.sceneId}`),
     // Unity 当前桥接器只接受该已验证映射版本；其余占位场景同样保持契约一致，但不会被测试宿主选择。
     sceneMappingVersion: unitySceneMappingVersion,
     resourceVersion: scene.sceneId === 'gas-power' ? `resource.${unityReleaseId}.gas-power` : `placeholder.${scene.sceneId}`,
@@ -965,7 +965,7 @@ export async function createConfiguredPowerScenesManifest(releaseId, initialScen
   if (solarTopologyIndex >= 0) topologies[solarTopologyIndex] = solarTopology
   else topologies.push(solarTopology)
   /*
-   * 合作方当前只从 workflowActions（流程动作摘要）生成可绑定菜单，因此四个新增场景必须登记稳定导航动作。
+   * 合作方当前只从 workflowActions（流程动作摘要）生成可绑定菜单，因此六个新增场景必须登记稳定导航动作。
    * 这些动作复用原子视图事务且 unityAction（Unity动作）固定为 none（无动作），不会伪造控制器未声明的工艺步骤。
    */
   const addedSceneNavigations = [
@@ -973,6 +973,8 @@ export async function createConfiguredPowerScenesManifest(releaseId, initialScen
     { sceneId: 'solar-power', title: '光伏发电', actionId: 'action.solar-power.overview', actionTitle: '进入光伏发电总览' },
     { sceneId: 'step-up-substation', title: '升压站', actionId: 'action.step-up-substation.overview', actionTitle: '进入升压站总览' },
     { sceneId: 'step-down-substation', title: '降压站', actionId: 'action.step-down-substation.overview', actionTitle: '进入降压站总览' },
+    { sceneId: 'converter-station', title: '换流站', actionId: 'action.converter-station.overview', actionTitle: '进入换流站总览' },
+    { sceneId: 'switching-station', title: '开关站', actionId: 'action.switching-station.overview', actionTitle: '进入开关站总览' },
   ]
   const solarProcessDetailAction = {
     actionId: 'action.solar-power.inverter',
@@ -1020,7 +1022,7 @@ export async function createConfiguredPowerScenesManifest(releaseId, initialScen
     const scene = scenes.find((item) => item.sceneId === sceneId)
     if (scene) {
       scene.title = navigation.title
-      // 四个场景通过公开流程动作进入默认拓扑，资源版本使用本次 Unity 发布号。
+      // 六个场景通过公开流程动作进入默认拓扑，资源版本使用本次 Unity 发布号。
       scene.resourceVersion = `resource.${unityReleaseId}.${sceneId}`
       scene.defaultTopologyId = `topology.${sceneId}.overview`
       scene.topologyIds = [scene.defaultTopologyId]
@@ -1047,7 +1049,7 @@ export async function createConfiguredPowerScenesManifest(releaseId, initialScen
     return { ...coalMapping }
   })
   // 光伏发布两个已核验三维节点；四个场景均不登记未实现的工艺步骤，避免能力清单与控制器不一致。
-  for (const sceneId of ['wind-power', 'solar-power', 'step-up-substation', 'step-down-substation']) {
+  for (const sceneId of ['wind-power', 'solar-power', 'step-up-substation', 'step-down-substation', 'converter-station', 'switching-station']) {
     const mapping = unitySceneMappings.find((item) => item.sceneId === sceneId)
     if (mapping) {
       mapping.mappingVersion = unitySceneMappingVersion
@@ -1128,6 +1130,8 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
         <button type="button" data-action-id="action.solar-power.inverter" disabled>光伏关键</button>
         <button type="button" data-action-id="action.step-up-substation.overview" disabled>升压站场景</button>
         <button type="button" data-action-id="action.step-down-substation.overview" disabled>降压站场景</button>
+        <button type="button" data-action-id="action.converter-station.overview" disabled>换流站场景</button>
+        <button type="button" data-action-id="action.switching-station.overview" disabled>开关站场景</button>
       </div>
       <div class="test-controls__states" aria-label="关键设备状态切换">
         <div class="test-controls__state">
@@ -1173,8 +1177,8 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
           .map((output) => [output.dataset.deviceStateOutput, output]));
         const commandButtons = [...actionButtons, ...deviceStateButtons];
         // 仅用于校验新增场景返回的稳定视图；实际跳转与合作方一致，全部通过动作标识触发。
-        const allowedSceneIds = new Set(['wind-power', 'solar-power', 'step-up-substation', 'step-down-substation']);
-        // 页面只允许联合清单中已登记的十项动作；固定闭集禁止页面输入拼接任意场景或内部 Unity 方法。
+        const allowedSceneIds = new Set(['wind-power', 'solar-power', 'step-up-substation', 'step-down-substation', 'converter-station', 'switching-station']);
+        // 页面只允许联合清单中已登记的十二项动作；固定闭集禁止页面输入拼接任意场景或内部 Unity 方法。
         const allowedActionIds = new Set([
           'action.scene.overview',
           'action.gas-power.overview',
@@ -1186,6 +1190,8 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
           'action.solar-power.inverter',
           'action.step-up-substation.overview',
           'action.step-down-substation.overview',
+          'action.converter-station.overview',
+          'action.switching-station.overview',
         ]);
         const deviceStates = new Map([
           ['asset.gas-turbine', 'normal'],
@@ -1266,7 +1272,7 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
         }
 
         /**
-         * 仅向当前已协商的嵌入壳发送清单中登记的十项动作之一，并携带最近稳定上下文版本。
+         * 仅向当前已协商的嵌入壳发送清单中登记的十二项动作之一，并携带最近稳定上下文版本。
          * 版本不匹配由壳返回明确冲突，页面不会绕过事务直接切换拓扑或调用 Unity 方法。
          */
         function triggerWorkflow(actionId) {

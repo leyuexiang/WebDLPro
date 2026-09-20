@@ -18,6 +18,18 @@ vi.mock('@meta2d/core', () => ({
 }))
 vi.mock('../topology-preview/solar-topology-preview-data', () => ({ loadSolarTopologyPreviewData: async () => ({ pens: [] }) }))
 vi.mock('../topology-preview/wind-topology-preview-data', () => ({ loadWindTopologyPreviewData: async () => ({ pens: [] }) }))
+vi.mock('../topology-preview/step-up-substation-topology-preview-data', () => ({
+  loadStepUpSubstationTopologyPreviewData: async () => ({ pens: [] }),
+}))
+vi.mock('../topology-preview/step-down-substation-topology-preview-data', () => ({
+  loadStepDownSubstationTopologyPreviewData: async () => ({ pens: [] }),
+}))
+vi.mock('../topology-preview/converter-station-topology-preview-data', () => ({
+  loadConverterStationTopologyPreviewData: async () => ({ pens: [] }),
+}))
+vi.mock('../topology-preview/switching-station-topology-preview-data', () => ({
+  loadSwitchingStationTopologyPreviewData: async () => ({ pens: [] }),
+}))
 vi.mock('../topology-preview/CoalTopologyRuntimeCanvas.vue', () => ({ default: { render: () => null } }))
 vi.mock('../topology-preview/GasV3TopologyRuntimeCanvas.vue', () => ({ default: { render: () => null } }))
 // 面板契约测试只验证公共重置与事件转发；光伏画布本身由其专项测试覆盖，替身暴露真实控制器所需的就绪与重置端口。
@@ -84,7 +96,7 @@ async function settle() {
   for (let i = 0; i < 8; i++) { const pending = [...frames.values()]; frames.clear(); pending.forEach((callback) => callback(0)); await nextTick() }
 }
 
-describe.each(['wind-power', 'solar-power'])('%s 正式面板重置', (scene) => {
+describe.each(['wind-power', 'solar-power', 'step-up-substation', 'step-down-substation', 'converter-station', 'switching-station'])('%s 正式面板重置', (scene) => {
   it('空业务清单不妨碍真实数据重置，暂停时仍禁止操作，且不重新加载图元', async () => {
     const state = reactive({ suspended: false })
     const root = element('root')
@@ -110,19 +122,5 @@ describe.each(['wind-power', 'solar-power'])('%s 正式面板重置', (scene) =>
     const panel = find(root, (node) => node.props.class === 'topology-panel')
     expect(fullscreen).toHaveBeenCalledWith(panel)
     expect(find(panel, (node) => node === reset)).toBe(reset)
-  })
-})
-
-describe.each(['step-up-substation', 'step-down-substation'])('%s 空拓扑', (scene) => {
-  it('真正空拓扑保持禁用且不会调用图形引擎', async () => {
-    const root = element('root')
-    const topology = { topologyKey: toTopologyKey(`topology.${scene}.overview`), title: scene, configVersion: 'test', nodes: [], edges: [] } as TopologyDefinition
-    const app = renderer.createApp({ render: () => h(TopologyPanel, { topology, selectedNodeIds: [], selectedRouteIds: [] }) })
-    app.mount(root); dispose = () => app.unmount()
-    await settle()
-    const reset = find(root, (node) => node.props.class === 'topology-panel__reset')
-    expect(reset.props.disabled).toBe(true)
-    reset.props.onClick()
-    expect(engine.fit).not.toHaveBeenCalled()
   })
 })

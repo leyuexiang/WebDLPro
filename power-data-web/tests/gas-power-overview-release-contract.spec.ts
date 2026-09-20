@@ -188,7 +188,7 @@ describe('燃气总览发布契约', () => {
     expect(selfTestPage).toContain('data-action-id="action.gas-power.gas-turbine"')
     expect(selfTestPage).toContain('data-action-id="action.coal-power.overview"')
     expect(selfTestPage).toContain('data-action-id="action.coal-power.steam-turbine"')
-    for (const sceneId of ['wind-power', 'solar-power', 'step-up-substation', 'step-down-substation']) {
+    for (const sceneId of ['wind-power', 'solar-power', 'step-up-substation', 'step-down-substation', 'converter-station', 'switching-station']) {
       expect(selfTestPage).toContain(`data-action-id="action.${sceneId}.overview"`)
     }
     /**

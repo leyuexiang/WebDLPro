@@ -235,7 +235,7 @@ export interface TopologyDefinition {
 
 /**
  * 动作公共字段；目标场景类型由各视图分支显式收窄。
- * 平台总览属于可打开视图，但不属于十一项业务场景，因此不能伪造业务场景或空拓扑。
+ * 平台总览属于可打开视图，但不属于十三项业务场景，因此不能伪造业务场景或空拓扑。
  */
 interface ActionDefinitionBase<TTargetSceneId extends ViewSceneId> {
   actionId: ActionId
