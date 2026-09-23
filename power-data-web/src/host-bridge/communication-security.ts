@@ -1,4 +1,4 @@
-import { SECURITY_CONFIG, ENCRYPTION_CONFIG, DISPLAY_CONFIG, calculateExpirationDate } from './security-config';
+import { SECURITY_CONFIG, DISPLAY_CONFIG, calculateExpirationDate } from './security-config';
 
 /**
  * 通信安全管理器 - 前端版本
@@ -58,7 +58,8 @@ export class CommunicationSecurityManager {
   /**
    * 生成混淆后的密钥（与Unity端算法一致）
    */
-  private async generateObfuscatedKey(): Promise<Uint8Array> {
+  /** 返回基于 ArrayBuffer 的独立字节视图，满足 Web Crypto 对 BufferSource 的类型约束。 */
+  private async generateObfuscatedKey(): Promise<Uint8Array<ArrayBuffer>> {
     // 与Unity端相同的混淆计算
     const part1 = this.xorUint32(0x4b65794d, 0x12345678);
     const part2 = this.xorUint32(0x61676963, 0x87654321);
@@ -98,7 +99,8 @@ export class CommunicationSecurityManager {
   /**
    * 生成混淆后的IV（与Unity端算法一致）
    */
-  private generateObfuscatedIV(): Uint8Array {
+  /** 初始化向量固定为普通 ArrayBuffer 视图，保持 AES-CBC 输入类型明确。 */
+  private generateObfuscatedIV(): Uint8Array<ArrayBuffer> {
     const part1 = this.xorUint32(0x49564d61, 0x11111111);
     const part2 = this.xorUint32(0x67696353, 0x22222222);
     const part3 = this.xorUint32(0x65637572, 0x33333333);
@@ -261,7 +263,8 @@ export class CommunicationSecurityManager {
     return (a ^ b) >>> 0; // 无符号右移确保结果为正数
   }
 
-  private uint32ToBytes(value: number): Uint8Array {
+  /** 从新建的 ArrayBuffer 生成 4 字节小端序视图，供密钥和初始化向量拼接。 */
+  private uint32ToBytes(value: number): Uint8Array<ArrayBuffer> {
     const buffer = new ArrayBuffer(4);
     const view = new DataView(buffer);
     view.setUint32(0, value, true); // little-endian

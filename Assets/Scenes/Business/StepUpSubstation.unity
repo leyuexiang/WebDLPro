@@ -354,7 +354,7 @@ MonoBehaviour:
     - {fileID: 2553086866670823}
     - {fileID: 4789379095749038406}
     - {fileID: 4502442596377214024}
-    _topologyOnlySelection: 1
+    _topologyOnlySelection: 0
     _focusCameraPose: {fileID: 1678914815}
   - _id: unit.step-up-measurement.control
     _targets:

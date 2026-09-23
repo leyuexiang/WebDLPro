@@ -8,6 +8,7 @@ import type {
   ManifestTopologyPreviewTooltip,
   ManifestTopologyPreviewVariant,
 } from './manifest-topology-preview-profile'
+import { resolveManifestTopologyClickSelection } from './manifest-topology-click-selection'
 import type { TopologyDataContext } from '@/modules/visual/topology/topology-runtime'
 import type { ProcessNodeId, RouteId } from '@/config/process/identifiers'
 import {
@@ -34,7 +35,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  selectNode: [nodeId: ProcessNodeId]
+  selectNode: [nodeId: ProcessNodeId | undefined]
   clearSelection: []
   doubleClickNode: [nodeId: ProcessNodeId]
   /** 父面板通过显式就绪事件更新重置入口，避免读取子组件暴露值的非响应快照。 */
@@ -215,10 +216,11 @@ function applySelectionVisual(pens: readonly Pen[], render = true): void {
 }
 
 function handleCanvasClick(event?: Meta2dPointerEvent): void {
-  const nodeId = event?.pen?.id ? nodeIdByPenId.value.get(event.pen.id) : undefined
-  if (nodeId) {
-    applySelectionVisual([event!.pen!])
-    emit('selectNode', nodeId)
+  const selection = resolveManifestTopologyClickSelection(event?.pen, nodeIdByPenId.value)
+  if (selection.kind === 'select') {
+    // 每个可选图元先更新二维高亮，再沿同一选择事件向外提交；无业务编号时由统一聚焦协调器清理三维。
+    applySelectionVisual([selection.pen])
+    emit('selectNode', selection.nodeId)
     return
   }
   applySelectionVisual([])
