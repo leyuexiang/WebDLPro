@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { toNodeId, toSceneId, toSceneNodeId, toSessionId, toTopologyId } from '@/config/scene-topology/identifiers'
+import { OVERVIEW_SCENE_ID, toNodeId, toSceneId, toSceneNodeId, toSessionId, toTopologyId } from '@/config/scene-topology/identifiers'
 import type { HostCommandLifecycleResult } from '@/host-bridge/host-command-lifecycle'
 import { HostEventSender, type HostEventTransport } from '@/host-bridge/host-event-sender'
 import type { HostEventMessage, HostProtocolError, HostVisualizationContext, SceneObjectSelectedPayload } from '@/host-bridge/host-protocol'
@@ -23,6 +23,7 @@ function createTransport(): { transport: HostEventTransport; sent: HostEventMess
 /** ready 上下文作为已提交视图夹具，避免测试凭标题或文件名推断场景关系。 */
 function createReadyContext(): HostVisualizationContext {
   return {
+    viewMode: 'business',
     sceneId: toSceneId('gas-power'),
     topologyId: toTopologyId('topology.gas-power'),
     actionId: null,
@@ -98,6 +99,34 @@ describe('外层事件发送器', () => {
       replyTo: 'parent-view-01',
       payload: expect.objectContaining({ sceneId: 'gas-power', topologyId: 'topology.gas-power', contextRevision: 3 }),
     }))
+  })
+
+  it('平台总览事件省略 topologyId，状态快照保持拓扑空闲', () => {
+    const { transport, sent } = createTransport()
+    const sender = new HostEventSender(transport, { now: () => 101 })
+    const overviewContext: HostVisualizationContext = {
+      viewMode: 'overview',
+      sceneId: OVERVIEW_SCENE_ID,
+      actionId: null,
+      contextRevision: 4,
+      status: 'ready',
+    }
+
+    expect(sender.sendViewChanged(overviewContext, undefined, 'parent-overview-view')).toBe(true)
+    expect(sender.sendStateSnapshot('parent-overview-state', {
+      manifestVersion: '2026.08.26',
+      context: overviewContext,
+      unityStatus: 'ready',
+      topologyStatus: 'idle',
+    })).toBe(true)
+    expect(sent).toHaveLength(2)
+    const viewChanged = sent[0]
+    const snapshot = sent[1]
+    if (viewChanged?.type !== 'view.changed' || snapshot?.type !== 'state.snapshot') throw new Error('总览事件类型不符合预期。')
+    expect(viewChanged.payload).toEqual({ viewMode: 'overview', sceneId: OVERVIEW_SCENE_ID, actionId: null, contextRevision: 4 })
+    expect(Object.hasOwn(viewChanged.payload, 'topologyId')).toBe(false)
+    expect(Object.hasOwn(snapshot.payload.context, 'topologyId')).toBe(false)
+    expect(snapshot.payload.topologyStatus).toBe('idle')
   })
 
   it('双击只发送场景、拓扑和节点三项稳定标识', () => {

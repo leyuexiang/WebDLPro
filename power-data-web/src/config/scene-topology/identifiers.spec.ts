@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  OVERVIEW_SCENE_ID,
   SCENE_IDS,
+  isOverviewSceneId,
   isSceneId,
+  isViewSceneId,
   toActionId,
   toNodeId,
   toSceneId,
@@ -10,9 +13,10 @@ import {
   toSessionId,
   toTopologyId,
   toTransitionId,
+  toViewSceneId,
   validateStableIdentifier,
 } from './identifiers'
-import type { ActionId, NodeId, SceneId, SceneNodeId, SelectionId, SessionId, TopologyId, TransitionId } from './identifiers'
+import type { ActionId, NodeId, OverviewSceneId, SceneId, SceneNodeId, SelectionId, SessionId, TopologyId, TransitionId, ViewSceneId } from './identifiers'
 
 /** 仅用于编译期断言：任意一类业务标识若可赋值给另一类，类型检查会立即失败。 */
 type Expect<TValue extends true> = TValue
@@ -25,18 +29,34 @@ export type StableIdentifierBrandContract = [
   Expect<IsAssignable<NodeId, SceneNodeId> extends false ? true : false>,
   Expect<IsAssignable<SelectionId, TransitionId> extends false ? true : false>,
   Expect<IsAssignable<SessionId, TransitionId> extends false ? true : false>,
+  Expect<IsAssignable<OverviewSceneId, SceneId> extends false ? true : false>,
+  Expect<IsAssignable<SceneId, ViewSceneId>>,
 ]
 
 /** 任务-004回归：固定场景目录与三类不互换标识必须同时在运行时和类型层受到保护。 */
 describe('场景拓扑稳定标识', () => {
-  it('只发布九个固定场景标识', () => {
-    expect(SCENE_IDS).toHaveLength(9)
+  it('只发布十三个固定场景标识', () => {
+    expect(SCENE_IDS).toHaveLength(13)
+    expect(toSceneId('step-up-substation')).toBe('step-up-substation')
+    expect(toSceneId('step-down-substation')).toBe('step-down-substation')
+    expect(toSceneId('converter-station')).toBe('converter-station')
+    expect(toSceneId('switching-station')).toBe('switching-station')
     expect(toSceneId('gas-power')).toBe('gas-power')
     expect(isSceneId('gas-power')).toBe(true)
     expect(isSceneId('gas-overview')).toBe(false)
-    expect(() => toSceneId('gas-overview')).toThrow('固定九场景目录')
-    expect(() => toSceneId('SampleScene')).toThrow('固定九场景目录')
-    expect(() => toSceneId('Assets/Scenes/SampleScene.unity')).toThrow('固定九场景目录')
+    expect(() => toSceneId('gas-overview')).toThrow('固定十三场景目录')
+    expect(() => toSceneId('SampleScene')).toThrow('固定十三场景目录')
+    expect(() => toSceneId('Assets/Scenes/SampleScene.unity')).toThrow('固定十三场景目录')
+  })
+
+  it('独立发布平台总览视图标识，但不扩展十三项业务场景闭集', () => {
+    expect(SCENE_IDS).toHaveLength(13)
+    expect(SCENE_IDS).not.toContain(OVERVIEW_SCENE_ID)
+    expect(isSceneId('overview')).toBe(false)
+    expect(isOverviewSceneId('overview')).toBe(true)
+    expect(isViewSceneId('overview')).toBe(true)
+    expect(toViewSceneId('overview')).toBe(OVERVIEW_SCENE_ID)
+    expect(() => toSceneId('overview')).toThrow('固定十三场景目录')
   })
 
   it('拒绝标题、路径和资源文件名作为外部标识', () => {

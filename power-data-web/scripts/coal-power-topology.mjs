@@ -5,7 +5,6 @@
  * 来源节点、连线标识，不复制节点事实。该模块不保存平台设备编号，也不根据 Unity
  * 对象名称、坐标或中文标题推导三维映射。
  */
-import { createCoalPowerDrilldowns } from './topology-drilldowns.mjs'
 
 /**
  * 燃煤总图的五个展示层级。层级颜色和坐标只属于二维呈现，不代表设备权限或数据流向。
@@ -30,41 +29,55 @@ const coalPowerEdgeColors = Object.freeze({
 })
 
 /**
+ * 正式燃煤清单在未接收外部状态快照时统一展示正常。
+ * 该值只是发布基线；运行时收到外部数据后仍按稳定 nodeId 覆盖为正常、告警、故障或离线，
+ * 构建器不推断通信状态，也不会阻止外部离线状态生效。
+ */
+const DEFAULT_TOPOLOGY_NODE_STATUS = 'normal'
+
+/**
  * 总图节点顺序严格沿用资料的“层级 + 层内顺序”。x 坐标是为画布提供稳定排版的
  * 显式数据；资料未定义业务坐标，因此不会被当作三维绑定依据。
  */
 const coalPowerNodes = Object.freeze([
-  Object.freeze({ nodeId: 'system.fuel-management', title: 'ERP/燃料管理系统', iconKey: 'server', x: 20, y: 8, layerId: 'enterprise-it' }),
-  Object.freeze({ nodeId: 'system.enterprise-core-switch', title: '企业核心交换机', iconKey: 'core-switch', x: 50, y: 8, layerId: 'enterprise-it' }),
-  Object.freeze({ nodeId: 'system.enterprise-firewall', title: '企业边界防火墙', iconKey: 'firewall', x: 80, y: 8, layerId: 'enterprise-it' }),
+  /*
+   * 清单名称复用当前燃煤拓扑可见文字，并统一增加“燃煤-”前缀。位置限定词用于区分
+   * 同一场景的多台工作站和交换机；稳定 nodeId、连线及 Unity 映射均保持不变。
+   */
+  Object.freeze({ nodeId: 'system.fuel-management', title: '燃煤-煤炭供应链管理', iconKey: 'server', x: 20, y: 8, layerId: 'enterprise-it' }),
+  Object.freeze({ nodeId: 'system.enterprise-core-switch', title: '燃煤-交换机（企业办公网）', iconKey: 'core-switch', x: 50, y: 8, layerId: 'enterprise-it' }),
+  Object.freeze({ nodeId: 'system.enterprise-firewall', title: '燃煤-企业级防火墙', iconKey: 'firewall', x: 80, y: 8, layerId: 'enterprise-it' }),
 
-  Object.freeze({ nodeId: 'system.pi-historian', title: 'PI 实时历史数据库', iconKey: 'server', x: 20, y: 28, layerId: 'production-dmz' }),
-  Object.freeze({ nodeId: 'system.dmz-industrial-firewall', title: 'DMZ 工业防火墙', iconKey: 'firewall', x: 50, y: 28, layerId: 'production-dmz' }),
-  Object.freeze({ nodeId: 'endpoint.remote-maintenance-gateway', title: '远程运维接入网关', iconKey: 'data-gateway', x: 80, y: 28, layerId: 'production-dmz' }),
+  Object.freeze({ nodeId: 'system.pi-historian', title: '燃煤-历史服务器', iconKey: 'server', x: 20, y: 28, layerId: 'production-dmz' }),
+  Object.freeze({ nodeId: 'system.dmz-industrial-firewall', title: '燃煤-工业防火墙', iconKey: 'firewall', x: 50, y: 28, layerId: 'production-dmz' }),
+  Object.freeze({ nodeId: 'endpoint.remote-maintenance-gateway', title: '燃煤-电厂综合运维 ERP', iconKey: 'data-gateway', x: 80, y: 28, layerId: 'production-dmz' }),
 
-  Object.freeze({ nodeId: 'system.unit-operator-station', title: '机组操作员站', iconKey: 'workstation', x: 10, y: 50, layerId: 'plant-control' }),
-  Object.freeze({ nodeId: 'system.monitor-core-switch-primary', title: '监控核心交换机(主)', iconKey: 'core-switch', x: 30, y: 50, layerId: 'plant-control' }),
-  Object.freeze({ nodeId: 'system.monitor-core-switch-standby', title: '监控核心交换机(备)', iconKey: 'core-switch', x: 50, y: 50, layerId: 'plant-control' }),
-  Object.freeze({ nodeId: 'system.auxiliary-operator-station', title: '辅控操作员站', iconKey: 'workstation', x: 70, y: 50, layerId: 'plant-control' }),
-  Object.freeze({ nodeId: 'system.sis-performance-station', title: 'SIS 性能计算站', iconKey: 'workstation', x: 90, y: 50, layerId: 'plant-control' }),
+  Object.freeze({ nodeId: 'system.unit-operator-station', title: '燃煤-操作员站（机组）', iconKey: 'workstation', x: 10, y: 50, layerId: 'plant-control' }),
+  Object.freeze({ nodeId: 'system.monitor-core-switch-primary', title: '燃煤-交换机（监控层主）', iconKey: 'core-switch', x: 30, y: 50, layerId: 'plant-control' }),
+  Object.freeze({ nodeId: 'system.monitor-core-switch-standby', title: '燃煤-交换机（监控层备）', iconKey: 'core-switch', x: 50, y: 50, layerId: 'plant-control' }),
+  Object.freeze({ nodeId: 'system.auxiliary-operator-station', title: '燃煤-操作员站（辅控）', iconKey: 'workstation', x: 70, y: 50, layerId: 'plant-control' }),
+  Object.freeze({ nodeId: 'system.sis-performance-station', title: '燃煤-工程师站（性能）', iconKey: 'workstation', x: 90, y: 50, layerId: 'plant-control' }),
 
-  Object.freeze({ nodeId: 'system.boiler-dcs', title: '锅炉 DCS 控制器', iconKey: 'dcs', x: 5, y: 69, layerId: 'unit-control' }),
-  Object.freeze({ nodeId: 'system.steam-turbine-dcs', title: '汽机 DCS 控制器', iconKey: 'steam-turbine', x: 20, y: 69, layerId: 'unit-control' }),
-  Object.freeze({ nodeId: 'system.generator-excitation-controller', title: '发电机励磁控制器', iconKey: 'excitation-system', x: 35, y: 69, layerId: 'unit-control' }),
-  Object.freeze({ nodeId: 'system.desulfurization-plc', title: '脱硫系统 PLC', iconKey: 'plc', x: 50, y: 69, layerId: 'unit-control' }),
-  Object.freeze({ nodeId: 'system.denitrification-plc', title: '脱硝系统 PLC', iconKey: 'plc', x: 65, y: 69, layerId: 'unit-control' }),
-  Object.freeze({ nodeId: 'system.coal-handling-ash-plc', title: '输煤除灰 PLC', iconKey: 'plc', x: 80, y: 69, layerId: 'unit-control' }),
-  Object.freeze({ nodeId: 'system.sis-safety-controller', title: 'SIS 安全仪表控制器', iconKey: 'sis-system', x: 95, y: 69, layerId: 'unit-control' }),
+  // 锅炉控制组整体左移并拉宽三条分支；控制器位于 x=11 中轴，避免同层标题在窄容器中相互覆盖。
+  Object.freeze({ nodeId: 'system.coal-boiler-control', title: '燃煤-锅炉安全与主燃料跳闸', iconKey: 'dcs', x: 11, y: 69, layerId: 'unit-control' }),
+  // 其余单元控制节点与各自现场节点复用同一横坐标，直连边可保持竖直，避免为避让区域产生斜线。
+  Object.freeze({ nodeId: 'system.coal-steam-turbine-control', title: '燃煤-汽轮机数字电调', iconKey: 'steam-turbine', x: 33, y: 69, layerId: 'unit-control' }),
+  Object.freeze({ nodeId: 'system.coal-generator-control', title: '燃煤-发电机励磁与电控', iconKey: 'excitation-system', x: 47, y: 69, layerId: 'unit-control' }),
+  Object.freeze({ nodeId: 'system.desulfurization-plc', title: '燃煤-环保脱硫控制系统', iconKey: 'plc', x: 61, y: 69, layerId: 'unit-control' }),
+  Object.freeze({ nodeId: 'system.denitrification-plc', title: '燃煤-环保脱硝控制系统', iconKey: 'plc', x: 75, y: 69, layerId: 'unit-control' }),
+  Object.freeze({ nodeId: 'system.coal-handling-ash-plc', title: '燃煤-输煤系统控制', iconKey: 'plc', x: 87, y: 69, layerId: 'unit-control' }),
+  Object.freeze({ nodeId: 'system.sis-safety-controller', title: '燃煤-协调控制系统', iconKey: 'sis-system', x: 96, y: 69, layerId: 'unit-control' }),
 
-  Object.freeze({ nodeId: 'asset.coal-mill-actuator', title: '磨煤机执行机构', iconKey: 'instrument', x: 5, y: 88, layerId: 'field-device' }),
-  Object.freeze({ nodeId: 'asset.induced-draft-fan-vfd', title: '引送风机变频器', iconKey: 'plc', x: 16.25, y: 88, layerId: 'field-device' }),
-  Object.freeze({ nodeId: 'asset.furnace-pressure-transmitter', title: '炉膛压力变送器', iconKey: 'instrument', x: 27.5, y: 88, layerId: 'field-device' }),
-  Object.freeze({ nodeId: 'asset.steam-turbine-valve-actuator', title: '汽机调门执行器', iconKey: 'instrument', x: 38.75, y: 88, layerId: 'field-device' }),
-  Object.freeze({ nodeId: 'asset.generator-protection-device', title: '发电机保护装置', iconKey: 'circuit-breaker', x: 50, y: 88, layerId: 'field-device' }),
-  Object.freeze({ nodeId: 'asset.desulfurization-circulation-pump', title: '脱硫浆液循环泵', iconKey: 'instrument', x: 61.25, y: 88, layerId: 'field-device' }),
-  Object.freeze({ nodeId: 'asset.denitrification-ammonia-valve', title: '脱硝喷氨调节阀', iconKey: 'instrument', x: 72.5, y: 88, layerId: 'field-device' }),
-  Object.freeze({ nodeId: 'asset.coal-belt-controller', title: '输煤皮带控制器', iconKey: 'plc', x: 83.75, y: 88, layerId: 'field-device' }),
-  Object.freeze({ nodeId: 'asset.esd-emergency-actuator', title: 'ESD 紧急停车执行器', iconKey: 'instrument', x: 95, y: 88, layerId: 'field-device' }),
+  // 锅炉三个现场节点按 2/11/20 拉开间隔；后续一对一链路逐项复用控制层横坐标，维持竖直连接。
+  Object.freeze({ nodeId: 'asset.coal-mill-actuator', title: '燃煤-传送带', iconKey: 'instrument', x: 2, y: 88, layerId: 'field-device' }),
+  Object.freeze({ nodeId: 'asset.coal-boiler', title: '燃煤-锅炉', iconKey: 'dcs', x: 11, y: 88, layerId: 'field-device' }),
+  Object.freeze({ nodeId: 'asset.furnace-pressure-transmitter', title: '燃煤-高压水泵', iconKey: 'instrument', x: 20, y: 88, layerId: 'field-device' }),
+  Object.freeze({ nodeId: 'asset.coal-steam-turbine', title: '燃煤-汽轮机', iconKey: 'steam-turbine', x: 33, y: 88, layerId: 'field-device' }),
+  Object.freeze({ nodeId: 'asset.coal-generator', title: '燃煤-发电机', iconKey: 'excitation-system', x: 47, y: 88, layerId: 'field-device' }),
+  Object.freeze({ nodeId: 'asset.desulfurization-circulation-pump', title: '燃煤-脱硫装置', iconKey: 'instrument', x: 61, y: 88, layerId: 'field-device' }),
+  Object.freeze({ nodeId: 'asset.denitrification-ammonia-valve', title: '燃煤-脱硝装置', iconKey: 'instrument', x: 75, y: 88, layerId: 'field-device' }),
+  Object.freeze({ nodeId: 'asset.coal-belt-controller', title: '燃煤-机炉协调', iconKey: 'plc', x: 87, y: 88, layerId: 'field-device' }),
+  Object.freeze({ nodeId: 'asset.esd-emergency-actuator', title: '燃煤-并网', iconKey: 'instrument', x: 96, y: 88, layerId: 'field-device' }),
 ])
 
 /**
@@ -83,115 +96,82 @@ const coalPowerEdges = Object.freeze([
   Object.freeze({ edgeId: 'route.coal.monitor-primary-to-sis-performance', fromNodeId: 'system.monitor-core-switch-primary', toNodeId: 'system.sis-performance-station', title: '主监控核心交换机至 SIS 性能计算站', lineColor: coalPowerEdgeColors.blue, lineStyle: 'solid' }),
   Object.freeze({ edgeId: 'route.coal.monitor-primary-to-standby', fromNodeId: 'system.monitor-core-switch-primary', toNodeId: 'system.monitor-core-switch-standby', title: '主备监控核心交换机冗余', protocolLabel: '虚拟路由冗余协议（VRRP）冗余', lineColor: coalPowerEdgeColors.blue, lineStyle: 'dashed' }),
   Object.freeze({ edgeId: 'route.coal.monitor-standby-to-auxiliary-operator', fromNodeId: 'system.monitor-core-switch-standby', toNodeId: 'system.auxiliary-operator-station', title: '备监控核心交换机至辅控操作员站', lineColor: coalPowerEdgeColors.blue, lineStyle: 'solid' }),
-  Object.freeze({ edgeId: 'route.coal.monitor-primary-to-boiler-dcs', fromNodeId: 'system.monitor-core-switch-primary', toNodeId: 'system.boiler-dcs', title: '主监控核心交换机至锅炉 DCS 控制器', protocolLabel: '工业以太网环网', lineColor: coalPowerEdgeColors.green, lineStyle: 'solid' }),
-  Object.freeze({ edgeId: 'route.coal.monitor-primary-to-steam-turbine-dcs', fromNodeId: 'system.monitor-core-switch-primary', toNodeId: 'system.steam-turbine-dcs', title: '主监控核心交换机至汽机 DCS 控制器', lineColor: coalPowerEdgeColors.green, lineStyle: 'solid' }),
-  Object.freeze({ edgeId: 'route.coal.monitor-primary-to-generator-excitation', fromNodeId: 'system.monitor-core-switch-primary', toNodeId: 'system.generator-excitation-controller', title: '主监控核心交换机至发电机励磁控制器', lineColor: coalPowerEdgeColors.green, lineStyle: 'solid' }),
+  Object.freeze({ edgeId: 'route.coal.monitor-primary-to-boiler-dcs', fromNodeId: 'system.monitor-core-switch-primary', toNodeId: 'system.coal-boiler-control', title: '主监控核心交换机至锅炉 DCS 控制器', protocolLabel: '工业以太网环网', lineColor: coalPowerEdgeColors.green, lineStyle: 'solid' }),
+  Object.freeze({ edgeId: 'route.coal.monitor-primary-to-steam-turbine-dcs', fromNodeId: 'system.monitor-core-switch-primary', toNodeId: 'system.coal-steam-turbine-control', title: '主监控核心交换机至汽机 DCS 控制器', lineColor: coalPowerEdgeColors.green, lineStyle: 'solid' }),
+  Object.freeze({ edgeId: 'route.coal.monitor-primary-to-generator-excitation', fromNodeId: 'system.monitor-core-switch-primary', toNodeId: 'system.coal-generator-control', title: '主监控核心交换机至发电机励磁控制器', lineColor: coalPowerEdgeColors.green, lineStyle: 'solid' }),
   Object.freeze({ edgeId: 'route.coal.monitor-standby-to-desulfurization', fromNodeId: 'system.monitor-core-switch-standby', toNodeId: 'system.desulfurization-plc', title: '备监控核心交换机至脱硫系统 PLC', protocolLabel: '基于传输控制协议的Modbus协议（Modbus TCP）', lineColor: coalPowerEdgeColors.green, lineStyle: 'solid' }),
   Object.freeze({ edgeId: 'route.coal.monitor-standby-to-denitrification', fromNodeId: 'system.monitor-core-switch-standby', toNodeId: 'system.denitrification-plc', title: '备监控核心交换机至脱硝系统 PLC', lineColor: coalPowerEdgeColors.green, lineStyle: 'solid' }),
   Object.freeze({ edgeId: 'route.coal.monitor-standby-to-coal-handling', fromNodeId: 'system.monitor-core-switch-standby', toNodeId: 'system.coal-handling-ash-plc', title: '备监控核心交换机至输煤除灰 PLC', lineColor: coalPowerEdgeColors.green, lineStyle: 'solid' }),
   Object.freeze({ edgeId: 'route.coal.monitor-standby-to-sis', fromNodeId: 'system.monitor-core-switch-standby', toNodeId: 'system.sis-safety-controller', title: '备监控核心交换机至 SIS 安全仪表控制器', protocolLabel: '只读数据上传', lineColor: coalPowerEdgeColors.green, lineStyle: 'dashed' }),
-  Object.freeze({ edgeId: 'route.coal.boiler-dcs-to-coal-mill', fromNodeId: 'system.boiler-dcs', toNodeId: 'asset.coal-mill-actuator', title: '锅炉 DCS 至磨煤机执行机构', lineColor: coalPowerEdgeColors.orange, lineStyle: 'solid' }),
-  Object.freeze({ edgeId: 'route.coal.boiler-dcs-to-fan-vfd', fromNodeId: 'system.boiler-dcs', toNodeId: 'asset.induced-draft-fan-vfd', title: '锅炉 DCS 至引送风机变频器', lineColor: coalPowerEdgeColors.orange, lineStyle: 'solid' }),
-  Object.freeze({ edgeId: 'route.coal.boiler-dcs-to-furnace-pressure', fromNodeId: 'system.boiler-dcs', toNodeId: 'asset.furnace-pressure-transmitter', title: '锅炉 DCS 至炉膛压力变送器', lineColor: coalPowerEdgeColors.orange, lineStyle: 'solid' }),
-  Object.freeze({ edgeId: 'route.coal.steam-turbine-dcs-to-valve', fromNodeId: 'system.steam-turbine-dcs', toNodeId: 'asset.steam-turbine-valve-actuator', title: '汽机 DCS 至汽机调门执行器', lineColor: coalPowerEdgeColors.orange, lineStyle: 'solid' }),
-  Object.freeze({ edgeId: 'route.coal.generator-excitation-to-protection', fromNodeId: 'system.generator-excitation-controller', toNodeId: 'asset.generator-protection-device', title: '发电机励磁控制器至发电机保护装置', lineColor: coalPowerEdgeColors.orange, lineStyle: 'solid' }),
+  Object.freeze({ edgeId: 'route.coal.boiler-dcs-to-coal-mill', fromNodeId: 'system.coal-boiler-control', toNodeId: 'asset.coal-mill-actuator', title: '锅炉 DCS 至磨煤机执行机构', lineColor: coalPowerEdgeColors.orange, lineStyle: 'solid' }),
+  Object.freeze({ edgeId: 'route.coal.boiler-dcs-to-boiler', fromNodeId: 'system.coal-boiler-control', toNodeId: 'asset.coal-boiler', title: '锅炉安全与主燃料跳闸控制', lineColor: coalPowerEdgeColors.orange, lineStyle: 'solid' }),
+  Object.freeze({ edgeId: 'route.coal.boiler-dcs-to-furnace-pressure', fromNodeId: 'system.coal-boiler-control', toNodeId: 'asset.furnace-pressure-transmitter', title: '锅炉 DCS 至炉膛压力变送器', lineColor: coalPowerEdgeColors.orange, lineStyle: 'solid' }),
+  Object.freeze({ edgeId: 'route.coal.steam-turbine-dcs-to-turbine', fromNodeId: 'system.coal-steam-turbine-control', toNodeId: 'asset.coal-steam-turbine', title: '汽轮机数字电调控制', lineColor: coalPowerEdgeColors.orange, lineStyle: 'solid' }),
+  Object.freeze({ edgeId: 'route.coal.generator-excitation-to-generator', fromNodeId: 'system.coal-generator-control', toNodeId: 'asset.coal-generator', title: '发电机励磁与电控', lineColor: coalPowerEdgeColors.orange, lineStyle: 'solid' }),
   Object.freeze({ edgeId: 'route.coal.desulfurization-to-pump', fromNodeId: 'system.desulfurization-plc', toNodeId: 'asset.desulfurization-circulation-pump', title: '脱硫系统 PLC 至脱硫浆液循环泵', lineColor: coalPowerEdgeColors.orange, lineStyle: 'solid' }),
   Object.freeze({ edgeId: 'route.coal.denitrification-to-ammonia-valve', fromNodeId: 'system.denitrification-plc', toNodeId: 'asset.denitrification-ammonia-valve', title: '脱硝系统 PLC 至脱硝喷氨调节阀', lineColor: coalPowerEdgeColors.orange, lineStyle: 'solid' }),
   Object.freeze({ edgeId: 'route.coal.coal-handling-to-belt-controller', fromNodeId: 'system.coal-handling-ash-plc', toNodeId: 'asset.coal-belt-controller', title: '输煤除灰 PLC 至输煤皮带控制器', lineColor: coalPowerEdgeColors.orange, lineStyle: 'solid' }),
   Object.freeze({ edgeId: 'route.coal.sis-to-esd', fromNodeId: 'system.sis-safety-controller', toNodeId: 'asset.esd-emergency-actuator', title: 'SIS 安全仪表控制器至 ESD 紧急停车执行器', lineColor: coalPowerEdgeColors.orange, lineStyle: 'solid' }),
 ])
 
-/** 资料已确认的二维节点到 Unity 三维节点映射；SIS 没有独立模型，必须省略。 */
+/** 当前发布五个下层现场设备映射，并为锅炉、汽轮机、发电机新增三个仅拓扑聚焦的上层控制映射。 */
 const coalPowerSceneNodeMappings = Object.freeze([
-  Object.freeze({ nodeId: 'system.boiler-dcs', sceneNodeId: 'node.coal-boiler' }),
-  Object.freeze({ nodeId: 'system.steam-turbine-dcs', sceneNodeId: 'node.coal-steam-turbine' }),
-  Object.freeze({ nodeId: 'system.generator-excitation-controller', sceneNodeId: 'node.coal-generator' }),
-])
-
-/** Unity 属性面板中已经保存并通过场景测试的流程步骤。 */
-const coalPowerProcessSteps = Object.freeze([
-  Object.freeze({ processId: 'coal-power-generation', stepId: 'overview' }),
-  Object.freeze({ processId: 'coal-power-generation', stepId: 'combustion' }),
-  Object.freeze({ processId: 'coal-power-generation', stepId: 'water-steam-cycle' }),
-  Object.freeze({ processId: 'coal-power-generation', stepId: 'power-output' }),
+  Object.freeze({ nodeId: 'asset.coal-mill-actuator', sceneNodeId: 'node.coal-feeder' }),
+  Object.freeze({ nodeId: 'system.coal-boiler-control', sceneNodeId: 'unit.coal-boiler.control' }),
+  Object.freeze({ nodeId: 'system.coal-steam-turbine-control', sceneNodeId: 'unit.coal-steam-turbine.control' }),
+  Object.freeze({ nodeId: 'system.coal-generator-control', sceneNodeId: 'unit.coal-generator.control' }),
+  Object.freeze({ nodeId: 'asset.coal-boiler', sceneNodeId: 'node.coal-boiler' }),
+  Object.freeze({ nodeId: 'asset.coal-steam-turbine', sceneNodeId: 'node.coal-steam-turbine' }),
+  Object.freeze({ nodeId: 'asset.coal-generator', sceneNodeId: 'node.coal-generator' }),
+  Object.freeze({ nodeId: 'system.coal-handling-ash-plc', sceneNodeId: 'node.coal-precipitator' }),
 ])
 
 /**
- * 三个关键流程只保存资料规定的节点和边标识；过滤视图不声明孤立节点豁免，因为每个可见节点
- * 都至少连接一条同图边。顺序与资料子表一致，供画布稳定投影和契约测试复用。
+ * 燃煤总览的重点区域声明。
+ *
+ * 重点区域只表达“一个已绑定三维入口及其显式子节点”的二维视觉分组，不能
+ * 从连线、坐标或中文标题推导。当前燃煤场景已确认的三维入口只有锅炉、汽轮机
+ * 和发电机三组，因此这里只登记这三组及其资料中明确对应的现场节点。过滤视图
+ * 会由注册表投影时主动清空该字段，避免区域框错误出现在关键环节拓扑中。
  */
-const coalPowerFlowViews = Object.freeze([
+const coalPowerFocusRegions = Object.freeze([
   Object.freeze({
-    topologyId: 'topology.coal-power.combustion',
-    title: '燃烧系统',
-    visibleNodeIds: Object.freeze([
-      'system.unit-operator-station', 'system.monitor-core-switch-primary', 'system.monitor-core-switch-standby',
-      'system.auxiliary-operator-station', 'system.sis-performance-station', 'system.boiler-dcs',
-      'system.sis-safety-controller', 'asset.coal-mill-actuator', 'asset.induced-draft-fan-vfd',
-      'asset.furnace-pressure-transmitter', 'asset.esd-emergency-actuator',
+    regionId: 'focus.coal-boiler-control',
+    anchorNodeId: 'system.coal-boiler-control',
+    nodeIds: Object.freeze([
+      'system.coal-boiler-control',
+      'asset.coal-mill-actuator',
+      'asset.coal-boiler',
+      'asset.furnace-pressure-transmitter',
     ]),
-    visibleEdgeIds: Object.freeze([
-      'route.coal.monitor-primary-to-operator', 'route.coal.monitor-primary-to-sis-performance',
-      'route.coal.monitor-primary-to-standby', 'route.coal.monitor-standby-to-auxiliary-operator',
-      'route.coal.monitor-primary-to-boiler-dcs', 'route.coal.monitor-standby-to-sis',
-      'route.coal.boiler-dcs-to-coal-mill', 'route.coal.boiler-dcs-to-fan-vfd',
-      'route.coal.boiler-dcs-to-furnace-pressure', 'route.coal.sis-to-esd',
-    ]),
+    label: '锅炉控制区域',
   }),
   Object.freeze({
-    topologyId: 'topology.coal-power.water-steam-cycle',
-    title: '汽水循环系统',
-    visibleNodeIds: Object.freeze([
-      'system.unit-operator-station', 'system.monitor-core-switch-primary', 'system.monitor-core-switch-standby',
-      'system.auxiliary-operator-station', 'system.sis-performance-station', 'system.steam-turbine-dcs',
-      'system.sis-safety-controller', 'asset.steam-turbine-valve-actuator', 'asset.esd-emergency-actuator',
+    regionId: 'focus.coal-steam-turbine-control',
+    anchorNodeId: 'system.coal-steam-turbine-control',
+    nodeIds: Object.freeze([
+      'system.coal-steam-turbine-control',
+      'asset.coal-steam-turbine',
     ]),
-    visibleEdgeIds: Object.freeze([
-      'route.coal.monitor-primary-to-operator', 'route.coal.monitor-primary-to-sis-performance',
-      'route.coal.monitor-primary-to-standby', 'route.coal.monitor-standby-to-auxiliary-operator',
-      'route.coal.monitor-primary-to-steam-turbine-dcs', 'route.coal.monitor-standby-to-sis',
-      'route.coal.steam-turbine-dcs-to-valve', 'route.coal.sis-to-esd',
-    ]),
+    label: '汽轮机控制区域',
   }),
   Object.freeze({
-    topologyId: 'topology.coal-power.power-output',
-    title: '发电输出',
-    visibleNodeIds: Object.freeze([
-      'system.unit-operator-station', 'system.monitor-core-switch-primary', 'system.monitor-core-switch-standby',
-      'system.auxiliary-operator-station', 'system.sis-performance-station', 'system.steam-turbine-dcs',
-      'system.generator-excitation-controller', 'system.sis-safety-controller', 'asset.steam-turbine-valve-actuator',
-      'asset.generator-protection-device', 'asset.esd-emergency-actuator',
+    regionId: 'focus.coal-generator-control',
+    anchorNodeId: 'system.coal-generator-control',
+    nodeIds: Object.freeze([
+      'system.coal-generator-control',
+      'asset.coal-generator',
     ]),
-    visibleEdgeIds: Object.freeze([
-      'route.coal.monitor-primary-to-operator', 'route.coal.monitor-primary-to-sis-performance',
-      'route.coal.monitor-primary-to-standby', 'route.coal.monitor-standby-to-auxiliary-operator',
-      'route.coal.monitor-primary-to-steam-turbine-dcs', 'route.coal.monitor-primary-to-generator-excitation',
-      'route.coal.monitor-standby-to-sis', 'route.coal.steam-turbine-dcs-to-valve',
-      'route.coal.generator-excitation-to-protection', 'route.coal.sis-to-esd',
-    ]),
+    label: '发电机控制区域',
   }),
 ])
 
-/** 模块加载时建立一次 O(n) 索引，所有流程过滤都复用它，避免每次切换重复扫描 27 个节点。 */
-const coalPowerNodesById = new Map(coalPowerNodes.map((node) => [node.nodeId, node]))
-
-/** 对来源总图索引进行 O(1) 查找，再为每个过滤视图投影坐标。 */
-function createCoalPowerLayoutOverrides(visibleNodeIds) {
-  return visibleNodeIds.map((nodeId) => {
-    const node = coalPowerNodesById.get(nodeId)
-    if (!node) throw new Error(`燃煤流程引用了总图不存在的节点：${nodeId}`)
-    return { nodeId, x: node.x, y: node.y }
-  })
-}
-
 /**
- * 将燃煤唯一来源总图和三个过滤视图转换为远程结构清单格式。
- * 来源节点统一以 offline（离线）作为初始状态，平台后续只按 nodeId 推送状态快照。
+ * 将燃煤唯一来源总图转换为远程结构清单格式。
+ * 来源节点统一以 normal（正常）作为初始状态，平台后续只按 nodeId 推送状态快照并覆盖该基线。
  */
 export function createCoalPowerTopologies(manifestVersion) {
   const sceneNodeIdByNodeId = new Map(coalPowerSceneNodeMappings.map((mapping) => [mapping.nodeId, mapping.sceneNodeId]))
-  // 入口引用只由同版本正式说明资源反向建立一次，禁止按中文标题或上下级连线猜测可下钻节点。
-  const drilldownBySourceNodeId = new Map(createCoalPowerDrilldowns(manifestVersion).map((content) => [content.sourceNodeId, content.contentKey]))
   const overview = {
     topologyId: 'topology.coal-power.overview',
     sceneId: 'coal-power',
@@ -201,52 +181,44 @@ export function createCoalPowerTopologies(manifestVersion) {
     nodes: coalPowerNodes.map((node) => ({
       ...node,
       ...(sceneNodeIdByNodeId.has(node.nodeId) ? { sceneNodeId: sceneNodeIdByNodeId.get(node.nodeId) } : {}),
-      ...(drilldownBySourceNodeId.has(node.nodeId) ? {
-        drilldown: { enabled: true, contentKey: drilldownBySourceNodeId.get(node.nodeId), trigger: 'button' },
-      } : {}),
-      deviceStatus: 'offline',
+      deviceStatus: DEFAULT_TOPOLOGY_NODE_STATUS,
       doubleClickBehavior: 'emit-node',
     })),
     edges: coalPowerEdges.map((edge) => ({ ...edge, evidenceStatus: 'verified' })),
+    // 重点区域属于燃煤总览自身的显式声明；不复制到过滤视图，且不参与节点命中、路由或联动。
+    focusRegions: coalPowerFocusRegions.map((region) => ({
+      ...region,
+      nodeIds: [...region.nodeIds],
+    })),
   }
 
-  const flowTopologies = coalPowerFlowViews.map((view) => ({
-    topologyId: view.topologyId,
-    sceneId: 'coal-power',
-    title: view.title,
-    configVersion: manifestVersion,
-    // 过滤视图不复制节点、边或层级；运行时由 sourceTopologyId（来源总图）派生实际图元。
-    nodes: [],
-    edges: [],
-    filter: {
-      sourceTopologyId: overview.topologyId,
-      visibleNodeIds: [...view.visibleNodeIds],
-      visibleEdgeIds: [...view.visibleEdgeIds],
-      nodeLayoutOverrides: createCoalPowerLayoutOverrides(view.visibleNodeIds),
-    },
-  }))
-
-  return [overview, ...flowTopologies]
+  // 新 JSON 图纸完整承载总览，不再生成旧版流程过滤拓扑或其坐标投影。
+  return [overview]
 }
 
-/** 为燃煤四个受控流程动作生成同版本配置；外部只需使用 actionId。 */
+/** 新版只公开恢复场景默认状态的总览动作；流程子图和下钻能力均不再进入外部白名单。 */
 export function createCoalPowerActions(manifestVersion) {
   const actions = [
     ['overview', '总览', 'topology.coal-power.overview'],
-    ['combustion', '燃烧系统', 'topology.coal-power.combustion'],
-    ['water-steam-cycle', '汽水循环系统', 'topology.coal-power.water-steam-cycle'],
-    ['power-output', '发电输出', 'topology.coal-power.power-output'],
   ]
   return actions.map(([stepId, title, targetTopologyId]) => ({
     actionId: `action.coal-power.${stepId}`,
     title: `进入燃煤${title}`,
     targetSceneId: 'coal-power',
+    targetViewMode: 'business',
     targetTopologyId,
     allowedParameters: [],
-    unityAction: { type: 'enterProcessStep', processId: 'coal-power-generation', stepId, defaultUnitId: 'all', isolate: true },
+    unityAction: { type: 'resetScene' },
     failurePolicy: 'keep-current-context',
     configVersion: manifestVersion,
   }))
 }
 
-export { coalPowerEdgeColors, coalPowerEdges, coalPowerFlowViews, coalPowerLayers, coalPowerNodes, coalPowerProcessSteps, coalPowerSceneNodeMappings }
+export {
+  coalPowerEdgeColors,
+  coalPowerEdges,
+  coalPowerFocusRegions,
+  coalPowerLayers,
+  coalPowerNodes,
+  coalPowerSceneNodeMappings,
+}

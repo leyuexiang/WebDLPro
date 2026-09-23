@@ -11,7 +11,7 @@ public static class PowerPlantWebGlMeshOptimizer
 {
     private const string ArtRoot = "Assets/Art";
 
-    [MenuItem("Tools/Power Plant/WebGL/报告模型导入设置")]
+    [MenuItem("Tools/WebDLPro/WebGL/模型导入设置/报告设置")]
     public static void ReportSettings()
     {
         List<string> paths = FindFbxPaths();
@@ -42,7 +42,7 @@ public static class PowerPlantWebGlMeshOptimizer
             $"高压缩={highCompressionCount}; 可读网格={readableCount}。");
     }
 
-    [MenuItem("Tools/Power Plant/WebGL/应用 WebGL 网格优化")]
+    [MenuItem("Tools/WebDLPro/WebGL/模型导入设置/应用网格优化")]
     public static void ApplyWebGlSettings()
     {
         List<string> paths = FindFbxPaths();

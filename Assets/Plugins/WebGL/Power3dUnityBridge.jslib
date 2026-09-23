@@ -45,9 +45,16 @@ mergeInto(LibraryManager.library, {
       return;
     }
 
+    // 该白名单必须与前端 runtime-registry（运行时登记表）和 webgl-protocol-capabilities.json 完全一致；
+    // moveCameraToPose（命名镜头定位）与 resetCamera（相机复位）都只改变当前镜头；
+    // 任一能力缺失都会在握手阶段被前端判定为不兼容。
     var commandCapabilities = [
-      'init', 'resize', 'switchScene', 'enterProcessStep', 'resetScene', 'focusNode', 'clearSelection',
-      'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'
+      // 必须与前端 WEBGL_COMMAND_TYPES（网页图形命令白名单）和模板兜底桥保持一致；
+      // enterProcessStep 已废弃，继续声明会让 ready 载荷无法通过前端字段校验。
+      'init', 'resize', 'switchScene', 'moveCameraToPose', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail',
+      'enterProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback',
+      'resetScene', 'resetCamera', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState',
+ 'setRouteFlow', 'setNodeVisibility', 'dispose'
     ];
     var eventCapabilities = ['ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'selectionCleared', 'disposed'];
     var isSupportedCommand = function (type) {
@@ -68,7 +75,7 @@ mergeInto(LibraryManager.library, {
         event.source !== window.parent ||
         !data ||
         data.channel !== 'power3d-unity' ||
-        data.version !== 1 ||
+        data.version !== 2 ||
         data.instanceId !== bridge.instanceId ||
         typeof data.messageId !== 'string' ||
         typeof data.timestamp !== 'number' ||
@@ -94,7 +101,7 @@ mergeInto(LibraryManager.library, {
      */
     window.parent.postMessage({
       channel: 'power3d-unity',
-      version: 1,
+      version: 2,
       instanceId: instanceId,
       messageId: Date.now() + '-ready',
       type: 'ready',
@@ -102,7 +109,7 @@ mergeInto(LibraryManager.library, {
         runtimeKey: runtimeKey,
         buildId: buildId,
         sceneMappingVersion: sceneMappingVersion,
-        protocolVersion: 1,
+        protocolVersion: 2,
         resourceDigest: resourceDigest,
         commandCapabilities: commandCapabilities,
         eventCapabilities: eventCapabilities
@@ -129,7 +136,7 @@ mergeInto(LibraryManager.library, {
       if (
         !message ||
         message.channel !== 'power3d-unity' ||
-        message.version !== 1 ||
+        message.version !== 2 ||
         message.instanceId !== bridge.instanceId ||
         eventCapabilities.indexOf(message.type) === -1
       ) {

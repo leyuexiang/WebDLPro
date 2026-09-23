@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, provide, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, shallowRef, watch } from 'vue'
 import { readDeploymentConfiguration } from '@/config/deployment/deployment-config'
-import { toSceneId, toTransitionId } from '@/config/scene-topology/identifiers'
+import { isOverviewSceneId, toTransitionId, toViewSceneId } from '@/config/scene-topology/identifiers'
 import {
   createContainerTooSmallReason,
   createEmbeddedShellCorrelationId,
@@ -15,16 +15,28 @@ import { localProcessConfigLoader } from '@/config/process/local-process-config'
 import { createHostBridgeStartup, HostBridge } from '@/host-bridge/host-bridge'
 import { HostEventSender } from '@/host-bridge/host-event-sender'
 import { HostRuntimeComposition } from '@/host-bridge/host-runtime-composition'
+import { HostRuntimeReadinessGate } from '@/host-bridge/host-runtime-readiness-gate'
+import { HOST_PROTOCOL_VERSION } from '@/host-bridge/host-protocol'
 import ProcessScenePanel from '@/modules/visual/components/ProcessScenePanel.vue'
+import CameraPoseInformationBubble from '@/modules/visual/components/CameraPoseInformationBubble.vue'
+import {
+  getCameraPoseNavigationButtons,
+  type CameraPoseNavigationButton,
+} from '@/modules/visual/components/camera-pose-navigation'
+import { resolvePipelineLegendVariant } from '@/modules/visual/components/pipeline-legend-visibility'
 import ManifestTopologyRuntimePanel from '@/modules/visual/topology/ManifestTopologyRuntimePanel.vue'
 import VisualizationRuntimeHost from '@/modules/visual/runtime/VisualizationRuntimeHost.vue'
 import { VisualizationCoordinator } from '@/modules/visual/orchestration/visualization-coordinator'
 import { createVisualizationCoordinatorFacade, visualizationCoordinatorFacadeKey } from '@/modules/visual/orchestration/visualization-coordinator-facade'
-import { useVisualizationStore } from '@/modules/visual/orchestration/visualization.store'
+import {
+  isBusinessVisualizationStableContext,
+  useVisualizationStore,
+} from '@/modules/visual/orchestration/visualization.store'
 import { getVisualizationTransitionOverlayState } from '@/modules/visual/orchestration/visualization-transition-overlay'
 import { ViewOpenTransactionHandler } from '@/modules/visual/orchestration/view-open-transaction-handler'
 import { WorkflowTriggerTransactionHandler } from '@/modules/visual/orchestration/workflow-trigger-transaction-handler'
 import { WorkflowTriggerTransactionRouter } from '@/modules/visual/orchestration/workflow-trigger-transaction-router'
+import { ProcessDetailTransactionHandler } from '@/modules/visual/orchestration/process-detail-transaction-handler'
 import { shouldInstallWorkflowTrigger } from '@/modules/visual/orchestration/workflow-trigger-capability'
 import { DeviceStatesUpdateCoordinator } from '@/modules/visual/orchestration/device-states-update-coordinator'
 import { UnityObjectSelectionCoordinator } from '@/modules/visual/orchestration/unity-object-selection-coordinator'
@@ -52,8 +64,13 @@ const topologyRuntime = shallowRef<TopologyRuntime | undefined>()
 /** 通信组合根只保留一个实例；失败的启动参数不会构造桥，也不会留下半注册监听器。 */
 let hostRuntimeComposition: HostRuntimeComposition | undefined
 /**
+ * 外层 ready（就绪）不再被 Unity 门控；平台早到的唯一 init（初始化）通过该单槽屏障等待内层运行时。
+ * 屏障不保存外层消息，120秒超时后允许平台重新发送新的合法初始化命令。
+ */
+const hostRuntimeReadinessGate = new HostRuntimeReadinessGate()
+/**
  * 合法嵌入参数在页面脚本初始化时即固定为唯一桥接实例。
- * 这样页面级 15 秒截止既从真实加载阶段开始计时，也能在 ready 之前向同一受信父页面发送一次受控超时错误。
+ * 这样页面级15秒外层就绪截止从真实加载阶段开始计时，也能在 ready 之前向同一受信父页面发送一次受控超时错误。
  */
 const hostBridgeStartup = deploymentConfiguration.configuration
   ? createHostBridgeStartup(window.location.search, deploymentConfiguration.configuration)
@@ -72,7 +89,7 @@ const directAccessSceneId = requestedInitialSceneId === 'coal-power' ? 'coal-pow
 const directAccessTopologyId = `topology.${directAccessSceneId}.overview`
 /**
  * 本地工艺配置只负责为当前发布场景申请对应的 Unity 单实例运行时。
- * 二维节点、连线、关键流程和二维—三维映射始终来自完成双重校验的正式场景清单，
+ * 二维节点、连线、场景总览和二维—三维映射始终来自完成双重校验的正式场景清单，
  * 不会把燃气标题或本地占位图元作为燃煤场景的回退内容。
  */
 const sceneBaseline = computed(() => localProcessConfigLoader.load(
@@ -106,7 +123,7 @@ const startupDeadline = hostBridge
     hostBridge?.dispose()
   })
   : undefined
-// 合法内嵌页面一开始加载即启动总期限，不能把挂载或任一子运行时准备时间排除在 15 秒之外。
+// 合法内嵌页面一开始加载即启动15秒外层期限；Unity 启动不计入此处，由收到初始化后的独立120秒屏障管理。
 startupDeadline?.start()
 /** 三维反向选择订阅只在组合根存在期间保留；壳层释放时必须解除，不能让旧 Unity 回调存活。 */
 let unsubscribeUnityObjectSelected: (() => void) | undefined
@@ -144,8 +161,53 @@ const transitionOverlay = computed(() => getVisualizationTransitionOverlayState(
   activeTransitionId: visualizationStore.activeTransitionId,
   targetSceneId: visualizationStore.targetSceneId,
   targetTopologyId: visualizationStore.targetTopologyId,
+  targetProcessDetailId: visualizationStore.targetProcessDetailId,
   runtimeStatus: visualizationStore.runtimeStatus,
 }))
+/** 仅已提交的平台总览上下文控制布局；进行中目标不得提前隐藏业务拓扑。 */
+const overviewActive = computed(() => (
+  visualizationStore.runtimeStatus === 'ready'
+  && Boolean(visualizationStore.stableContext && isOverviewSceneId(visualizationStore.stableContext.sceneId))
+))
+/** 第三层仍保持三维与二维双区布局；只有平台总览（第一层）隐藏拓扑画布。 */
+const topologySuppressed = computed(() => overviewActive.value)
+/**
+ * 图例只按已提交稳定上下文决议可见性和资源语义：燃煤使用专用图例，当前其余第二层保持既有燃气图例。
+ * 原生全屏状态不参与该计算，因此进入全屏和退出全屏都复用同一个图例节点及同一份已解析资源。
+ */
+const pipelineLegendVariant = computed(() => resolvePipelineLegendVariant(
+  visualizationStore.runtimeStatus,
+  visualizationStore.stableContext,
+))
+
+/**
+ * 命名镜头按钮只属于燃气、燃煤第二层业务视图。平台总览没有对应镜头，第三层关键环节又会拒绝
+ * 第二层镜头命令，因此必须先用稳定上下文的业务类型守卫排除平台总览和不携带第二层拓扑编号的第三层状态。
+ * 第三层的独立二维拓扑由 topologyDataContextId 驱动，不属于这组第二层镜头控制。
+ */
+const cameraPoseButtons = computed(() => {
+  const context = visualizationStore.stableContext
+  return context && isBusinessVisualizationStableContext(context)
+    ? getCameraPoseNavigationButtons(context.sceneId)
+    : getCameraPoseNavigationButtons(undefined)
+})
+/** 最后一次由当前页面确认成功的镜头点只用于按钮反馈，不冒充 Unity 相机的权威实时状态。 */
+const activeCameraPoseId = ref<string | null>(null)
+/** 最新在途镜头点用于轻量反馈；不同按钮仍可连续点击，以满足后一次命令接管未完成插值。 */
+const pendingCameraPoseId = ref<string | null>(null)
+/**
+ * 气泡内容与镜头回执状态分离：步骤按钮一经合法点击就立即展示说明，后续点击其他步骤只替换当前内容。
+ * 用户主动关闭只经气泡右上角按钮；Unity、拓扑和页面其他区域的点击不会改写此引用。
+ */
+const displayedCameraPoseButton = ref<CameraPoseNavigationButton | null>(null)
+/** 单调请求序号阻止先发命令的迟到回执覆盖后发命令的按钮状态，不保存无界请求历史。 */
+let cameraPoseRequestSequence = 0
+
+/** 等待 Vue 完成响应式布局提交并跨过一帧浏览器布局边界，Unity 随后才可显示候选和移动相机。 */
+async function waitForProcessDetailLayoutCommit(): Promise<void> {
+  await nextTick()
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+}
 
 /**
  * 启动遮罩直接读取唯一宿主控制器的生命周期，并与协调器的稳定上下文合并判断。
@@ -160,16 +222,81 @@ const visualizationMaskVisible = computed(() => {
 
   return status !== 'ready' || !visualizationStore.hasStableContext || transitionOverlay.value.visible
 })
-/**
- * 下钻按钮必须与稳定上下文共用同一显示门禁；切换期间即使旧拓扑暂留在画布上，也不允许展示旧入口。
- * 这样按钮不会在加载遮罩下闪现，且新拓扑只有完成原子提交后才会暴露可操作入口。
- */
-const drilldownEnabled = computed(() => (
-  runtimeHostStatus.value === 'ready'
-  && visualizationStore.hasStableContext
-  && !transitionOverlay.value.visible
-))
 
+/**
+ * 控件在稳定业务视图可见；能力缺失时仍保留六步结构但整体禁用，便于联调直接识别 Unity 构建不兼容。
+ * 命令可用性只读取唯一运行时宿主公开的状态与能力，不探测内嵌窗口。
+ */
+const cameraPoseControlsVisible = computed(() => cameraPoseButtons.value.length > 0 && !visualizationMaskVisible.value)
+const cameraPoseNavigationAvailable = computed(() => {
+  const runtime = getRuntimeHostController()
+  return runtime?.status.value === 'ready' && runtime.capabilities.value.includes('moveCameraToPose')
+})
+
+/**
+ * 向当前唯一运行时发送固定命名镜头步骤。Unity 会在同一命令内先应用该步骤的多模型脉冲描边与全场半透明上下文，
+ * 再移动到固定镜头点。这里不加全局在途锁：连续点击不同步骤时，后一次命令应从
+ * 当前相机位置接管插值；请求序号与稳定上下文版本共同过滤乱序回执和切场景后的迟到结果。
+ */
+async function moveCameraToPose(button: CameraPoseNavigationButton): Promise<void> {
+  const runtime = getRuntimeHostController()
+  const context = visualizationStore.stableContext
+  if (
+    !cameraPoseControlsVisible.value
+    || !cameraPoseNavigationAvailable.value
+    || !runtime
+    || !context
+    || !isBusinessVisualizationStableContext(context)
+  ) return
+
+  const requestSequence = ++cameraPoseRequestSequence
+  const contextRevision = context.contextRevision
+  const sceneId = context.sceneId
+  // 说明气泡不等待 Unity 镜头插值回执；连续点击会同步替换标题和说明，避免视觉反馈滞后。
+  displayedCameraPoseButton.value = button
+  pendingCameraPoseId.value = button.cameraPoseId
+
+  const result = await runtime.sendCommandAndWait('moveCameraToPose', { cameraPoseId: button.cameraPoseId })
+  if (requestSequence !== cameraPoseRequestSequence) return
+
+  const currentContext = visualizationStore.stableContext
+  const contextStillMatches = currentContext
+    && isBusinessVisualizationStableContext(currentContext)
+    && currentContext.contextRevision === contextRevision
+    && currentContext.sceneId === sceneId
+  if (!contextStillMatches) return
+
+  pendingCameraPoseId.value = null
+  if (result.success) {
+    activeCameraPoseId.value = button.cameraPoseId
+    return
+  }
+
+  activeCameraPoseId.value = null
+  // 页面只输出固定诊断，不展示 Unity 原始错误或场景内部信息。
+  console.warn('[命名镜头定位]', '三维运行时未确认本次镜头定位。')
+}
+
+/** 相机复位成功后使旧镜头点回执失效，并清除不再对应当前镜头的按钮与说明反馈。 */
+function handleCameraReset(): void {
+  cameraPoseRequestSequence += 1
+  activeCameraPoseId.value = null
+  pendingCameraPoseId.value = null
+  displayedCameraPoseButton.value = null
+}
+
+/** 关闭按钮是同一稳定业务视图内唯一主动关闭入口，不修改镜头定位的成功态或在途状态。 */
+function closeCameraPoseInformation(): void {
+  displayedCameraPoseButton.value = null
+}
+
+/** 切换稳定视图时立即使旧请求失效，并清空只属于上一业务视图的按钮反馈和说明。 */
+watch(() => visualizationStore.stableContext?.contextRevision, () => {
+  cameraPoseRequestSequence += 1
+  activeCameraPoseId.value = null
+  pendingCameraPoseId.value = null
+  displayedCameraPoseButton.value = null
+})
 /**
  * 壳层只向用户显示有限、脱敏的中文状态；部署地址、错误码、关联标识、外部消息和 Unity 原始错误均不进入界面。
  * 完整诊断模型仍保留给控制台和父页面协议使用。配置错误优先级最高，其次是尺寸不足和原子清单校验，
@@ -192,7 +319,7 @@ const shellDiagnostic = computed(() => {
 
   if (startupTimedOut.value) {
     return createEmbeddedShellDiagnostic('startup-timeout', {
-      reason: '页面加载后 15 秒内未完成运行时准备，已停止启动。',
+      reason: '页面加载后 15 秒内未完成外层协议准备，已停止启动。',
       correlationId: shellCorrelationId,
     })
   }
@@ -364,7 +491,7 @@ function installDirectAccessBootstrap(): void {
     const candidate = message as Record<string, unknown>
     if (
       candidate.channel !== 'power-scene-topology-shell' ||
-      candidate.version !== 1 ||
+      candidate.version !== HOST_PROTOCOL_VERSION ||
       candidate.instanceId !== context.instanceId ||
       candidate.sessionId !== context.sessionId ||
       candidate.type !== 'system.ready'
@@ -373,7 +500,7 @@ function installDirectAccessBootstrap(): void {
     initialized = true
     window.postMessage({
       channel: 'power-scene-topology-shell',
-      version: 1,
+      version: HOST_PROTOCOL_VERSION,
       instanceId: context.instanceId,
       sessionId: context.sessionId,
       messageId: `direct-access-init-${Date.now()}`,
@@ -401,7 +528,9 @@ function getRuntimeHostController(): VisualizationRuntimeHostController | undefi
 }
 
 /**
- * 当清单、唯一拓扑运行时和 Unity 运行时均已就绪后，才创建外层桥组合根。
+ * 当清单、唯一拓扑运行时和 Unity 宿主控制器均已装配后创建外层桥组合根。
+ * Unity 此时可以仍处于 creating/handshaking（创建/握手）阶段；组合根会立即发送 system.ready，
+ * 早到的 system.init 只在内部单槽等待 Unity，成功确认仍由稳定视图事务产生。
  * 直接打开子应用时通常缺少父来源、实例和协议版本参数，此时保持本地等待态而不创建宽松桥接；
  * 被合法父页面嵌入时，三个参数仍须与部署白名单同时匹配，任一不匹配均不会注册窗口监听器。
  */
@@ -412,7 +541,8 @@ function startHostRuntimeCompositionIfReady(): void {
   const registry = manifestState.value.status === 'ready' ? manifestState.value.registry : undefined
   const runtime = topologyRuntime.value
   const runtimeHost = getRuntimeHostController()
-  if (!configuration || !manifest || !registry || !runtime || !runtimeHost || runtimeHost.status.value !== 'ready') return
+  const unitySceneMappingVersion = sceneBaseline.value.bundle?.runtime?.sceneMappingVersion
+  if (!configuration || !manifest || !registry || !runtime || !runtimeHost || !unitySceneMappingVersion) return
 
   const bridge = hostBridge
   if (!bridge || hostBridgeStartup?.status !== 'ready') return
@@ -424,14 +554,32 @@ function startHostRuntimeCompositionIfReady(): void {
     runtime,
     new VisualizationRuntimeDeviceStatePort(runtimeHost),
   )
+  const unityViewPort = new VisualizationRuntimeViewOpenPort(runtimeHost)
   const viewOpen = new ViewOpenTransactionHandler(
     registry,
     runtime,
-    new VisualizationRuntimeViewOpenPort(runtimeHost),
+    unityViewPort,
     visualizationCoordinatorFacade,
+    unitySceneMappingVersion,
     undefined,
     // 失败回退或超时补偿会产生新的 Unity 物理实例；无需等待平台重推，直接从有限权威快照重投影。
     (sceneActivationId) => deviceStatesUpdate.resynchronizeLatestSnapshot(sceneActivationId),
+  )
+  /** 关键环节使用独立事务和同一个 Unity 宿主端口，不创建第二个 iframe 或第二张拓扑画布。 */
+  const processDetail = new ProcessDetailTransactionHandler(
+    registry,
+    runtime,
+    unityViewPort,
+    visualizationCoordinatorFacade,
+    undefined,
+    waitForProcessDetailLayoutCommit,
+  )
+  /*
+   * 跨场景关键环节会先进入目标业务场景默认拓扑，再在启动第三层资源事务前等待最新状态完成重放。
+   * 该同步器只复用现有有限工作池与同一 Unity 宿主，不创建第二条状态通道或额外运行时实例。
+   */
+  const synchronizeCrossSceneProcessDetailState = (sceneActivationId?: Parameters<DeviceStatesUpdateCoordinator['resynchronizeLatestSnapshotAndWait']>[0]) => (
+    deviceStatesUpdate.resynchronizeLatestSnapshotAndWait(sceneActivationId)
   )
   /*
    * 只有清单实际登记动作时，才构造流程路由并向外层组合根注入能力。
@@ -443,9 +591,16 @@ function startHostRuntimeCompositionIfReady(): void {
       registry,
       visualizationCoordinatorFacade,
       // 同场景流程触发只复用同一个原子切换处理器；它不会取得运行时宿主的 release 或 iframe 访问权。
-      new WorkflowTriggerTransactionHandler(registry, viewOpen, visualizationCoordinatorFacade),
-      // 跨场景流程动作的范围校验独立，避免同场景失败策略错误应用于跨场景物理回退。
-      new WorkflowTriggerTransactionHandler(registry, viewOpen, visualizationCoordinatorFacade, 'cross-scene'),
+      new WorkflowTriggerTransactionHandler(registry, viewOpen, visualizationCoordinatorFacade, 'same-scene', processDetail),
+      // 跨场景流程动作先建立目标业务场景，再等待状态重放并进入关键环节，避免目标控制器尚不存在时直接发送第三层命令。
+      new WorkflowTriggerTransactionHandler(
+        registry,
+        viewOpen,
+        visualizationCoordinatorFacade,
+        'cross-scene',
+        processDetail,
+        synchronizeCrossSceneProcessDetailState,
+      ),
     )
     : undefined
   const composition = new HostRuntimeComposition(
@@ -457,6 +612,12 @@ function startHostRuntimeCompositionIfReady(): void {
     () => runtimeHost.releaseAndWait(),
     workflowTrigger,
     deviceStatesUpdate,
+    // 播放按钮复用已存在的第三层事务处理器；它只允许控制当前稳定关键环节，不能直连 Unity iframe。
+    processDetail,
+    {
+      // 回调只暴露布尔就绪结果；组合根不能取得 Vue 状态、iframe 或 Unity 控制器引用。
+      waitForInnerRuntimeReady: () => hostRuntimeReadinessGate.wait(),
+    },
   )
   /**
    * 订阅只经过 Unity 宿主公开的受控门面。协调器会用当前清单、拓扑和稳定上下文精确映射选择，
@@ -468,6 +629,13 @@ function startHostRuntimeCompositionIfReady(): void {
     visualizationCoordinatorFacade,
   )
   unsubscribeUnityObjectSelected = runtimeHost.subscribeObjectSelected((selection) => {
+    // 总览没有拓扑图：建筑点击直接转换为目标业务视图事务，不能送入业务节点反向选择协调逻辑。
+    if (isOverviewSceneId(selection.payload.sceneId)) {
+      const target = unityObjectSelectionCoordinator?.resolveOverviewBuilding(selection)
+      if (target) void composition?.openOverviewBuilding(target)
+      return
+    }
+
     const selected = unityObjectSelectionCoordinator?.resolve(selection)
     if (selected) composition?.reportSceneObjectSelected(selected)
   })
@@ -482,7 +650,7 @@ function startHostRuntimeCompositionIfReady(): void {
     visualizationCoordinatorFacade.submit({
       type: 'unity.load-progress.reported',
       transitionId: toTransitionId(payload.transitionId),
-      sceneId: toSceneId(payload.sceneId),
+      sceneId: toViewSceneId(payload.sceneId),
       stageCode: payload.stageCode,
       progress: payload.progress,
     })
@@ -490,7 +658,7 @@ function startHostRuntimeCompositionIfReady(): void {
  hostRuntimeComposition = composition
   installDirectAccessBootstrap()
  composition.start()
-  // 只有组合根完整启动后才算通过页面级就绪期限；此前任何单个子运行时 ready 都不能提前停止计时。
+  // 清单摘要、能力和外层消息通道已经发布后即完成页面级15秒 ready 期限；Unity 使用独立120秒屏障。
   startupDeadline?.succeed()
 }
 
@@ -510,7 +678,10 @@ onMounted(() => {
  */
 watch(
   () => getRuntimeHostController()?.status.value,
-  () => startHostRuntimeCompositionIfReady(),
+  (status) => {
+    if (status) hostRuntimeReadinessGate.report(status)
+    startHostRuntimeCompositionIfReady()
+  },
 )
 
 /** 卸载时释放尺寸观察器，避免父页面销毁 iframe 后仍保留子应用回调。 */
@@ -519,7 +690,8 @@ onBeforeUnmount(() => {
   shellResizeObserver = undefined
   manifestAbortController?.abort()
   manifestAbortController = undefined
- startupDeadline?.dispose()
+  startupDeadline?.dispose()
+  hostRuntimeReadinessGate.dispose()
   removeDirectAccessBootstrapListener?.()
   removeDirectAccessBootstrapListener = undefined
   unsubscribeUnityObjectSelected?.()
@@ -557,7 +729,7 @@ onBeforeUnmount(() => {
     <!-- Unity 启动登记与正式注册表均通过后才创建两类运行时；二者任一缺失都不会把旧燃气拓扑传给画布。 -->
     <div
       v-else-if="sceneBaseline.bundle && manifestState.status === 'ready'"
-      class="embedded-visualization-shell__content"
+      :class="['embedded-visualization-shell__content', { 'embedded-visualization-shell__content--full-scene': topologySuppressed }]"
       :aria-busy="visualizationMaskVisible ? 'true' : 'false'"
     >
       <VisualizationRuntimeHost ref="visualizationRuntimeHost" v-slot="{ status }">
@@ -567,7 +739,55 @@ onBeforeUnmount(() => {
           aria-label="三维场景容器"
           :inert="visualizationMaskVisible"
         >
-          <ProcessScenePanel :result="sceneBaseline" />
+          <ProcessScenePanel
+            :result="sceneBaseline"
+            :pipeline-legend-variant="pipelineLegendVariant"
+            @camera-reset="handleCameraReset"
+          >
+            <template #overlays>
+              <!--
+                气泡与步骤导航直接挂在实际 Unity 视口内，进入原生全屏时保留显示并同步缩放。
+                气泡仍是非模态内容：同一业务视图只通过自身右上角按钮关闭，步骤按钮替换当前说明。
+              -->
+              <CameraPoseInformationBubble
+                v-if="displayedCameraPoseButton && cameraPoseControlsVisible"
+                id="camera-pose-information-bubble"
+                :title="displayedCameraPoseButton.label"
+                :description="displayedCameraPoseButton.description"
+                @close="closeCameraPoseInformation"
+              />
+              <!--
+                临时步骤导航只发送独立命名镜头命令，不触发流程步骤，不改变模型显隐、选择、描边或设备状态。
+                六个按钮来自当前稳定业务场景的固定映射，禁止把页面输入直接作为 cameraPoseId（镜头点标识）。
+              -->
+              <nav
+                v-if="cameraPoseControlsVisible"
+                class="embedded-visualization-shell__camera-steps"
+                aria-label="关键环节镜头定位"
+              >
+                <ol class="embedded-visualization-shell__camera-step-list">
+                  <li v-for="(button, index) in cameraPoseButtons" :key="button.cameraPoseId">
+                    <button
+                      class="embedded-visualization-shell__camera-step-button"
+                      type="button"
+                      :disabled="!cameraPoseNavigationAvailable"
+                      :aria-pressed="activeCameraPoseId === button.cameraPoseId"
+                      :aria-busy="pendingCameraPoseId === button.cameraPoseId ? 'true' : 'false'"
+                      aria-controls="camera-pose-information-bubble"
+                      :aria-expanded="displayedCameraPoseButton?.cameraPoseId === button.cameraPoseId"
+                      :title="cameraPoseNavigationAvailable ? button.label : '当前三维运行时不支持命名镜头定位'"
+                      @click="moveCameraToPose(button)"
+                    >
+                      <span class="embedded-visualization-shell__camera-step-index" aria-hidden="true">
+                        {{ String(index + 1).padStart(2, '0') }}
+                      </span>
+                      <span>{{ button.label }}</span>
+                    </button>
+                  </li>
+                </ol>
+              </nav>
+            </template>
+          </ProcessScenePanel>
           <!-- 运行时尚未就绪时遮罩三维区域，但底层面板仍会登记视口并完成唯一实例初始化。 -->
           <AppStatePanel
             v-if="status === 'idle' || status === 'creating' || status === 'handshaking' || status === 'switching' || status === 'releasing'"
@@ -594,14 +814,16 @@ onBeforeUnmount(() => {
         </section>
 
         <!-- 下半区固定取得可用高度的一半，并始终复用一个画布；它只接受正式原子清单运行时的激活结果，不以燃气配置回退猜测当前拓扑。 -->
-        <section
-          class="embedded-visualization-shell__topology"
-          aria-label="二维拓扑容器"
-          :inert="visualizationMaskVisible"
-        >
+          <section
+            class="embedded-visualization-shell__topology"
+            aria-label="二维拓扑容器"
+            v-show="!topologySuppressed"
+            :inert="visualizationMaskVisible || topologySuppressed"
+            :aria-hidden="topologySuppressed ? 'true' : 'false'"
+          >
           <ManifestTopologyRuntimePanel
             :registry="manifestState.registry"
-            :drilldown-enabled="drilldownEnabled"
+            :suspended="topologySuppressed"
             @ready="handleTopologyRuntimeReady"
             @node-double-click="handleTopologyNodeDoubleClick"
           />
@@ -669,6 +891,18 @@ onBeforeUnmount(() => {
   background: #020617;
 }
 
+.embedded-visualization-shell__content--full-scene {
+  grid-template-rows: minmax(0, 1fr) 0;
+  gap: 0;
+}
+
+/* 平台总览只改变已提交稳定上下文对应的布局，不重建 Unity iframe 或拓扑 Canvas。 */
+.embedded-visualization-shell__content--full-scene .embedded-visualization-shell__scene :deep(.process-scene--reserved) {
+  inline-size: 100%;
+  block-size: 100%;
+  aspect-ratio: auto;
+}
+
 /*
  * 启动和切换遮罩与网格同尺寸，不依赖固定像素：2K、4K、8K 与带鱼屏均由容器自身边界决定覆盖范围。
  * 使用不透明背景完全挡住 Unity iframe 的品牌图和内部加载层，直到协调器确认首个稳定视图后才移除；
@@ -724,6 +958,101 @@ onBeforeUnmount(() => {
   align-content: center;
   justify-items: center;
   text-align: center;
+}
+
+/*
+ * 六步导航定位在实际 Unity 视口的覆盖层底部，不参与网格计算，不占用画布两侧留白。
+ * 普通态与原生全屏态都读取同一父容器的完整宽度，无需另设全屏宽度或监听窗口变化。
+ * 六个按钮始终等分并收缩在导航条内，窄屏文案内部换行，不产生横向滚动条。
+ */
+.embedded-visualization-shell__camera-steps {
+  position: absolute;
+  z-index: 2;
+  inset-block-end: clamp(12px, 2.4cqh, 28px);
+  inset-inline-start: 0;
+  /*
+   * 父覆盖层就是 Unity 实际画布；使用包含边框和内边距的完整宽度，
+   * 防止按钮内容撑宽外框，同时避免继续引用壳页面的半屏工作宽度。
+   */
+  inline-size: 100%;
+  max-inline-size: 100%;
+  box-sizing: border-box;
+  padding: 8px;
+  /* 六个按钮在外框内等比分配；窄屏时由按钮自身换行，不产生页面级横向滚动。 */
+  overflow: hidden;
+  border: 1px solid rgb(103 232 249 / 42%);
+  border-radius: 10px;
+  background: rgb(2 15 28 / 84%);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+  /* 父覆盖层默认透传鼠标；仅导航自身恢复交互，不阻断其余 Unity 画面。 */
+  pointer-events: auto;
+  backdrop-filter: blur(6px);
+  scrollbar-width: thin;
+  scrollbar-color: rgb(103 232 249 / 55%) transparent;
+}
+
+.embedded-visualization-shell__camera-step-list {
+  display: grid;
+  /* 六个固定按钮始终共享导航条可用宽度，避免 min-content 宽度把列表撑出容器。 */
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 7px;
+  inline-size: 100%;
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* 单个按钮保持两行以内，并用独立序号强化从左到右的工艺顺序。 */
+.embedded-visualization-shell__camera-step-button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  min-block-size: 42px;
+  /* 清除网格项目的自动最小宽度，确保长文案不会把对应轨道重新撑大。 */
+  min-inline-size: 0;
+  inline-size: 100%;
+  padding: 7px 10px;
+  border: 1px solid rgb(103 232 249 / 36%);
+  border-radius: 7px;
+  color: #e6fbff;
+  font: inherit;
+  font-size: clamp(11px, 0.72cqw, 13px);
+  line-height: 1.25;
+  text-align: start;
+  cursor: pointer;
+  background: rgb(8 47 73 / 88%);
+  transition: border-color 120ms ease, background-color 120ms ease, opacity 120ms ease;
+}
+
+.embedded-visualization-shell__camera-step-index {
+  display: grid;
+  place-items: center;
+  inline-size: 24px;
+  block-size: 24px;
+  border: 1px solid rgb(103 232 249 / 60%);
+  border-radius: 50%;
+  color: #a5f3fc;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.embedded-visualization-shell__camera-step-button:hover:not(:disabled),
+.embedded-visualization-shell__camera-step-button[aria-pressed='true'],
+.embedded-visualization-shell__camera-step-button[aria-busy='true'] {
+  border-color: #67e8f9;
+  background: #0e7490;
+}
+
+.embedded-visualization-shell__camera-step-button:focus-visible {
+  outline: 2px solid #f8fafc;
+  outline-offset: 2px;
+}
+
+.embedded-visualization-shell__camera-step-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
 }
 
 /*

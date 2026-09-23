@@ -80,3 +80,6 @@ InitTestScene*.unity*
 /[Aa]ssets/Unity.VisualScripting.Generated/VisualScripting.Core/Property Providers.meta
 /[Aa]ssets/[Ii]nit[Tt]est[Ss]cene*.unity*
 /[Aa]ssets/[Ss]ceneDependencyCache*
+
+# 本地报价单，不纳入版本控制。
+/电力工艺导航项目报价单_30天简化交付版.html

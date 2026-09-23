@@ -9,6 +9,9 @@ EditorBuildSettings:
     path: Assets/Scenes/Bootstrap.unity
     guid: 03c5f7021e314494ab7ed633133aca50
   - enabled: 1
+    path: Assets/Scenes/Overview/Overview.unity
+    guid: 4120e7085a07bf641baf3261e6bc1102
+  - enabled: 1
     path: Assets/Scenes/Business/CoalPower.unity
     guid: 1f8e1bd581131d448b618f21597ed68a
   - enabled: 1
@@ -35,4 +38,16 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Scenes/Business/Dispatch.unity
     guid: a2e5d93b032920c49b90997090fcc506
+  - enabled: 1
+    path: Assets/Scenes/Business/StepUpSubstation.unity
+    guid: 4fcfb67e79f099d4fb5f30010979ba10
+  - enabled: 1
+    path: Assets/Scenes/Business/StepDownSubstation.unity
+    guid: a026c4018bf2db24dac33d0bdfd7f7fb
+  - enabled: 1
+    path: Assets/Scenes/Business/ConverterStation.unity
+    guid: 7bf0d527d51c4cf409529fe1969b82ba
+  - enabled: 1
+    path: Assets/Scenes/Business/SwitchingStation.unity
+    guid: ce34b46fd014ebc419c0a10a2094cb18
   m_configObjects: {}

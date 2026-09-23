@@ -10,6 +10,8 @@ interface NodeLayout {
   y: number
   width: number
   height: number
+  /** 标题按同层邻居间距动态限宽；绘制与视觉边界必须共享该值，避免文字越过相邻节点。 */
+  titleMaxWidth: number
   /** 标题虽绘制在图元边框外，仍属于节点的完整视觉边界，供命中、连线和标签避让统一使用。 */
   titleBounds: RectangleBounds
   /** 图标与标题组成的真实视觉边界；重点区域只基于此边界，不放大节点命中区。 */
@@ -140,6 +142,12 @@ const edgeColorByEvidence = {
   // 新清单未携带连线证据时使用中性灰，避免渲染器把未知关系伪装为任何已知业务语义。
   unclassified: '#94a3b8',
 } as const
+
+/**
+ * 协议标签的最大视觉宽度（画布坐标）。标签需要优先保持文字比例，不能使用 Canvas
+ * 的 maxWidth 参数横向挤压字体；超过该宽度时改用字符级省略，避免长协议名称遮挡整张图。
+ */
+const MAX_PROTOCOL_LABEL_WIDTH = 220
 
 /** 重点区域受控调色板；通过 regionId 哈希稳定选色，刷新后颜色不跳变且相邻区域通常不同色。 */
 const focusRegionPalette = [
@@ -635,7 +643,12 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
     // 右侧保留与左侧相对较小的安全边距，保证最右设备完整显示且不浪费可用宽度。
     const topologyContentWidth = Math.max(1, this.width - layerLabelGutter - rightPadding)
 
-    for (const node of this.topology.nodes) {
+    /**
+     * 先只计算图元位置，再按层排序中心点。标题不能沿用统一最大宽度：在截图尺寸下，
+     * 锅炉三分支的节点中心间距小于完整标题宽度，统一宽度会让文字穿透相邻图元。
+     * 该索引只在拓扑或画布尺寸变化时建立，不进入实时状态重绘路径。
+     */
+    const provisionalLayouts = this.topology.nodes.map((node) => {
       const requestedX = Math.round(layerLabelGutter + (node.x / 100) * topologyContentWidth - nodeWidth / 2)
       const requestedY = Math.round((node.y / 100) * this.height - nodeHeight / 2)
       // 顶层与现场层都采用中心坐标；限制图元边界后可防止 y=8 和 y=94 的标签被 Canvas（画布）裁掉。
@@ -643,13 +656,54 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
       // 底部额外保留一行小字，文字虽在图元外部，仍不能被画布裁切。
       const titleSpace = metrics.nodeTitleGap + metrics.nodeTitleHeight
       const y = Math.min(this.height - nodeHeight - titleSpace - 1, Math.max(0, requestedY))
-      const centerX = x + nodeWidth / 2
-      const titleTop = y + nodeHeight + metrics.nodeTitleGap
-      const titleBounds = this.createBoundsFromCenter(centerX, titleTop + metrics.nodeTitleHeight / 2, metrics.nodeTitleMaxWidth, metrics.nodeTitleHeight)
-      const visualBounds = this.unionBounds({ left: x, top: y, right: x + nodeWidth, bottom: y + nodeHeight }, titleBounds)
-      const hitBounds = this.expandBoundsToMinimumSize(visualBounds, centerX, y + nodeHeight / 2, metrics.minimumHitSize)
+      return { node, x, y, centerX: x + nodeWidth / 2 }
+    })
+
+    const sortedNodeIdsByLayer = new Map<string, Array<{ nodeId: string; centerX: number }>>()
+    for (const layout of provisionalLayouts) {
+      const layerId = layout.node.layerId ?? '__ungrouped__'
+      const layerNodes = sortedNodeIdsByLayer.get(layerId) ?? []
+      layerNodes.push({ nodeId: layout.node.nodeId, centerX: layout.centerX })
+      sortedNodeIdsByLayer.set(layerId, layerNodes)
+    }
+
+    const nearestSameLayerGapByNodeId = new Map<string, number>()
+    for (const layerNodes of sortedNodeIdsByLayer.values()) {
+      layerNodes.sort((left, right) => left.centerX - right.centerX || left.nodeId.localeCompare(right.nodeId))
+      for (let index = 0; index < layerNodes.length; index += 1) {
+        const current = layerNodes[index]
+        if (!current) continue
+        const leftGap = index > 0 ? current.centerX - (layerNodes[index - 1]?.centerX ?? current.centerX) : Number.POSITIVE_INFINITY
+        const rightGap = index + 1 < layerNodes.length ? (layerNodes[index + 1]?.centerX ?? current.centerX) - current.centerX : Number.POSITIVE_INFINITY
+        nearestSameLayerGapByNodeId.set(current.nodeId, Math.min(leftGap, rightGap))
+      }
+    }
+
+    const titleSafetyGap = Math.max(4, Math.round(6 * metrics.scale))
+    for (const layout of provisionalLayouts) {
+      const nearestGap = nearestSameLayerGapByNodeId.get(layout.node.nodeId) ?? Number.POSITIVE_INFINITY
+      // 有同层邻居时，标题宽度最多占用邻居间距减安全缝；没有邻居时保持原全局上限。
+      // 不设置过大的最小宽度，极端窄视口宁可显示省略号，也不能再次造成文字碰撞。
+      const titleMaxWidth = Number.isFinite(nearestGap)
+        ? Math.max(1, Math.min(metrics.nodeTitleMaxWidth, nearestGap - titleSafetyGap))
+        : metrics.nodeTitleMaxWidth
+      const titleTop = layout.y + nodeHeight + metrics.nodeTitleGap
+      const titleBounds = this.createBoundsFromCenter(layout.centerX, titleTop + metrics.nodeTitleHeight / 2, titleMaxWidth, metrics.nodeTitleHeight)
+      const visualBounds = this.unionBounds({ left: layout.x, top: layout.y, right: layout.x + nodeWidth, bottom: layout.y + nodeHeight }, titleBounds)
+      const hitBounds = this.expandBoundsToMinimumSize(visualBounds, layout.centerX, layout.y + nodeHeight / 2, metrics.minimumHitSize)
       const routeBounds = this.expandBounds(visualBounds, metrics.nodeRoutePadding + 1)
-      this.layoutByNodeId.set(node.nodeId, { node, x, y, width: nodeWidth, height: nodeHeight, titleBounds, visualBounds, hitBounds, routeBounds })
+      this.layoutByNodeId.set(layout.node.nodeId, {
+        node: layout.node,
+        x: layout.x,
+        y: layout.y,
+        width: nodeWidth,
+        height: nodeHeight,
+        titleMaxWidth,
+        titleBounds,
+        visualBounds,
+        hitBounds,
+        routeBounds,
+      })
     }
   }
 
@@ -1291,7 +1345,14 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
   private drawEdgeLabel(context: CanvasRenderingContext2D, label: string, route: EdgeRoute, color: string): void {
     const metrics = this.getResponsiveMetrics()
     context.font = `600 ${metrics.edgeLabelFontSize}px Microsoft YaHei, sans-serif`
-    const labelWidth = Math.min(68 * metrics.scale, Math.ceil(context.measureText(label).width + 8 * metrics.scale))
+    const labelPadding = 8 * metrics.scale
+    // 标签宽度随画布和文字实际宽度变化；不再固定为 68 像素，避免 VRRP、Modbus TCP 等长协议被压扁。
+    // 同时设置画布比例上限，防止极宽画布上的说明标签占用整条网络通道。
+    const maximumLabelWidth = Math.min(
+      MAX_PROTOCOL_LABEL_WIDTH * metrics.scale,
+      Math.max(120 * metrics.scale, this.width * 0.24),
+    )
+    const labelWidth = Math.min(maximumLabelWidth, Math.ceil(context.measureText(label).width + labelPadding))
     // 高度随画布连续缩放，最低仍可完整容纳 7.2 像素协议文字。
     const labelHeight = 14 * metrics.scale
     const placement = this.findAvailableEdgeLabelPlacement(route, labelWidth, labelHeight)
@@ -1307,8 +1368,28 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
     context.fillStyle = '#d9f8ff'
     context.textAlign = 'center'
     context.textBaseline = 'middle'
-    context.fillText(label, placement.x, placement.y, labelWidth - 8 * metrics.scale)
+    // 字体保持原始比例；只有实际宽度超出标签盒时才按字符追加省略号，避免浏览器横向缩放字形。
+    const visibleLabel = this.truncateTextToWidth(context, label, labelWidth - labelPadding)
+    context.fillText(visibleLabel, placement.x, placement.y)
     this.drawnEdgeLabelBounds.push(this.createBoundsFromCenter(placement.x, placement.y, placement.width, placement.height))
+  }
+
+  /**
+   * 在不改变字体比例的前提下将协议标签裁剪到标签盒宽度。
+   * 中文、英文和数字统一按实际 Canvas 测量值处理；极端窄视口至少保留省略号，
+   * 完整协议内容仍可通过节点悬浮提示查看。
+   */
+  private truncateTextToWidth(context: CanvasRenderingContext2D, text: string, maxWidth: number): string {
+    if (context.measureText(text).width <= maxWidth) return text
+
+    let visibleText = ''
+    for (const character of Array.from(text)) {
+      const candidate = `${visibleText}${character}…`
+      if (context.measureText(candidate).width > maxWidth) break
+      visibleText += character
+    }
+
+    return visibleText ? `${visibleText}…` : '…'
   }
 
   /**
@@ -1429,48 +1510,18 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
    * 这里仍按实测像素宽度截断，避免中文、字母和数字宽度差异造成相邻节点文字碰撞。
    */
   private drawNodeTitle(context: CanvasRenderingContext2D, layout: NodeLayout, metrics: ResponsiveTopologyMetrics): void {
-    const availableWidth = metrics.nodeTitleMaxWidth
+    // 标题宽度已在布局阶段按同层邻居间距计算；绘制必须复用缓存值，避免视觉文字再次越界。
+    const availableWidth = layout.titleMaxWidth
     context.fillStyle = '#e2f7ff'
     context.font = `600 ${metrics.nodeTitleFontSize}px Microsoft YaHei, sans-serif`
     context.textAlign = 'center'
     context.textBaseline = 'top'
-    const [label = ''] = this.wrapText(context, layout.node.title, availableWidth, 1)
-    context.fillText(label, layout.x + layout.width / 2, layout.titleBounds.top, availableWidth)
-  }
-
-  /** 基于 Canvas 实测宽度拆分文本，末行超出时追加省略号而非让标签穿透相邻节点。 */
-  private wrapText(context: CanvasRenderingContext2D, text: string, maxWidth: number, maxLines: number): string[] {
-    const lines: string[] = []
-    let currentLine = ''
-
-    for (const character of Array.from(text)) {
-      const candidate = `${currentLine}${character}`
-
-      if (currentLine && context.measureText(candidate).width > maxWidth) {
-        lines.push(currentLine)
-        currentLine = character
-
-        if (lines.length === maxLines) break
-      } else {
-        currentLine = candidate
-      }
-    }
-
-    if (lines.length < maxLines && currentLine) lines.push(currentLine)
-    const visibleLength = lines.join('').length
-
-    if (visibleLength < text.length && lines.length > 0) {
-      const lastIndex = lines.length - 1
-      let lastLine = lines[lastIndex] ?? ''
-
-      while (lastLine && context.measureText(`${lastLine}…`).width > maxWidth) {
-        lastLine = lastLine.slice(0, -1)
-      }
-
-      lines[lastIndex] = `${lastLine}…`
-    }
-
-    return lines
+    // 先按宽度生成省略文本，再省略 fillText 的 maxWidth 参数；后者会横向缩放字形，
+    // 在窄视口下会把中文标题压成不可读的细线。若连单个省略号都放不下，直接隐藏常驻标题，
+    // 完整名称仍可通过画布外提示层查看，避免文字越过相邻节点边界。
+    const label = this.truncateTextToWidth(context, layout.node.title, availableWidth)
+    if (context.measureText(label).width > availableWidth) return
+    context.fillText(label, layout.x + layout.width / 2, layout.titleBounds.top)
   }
 
   /** 通过受控图元键与设备状态取得图片；同一地址只加载一次，完成后合并为下一帧重绘。 */

@@ -1,3 +1,4 @@
+import { isOverviewSceneId } from '@/config/scene-topology/identifiers'
 import type { VisualizationRuntimeStatus } from '@/modules/visual/orchestration/visualization.store'
 import type { VisualizationCoordinatorSnapshot } from '@/modules/visual/orchestration/visualization-coordinator'
 
@@ -7,7 +8,7 @@ import type { VisualizationCoordinatorSnapshot } from '@/modules/visual/orchestr
  */
 type VisualizationTransitionOverlaySource = Pick<
   VisualizationCoordinatorSnapshot,
-  'activeTransitionId' | 'targetSceneId' | 'targetTopologyId' | 'runtimeStatus'
+  'activeTransitionId' | 'targetSceneId' | 'targetTopologyId' | 'targetProcessDetailId' | 'runtimeStatus'
 >
 
 /** 壳层渲染所需的脱敏遮罩模型；不携带进度或业务目标，避免把伪实时反馈展示给用户。 */
@@ -29,7 +30,9 @@ export function getVisualizationTransitionOverlayState(
 ): VisualizationTransitionOverlayState {
   const hasActiveTarget = source.activeTransitionId !== null
     && source.targetSceneId !== null
-    && source.targetTopologyId !== null
+    && (isOverviewSceneId(source.targetSceneId)
+      ? source.targetTopologyId === null && !source.targetProcessDetailId
+      : (source.targetTopologyId !== null) !== Boolean(source.targetProcessDetailId))
 
   if (!hasActiveTarget || !isTransitioningStatus(source.runtimeStatus)) {
     return { visible: false }

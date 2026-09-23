@@ -4,6 +4,7 @@ import type {
   HostCommandType,
   HostDispatchableCommandType,
   HostProtocolError,
+  ProcessDetailPlaybackPayload,
   ViewOpenPayload,
   WorkflowTriggerPayload,
 } from '@/host-bridge/host-protocol'
@@ -25,6 +26,11 @@ export type HostDispatchableDomainCommand =
       type: 'workflow.trigger'
       correlationId: string
       payload: WorkflowTriggerPayload
+    }
+  | {
+      type: 'process-detail.playback'
+      correlationId: string
+      payload: ProcessDetailPlaybackPayload
     }
   | {
       type: 'device.states.update'
@@ -90,7 +96,8 @@ export class HostCommandDispatcher {
     }
 
     const expectedContextRevision = readExpectedContextRevision(command)
-    const currentContextRevision = snapshot.stableContext?.contextRevision ?? 0
+    // 错误态可能已清空不可信稳定内容；版本必须读取独立单调时钟，兼容旧快照时才回退到稳定上下文。
+    const currentContextRevision = snapshot.contextRevision ?? snapshot.stableContext?.contextRevision ?? 0
     if (expectedContextRevision !== undefined && expectedContextRevision !== currentContextRevision) {
       return this.failure('context.revision.conflict', 'validation', '父页面命令基于旧的稳定上下文版本。', true, currentContextRevision)
     }
@@ -105,6 +112,8 @@ export class HostCommandDispatcher {
         return this.submitDomainCommand({ type: 'view.open', correlationId: command.messageId, payload: command.payload })
       case 'workflow.trigger':
         return this.submitDomainCommand({ type: 'workflow.trigger', correlationId: command.messageId, payload: command.payload })
+      case 'process-detail.playback':
+        return this.submitDomainCommand({ type: 'process-detail.playback', correlationId: command.messageId, payload: command.payload })
       case 'device.states.update':
         return this.submitDomainCommand({ type: 'device.states.update', correlationId: command.messageId, payload: command.payload })
     }
@@ -160,6 +169,6 @@ function isDispatchableCommand(type: HostCommandType): type is HostDispatchableC
 
 /** 只有会修改或派生稳定视图上下文的命令才携带乐观并发版本。 */
 function readExpectedContextRevision(command: HostCommandMessage): number | undefined {
-  if (command.type === 'view.open' || command.type === 'workflow.trigger') return command.payload.expectedContextRevision
+  if (command.type === 'view.open' || command.type === 'workflow.trigger' || command.type === 'process-detail.playback') return command.payload.expectedContextRevision
   return undefined
 }

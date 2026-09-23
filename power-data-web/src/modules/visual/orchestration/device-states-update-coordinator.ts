@@ -1,6 +1,6 @@
 import type { HostCommandExecutionResult } from '@/host-bridge/host-command-lifecycle'
 import type { HostDispatchableDomainCommand } from '@/host-bridge/host-command-dispatcher'
-import type { SceneActivationId, SceneNodeId } from '@/config/scene-topology/identifiers'
+import { toSceneNodeId, type SceneActivationId, type SceneNodeId } from '@/config/scene-topology/identifiers'
 import type { DeviceVisualStatus } from '@/config/scene-topology/types'
 import type { TopologyNodeStateApplyResult, TopologySceneNodeVisualStateUpdate } from '@/modules/visual/topology/topology-device-state-cache'
 import type { TopologyRuntime } from '@/modules/visual/topology/topology-runtime'
@@ -85,6 +85,9 @@ export class DeviceStatesUpdateCoordinator {
   private frameHandle: unknown | undefined
   private unityDispatchActive = false
   private latestSnapshotSequence = 0
+  /** 保存最新完整快照中的全部故障来源节点；具体节点属于哪座沙盘建筑由 Unity 场景资产配置。 */
+  private readonly latestOverviewTargets = new Map<SceneNodeId, UnityNodeVisualStateOperation>()
+  private activeOverviewSceneActivationId: SceneActivationId | undefined
   /**
    * 每次确认物理场景激活标识变化时递增。快照序号只区分设备快照，不能区分同一快照在两个物理控制器实例上的投影；
    * 工作项必须同时匹配快照序号和本代次，才允许进入当前 Unity 控制器。
@@ -132,8 +135,13 @@ export class DeviceStatesUpdateCoordinator {
     }
 
     this.latestSnapshotSequence = topologyResult.snapshotSequence
+    const clearedOverviewTargets = this.updateLatestOverviewTargets(command, topologyResult)
     const diagnostic = this.createDiagnostic(command, startedAt, topologyResult)
     const unityTargets = this.createUnityTargets(topologyResult)
+    if (this.activeOverviewSceneActivationId) {
+      this.latestOverviewTargets.forEach((operation, sceneNodeId) => unityTargets.set(sceneNodeId, operation))
+      clearedOverviewTargets.forEach((operation, sceneNodeId) => unityTargets.set(sceneNodeId, operation))
+    }
     // 目标数量必须取最终操作表：同一节点的设置/清除会去重，历史清除债务也会在这里合并。
     diagnostic.unityTargetCount = unityTargets.size
     this.recordDiagnostic(diagnostic)
@@ -154,7 +162,122 @@ export class DeviceStatesUpdateCoordinator {
    * 该内部补同步不产生外层命令结果，也不会为旧批次保留队列；相同序号由 Unity 新控制器实例重新接纳。
    */
   public resynchronizeLatestSnapshot(sceneActivationId?: SceneActivationId): void {
-    if (this.disposed) return
+    const replay = this.createLatestReplay(sceneActivationId, 'internal-state-replay')
+    if (!replay) return
+    this.scheduleLatestUnitySnapshot(replay.snapshotSequence, replay.targets, replay.diagnostic)
+  }
+
+  /** 设置当前沙盘物理实例；离开沙盘时传 undefined，防止旧入口状态继续写入新场景。 */
+  public setOverviewSceneActivation(sceneActivationId?: SceneActivationId): void {
+    if (sceneActivationId || !this.activeOverviewSceneActivationId) {
+      this.activeOverviewSceneActivationId = sceneActivationId
+      return
+    }
+
+    // 离开沙盘时立即使尚未发送的沙盘目标失效，防止它们迟到后进入业务二层控制器。
+    this.activeOverviewSceneActivationId = undefined
+    this.unityDispatchGeneration += 1
+    this.activeSceneActivationId = undefined
+    this.pendingClearSequenceBySceneNodeId.clear()
+    this.invalidatePendingBatchForSceneChange()
+  }
+
+  /** 切入沙盘后重放最近一次完整快照中的故障来源节点；建筑归属由 Unity 场景配置解析。 */
+  public resynchronizeLatestOverviewSnapshot(sceneActivationId?: SceneActivationId): void {
+    if (this.disposed || !sceneActivationId) return
+    this.activeOverviewSceneActivationId = sceneActivationId
+    if (sceneActivationId !== this.activeSceneActivationId) {
+      this.unityDispatchGeneration += 1
+      this.activeSceneActivationId = sceneActivationId
+      this.pendingClearSequenceBySceneNodeId.clear()
+      this.invalidatePendingBatchForSceneChange()
+    }
+    // 尚无设备快照时只登记沙盘活动实例；首份快照提交后会立即发送当前故障来源节点。
+    if (this.latestSnapshotSequence <= 0) return
+    const diagnostic = this.createReplayDiagnostic('overview-state-replay')
+    this.recordDiagnostic(diagnostic)
+    // 复制目标映射，避免下一份状态快照更新原 Map（映射）时改写已经排队的旧批次。
+    this.scheduleLatestUnitySnapshot(this.latestSnapshotSequence, new Map(this.latestOverviewTargets), diagnostic)
+  }
+
+  /**
+   * 将完整设备快照中的全部故障节点投给沙盘。前端不判断节点属于哪座建筑；Unity 根据场景资产配置聚合。
+   * 返回上一快照存在、本次已恢复或消失的故障来源，供同一沙盘实例立即清除；新实例只需重放当前故障。
+   */
+  private updateLatestOverviewTargets(
+    command: Extract<HostDispatchableDomainCommand, { type: 'device.states.update' }>,
+    result: TopologyNodeStateApplyResult,
+  ): ReadonlyMap<SceneNodeId, UnityNodeVisualStateOperation> {
+    const acceptedNodeIds = new Set(result.acceptedNodeIds)
+    const latestStateByNodeId = new Map<string, { deviceStatus: DeviceVisualStatus; statusUpdatedAt: string }>()
+    for (const item of command.payload.items) {
+      if (acceptedNodeIds.has(item.nodeId)) latestStateByNodeId.set(item.nodeId, item)
+    }
+
+    const previousFaultNodeIds = new Set(this.latestOverviewTargets.keys())
+    this.latestOverviewTargets.clear()
+    latestStateByNodeId.forEach((state, nodeId) => {
+      if (state.deviceStatus !== 'fault') return
+      const faultSourceNodeId = toSceneNodeId(nodeId)
+      previousFaultNodeIds.delete(faultSourceNodeId)
+      this.latestOverviewTargets.set(faultSourceNodeId, { kind: 'set', state: {
+        visualState: 'fault',
+        statusUpdatedAt: state.statusUpdatedAt,
+        sourceRevision: command.payload.sourceRevision,
+      } })
+    })
+
+    const clearedTargets = new Map<SceneNodeId, UnityNodeVisualStateOperation>()
+    previousFaultNodeIds.forEach((faultSourceNodeId) => clearedTargets.set(faultSourceNodeId, { kind: 'clear' }))
+    return clearedTargets
+  }
+
+  /** 生成总览重放所需的最小诊断对象，不把建筑状态加入外层业务回执。 */
+  private createReplayDiagnostic(correlationId: string): DeviceStatesBatchDiagnostic {
+    return {
+      correlationId,
+      snapshotSequence: this.latestSnapshotSequence,
+      sourceRevision: 0,
+      processedAt: this.now(),
+      elapsedMilliseconds: 0,
+      acceptedCount: 0,
+      outdatedCount: 0,
+      unmappedCount: 0,
+      invalidTimestampCount: 0,
+      unityTargetCount: this.latestOverviewTargets.size,
+      unitySucceededCount: 0,
+      unityFailedCount: 0,
+      unityStaleSkippedCount: 0,
+      unityUnavailable: false,
+      unityFrameMergedCount: 0,
+    }
+  }
+
+  /**
+   * 跨场景关键环节必须等目标业务控制器真正接收最新权威状态后才能准备隐藏资源。
+   * 该屏障绕过动画帧单槽，但仍使用有限工作池并等待每条 Unity 回执；普通实时快照继续走原异步快路径，
+   * 因此不会把所有设备状态更新改成阻塞外层命令。
+   */
+  public async resynchronizeLatestSnapshotAndWait(sceneActivationId?: SceneActivationId): Promise<boolean> {
+    const replay = this.createLatestReplay(sceneActivationId, 'internal-state-replay-barrier')
+    if (!replay) return !this.disposed
+    return this.dispatchUnityReplayImmediately(replay)
+  }
+
+  /**
+   * 建立一次场景重放的固定投影和诊断。物理实例变化时先废弃旧代次待发批次，避免旧场景命令进入新控制器；
+   * 空快照或空目标直接返回，不占用诊断槽位，也不创建无意义的异步任务。
+   */
+  private createLatestReplay(
+    sceneActivationId: SceneActivationId | undefined,
+    correlationId: string,
+  ): {
+    snapshotSequence: number
+    generation: number
+    targets: ReadonlyMap<SceneNodeId, UnityNodeVisualStateOperation>
+    diagnostic: DeviceStatesBatchDiagnostic
+  } | undefined {
+    if (this.disposed) return undefined
     if (sceneActivationId && sceneActivationId !== this.activeSceneActivationId) {
       this.unityDispatchGeneration += 1
       this.pendingClearSequenceBySceneNodeId.clear()
@@ -162,12 +285,12 @@ export class DeviceStatesUpdateCoordinator {
     }
     if (sceneActivationId) this.activeSceneActivationId = sceneActivationId
     const snapshot = this.topologyRuntime.getActiveSceneNodeStateSnapshot()
-    if (snapshot.snapshotSequence <= 0) return
+    if (snapshot.snapshotSequence <= 0) return undefined
 
     this.latestSnapshotSequence = Math.max(this.latestSnapshotSequence, snapshot.snapshotSequence)
     const firstUpdate = snapshot.updates.values().next().value as TopologySceneNodeVisualStateUpdate | undefined
     const diagnostic: DeviceStatesBatchDiagnostic = {
-      correlationId: 'internal-state-replay',
+      correlationId,
       snapshotSequence: snapshot.snapshotSequence,
       sourceRevision: firstUpdate?.sourceRevision ?? 0,
       processedAt: this.now(),
@@ -188,11 +311,86 @@ export class DeviceStatesUpdateCoordinator {
     this.pendingClearSequenceBySceneNodeId.forEach((_sequence, sceneNodeId) => {
       if (!replayTargets.has(sceneNodeId)) replayTargets.set(sceneNodeId, { kind: 'clear' })
     })
-    // 空重同步没有任何三维工作，不应占用有限诊断槽位或留下看似未完成的零目标记录。
-    if (replayTargets.size === 0) return
+    if (replayTargets.size === 0) return undefined
+
     diagnostic.unityTargetCount = replayTargets.size
     this.recordDiagnostic(diagnostic)
-    this.scheduleLatestUnitySnapshot(snapshot.snapshotSequence, replayTargets, diagnostic)
+    return {
+      snapshotSequence: snapshot.snapshotSequence,
+      generation: this.unityDispatchGeneration,
+      targets: replayTargets,
+      diagnostic,
+    }
+  }
+
+  /**
+   * 阻塞式重放只用于跨场景关键环节准备屏障。工作项数量受现有并发上限约束，
+   * 每个节点仍携带本地快照序号，期间到达的新快照可由 Unity 端序号门禁覆盖旧值。
+   */
+  private async dispatchUnityReplayImmediately(replay: {
+    snapshotSequence: number
+    generation: number
+    targets: ReadonlyMap<SceneNodeId, UnityNodeVisualStateOperation>
+    diagnostic: DeviceStatesBatchDiagnostic
+  }): Promise<boolean> {
+    let supported = false
+    try {
+      supported = this.unity.supportsNodeVisualState()
+    } catch {
+      supported = false
+    }
+    if (!supported) {
+      replay.diagnostic.unityUnavailable = true
+      replay.diagnostic.unityFailedCount = replay.targets.size
+      this.completeDiagnostic(replay.diagnostic)
+      return false
+    }
+
+    const targets = [...replay.targets]
+    let nextTargetIndex = 0
+    let allSucceeded = true
+    const workerCount = Math.min(this.maximumConcurrentUnityCommands, targets.length)
+    const workers = Array.from({ length: workerCount }, async () => {
+      while (!this.disposed && nextTargetIndex < targets.length) {
+        const target = targets[nextTargetIndex]
+        nextTargetIndex += 1
+        if (!target) continue
+        if (replay.generation !== this.unityDispatchGeneration) {
+          replay.diagnostic.unityStaleSkippedCount += 1
+          allSucceeded = false
+          continue
+        }
+
+        const [sceneNodeId, operation] = target
+        try {
+          const result = operation.kind === 'set'
+            ? await this.unity.setNodeVisualState(
+              sceneNodeId,
+              operation.state.visualState,
+              replay.snapshotSequence,
+              operation.state.statusUpdatedAt,
+              operation.state.sourceRevision,
+            )
+            : await this.unity.clearNodeVisualState(sceneNodeId, replay.snapshotSequence)
+          if (result.success) {
+            replay.diagnostic.unitySucceededCount += 1
+            if (operation.kind === 'clear' && this.pendingClearSequenceBySceneNodeId.get(sceneNodeId) === replay.snapshotSequence) {
+              this.pendingClearSequenceBySceneNodeId.delete(sceneNodeId)
+            }
+          } else {
+            replay.diagnostic.unityFailedCount += 1
+            allSucceeded = false
+          }
+        } catch {
+          replay.diagnostic.unityFailedCount += 1
+          allSucceeded = false
+        }
+      }
+    })
+    await Promise.all(workers)
+    if (this.disposed) return false
+    this.completeDiagnostic(replay.diagnostic)
+    return allSucceeded && replay.generation === this.unityDispatchGeneration
   }
 
   /**
@@ -207,6 +405,8 @@ export class DeviceStatesUpdateCoordinator {
     this.pendingBatch = undefined
     this.activeSceneActivationId = undefined
     this.pendingClearSequenceBySceneNodeId.clear()
+    this.latestOverviewTargets.clear()
+    this.activeOverviewSceneActivationId = undefined
     this.diagnostics.length = 0
   }
 

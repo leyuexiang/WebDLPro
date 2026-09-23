@@ -1,6 +1,6 @@
 %YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
---- !u!114 &-254893425793620825
+--- !u!114 &-4679767560993946260
 MonoBehaviour:
   m_ObjectHideFlags: 11
   m_CorrespondingSourceObject: {fileID: 0}
@@ -39,7 +39,7 @@ Material:
     serializedVersion: 3
     m_TexEnvs:
     - _BASE_COLOR_MAP:
-        m_Texture: {fileID: 2800000, guid: 774100f938c61904bbeebc3f47b9c5e6, type: 3}
+        m_Texture: {fileID: 2800000, guid: 51bd139c57814a64fa102c6cdc956694, type: 3}
         m_Scale: {x: 0.4, y: 0.4}
         m_Offset: {x: 0.3, y: 0.3}
     - _BUMP_MAP:

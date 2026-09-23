@@ -1,28 +1,31 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { ProcessNodeId, RouteId } from '@/config/process/identifiers'
 import type { TopologyDefinition, TopologyDeviceStatus } from '@/config/process/types'
-import type { TopologyDrilldownContent } from '@/config/scene-topology/types'
-import type { TopologyDrilldownLookupResult } from '@/config/scene-topology/topology-drilldown-registry'
 import TopologyCanvas from '@/modules/visual/components/TopologyCanvas.vue'
+import CoalTopologyRuntimeCanvas from '@/modules/visual/topology-preview/CoalTopologyRuntimeCanvas.vue'
+import GasV3TopologyRuntimeCanvas from '@/modules/visual/topology-preview/GasV3TopologyRuntimeCanvas.vue'
+import WindTopologyJsonPreview from '@/modules/visual/topology-preview/WindTopologyJsonPreview.vue'
+import SolarTopologyJsonPreview from '@/modules/visual/topology-preview/SolarTopologyJsonPreview.vue'
+import StepUpSubstationTopologyJsonPreview from '@/modules/visual/topology-preview/StepUpSubstationTopologyJsonPreview.vue'
+import StepDownSubstationTopologyJsonPreview from '@/modules/visual/topology-preview/StepDownSubstationTopologyJsonPreview.vue'
+import ConverterStationTopologyJsonPreview from '@/modules/visual/topology-preview/ConverterStationTopologyJsonPreview.vue'
+import SwitchingStationTopologyJsonPreview from '@/modules/visual/topology-preview/SwitchingStationTopologyJsonPreview.vue'
 import { createTopologyPanelPresentation } from '@/modules/visual/components/topology-panel-presentation'
 import type { TopologyCanvasController } from '@/modules/visual/components/topology-canvas-controller'
-import {
-  TopologyDrilldownCanvasViewSession,
-  type TopologyDrilldownCloseReason,
-} from '@/modules/visual/components/topology-drilldown-canvas-view-session'
-import TopologyDrilldownOverlay from '@/modules/visual/drilldown/TopologyDrilldownOverlay.vue'
+import type { TopologyDataContext } from '@/modules/visual/topology/topology-runtime'
 
 const props = defineProps<{
   topology: TopologyDefinition
   selectedNodeIds: readonly ProcessNodeId[]
   selectedRouteIds: readonly RouteId[]
+  /**
+   * 平台总览隐藏态为 true。此时保留唯一二维画布实例，只暂停输入、尺寸观察和重绘；
+   * 业务层与第三层关键环节均保持双区布局，并在同一实例上切换拓扑数据上下文。
+   */
+  suspended?: boolean
   /** 状态快照是独立运行时数据，不会改写当前拓扑定义或触发画布路径重建。 */
   nodeStatuses?: ReadonlyMap<ProcessNodeId, TopologyDeviceStatus>
-  /** 内容解析保持只读和常数时间；没有解析器时入口仍显示固定空态，不按标题生成内容。 */
-  resolveDrilldownContent?: (contentKey: string, version: string) => TopologyDrilldownLookupResult
-  /** 由壳层稳定上下文门禁控制；场景切换期间隐藏旧拓扑遗留的下钻入口。 */
-  drilldownEnabled?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -33,24 +36,154 @@ const emit = defineEmits<{
   doubleClickNode: [nodeId: ProcessNodeId]
 }>()
 
-const panelElement = ref<HTMLElement | null>(null)
-const panelTitleElement = ref<HTMLHeadingElement | null>(null)
-const isFullscreen = ref(false)
-const topologyCanvas = ref<TopologyCanvasController | null>(null)
-const drilldownOverlay = ref<InstanceType<typeof TopologyDrilldownOverlay> | null>(null)
-/** 独立会话统一消费画布快照，确保同一旧快照不会被重复恢复或跨拓扑复用。 */
-const canvasViewSession = new TopologyDrilldownCanvasViewSession()
-const activeDrilldown = shallowRef<{
-  content?: TopologyDrilldownContent
-  errorMessage?: string
-  triggerElement: HTMLButtonElement
+/** 光伏 JSON 画布在公共控制器之外额外暴露 ready，只用于重置按钮的可用性判断。 */
+const topologyCanvas = ref<(TopologyCanvasController & { readonly ready?: boolean }) | null>(null)
+/** 正式面板是全屏公共祖先，重置、筛选和图形需要一起进入全屏。 */
+const panelRoot = ref<HTMLElement | null>(null)
+/** 风电和四个站类场景使用窄视口接口；站类选择、第三层上下文和就绪事件仍通过受控端口转发。 */
+const jsonOverviewCanvas = ref<{
+  readonly ready: boolean
+  resetView(): void
+  setSelection?(nodeIds: readonly ProcessNodeId[], routeIds: readonly RouteId[]): void
+  /** 站类场景在同一窄端口画布上切换第三层，不向面板暴露具体引擎。 */
+  setTopologyDataContext?(context: TopologyDataContext | undefined): void
 } | null>(null)
-/** 浏览器可能先发 fullscreenchange（全屏变化）再把同一次 Escape（退出键）交给文档，需短时去重。 */
-let lastNativeFullscreenExitAt = Number.NEGATIVE_INFINITY
-/** 从覆盖层进入原生全屏后，下一次退出键只负责退出全屏，不得同时关闭说明层。 */
-let preserveOverlayForNextEscape = false
+/** 清单式画布通过事件报告加载完成；父面板用本地响应状态控制重置入口。 */
+const narrowCanvasReady = ref(false)
 
-const isDrilldownOpen = computed(() => activeDrilldown.value !== null)
+/**
+ * 最新 JSON 组态图接管燃气、燃煤两个“总览”拓扑；两类场景均已下线流程子图。新版燃煤
+ * 明确不需要子拓扑，因而只能精确匹配 `topology.coal-power.overview`，不得依据标题、
+ * sceneId（场景标识）或节点数量泛化替换任何过滤视图。两种画布都继续复用同一控制器、
+ * 状态快照和事件协议，不会改变原有的 Unity（三维引擎）协调链路。
+ */
+const usesLatestJsonOverviewCanvas = computed(() => {
+  const topologyKey = String(props.topology.topologyKey)
+  return topologyKey === 'topology.gas-power.overview' || topologyKey === 'topology.coal-power.overview'
+})
+
+/** 该开关只在已确认的燃煤总览键成立，防止其他场景意外创建燃煤 JSON 运行时画布。 */
+const usesLatestCoalOverviewCanvas = computed(() => String(props.topology.topologyKey) === 'topology.coal-power.overview')
+/** 风电、光伏和四个站类正式总览复用清单式 JSON 运行时，避免退回通用空拓扑画布。 */
+const usesWindOverviewCanvas = computed(() => String(props.topology.topologyKey) === 'topology.wind-power.overview')
+const usesSolarOverviewCanvas = computed(() => String(props.topology.topologyKey) === 'topology.solar-power.overview')
+const usesStepUpSubstationOverviewCanvas = computed(() => (
+  String(props.topology.topologyKey) === 'topology.step-up-substation.overview'
+))
+const usesStepDownSubstationOverviewCanvas = computed(() => (
+  String(props.topology.topologyKey) === 'topology.step-down-substation.overview'
+))
+const usesConverterStationOverviewCanvas = computed(() => (
+  String(props.topology.topologyKey) === 'topology.converter-station.overview'
+))
+const usesSwitchingStationOverviewCanvas = computed(() => (
+  String(props.topology.topologyKey) === 'topology.switching-station.overview'
+))
+/** 窄端口画布只暴露视口和受控选择；四个站类的图元映射来自显式发布清单，不从标题推断。 */
+const usesNarrowJsonOverviewCanvas = computed(() => (
+  usesWindOverviewCanvas.value
+  || usesStepUpSubstationOverviewCanvas.value
+  || usesStepDownSubstationOverviewCanvas.value
+  || usesConverterStationOverviewCanvas.value
+  || usesSwitchingStationOverviewCanvas.value
+))
+/** 外部 JSON 画布自行加载完整文件，空业务节点清单不能覆盖其真实画面。 */
+const usesExternalJsonOverviewCanvas = computed(() => (
+  usesNarrowJsonOverviewCanvas.value || usesSolarOverviewCanvas.value
+))
+
+/**
+ * 拓扑切换时 Vue（渐进式网页框架）会在下一渲染批次替换实际画布组件，而运行时会在同一同步事务内
+ * 连续调用 setTopology、restoreViewState 和 setSelection。稳定代理先缓存最新命令，再在新画布挂载后
+ * 一次性补发，防止命令误落到即将卸载的旧画布或丢失三维反向选择。
+ */
+let pendingControllerTopology = props.topology
+let pendingControllerNodeIds: readonly ProcessNodeId[] = props.selectedNodeIds
+let pendingControllerRouteIds: readonly RouteId[] = props.selectedRouteIds
+let pendingControllerStatuses: ReadonlyMap<ProcessNodeId, TopologyDeviceStatus> = props.nodeStatuses ?? new Map()
+let pendingControllerViewState: ReturnType<TopologyCanvasController['getViewState']>
+let pendingControllerDataContext: TopologyDataContext | undefined
+let canvasControllerDisposed = false
+let canvasControllerSuspended = Boolean(props.suspended)
+
+const stableCanvasController: TopologyCanvasController = Object.freeze({
+  setTopology(topology: TopologyDefinition) {
+    pendingControllerTopology = topology
+    // 新拓扑没有视图快照时不能继承上一拓扑的平移与缩放；运行时若有快照会紧接着重新写入。
+    pendingControllerViewState = undefined
+    if (!canvasControllerSuspended) topologyCanvas.value?.setTopology(topology)
+  },
+  setSelection(nodeIds: readonly ProcessNodeId[], routeIds: readonly RouteId[]) {
+    pendingControllerNodeIds = nodeIds
+    pendingControllerRouteIds = routeIds
+    if (!canvasControllerSuspended) {
+      if (usesNarrowJsonOverviewCanvas.value) jsonOverviewCanvas.value?.setSelection?.(nodeIds, routeIds)
+      else topologyCanvas.value?.setSelection(nodeIds, routeIds)
+    }
+  },
+  setTopologyDataContext(context: TopologyDataContext | undefined) {
+    pendingControllerDataContext = context
+    if (!canvasControllerSuspended) {
+      if (usesNarrowJsonOverviewCanvas.value) jsonOverviewCanvas.value?.setTopologyDataContext?.(context)
+      else topologyCanvas.value?.setTopologyDataContext?.(context)
+    }
+  },
+  setNodeStatuses(statuses: ReadonlyMap<ProcessNodeId, TopologyDeviceStatus>) {
+    pendingControllerStatuses = statuses
+    if (!canvasControllerSuspended) topologyCanvas.value?.setNodeStatuses(statuses)
+  },
+  getViewState() {
+    return topologyCanvas.value?.getViewState() ?? pendingControllerViewState
+  },
+  restoreViewState(state: ReturnType<TopologyCanvasController['getViewState']> extends infer ViewState
+    ? Exclude<ViewState, undefined>
+    : never) {
+    pendingControllerViewState = state
+    if (!canvasControllerSuspended) topologyCanvas.value?.restoreViewState(state)
+  },
+  resetView() {
+    // 显式重置会废弃旧视口快照，避免后续恢复或画布实现替换时再次回放已经失效的位置。
+    pendingControllerViewState = undefined
+    if (!canvasControllerSuspended) {
+      if (usesNarrowJsonOverviewCanvas.value) jsonOverviewCanvas.value?.resetView()
+      else topologyCanvas.value?.resetView()
+    }
+  },
+  setSuspended(suspended: boolean) {
+    if (canvasControllerDisposed || canvasControllerSuspended === suspended) return
+    canvasControllerSuspended = suspended
+    const controller = topologyCanvas.value
+    const narrowController = usesNarrowJsonOverviewCanvas.value ? jsonOverviewCanvas.value : undefined
+    if (!controller && !narrowController) return
+
+    // 清单式站类画布通过受控上下文接口恢复；其 suspended 状态由父属性直接传入，不暴露引擎暂停方法。
+    if (!controller) {
+      if (suspended) return
+      narrowController?.setTopologyDataContext?.(pendingControllerDataContext)
+      narrowController?.setSelection?.(pendingControllerNodeIds, pendingControllerRouteIds)
+      narrowController?.resetView()
+      return
+    }
+
+    controller.setSuspended(suspended)
+    if (suspended) return
+
+    // 暂停期间只保留每类数据的最新快照；恢复时按固定顺序一次补发，避免触发重复布局。
+    controller.setTopology(pendingControllerTopology)
+    controller.setTopologyDataContext?.(pendingControllerDataContext)
+    controller.setNodeStatuses(pendingControllerStatuses)
+    controller.setSelection(pendingControllerNodeIds, pendingControllerRouteIds)
+    if (pendingControllerViewState) controller.restoreViewState(pendingControllerViewState)
+    // 每次从全屏三维重新显示第二层拓扑，都以当前容器尺寸完整适配并居中；只重置视口，不重建画布。
+    pendingControllerViewState = undefined
+    controller.resetView()
+  },
+  dispose() {
+    if (canvasControllerDisposed) return
+    canvasControllerDisposed = true
+    topologyCanvas.value?.dispose()
+  },
+})
 
 /**
  * 组合根只能取得当前已挂载画布的受控端口，不能越过面板创建第二个 Canvas（画布）。
@@ -58,190 +191,196 @@ const isDrilldownOpen = computed(() => activeDrilldown.value !== null)
  * 不能因为端口存在就猜测存在业务节点、设备或三维映射。
  */
 function getCanvasController(): TopologyCanvasController | undefined {
-  return topologyCanvas.value ?? undefined
+  return stableCanvasController
 }
 
-/** 仅暴露单画布端口；全屏状态和 DOM（文档对象模型）元素继续由面板内部管理。 */
+/** 仅暴露单画布端口；面板外观统一由公共满高布局管理，不向上层暴露文档对象模型元素。 */
 defineExpose({ getCanvasController })
 
 /** 展示模型只从当前拓扑计算，切换场景或拓扑时无需复制组件或维护燃气专用条件分支。 */
 const presentation = computed(() => createTopologyPanelPresentation(props.topology))
+/** 外部数据画布依据真实加载状态解锁；其他空场景仍禁用，不能以空业务绑定判断画布为空。 */
+const resetDisabled = computed(() => Boolean(props.suspended) || (usesNarrowJsonOverviewCanvas.value
+  ? !narrowCanvasReady.value
+  : usesSolarOverviewCanvas.value
+    // 真实光伏画布提供 ready；兼容测试替身未实现该只读字段时沿用公共控制器能力。
+    ? topologyCanvas.value?.ready === false
+    : presentation.value.isEmpty))
 
 /**
- * 全屏状态只以浏览器实际登记的全屏元素为准，不能在点击后直接反转本地布尔值。
- * 平台通过 iframe（内嵌框架）承载本应用时，只要父 iframe 声明 fullscreen（全屏）权限，
- * 当前面板就会与三维容器一样越过平台内容区进入浏览器原生全屏；按 Esc、浏览器拒绝请求
- * 或其他元素接管全屏时，按钮名称和画布尺寸都会跟随 fullscreenchange（全屏变化）恢复。
+ * 公共重置入口只调用受控画布端口，不直接接触 Meta2D（网页二维组态引擎）或具体拓扑实现。
+ * 因此燃气、燃煤和后续新增拓扑都复用同一套“适应画布并居中”逻辑；空态和暂停态不发无效命令。
  */
-function synchronizeFullscreenState(): void {
-  const wasFullscreen = isFullscreen.value
-  isFullscreen.value = document.fullscreenElement === panelElement.value
-  if (!wasFullscreen && isFullscreen.value && isDrilldownOpen.value) preserveOverlayForNextEscape = true
-  if (wasFullscreen && !isFullscreen.value && isDrilldownOpen.value) {
-    lastNativeFullscreenExitAt = globalThis.performance.now()
-  }
+function resetTopologyView(): void {
+  if (resetDisabled.value) return
+  stableCanvasController.resetView()
 }
+
+/** 拓扑键切换会替换窄画布实例；替换完成前必须保持重置入口禁用。 */
+function handleNarrowCanvasReady(ready: boolean): void {
+  // 旧画布卸载时可能晚到一个 false 事件，不能让它覆盖新画布已提交的 ready 状态。
+  if (ready) narrowCanvasReady.value = true
+}
+
+/** 画布实现发生替换后补发同一份运行时快照；每类数据只保留最新值，不累积历史命令。 */
+watch(topologyCanvas, (controller) => {
+  if (!controller || canvasControllerDisposed) return
+  controller.setSuspended(canvasControllerSuspended)
+  if (canvasControllerSuspended) return
+  controller.setTopology(pendingControllerTopology)
+  controller.setTopologyDataContext?.(pendingControllerDataContext)
+  controller.setNodeStatuses(pendingControllerStatuses)
+  controller.setSelection(pendingControllerNodeIds, pendingControllerRouteIds)
+  if (pendingControllerViewState) controller.restoreViewState(pendingControllerViewState)
+}, { flush: 'post' })
+
+/** 窄端口画布挂载后补发最新第三层上下文；第二层初始态的 undefined 同样显式恢复筛选文件。 */
+watch(jsonOverviewCanvas, (controller) => {
+  if (!controller || canvasControllerDisposed || canvasControllerSuspended) return
+  controller.setTopologyDataContext?.(pendingControllerDataContext)
+}, { flush: 'post' })
 
 /**
- * 请求当前拓扑面板进入浏览器原生全屏，并始终复用已挂载的唯一画布实例。
- * 请求失败时不伪造全屏状态，也不重建拓扑、清空选择或改变三维运行时；用户可继续使用常规布局。
+ * 模式切换只改变现有控制器的运行许可，不参与画布组件选择，因此第三层往返不会触发卸载和重建。
  */
-async function toggleFullscreen(): Promise<void> {
-  const panel = panelElement.value
-  if (!panel) return
+watch(() => props.suspended, (suspended) => {
+  stableCanvasController.setSuspended(Boolean(suspended))
+}, { immediate: true, flush: 'post' })
 
-  try {
-    if (document.fullscreenElement === panel) {
-      // 用户点击覆盖层自身的退出全屏按钮不需要保留下一次 Escape（退出键）。
-      preserveOverlayForNextEscape = false
-      await document.exitFullscreen()
-      return
-    }
-
-    await panel.requestFullscreen()
-  } catch {
-    // 权限策略或浏览器窗口状态可能拒绝原生全屏；重新读取真实状态，禁止显示虚假的退出按钮。
-    synchronizeFullscreenState()
-  }
-}
-
-/**
- * 打开前只保存一次正式画布视图快照；说明内容必须同时匹配当前节点、内容键和拓扑版本。
- * 所有失败都停留在局部固定空态，不替换正式拓扑、发送三维命令或触发外层事务。
- */
-async function handleOpenDrilldown(nodeId: ProcessNodeId, contentKey: string, triggerElement: HTMLButtonElement): Promise<void> {
-  const sourceNode = props.topology.nodes.find((node) => node.nodeId === nodeId)
-  canvasViewSession.capture(props.topology.topologyKey, topologyCanvas.value?.getViewState())
-
-  let content: TopologyDrilldownContent | undefined
-  let errorMessage: string | undefined
-  if (!sourceNode || sourceNode.drilldown?.contentKey !== contentKey) {
-    errorMessage = '当前拓扑中不存在匹配的下钻入口。'
-  } else if (!props.resolveDrilldownContent) {
-    errorMessage = '下钻说明资源尚未加载。'
-  } else {
-    const result = props.resolveDrilldownContent(contentKey, props.topology.configVersion)
-    if (result.status === 'missing') errorMessage = '下钻说明内容缺失。'
-    else if (result.status === 'version-mismatch') errorMessage = '下钻说明内容版本与当前拓扑不一致。'
-    else if (String(result.content.sourceNodeId) !== String(nodeId)) errorMessage = '下钻说明内容与当前入口不匹配。'
-    else if (result.content.nodes.length === 0 || result.content.edges.length === 0) errorMessage = '下钻说明内容为空。'
-    else content = result.content
-  }
-
-  activeDrilldown.value = { content, errorMessage, triggerElement }
-  await nextTick()
-  drilldownOverlay.value?.focusInitial()
-}
-
-/**
- * 普通关闭恢复同一拓扑的画布数值快照；拓扑切换关闭只丢弃旧快照，不得覆盖新拓扑刚恢复的视图。
- * 全程不调用 prepare/activate（准备/激活）且不重建 Canvas（画布）；触发按钮消失时焦点回退到面板标题。
- */
-async function closeDrilldown(reason: TopologyDrilldownCloseReason = 'regular-close', returnFocus = true): Promise<void> {
-  const previous = activeDrilldown.value
-  if (!previous) return
-  activeDrilldown.value = null
-  preserveOverlayForNextEscape = false
-  // 在等待界面刷新前先消费快照；拓扑切换路径会在此处立即丢弃旧拓扑状态。
-  const snapshot = canvasViewSession.finish(reason)
-  await nextTick()
-  // 普通关闭等待期间也可能发生拓扑切换，因此恢复前必须再次核对快照归属。
-  if (snapshot?.topologyKey === props.topology.topologyKey) {
-    topologyCanvas.value?.restoreViewState(snapshot.viewState)
-  }
-  if (!returnFocus) return
-  if (previous.triggerElement.isConnected) previous.triggerElement.focus()
-  else panelTitleElement.value?.focus()
-}
-
-/** 原生全屏中的第一次退出键交给浏览器退出全屏；常规态退出键只关闭局部覆盖层。 */
-function handleDocumentKeydown(event: KeyboardEvent): void {
-  if (event.key !== 'Escape' || !isDrilldownOpen.value) return
-  if (preserveOverlayForNextEscape) {
-    preserveOverlayForNextEscape = false
-    return
-  }
-  if (isFullscreen.value || document.fullscreenElement === panelElement.value) return
-  // 同一次物理退出键不得同时退出原生全屏和关闭覆盖层；稍后的第二次退出键仍按正常关闭处理。
-  if (globalThis.performance.now() - lastNativeFullscreenExitAt < 350) return
-  event.preventDefault()
-  void closeDrilldown()
-}
-
-/** 监听浏览器原生 Esc 与权限状态变化；组件卸载后立即移除，避免多拓扑切换累积监听器。 */
-onMounted(() => {
-  document.addEventListener('fullscreenchange', synchronizeFullscreenState)
-  document.addEventListener('keydown', handleDocumentKeydown)
+watch(() => props.nodeStatuses, (statuses) => {
+  pendingControllerStatuses = statuses ?? new Map()
 })
 
-/** 切换拓扑时立即释放旧说明层；新拓扑必须由自身可见入口重新打开，禁止迟到内容恢复。 */
-watch(() => props.topology.topologyKey, () => {
-  if (isDrilldownOpen.value) void closeDrilldown('topology-change', false)
-})
+watch(() => String(props.topology.topologyKey), () => {
+  narrowCanvasReady.value = false
+}, { immediate: true })
 
-onBeforeUnmount(() => {
-  document.removeEventListener('fullscreenchange', synchronizeFullscreenState)
-  document.removeEventListener('keydown', handleDocumentKeydown)
-  activeDrilldown.value = null
-  canvasViewSession.clear()
-})
 </script>
 
 <template>
-  <section ref="panelElement" :class="['topology-panel', { 'topology-panel--fullscreen': isFullscreen }]" :aria-label="presentation.title">
-    <div class="topology-panel__content" :inert="isDrilldownOpen" :aria-hidden="isDrilldownOpen ? 'true' : undefined">
-    <header class="topology-panel__header">
-      <div>
-        <p class="eyebrow">控制网络拓扑</p>
-        <h2 ref="panelTitleElement" tabindex="-1">{{ presentation.title }}</h2>
-      </div>
-      <div class="topology-panel__actions">
-        <div v-if="presentation.legends.length > 0" class="topology-panel__legend" aria-label="当前拓扑连线图例">
-          <span v-for="legend in presentation.legends" :key="legend.modifier">
-            <i :class="['topology-panel__line', `topology-panel__line--${legend.modifier}`]" />{{ legend.label }}
-          </span>
-        </div>
-        <!-- 常规态显示放大图标；全屏态改为关闭图标，减少用户寻找退出入口的成本。 -->
-        <button
-          type="button"
-          class="topology-panel__fullscreen-button"
-          :aria-label="isFullscreen ? '退出拓扑图全屏展示' : '全屏展示拓扑图'"
-          :aria-pressed="isFullscreen"
-          :title="isFullscreen ? '退出全屏' : '全屏展示'"
-          @click="void toggleFullscreen()"
-        >
-          <span aria-hidden="true">{{ isFullscreen ? '×' : '⛶' }}</span>
-        </button>
-      </div>
-    </header>
+  <section ref="panelRoot" class="topology-panel" :aria-label="presentation.title">
+    <!-- 公共层统一提供视图重置按钮，避免每个拓扑包装组件重复实现或遗漏该能力。 -->
+    <button
+      type="button"
+      class="topology-panel__reset"
+      :disabled="resetDisabled"
+      aria-label="重置拓扑图位置"
+      title="重置拓扑图位置"
+      @click="resetTopologyView"
+    >
+      重置
+    </button>
+    <div class="topology-panel__content">
+    <!--
+      公共面板默认只承载画布；唯一通用操作是上方的视图重置按钮，不为具体业务拓扑复制操作栏。
+      因此当前燃气、燃煤以及后续接入的拓扑都会自动占满面板高度。
+    -->
+    <CoalTopologyRuntimeCanvas
+      v-if="usesLatestCoalOverviewCanvas"
+      ref="topologyCanvas"
+      :topology="props.topology"
+      :selected-node-ids="props.selectedNodeIds"
+      :selected-route-ids="props.selectedRouteIds"
+      :node-statuses="props.nodeStatuses"
+      @select-node="emit('selectNode', $event)"
+      @clear-selection="emit('clearSelection')"
+      @double-click-node="emit('doubleClickNode', $event)"
+    />
+    <GasV3TopologyRuntimeCanvas
+      v-else-if="usesLatestJsonOverviewCanvas"
+      ref="topologyCanvas"
+      :topology="props.topology"
+      :selected-node-ids="props.selectedNodeIds"
+      :selected-route-ids="props.selectedRouteIds"
+      :node-statuses="props.nodeStatuses"
+      @select-node="emit('selectNode', $event)"
+      @clear-selection="emit('clearSelection')"
+      @double-click-node="emit('doubleClickNode', $event)"
+    />
+    <WindTopologyJsonPreview
+      v-else-if="usesWindOverviewCanvas"
+      ref="jsonOverviewCanvas"
+      :fullscreen-target="panelRoot"
+      :suspended="props.suspended"
+      @ready-change="handleNarrowCanvasReady"
+    />
+    <!-- 升压站使用显式 penId→nodeId→sceneNodeId 绑定，选择事件回到统一运行时。 -->
+    <StepUpSubstationTopologyJsonPreview
+      v-else-if="usesStepUpSubstationOverviewCanvas"
+      ref="jsonOverviewCanvas"
+      :fullscreen-target="panelRoot"
+      :suspended="props.suspended"
+      :selected-node-ids="props.selectedNodeIds"
+      :selected-route-ids="props.selectedRouteIds"
+      @select-node="emit('selectNode', $event)"
+      @clear-selection="emit('clearSelection')"
+      @ready-change="handleNarrowCanvasReady"
+    />
+    <!-- 降压站使用显式清单绑定，反向选择由同一窄端口回放。 -->
+    <StepDownSubstationTopologyJsonPreview
+      v-else-if="usesStepDownSubstationOverviewCanvas"
+      ref="jsonOverviewCanvas"
+      :fullscreen-target="panelRoot"
+      :suspended="props.suspended"
+      :selected-node-ids="props.selectedNodeIds"
+      :selected-route-ids="props.selectedRouteIds"
+      @select-node="emit('selectNode', $event)"
+      @clear-selection="emit('clearSelection')"
+      @ready-change="handleNarrowCanvasReady"
+    />
+    <!-- 换流站使用显式清单绑定，禁止按设备标题推断节点。 -->
+    <ConverterStationTopologyJsonPreview
+      v-else-if="usesConverterStationOverviewCanvas"
+      ref="jsonOverviewCanvas"
+      :fullscreen-target="panelRoot"
+      :suspended="props.suspended"
+      :selected-node-ids="props.selectedNodeIds"
+      :selected-route-ids="props.selectedRouteIds"
+      @select-node="emit('selectNode', $event)"
+      @clear-selection="emit('clearSelection')"
+      @ready-change="handleNarrowCanvasReady"
+    />
+    <!-- 开关站使用显式清单绑定，三维反选不经拓扑标题或坐标推断。 -->
+    <SwitchingStationTopologyJsonPreview
+      v-else-if="usesSwitchingStationOverviewCanvas"
+      ref="jsonOverviewCanvas"
+      :fullscreen-target="panelRoot"
+      :suspended="props.suspended"
+      :selected-node-ids="props.selectedNodeIds"
+      :selected-route-ids="props.selectedRouteIds"
+      @select-node="emit('selectNode', $event)"
+      @clear-selection="emit('clearSelection')"
+      @ready-change="handleNarrowCanvasReady"
+    />
+    <!-- 光伏使用完整控制器：中央状态、二维选择和双击事件都沿用成熟场景的公共通道。 -->
+    <SolarTopologyJsonPreview
+      v-else-if="usesSolarOverviewCanvas"
+      ref="topologyCanvas"
+      :fullscreen-target="panelRoot"
+      :suspended="props.suspended"
+      :topology="props.topology"
+      :selected-node-ids="props.selectedNodeIds"
+      :selected-route-ids="props.selectedRouteIds"
+      :node-statuses="props.nodeStatuses"
+      @select-node="emit('selectNode', $event)"
+      @clear-selection="emit('clearSelection')"
+      @double-click-node="emit('doubleClickNode', $event)"
+    />
     <TopologyCanvas
+      v-else
       ref="topologyCanvas"
       v-show="!presentation.isEmpty"
       :topology="props.topology"
       :selected-node-ids="props.selectedNodeIds"
       :selected-route-ids="props.selectedRouteIds"
       :node-statuses="props.nodeStatuses"
-      :fullscreen="isFullscreen"
-      :drilldown-enabled="props.drilldownEnabled"
       @select-node="emit('selectNode', $event)"
       @clear-selection="emit('clearSelection')"
       @double-click-node="emit('doubleClickNode', $event)"
-      @open-drilldown="handleOpenDrilldown"
     />
     <!-- 空态提示与隐藏的唯一预备画布独立渲染：保留实例避免切换时重建资源，提示仍准确说明尚无已激活拓扑。 -->
-    <p v-if="presentation.isEmpty" class="topology-panel__empty">{{ presentation.emptyMessage }}</p>
-    <!-- 与参考原型一致，提供键盘退出提示；按钮本身始终保留为可见的关闭入口。 -->
-    <p v-if="isFullscreen" class="topology-panel__fullscreen-hint" role="status">按 Esc 键退出全屏</p>
+    <p v-if="presentation.isEmpty && !usesExternalJsonOverviewCanvas" class="topology-panel__empty">{{ presentation.emptyMessage }}</p>
     </div>
-    <TopologyDrilldownOverlay
-      v-if="activeDrilldown"
-      ref="drilldownOverlay"
-      :content="activeDrilldown.content"
-      :error-message="activeDrilldown.errorMessage"
-      :fullscreen="isFullscreen"
-      @close="void closeDrilldown()"
-      @toggle-fullscreen="void toggleFullscreen()"
-    />
   </section>
 </template>
 
@@ -265,100 +404,47 @@ onBeforeUnmount(() => {
   display: grid;
   min-block-size: 0;
   block-size: 100%;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: var(--space-3);
+  /* 单一弹性轨道是所有拓扑的默认值，未来画布接入后无需再声明专用满高修饰类。 */
+  grid-template-rows: minmax(0, 1fr);
+  gap: 0;
 }
 
-.topology-panel__header {
-  display: flex;
-  align-items: start;
-  justify-content: space-between;
-  gap: var(--space-3);
-}
-
-.topology-panel__header > div:first-child {
-  min-inline-size: 0;
-}
-
-.topology-panel__actions {
-  display: flex;
-  align-items: start;
-  flex-wrap: wrap;
-  justify-content: end;
-  gap: var(--space-2);
-}
-
-.topology-panel__header h2,
-.topology-panel__header p,
-.topology-panel__empty {
-  margin: 0;
-}
-
-.topology-panel__header h2 {
-  margin-block-start: var(--space-1);
-  font-size: 1rem;
-}
-
-.topology-panel__header .eyebrow {
-  color: #67e8f9;
-}
-
-.topology-panel__legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  justify-content: end;
-  color: #b7d9e8;
-  font-size: 0.75rem;
-}
-
-.topology-panel__fullscreen-button {
-  display: inline-grid;
-  flex: 0 0 auto;
-  inline-size: 30px;
-  block-size: 30px;
-  place-items: center;
+/*
+ * 按钮悬浮在画布右上角并避开各拓扑自己的全屏按钮；它不参与网格排版，
+ * 所以不会为后续拓扑增加标题行或挤压画布的可用高度。
+ */
+.topology-panel__reset {
+  position: absolute;
+  z-index: 23;
+  inset-block-start: calc(var(--space-4) + 8px);
+  inset-inline-end: calc(var(--space-4) + 48px);
+  min-inline-size: 46px;
+  min-block-size: 32px;
+  padding: 0 9px;
   border: 1px solid rgba(103, 232, 249, 0.44);
   border-radius: 5px;
-  background: rgba(8, 47, 73, 0.56);
+  background: rgba(8, 47, 73, 0.86);
   color: #bff7ff;
-  font-size: 1rem;
-  line-height: 1;
+  font: 600 12px/1 "Microsoft YaHei", sans-serif;
+  cursor: pointer;
   transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
 }
 
-.topology-panel__fullscreen-button:hover,
-.topology-panel__fullscreen-button:focus-visible {
+.topology-panel__reset:hover:not(:disabled),
+.topology-panel__reset:focus-visible {
   border-color: #67e8f9;
-  background: rgba(8, 145, 178, 0.42);
+  background: rgba(8, 145, 178, 0.8);
   color: #ffffff;
 }
 
-.topology-panel__legend span {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+.topology-panel__reset:focus-visible {
+  outline: 2px solid rgba(103, 232, 249, 0.55);
+  outline-offset: 2px;
 }
 
-.topology-panel__line {
-  inline-size: 18px;
-  border-block-start: 2px solid #22d3ee;
-}
-
-.topology-panel__line--pending {
-  border-block-start-style: dashed;
-  border-color: #f59e0b;
-}
-
-.topology-panel__line--conceptual {
-  border-block-start-style: dashed;
-  border-color: #64748b;
-}
-
-/* 新原子清单未声明连线证据时使用中性虚线，不借用旧燃气的“已确认”视觉语义。 */
-.topology-panel__line--unclassified {
-  border-block-start-style: dashed;
-  border-color: #94a3b8;
+.topology-panel__reset:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
 }
 
 .topology-panel__empty {
@@ -371,63 +457,6 @@ onBeforeUnmount(() => {
   color: var(--color-text-secondary);
   line-height: 1.65;
   text-align: center;
-}
-
-/*
- * 浏览器原生全屏元素直接占满物理屏幕可用区域，与三维容器使用相同机制。
- * 不再使用 fixed（固定定位）遮罩，因此嵌入平台后不会被限制在平台为 iframe 分配的内容尺寸内。
- */
-.topology-panel--fullscreen {
-  position: relative;
-  inline-size: 100%;
-  block-size: 100%;
-  min-inline-size: 0;
-  min-block-size: 0;
-  box-sizing: border-box;
-  overflow: hidden;
-  padding: clamp(12px, 1.5vw, 22px);
-  border: 0;
-  border-radius: 0;
-  background: #03111d;
-  box-shadow: none;
-}
-
-/* 全屏时画布接管面板最后一行；ResizeObserver 会在尺寸变更后重绘而不重建缓存。 */
-.topology-panel--fullscreen :deep(.topology-canvas) {
-  min-block-size: 0;
-}
-
-.topology-panel__fullscreen-hint {
-  position: absolute;
-  inset-block-start: 18px;
-  inset-inline-end: 64px;
   margin: 0;
-  padding: 5px 9px;
-  border: 1px solid rgba(103, 232, 249, 0.28);
-  border-radius: 5px;
-  background: rgba(3, 17, 29, 0.78);
-  color: #b7d9e8;
-  font-size: 0.75rem;
-  pointer-events: none;
-}
-
-@media (width < 620px) {
-  .topology-panel__header {
-    align-items: start;
-    flex-direction: column;
-  }
-
-  .topology-panel__legend {
-    justify-content: start;
-  }
-
-  .topology-panel__actions {
-    inline-size: 100%;
-    justify-content: space-between;
-  }
-
-  .topology-panel__fullscreen-hint {
-    display: none;
-  }
 }
 </style>

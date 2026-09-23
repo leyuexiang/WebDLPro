@@ -15,9 +15,9 @@ MonoBehaviour:
   _alarmColor: {r: 1, g: 0.6901961, b: 0, a: 1}
   _faultColor: {r: 1, g: 0, b: 0.03137255, a: 1}
   _offlineColor: {r: 0.6039216, g: 0.6431373, b: 0.69803923, a: 1}
-  _overlayOpacity: 0.32
+  _overlayOpacity: 0.6
   _outlineWidth: 0.3
   _alarmFillPulseFrequency: 0.6
   _faultFillPulseFrequency: 1.5
-  _fillPulseMinimumOpacity: 0.08
+  _fillPulseMinimumOpacity: 0.3
   _showOfflineState: 0

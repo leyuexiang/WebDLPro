@@ -137,6 +137,120 @@ describe('设备状态批量协调器', () => {
     expect(coordinator.getDiagnostics()[0]).toEqual(expect.objectContaining({ unitySucceededCount: 1, unityFailedCount: 0 }))
   })
 
+  it('沙盘活动时把燃气轮机故障节点原样发送给 Unity，恢复后清除同一节点', async () => {
+    const gasTurbineNodeId = toNodeId('asset.gas-turbine')
+    const first = createTopologyResult({
+      snapshotSequence: 1,
+      acceptedNodeIds: [gasTurbineNodeId],
+      activeSceneNodeStatuses: new Map(),
+      activeSceneNodeStateUpdates: new Map(),
+    })
+    const second = createTopologyResult({
+      snapshotSequence: 2,
+      acceptedNodeIds: [gasTurbineNodeId],
+      activeSceneNodeStatuses: new Map(),
+      activeSceneNodeStateUpdates: new Map(),
+    })
+    const { runtime } = createTopologyRuntime([first, second])
+    const unity = createUnityPort()
+    const frameScheduler = createFrameScheduler()
+    const coordinator = new DeviceStatesUpdateCoordinator(runtime, unity, { frameScheduler })
+    coordinator.resynchronizeLatestOverviewSnapshot(toSceneActivationId('scene-activation.overview'))
+
+    await coordinator.submit({
+      type: 'device.states.update',
+      correlationId: 'overview-gas-fault',
+      payload: {
+        sourceRevision: 1,
+        items: [{ nodeId: gasTurbineNodeId, deviceStatus: 'fault', statusUpdatedAt: '2026-08-05T00:00:00.000Z' }],
+      },
+    })
+    frameScheduler.flush()
+    await flushPromises()
+
+    expect(unity.setNodeVisualState).toHaveBeenCalledWith(
+      gasTurbineNodeId,
+      'fault',
+      1,
+      '2026-08-05T00:00:00.000Z',
+      1,
+    )
+    expect(unity.setNodeVisualState).toHaveBeenCalledTimes(1)
+    expect(unity.clearNodeVisualState).not.toHaveBeenCalled()
+
+    await coordinator.submit({
+      type: 'device.states.update',
+      correlationId: 'overview-gas-recovered',
+      payload: {
+        sourceRevision: 2,
+        items: [{ nodeId: gasTurbineNodeId, deviceStatus: 'normal', statusUpdatedAt: '2026-08-05T00:00:01.000Z' }],
+      },
+    })
+    frameScheduler.flush()
+    await flushPromises()
+
+    expect(unity.clearNodeVisualState).toHaveBeenCalledWith(gasTurbineNodeId, 2)
+  })
+
+  it.each([
+    ['锅炉', 'asset.coal-boiler'],
+    ['汽轮机', 'asset.coal-steam-turbine'],
+    ['发电机', 'asset.coal-generator'],
+  ])('沙盘活动时把燃煤%s现场设备故障节点原样发送给 Unity，恢复后清除同一节点', async (_deviceLabel, rawNodeId) => {
+    const coalDeviceNodeId = toNodeId(rawNodeId)
+    const first = createTopologyResult({
+      snapshotSequence: 1,
+      acceptedNodeIds: [coalDeviceNodeId],
+      activeSceneNodeStatuses: new Map(),
+      activeSceneNodeStateUpdates: new Map(),
+    })
+    const second = createTopologyResult({
+      snapshotSequence: 2,
+      acceptedNodeIds: [coalDeviceNodeId],
+      activeSceneNodeStatuses: new Map(),
+      activeSceneNodeStateUpdates: new Map(),
+    })
+    const { runtime } = createTopologyRuntime([first, second])
+    const unity = createUnityPort()
+    const frameScheduler = createFrameScheduler()
+    const coordinator = new DeviceStatesUpdateCoordinator(runtime, unity, { frameScheduler })
+    coordinator.resynchronizeLatestOverviewSnapshot(toSceneActivationId('scene-activation.overview'))
+
+    await coordinator.submit({
+      type: 'device.states.update',
+      correlationId: `overview-coal-fault-${rawNodeId}`,
+      payload: {
+        sourceRevision: 1,
+        items: [{ nodeId: coalDeviceNodeId, deviceStatus: 'fault', statusUpdatedAt: '2026-08-05T00:00:00.000Z' }],
+      },
+    })
+    frameScheduler.flush()
+    await flushPromises()
+
+    expect(unity.setNodeVisualState).toHaveBeenCalledWith(
+      coalDeviceNodeId,
+      'fault',
+      1,
+      '2026-08-05T00:00:00.000Z',
+      1,
+    )
+    expect(unity.setNodeVisualState).toHaveBeenCalledTimes(1)
+    expect(unity.clearNodeVisualState).not.toHaveBeenCalled()
+
+    await coordinator.submit({
+      type: 'device.states.update',
+      correlationId: `overview-coal-recovered-${rawNodeId}`,
+      payload: {
+        sourceRevision: 2,
+        items: [{ nodeId: coalDeviceNodeId, deviceStatus: 'normal', statusUpdatedAt: '2026-08-05T00:00:01.000Z' }],
+      },
+    })
+    frameScheduler.flush()
+    await flushPromises()
+
+    expect(unity.clearNodeVisualState).toHaveBeenCalledWith(coalDeviceNodeId, 2)
+  })
+
   it('Unity能力缺失或节点失败只进入内部诊断，不改变、延迟或补发外层成功', async () => {
     const missingRuntime = createTopologyRuntime([createTopologyResult()]).runtime
     const missingUnity = createUnityPort({ supported: false })
@@ -390,6 +504,47 @@ describe('设备状态批量协调器', () => {
 
     expect(getActiveSceneNodeStateSnapshot).toHaveBeenCalledTimes(1)
     expect(unity.setNodeVisualState).toHaveBeenCalledWith(sceneNodeId, 'offline', 7, '2026-08-03T00:00:00.000Z', 2)
+  })
+
+  it('跨场景关键环节状态屏障会直接等待目标控制器完成最新快照重放', async () => {
+    const latest = createTopologyResult({
+      snapshotSequence: 9,
+      activeSceneNodeStateUpdates: new Map([[sceneNodeId, createState('fault', 9)]]),
+    })
+    const { runtime } = createTopologyRuntime([latest])
+    const unity = createUnityPort()
+    let resolveReplay: ((value: { success: boolean }) => void) | undefined
+    unity.setNodeVisualState.mockImplementationOnce(() => new Promise((resolve) => { resolveReplay = resolve }))
+    const frameScheduler = createFrameScheduler()
+    const coordinator = new DeviceStatesUpdateCoordinator(runtime, unity, { frameScheduler })
+
+    let settled = false
+    const replay = coordinator
+      .resynchronizeLatestSnapshotAndWait(toSceneActivationId('scene-activation.process-detail-target'))
+      .then((result) => {
+        settled = true
+        return result
+      })
+    await Promise.resolve()
+
+    // 阻塞式重放不等待浏览器下一动画帧，但必须等待 Unity 对目标节点的最终回执。
+    expect(frameScheduler.request).not.toHaveBeenCalled()
+    expect(unity.setNodeVisualState).toHaveBeenCalledWith(
+      sceneNodeId,
+      'fault',
+      9,
+      '2026-08-05T00:00:00.000Z',
+      9,
+    )
+    expect(settled).toBe(false)
+
+    resolveReplay?.({ success: true })
+    await expect(replay).resolves.toBe(true)
+    expect(coordinator.getDiagnostics().at(-1)).toEqual(expect.objectContaining({
+      correlationId: 'internal-state-replay-barrier',
+      unitySucceededCount: 1,
+      unityFailedCount: 0,
+    }))
   })
 
   it('最新权威快照没有三维目标或清除债务时不生成空重同步诊断', () => {

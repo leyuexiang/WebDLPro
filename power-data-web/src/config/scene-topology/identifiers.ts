@@ -10,7 +10,7 @@ export type StableIdentifier<TKind extends string> = string & {
   readonly [sceneTopologyIdentifierBrand]: TKind
 }
 
-/** 九个业务场景是固定闭集，外部输入不能注册第十个场景或传入 Unity 文件名。 */
+/** 十三个业务场景是固定闭集，外部输入不能动态注册场景或传入 Unity 文件名。 */
 const sceneIdValues = [
   'coal-power',
   'gas-power',
@@ -21,10 +21,18 @@ const sceneIdValues = [
   'consumption',
   'microgrid',
   'dispatch',
+  'step-up-substation',
+  'step-down-substation',
+  'converter-station',
+  'switching-station',
 ] as const
 
 /** 固定场景值与品牌共同保证原始字符串、错误场景和其他标识类型均不可直接替换。 */
 export type SceneId = (typeof sceneIdValues)[number] & StableIdentifier<'scene'>
+/** 平台总览是独立视图场景，不属于十三项业务场景闭集，也不参与业务清单拓扑校验。 */
+export type OverviewSceneId = 'overview' & StableIdentifier<'overview-scene'>
+/** 所有可由 system.init/view.open 打开的场景联合；业务清单仍只接受 SceneId。 */
+export type ViewSceneId = SceneId | OverviewSceneId
 export type TopologyId = StableIdentifier<'topology'>
 export type ActionId = StableIdentifier<'action'>
 export type NodeId = StableIdentifier<'topology-node'>
@@ -40,9 +48,16 @@ export type TransitionId = StableIdentifier<'transition'>
 export type SceneActivationId = StableIdentifier<'scene-activation'>
 export type ProcessId = StableIdentifier<'process'>
 export type StepId = StableIdentifier<'step'>
+/** 第三层关键环节、独立资源和相机位使用不同品牌，禁止把资源编号当作业务入口编号下发。 */
+export type ProcessDetailId = StableIdentifier<'process-detail'>
+export type ProcessDetailResourceId = StableIdentifier<'process-detail-resource'>
+export type CameraPoseId = StableIdentifier<'camera-pose'>
 export type RouteId = StableIdentifier<'route'>
 export type UnitySceneKey = StableIdentifier<'unity-scene-key'>
 export type UnityRuntimeKey = StableIdentifier<'unity-runtime-key'>
+
+/** 固定平台总览标识独立导出，禁止调用方将其追加到 SCENE_IDS。 */
+export const OVERVIEW_SCENE_ID = 'overview' as OverviewSceneId
 
 /** 仅导出完成品牌转换的固定场景数组，组件不应自行复制或排序场景目录。 */
 export const SCENE_IDS: readonly SceneId[] = sceneIdValues.map((value) => value as SceneId)
@@ -91,10 +106,10 @@ function createStableIdentifier<TKind extends string>(kind: TKind, value: string
   return value as StableIdentifier<TKind>
 }
 
-/** 仅接受固定九场景之一；禁止由标题、路径或模型名称推断场景标识。 */
+/** 仅接受固定十三场景之一；禁止由标题、路径或模型名称推断场景标识。 */
 export function toSceneId(value: string): SceneId {
   if (!sceneIdValues.includes(value as (typeof sceneIdValues)[number])) {
-    throw new Error('场景标识不在固定九场景目录中。')
+    throw new Error('场景标识不在固定十三场景目录中。')
   }
 
   return value as SceneId
@@ -103,6 +118,27 @@ export function toSceneId(value: string): SceneId {
 /** 用于不可信外部输入的非抛出式场景判断，成功后可安全窄化为品牌场景标识。 */
 export function isSceneId(value: unknown): value is SceneId {
   return typeof value === 'string' && sceneIdValues.includes(value as (typeof sceneIdValues)[number])
+}
+
+/** 平台总览只接受唯一固定值，不能用标题、别名或业务场景标识替代。 */
+export function isOverviewSceneId(value: unknown): value is OverviewSceneId {
+  return value === OVERVIEW_SCENE_ID
+}
+
+/** system.init/view.open 与 Unity 场景事件共用的完整视图场景守卫。 */
+export function isViewSceneId(value: unknown): value is ViewSceneId {
+  return isSceneId(value) || isOverviewSceneId(value)
+}
+
+/** 在已验证的视图场景联合中收窄为十三项业务场景，供需要拓扑清单的调用方使用。 */
+export function isBusinessViewSceneId(value: ViewSceneId): value is SceneId {
+  return isSceneId(value)
+}
+
+/** 将已验证的业务或平台总览字符串转换为视图场景标识。 */
+export function toViewSceneId(value: string): ViewSceneId {
+  if (isOverviewSceneId(value)) return OVERVIEW_SCENE_ID
+  return toSceneId(value)
 }
 
 /** 以下工厂函数分别创建严格隔离的稳定标识。 */
@@ -116,6 +152,9 @@ export const toTransitionId = (value: string): TransitionId => createStableIdent
 export const toSceneActivationId = (value: string): SceneActivationId => createStableIdentifier('scene-activation', value)
 export const toProcessId = (value: string): ProcessId => createStableIdentifier('process', value)
 export const toStepId = (value: string): StepId => createStableIdentifier('step', value)
+export const toProcessDetailId = (value: string): ProcessDetailId => createStableIdentifier('process-detail', value)
+export const toProcessDetailResourceId = (value: string): ProcessDetailResourceId => createStableIdentifier('process-detail-resource', value)
+export const toCameraPoseId = (value: string): CameraPoseId => createStableIdentifier('camera-pose', value)
 export const toRouteId = (value: string): RouteId => createStableIdentifier('route', value)
 export const toUnitySceneKey = (value: string): UnitySceneKey => createStableIdentifier('unity-scene-key', value)
 export const toUnityRuntimeKey = (value: string): UnityRuntimeKey => createStableIdentifier('unity-runtime-key', value)

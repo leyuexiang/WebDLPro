@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Runtime.InteropServices;
@@ -71,6 +72,7 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
     // 场景映射版本由受控 iframe 入口参数传入；switchScene 必须与当前运行时握手的映射一致。
     private string _sceneMappingVersion = LocalSceneMappingVersion;
     private IBusinessSceneController _sceneController;
+    private OverviewSceneController _overviewSceneController;
     private MultiSceneCoordinator _sceneCoordinator;
     // 保留实际订阅对象，确保协调器被销毁或替换时先解除旧委托，避免新协调器因标志残留而未绑定。
     private MultiSceneCoordinator _subscribedSceneCoordinator;
@@ -262,6 +264,10 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         public string requestId;
         public string processId;
         public string stepId;
+        // cameraPoseId 只引用当前业务场景已登记的命名镜头点，禁止网页传入位置、旋转或层级路径。
+        public string cameraPoseId;
+        // processDetailId 只表示已发布关键环节，不允许网页传入资源编号、相机位或 Unity 对象路径。
+        public string processDetailId;
         public string unitId;
         public string nodeId;
         // sceneNodeId 是 Unity 场景映射中的稳定三维节点标识；nodeId 仅用于下行旧命令兼容，
@@ -293,6 +299,8 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         public bool success;
         public bool isolate;
         public bool enabled;
+        // 保留历史播放命令载荷字段；当前燃气关键环节实际播放许可由设备状态绑定器决定。
+        public bool playing;
         public float width;
         public float height;
         public float progress;
@@ -338,6 +346,8 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         // 当作“无场景引用”的代码裁掉。重复登记只覆盖同名工厂，不创建第二个实例。
         GasPowerBusinessSceneControllerAdapter.RegisterFactory();
         CoalPowerBusinessSceneControllerAdapter.RegisterFactory();
+        // 光伏场景复用 PowerPlantProcessController，但通过独立适配器声明已核验的聚焦与四态能力。
+        SolarPowerBusinessSceneControllerAdapter.RegisterFactory();
         _instanceId = ReadQueryParameter("instanceId", _instanceId);
         _sceneMappingVersion = ReadQueryParameter("sceneMappingVersion", _sceneMappingVersion);
 
@@ -413,6 +423,12 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
 #endif
     }
 
+    /// <summary>验证固定协议字段是否在原始负载中显式出现，避免 JsonUtility 对缺失布尔值采用默认 false。</summary>
+    private static bool HasJsonField(string messageJson, string fieldName)
+    {
+        return messageJson.IndexOf($"\"{fieldName}\"", StringComparison.Ordinal) >= 0;
+    }
+
     /// <summary>
     /// 由 .jslib 的 SendMessage 调用。方法名不可修改，否则浏览器桥接层无法将消息送入 Unity。
     /// 先校验协议与实例标识，再根据类型执行业务操作，避免外部页面的无关消息影响场景。
@@ -477,6 +493,11 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
             Debug.LogWarning("[UnityIframeBridge] 已拒绝不符合协议或实例标识的消息。");
             return;
         }
+        if (message.type == "setProcessDetailPlayback" && !HasJsonField(messageJson, "playing"))
+        {
+            SendCommandResult(message, false, "process-detail-playback-payload-invalid", "关键环节播放命令必须显式提供播放开关。");
+            return;
+        }
 
         // 释放已开始后不再执行任何场景命令；重复 dispose 仍返回成功回执，保证调用端可安全重试。
         if (_releaseRequested)
@@ -507,11 +528,32 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
             case "switchScene":
                 HandleSwitchScene(message);
                 break;
-            case "enterProcessStep":
-                HandleEnterProcessStep(message);
+            case "moveCameraToPose":
+                HandleMoveCameraToPose(message);
+                break;
+            case "prepareProcessDetail":
+                HandlePrepareProcessDetail(message);
+                break;
+            case "commitProcessDetail":
+                HandleCommitProcessDetail(message);
+                break;
+            case "abortProcessDetail":
+                HandleAbortProcessDetail(message);
+                break;
+            case "enterProcessDetail":
+                HandleEnterProcessDetail(message);
+                break;
+            case "exitProcessDetail":
+                HandleExitProcessDetail(message);
+                break;
+            case "setProcessDetailPlayback":
+                HandleSetProcessDetailPlayback(message);
                 break;
             case "resetScene":
                 HandleResetScene(message);
+                break;
+            case "resetCamera":
+                HandleResetCamera(message);
                 break;
             case "focusNode":
                 HandleFocusNode(message);
@@ -777,24 +819,342 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         SendRequestAcknowledgement("disposed", command.messageId, success, resultMessage, GetSceneStateDescription());
     }
 
-    private void HandleEnterProcessStep(BridgeMessage message)
+    /// <summary>
+    /// 将稳定镜头点标识交给当前业务场景。该命令不携带流程、显隐、描边或状态参数，
+    /// </summary>
+    private void HandleMoveCameraToPose(BridgeMessage message)
     {
         BridgePayload payload = message.payload;
-        string processId = payload?.processId;
-        string stepId = payload?.stepId;
-        string unitId = payload?.unitId;
-        if (!SceneActionProtocolValidator.IsValidProcessStep(processId, stepId, unitId))
+        if (!SceneActionProtocolValidator.IsValidCameraPoseId(payload?.cameraPoseId))
         {
-            SendCommandResult(message, false, "process-step-payload-invalid", "流程命令缺少合法流程、步骤或机组标识。");
+            SendCommandResult(message, false, "camera-pose-payload-invalid", "镜头定位命令缺少合法镜头点标识。");
             return;
         }
-        if (!TryGetSceneController(message, BusinessSceneCapability.EnterProcessStep, out IBusinessSceneController controller))
+        if (!TryGetSceneController(message, BusinessSceneCapability.MoveCameraToPose, out IBusinessSceneController controller))
         {
             return;
         }
-        bool isolate = payload == null || payload.isolate;
-        BusinessSceneCommandResult result = controller.EnterProcessStep(processId, stepId, unitId, isolate);
+        if (!(controller is IBusinessSceneNamedCameraPoseController cameraPoseController))
+        {
+            SendCommandResult(message, false, "capability-not-implemented", "当前业务场景未实现命名镜头点能力。");
+            return;
+        }
+
+        SendSceneCommandResult(message, cameraPoseController.MoveCameraToPose(payload.cameraPoseId));
+    }
+
+    /// <summary>准备命令只生成隐藏候选；网页完成拓扑暂停和全屏布局后必须再发送提交命令。</summary>
+    private void HandlePrepareProcessDetail(BridgeMessage message)
+    {
+        BridgePayload payload = message.payload;
+        if (!SceneActionProtocolValidator.IsValidProcessDetail(
+                payload?.sceneId, payload?.processId, payload?.stepId, payload?.processDetailId, payload?.transitionId))
+        {
+            SendCommandResult(message, false, "process-detail-prepare-payload-invalid", "关键环节准备命令缺少合法业务映射或事务标识。");
+            return;
+        }
+        if (!TryGetProcessDetailController(message, payload.sceneId, out IBusinessSceneProcessDetailController controller))
+        {
+            return;
+        }
+        StartCoroutine(RunPrepareProcessDetail(message, controller));
+    }
+
+    private IEnumerator RunPrepareProcessDetail(BridgeMessage message, IBusinessSceneProcessDetailController controller)
+    {
+        BridgePayload payload = message.payload;
+        BusinessSceneCommandResult result = default;
+        bool completed = false;
+        IEnumerator preparing;
+        try
+        {
+            preparing = controller.PrepareProcessDetailAsync(
+                payload.sceneId, payload.processId, payload.stepId, payload.processDetailId, payload.transitionId,
+                value =>
+                {
+                    if (!completed)
+                    {
+                        completed = true;
+                        result = value;
+                    }
+                });
+        }
+        catch (Exception)
+        {
+            SendCommandResult(message, false, "process-detail-prepare-failed", "关键环节准备流程启动失败。");
+            yield break;
+        }
+        if (preparing == null)
+        {
+            SendCommandResult(message, false, "process-detail-prepare-failed", "关键环节准备流程不可用。");
+            yield break;
+        }
+
+        bool iterationFailed = false;
+        try
+        {
+            while (true)
+            {
+                bool hasNext;
+                object current = null;
+                try
+                {
+                    hasNext = preparing.MoveNext();
+                    if (hasNext)
+                    {
+                        current = preparing.Current;
+                    }
+                }
+                catch (Exception)
+                {
+                    hasNext = false;
+                    iterationFailed = true;
+                }
+                if (!hasNext)
+                {
+                    break;
+                }
+                yield return current;
+            }
+        }
+        finally
+        {
+            (preparing as IDisposable)?.Dispose();
+        }
+        if (iterationFailed || !completed)
+        {
+            SendCommandResult(message, false, "process-detail-prepare-failed", "关键环节准备流程未完成。");
+            yield break;
+        }
         SendSceneCommandResult(message, result);
+    }
+
+    private void HandleCommitProcessDetail(BridgeMessage message)
+    {
+        BridgePayload payload = message.payload;
+        if (!SceneActionProtocolValidator.IsValidProcessDetailExit(payload?.sceneId, payload?.processDetailId, payload?.transitionId))
+        {
+            SendCommandResult(message, false, "process-detail-commit-payload-invalid", "关键环节提交命令缺少合法场景、环节或事务标识。");
+            return;
+        }
+        if (!TryGetProcessDetailController(message, payload.sceneId, out IBusinessSceneProcessDetailController controller))
+        {
+            return;
+        }
+        SendSceneCommandResult(message, controller.CommitPreparedProcessDetail(payload.sceneId, payload.processDetailId, payload.transitionId));
+    }
+
+    private void HandleAbortProcessDetail(BridgeMessage message)
+    {
+        BridgePayload payload = message.payload;
+        if (!SceneActionProtocolValidator.IsValidProcessDetailExit(payload?.sceneId, payload?.processDetailId, payload?.transitionId))
+        {
+            SendCommandResult(message, false, "process-detail-abort-payload-invalid", "关键环节取消命令缺少合法场景、环节或事务标识。");
+            return;
+        }
+        if (!TryGetProcessDetailController(message, payload.sceneId, out IBusinessSceneProcessDetailController controller))
+        {
+            return;
+        }
+        SendSceneCommandResult(message, controller.AbortPreparedProcessDetail(payload.sceneId, payload.processDetailId, payload.transitionId));
+    }
+
+    /// <summary>
+    /// 第三层进入是兼容组合命令。新网页应使用 prepareProcessDetail → commitProcessDetail，
+    /// 该入口仍依次执行两个阶段以兼容当前已发布调用方。
+    /// </summary>
+    private void HandleEnterProcessDetail(BridgeMessage message)
+    {
+        BridgePayload payload = message.payload;
+        if (!SceneActionProtocolValidator.IsValidProcessDetail(
+                payload?.sceneId,
+                payload?.processId,
+                payload?.stepId,
+                payload?.processDetailId,
+                payload?.transitionId))
+        {
+            SendCommandResult(message, false, "process-detail-payload-invalid", "关键环节进入命令缺少合法场景、流程、步骤、环节或事务标识。");
+            return;
+        }
+        if (!TryGetProcessDetailController(message, payload.sceneId, out IBusinessSceneProcessDetailController controller))
+        {
+            return;
+        }
+
+        StartCoroutine(RunEnterProcessDetail(message, controller));
+    }
+
+    private IEnumerator RunEnterProcessDetail(
+        BridgeMessage message,
+        IBusinessSceneProcessDetailController controller)
+    {
+        BridgePayload payload = message.payload;
+        BusinessSceneCommandResult result = default;
+        bool completed = false;
+        IEnumerator entering;
+        try
+        {
+            entering = controller.EnterProcessDetailAsync(
+                payload.sceneId,
+                payload.processId,
+                payload.stepId,
+                payload.processDetailId,
+                payload.transitionId,
+                value =>
+                {
+                    if (!completed)
+                    {
+                        completed = true;
+                        result = value;
+                    }
+                });
+        }
+        catch (Exception)
+        {
+            SendCommandResult(message, false, "process-detail-enter-failed", "关键环节进入流程启动失败。");
+            yield break;
+        }
+
+        if (entering == null)
+        {
+            SendCommandResult(message, false, "process-detail-enter-failed", "关键环节进入流程不可用。");
+            yield break;
+        }
+
+        bool iterationFailed = false;
+        try
+        {
+            while (true)
+            {
+                bool hasNext;
+                object current = null;
+                try
+                {
+                    hasNext = entering.MoveNext();
+                    if (hasNext)
+                    {
+                        current = entering.Current;
+                    }
+                }
+                catch (Exception)
+                {
+                    hasNext = false;
+                    iterationFailed = true;
+                }
+
+                if (!hasNext)
+                {
+                    break;
+                }
+                yield return current;
+            }
+        }
+        finally
+        {
+            (entering as IDisposable)?.Dispose();
+        }
+
+        if (iterationFailed || !completed)
+        {
+            SendCommandResult(message, false, "process-detail-enter-failed", "关键环节进入流程未完成。");
+            yield break;
+        }
+
+        SendSceneCommandResult(message, result);
+    }
+
+    /// <summary>退出只允许当前业务场景、活动关键环节和事务标识，迟到或错环节命令由场景协调器明确隔离。</summary>
+    private void HandleExitProcessDetail(BridgeMessage message)
+    {
+        BridgePayload payload = message.payload;
+        if (!SceneActionProtocolValidator.IsValidProcessDetailExit(payload?.sceneId, payload?.processDetailId, payload?.transitionId))
+        {
+            SendCommandResult(message, false, "process-detail-exit-payload-invalid", "关键环节退出命令缺少合法场景、环节或事务标识。");
+            return;
+        }
+        if (!TryGetProcessDetailController(message, payload.sceneId, out IBusinessSceneProcessDetailController controller))
+        {
+            return;
+        }
+
+        SendSceneCommandResult(message, controller.ExitProcessDetail(payload.sceneId, payload.processDetailId, payload.transitionId));
+    }
+
+    /// <summary>
+    /// 播放命令只控制当前活动关键环节的动画、粒子和气流，不读取设备状态，也不触发进入或退出事务。
+    /// </summary>
+    private void HandleSetProcessDetailPlayback(BridgeMessage message)
+    {
+        BridgePayload payload = message.payload;
+        if (!SceneActionProtocolValidator.IsValidProcessDetailPlayback(payload?.sceneId, payload?.processDetailId))
+        {
+            SendCommandResult(message, false, "process-detail-playback-payload-invalid", "关键环节播放命令缺少合法场景或环节标识。");
+            return;
+        }
+        if (!TryGetProcessDetailController(message, payload.sceneId, out IBusinessSceneProcessDetailController controller))
+        {
+            return;
+        }
+
+        SendSceneCommandResult(
+            message,
+            controller.SetProcessDetailPlayback(payload.sceneId, payload.processDetailId, payload.playing));
+    }
+
+    private bool TryGetProcessDetailController(
+        BridgeMessage message,
+        string expectedSceneId,
+        out IBusinessSceneProcessDetailController processDetailController)
+    {
+        TryBindSceneController();
+        processDetailController = null;
+        if (_sceneController == null)
+        {
+            SendCommandResult(message, false, "controller-unavailable", "当前没有已初始化的业务场景控制器。");
+            return false;
+        }
+        if (!string.Equals(_sceneController.SceneId, expectedSceneId, StringComparison.Ordinal))
+        {
+            SendCommandResult(message, false, "process-detail-scene-mismatch", "关键环节命令不属于当前活动业务场景。");
+            return false;
+        }
+        if (!(_sceneController is IBusinessSceneProcessDetailController resolved))
+        {
+            SendCommandResult(message, false, "process-detail-unsupported", "当前业务场景未声明第三层关键环节能力。");
+            return false;
+        }
+
+        processDetailController = resolved;
+        return true;
+    }
+
+    /// <summary>
+    /// 恢复当前活动场景的初始镜头，并由业务控制器撤销流程、命名镜头和交互产生的临时视觉。
+    /// 设备当前状态必须保留；只有控制器完整成功后才通知前端清空拓扑选择，失败命令不得误清页面状态。
+    /// </summary>
+    private void HandleResetCamera(BridgeMessage message)
+    {
+        TryBindSceneController();
+        if (_sceneController == null)
+        {
+            SendCommandResult(message, false, "controller-unavailable", "当前没有已初始化的业务场景控制器。");
+            return;
+        }
+        if (!(_sceneController is IBusinessSceneCameraResetController cameraResetController))
+        {
+            SendCommandResult(message, false, "camera-reset-unsupported", "当前业务场景未提供相机复位能力。");
+            return;
+        }
+
+        BusinessSceneCommandResult result = cameraResetController.ResetCamera();
+        SendSceneCommandResult(message, result);
+        if (!result.Success)
+        {
+            return;
+        }
+
+        // 复位成功后复用既有 selectionCleared（选择清除）事件；前端会清空节点及关联连线且不会回发 clearSelection。
+        ReportSelectionCleared();
     }
 
     private void HandleResetScene(BridgeMessage message)
@@ -894,6 +1254,12 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
             SendCommandResult(message, false, "node-visual-state-payload-invalid", "设备状态命令缺少合法三维节点标识、固定四态状态或本地快照序号。");
             return;
         }
+        TryBindSceneController();
+        if (_sceneController is OverviewSceneController overviewController)
+        {
+            HandleOverviewBuildingVisualState(message, overviewController, payload.sceneNodeId, visualState, false);
+            return;
+        }
         if (!TryGetSceneController(message, BusinessSceneCapability.UpdateNodeVisualState, out IBusinessSceneController controller))
         {
             return;
@@ -937,6 +1303,12 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
             SendCommandResult(message, false, "node-visual-state-clear-payload-invalid", "设备状态清除命令缺少合法三维节点标识或本地快照序号。");
             return;
         }
+        TryBindSceneController();
+        if (_sceneController is OverviewSceneController overviewController)
+        {
+            HandleOverviewBuildingVisualState(message, overviewController, payload.sceneNodeId, BusinessSceneNodeVisualState.Normal, true);
+            return;
+        }
         if (!TryGetSceneController(message, BusinessSceneCapability.ClearNodeVisualState, out IBusinessSceneController controller))
         {
             return;
@@ -964,6 +1336,41 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
     }
 
     /// <summary>
+    /// 沙盘故障来源由 OverviewBuildingPlaceholder 的序列化节点列表解析。
+    /// 设置命令只允许故障态，恢复统一走清除命令；未绑定来源由总览控制器安全忽略。
+    /// </summary>
+    private void HandleOverviewBuildingVisualState(
+        BridgeMessage message,
+        OverviewSceneController controller,
+        string faultSourceNodeId,
+        BusinessSceneNodeVisualState visualState,
+        bool clearState)
+    {
+        if (!clearState && visualState != BusinessSceneNodeVisualState.Fault)
+        {
+            SendCommandResult(message, false, "overview-building-state-unsupported", "沙盘建筑来源节点只支持故障状态。");
+            return;
+        }
+
+        NodeVisualStateWatermark incomingWatermark = new NodeVisualStateWatermark(message.payload.snapshotSequence);
+        if (_nodeVisualStateWatermarks.TryGetValue(faultSourceNodeId, out NodeVisualStateWatermark latestWatermark) &&
+            IsOutdatedOrDuplicate(incomingWatermark, latestWatermark))
+        {
+            SendCommandResult(message, true, string.Empty, "重复或迟到的沙盘故障来源状态已幂等忽略。");
+            return;
+        }
+
+        BusinessSceneCommandResult result = clearState
+            ? controller.ClearFaultSourceVisualState(faultSourceNodeId)
+            : controller.ApplyFaultSourceVisualState(faultSourceNodeId, BusinessSceneNodeVisualState.Fault);
+        if (result.Success)
+        {
+            _nodeVisualStateWatermarks[faultSourceNodeId] = incomingWatermark;
+        }
+        SendSceneCommandResult(message, result);
+    }
+
+    /// <summary>
     /// 与前端权威快照使用相同顺序：相同序号是幂等重试，更小序号是迟到任务，只有更大序号可执行。
     /// 比较为常数时间且不会创建临时集合。
     /// </summary>
@@ -983,8 +1390,52 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
             return;
         }
 
+        UnsubscribeOverviewController();
         _sceneController = controller;
         ClearNodeVisualStateWatermarks();
+        if (controller is OverviewSceneController overviewController)
+        {
+            _overviewSceneController = overviewController;
+            _overviewSceneController.BuildingSelected += HandleOverviewBuildingSelected;
+            _overviewSceneController.BuildingSelectionCleared += HandleOverviewSelectionCleared;
+        }
+    }
+
+    /// <summary>
+    /// 总览建筑点击只上报稳定建筑标识，作为平台决定下一场景的交互意图。
+    /// Unity 不根据目标 sceneId 自行切换；进入业务场景必须等待平台重新发送受控 switchScene 命令，
+    /// 从而与拓扑准备、遮罩、事务标识和失败恢复保持同一原子事务。
+    /// </summary>
+    private void HandleOverviewBuildingSelected(string overviewBuildingId, string targetSceneId, string buildingName)
+    {
+        if (_releaseRequested || _sceneCoordinator == null ||
+            !SceneSwitchProtocolValidator.IsBoundedIdentifier(overviewBuildingId) ||
+            !SceneSwitchProtocolValidator.IsBoundedIdentifier(targetSceneId) ||
+            !BusinessSceneCatalog.IsRequiredSceneId(targetSceneId))
+        {
+            return;
+        }
+
+        ReportObjectSelected(overviewBuildingId, buildingName);
+        StatusText = $"已选择总览建筑 {overviewBuildingId}，等待平台下发目标场景命令。";
+        LogStatusToBrowserConsole();
+    }
+
+    private void HandleOverviewSelectionCleared()
+    {
+        ReportSelectionCleared();
+    }
+
+    private void UnsubscribeOverviewController()
+    {
+        if (_overviewSceneController == null)
+        {
+            return;
+        }
+
+        _overviewSceneController.BuildingSelected -= HandleOverviewBuildingSelected;
+        _overviewSceneController.BuildingSelectionCleared -= HandleOverviewSelectionCleared;
+        _overviewSceneController = null;
     }
 
     /// <summary>释放当前控制器的有限因果索引；字典不包含 Unity 对象，清空不会触发资源销毁或额外分配。</summary>
@@ -1506,6 +1957,7 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
     /// </summary>
     private void UnsubscribeFromSceneCoordinator()
     {
+        UnsubscribeOverviewController();
         if (_sceneCoordinatorSubscribed && !ReferenceEquals(_subscribedSceneCoordinator, null))
         {
             _subscribedSceneCoordinator.ActiveControllerChanged -= HandleActiveControllerChanged;

@@ -8,25 +8,16 @@ using WebDLPro.Unity.SceneRuntime;
 public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
 {
     private const string ProcessId = "gas-power-generation";
+    private const string GasPowerSceneId = "gas-power";
+    private const string GasTurbineStepId = "gas-turbine";
+    private const string GasTurbineProcessDetailId = "process-detail.gas-power.gas-turbine";
     private const string DefaultBridgeInstanceId = "local-demo-001";
-
-    private static readonly string[] StepIds =
-    {
-        "overview",
-        "grid-output",
-        "gas-network",
-        "inlet-duct",
-        "gas-turbine",
-        "hrsg",
-        "steam-turbine",
-        "generator"
-    };
 
     private static readonly string[] VisualStateNodeIds =
     {
-        "gas-turbine",
-        "hrsg",
-        "steam-turbine"
+        "node.gas-turbine",
+        "node.gas-hrsg",
+        "node.gas-steam-turbine"
     };
 
     private readonly GUIContent[] _visualStateNodeLabels =
@@ -40,40 +31,31 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
     {
         BusinessSceneNodeVisualState.Normal,
         BusinessSceneNodeVisualState.Alarm,
-        BusinessSceneNodeVisualState.Fault
+        BusinessSceneNodeVisualState.Fault,
+        BusinessSceneNodeVisualState.Offline
     };
 
     private static readonly GUIContent[] VisualStateLabels =
     {
         new GUIContent("正常"),
         new GUIContent("告警"),
-        new GUIContent("故障")
+        new GUIContent("故障"),
+        new GUIContent("离线")
     };
 
     [SerializeField] private PowerPlantProcessController _processController;
     [SerializeField] private UnityIframeBridgeManager _bridgeManager;
+    // 与场景内正式第三层协调器共用，面板只调用其公开状态与加载接口，不直接创建模型或修改场景对象。
+    [SerializeField] private ProcessDetailCoordinator _processDetailCoordinator;
 
     [Header("测试设置")]
     [SerializeField] private bool _showPanel = true;
     [SerializeField, Min(0.5f)] private float _autoTestInterval = 2.5f;
     [SerializeField] private string _bridgeInstanceId = DefaultBridgeInstanceId;
 
-    private readonly GUIContent[] _stepLabels =
-    {
-        new GUIContent("总览"),
-        new GUIContent("电网送出"),
-        new GUIContent("燃气网络"),
-        new GUIContent("进气系统"),
-        new GUIContent("燃气轮机"),
-        new GUIContent("余热锅炉"),
-        new GUIContent("汽轮机"),
-        new GUIContent("发电机")
-    };
-
     private bool _isolate = true;
-    private string _unitId = "all";
     // 默认使用场景已登记的稳定节点标识，避免打开面板后节点测试立即落入无效节点错误路径。
-    private string _nodeId = "gas-turbine";
+    private string _nodeId = "node.gas-turbine";
     private int _visualStateNodeIndex;
     // 保存最近一次桥接聚焦使用的选择标识，供“重复聚焦”按钮原样重发以验证幂等处理。
     private string _lastFocusSelectionId;
@@ -83,9 +65,15 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
     private Vector2 _scrollPosition;
     private Coroutine _autoTestRoutine;
     private Coroutine _visualStateTestRoutine;
+    // 关键环节进入需要异步加载资源；单独保存协程句柄，防止测试面板重复启动并发加载。
+    private Coroutine _processDetailTestRoutine;
     private GUIStyle _titleStyle;
     private GUIStyle _sectionStyle;
     private int _messageSequence;
+    // 测试事务使用唯一标识，复用正式协调器的事务去重与迟到回调隔离逻辑。
+    private int _processDetailTransitionSequence;
+    // 进入与退出必须复用同一事务标识，才能覆盖协调器对迟到退出和重复请求的正式保护路径。
+    private string _processDetailTransitionId = string.Empty;
 
     [Serializable]
     private sealed class TestBridgeMessage
@@ -126,6 +114,7 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
     {
         StopAutoTest();
         StopVisualStateTest();
+        StopProcessDetailTest();
     }
 
     /// <summary>
@@ -176,6 +165,7 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
         DrawProcessControls();
         DrawNodeControls();
         DrawVisualStateControls();
+        DrawProcessDetailControls();
         DrawBridgeControls();
 
         GUILayout.Space(4f);
@@ -189,23 +179,7 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
     private void DrawProcessControls()
     {
         GUILayout.Space(4f);
-        GUILayout.Label("流程、显隐与描边", _sectionStyle);
-        GUILayout.BeginHorizontal();
-        GUILayout.Label("机组", GUILayout.Width(38f));
-        DrawUnitButton("全部", "all");
-        DrawUnitButton("1 号", "1");
-        DrawUnitButton("2 号", "2");
-        _isolate = GUILayout.Toggle(_isolate, "隔离上下文", GUILayout.Width(110f));
-        GUILayout.EndHorizontal();
-
-        for (int row = 0; row < 4; row++)
-        {
-            GUILayout.BeginHorizontal();
-            DrawStepButton(row * 2);
-            DrawStepButton(row * 2 + 1);
-            GUILayout.EndHorizontal();
-        }
-
+        GUILayout.Label("场景复位与节点交互", _sectionStyle);
         GUILayout.BeginHorizontal();
         if (GUILayout.Button("重置场景"))
         {
@@ -291,7 +265,7 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
     {
         GUILayout.Space(4f);
         GUILayout.Label("关键设备四态视觉", _sectionStyle);
-        GUILayout.Label("选择已绑定模型后，分别测试正常、告警、故障效果。离线视觉由共享配置开关控制。", GUILayout.MinHeight(22f));
+        GUILayout.Label("选择已绑定模型后，分别测试正常、告警、故障、离线效果。离线视觉是否显示由共享配置开关控制。", GUILayout.MinHeight(22f));
 
         GUILayout.BeginHorizontal();
         for (int nodeIndex = 0; nodeIndex < VisualStateNodeIds.Length; nodeIndex++)
@@ -339,6 +313,53 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
         GUILayout.EndHorizontal();
     }
 
+    /// <summary>
+    /// 复用正式第三层协调器验证燃气轮机资源加载、退出和状态驱动播放。
+    /// 状态按钮固定写入燃气轮机稳定节点，未加载时写入协调器缓存，加载后立即投影到实例。
+    /// </summary>
+    private void DrawProcessDetailControls()
+    {
+        GUILayout.Space(4f);
+        GUILayout.Label("燃气轮机关键环节测试", _sectionStyle);
+        GUILayout.Label(GetProcessDetailState(), GUILayout.MinHeight(20f));
+
+        GUILayout.BeginHorizontal();
+        if (GUILayout.Button("加载燃气轮机关键环节"))
+        {
+            EnterGasTurbineProcessDetail();
+        }
+
+        if (GUILayout.Button("退出关键环节"))
+        {
+            ExitGasTurbineProcessDetail();
+        }
+        GUILayout.EndHorizontal();
+
+        GUILayout.BeginHorizontal();
+        if (GUILayout.Button("关键环节正常"))
+        {
+            ApplyVisualState(GasTurbineStepId, "燃气轮机关键环节", BusinessSceneNodeVisualState.Normal);
+        }
+        if (GUILayout.Button("关键环节告警"))
+        {
+            ApplyVisualState(GasTurbineStepId, "燃气轮机关键环节", BusinessSceneNodeVisualState.Alarm);
+        }
+        if (GUILayout.Button("关键环节故障"))
+        {
+            ApplyVisualState(GasTurbineStepId, "燃气轮机关键环节", BusinessSceneNodeVisualState.Fault);
+        }
+        if (GUILayout.Button("关键环节离线"))
+        {
+            ApplyVisualState(GasTurbineStepId, "燃气轮机关键环节", BusinessSceneNodeVisualState.Offline);
+        }
+        GUILayout.EndHorizontal();
+
+        if (GUILayout.Button("清除关键环节状态"))
+        {
+            ClearVisualState(GasTurbineStepId, "燃气轮机关键环节");
+        }
+    }
+
     private void DrawBridgeControls()
     {
         GUILayout.Space(4f);
@@ -354,15 +375,9 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
             InitializeBridgeSession();
         }
 
-        if (GUILayout.Button("当前步骤"))
+        if (GUILayout.Button("恢复默认状态"))
         {
-            SendBridgeCommand("enterProcessStep", new TestBridgePayload
-            {
-                processId = ProcessId,
-                stepId = GetSelectedStepId(),
-                unitId = _unitId,
-                isolate = _isolate
-            });
+            SendBridgeCommand("resetScene", new TestBridgePayload());
         }
 
         if (GUILayout.Button("重置"))
@@ -408,51 +423,6 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
         }
         GUILayout.EndHorizontal();
 
-        GUILayout.BeginHorizontal();
-        if (GUILayout.Button("旧测试指令"))
-        {
-            SendBridgeCommand("test-command", new TestBridgePayload { text = "runtime-test-panel" });
-        }
-
-        if (GUILayout.Button("无效步骤（错误路径）"))
-        {
-            SendBridgeCommand("enterProcessStep", new TestBridgePayload
-            {
-                processId = ProcessId,
-                stepId = "invalid-step",
-                unitId = _unitId,
-                isolate = _isolate
-            });
-        }
-        GUILayout.EndHorizontal();
-    }
-
-    private void DrawUnitButton(string label, string unitId)
-    {
-        bool selected = _unitId == unitId;
-        if (GUILayout.Toggle(selected, label, "Button", GUILayout.Width(54f)) && !selected)
-        {
-            _unitId = unitId;
-        }
-    }
-
-    private void DrawStepButton(int index)
-    {
-        if (GUILayout.Button(_stepLabels[index], GUILayout.ExpandWidth(true)))
-        {
-            EnterStep(StepIds[index], _unitId, _isolate);
-        }
-    }
-
-    private void EnterStep(string stepId, string unitId, bool isolate)
-    {
-        if (!EnsureProcessController())
-        {
-            return;
-        }
-
-        bool success = _processController.TryEnterProcessStep(ProcessId, stepId, unitId, isolate, out string message);
-        Report(success ? $"流程测试通过：{message}" : $"流程测试失败：{message}");
     }
 
     private void ResetScene()
@@ -467,21 +437,169 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
     }
 
     /// <summary>
+    /// 发起燃气轮机第三层的正式加载流程。协程内只转发固定目录标识，
+    /// 实际资源、展示位置、相机位与状态重放均由协调器和目录校验。
+    /// </summary>
+    private void EnterGasTurbineProcessDetail()
+    {
+        if (!EnsureProcessDetailCoordinator())
+        {
+            return;
+        }
+        if (_processDetailTestRoutine != null)
+        {
+            Report("燃气轮机关键环节正在加载，请等待当前请求完成。");
+            return;
+        }
+        if (_processDetailCoordinator.IsActive &&
+            string.Equals(_processDetailCoordinator.ActiveProcessDetailId, GasTurbineProcessDetailId, StringComparison.Ordinal))
+        {
+            Report("燃气轮机关键环节已经加载。");
+            return;
+        }
+        if (_processDetailCoordinator.IsActive)
+        {
+            Report($"当前已加载 {_processDetailCoordinator.ActiveProcessDetailId}，请先退出后再加载燃气轮机关键环节。");
+            return;
+        }
+
+        _processDetailTransitionId = $"runtime-test-process-detail.{++_processDetailTransitionSequence}";
+        _processDetailTestRoutine = StartCoroutine(EnterGasTurbineProcessDetailAsync(_processDetailTransitionId));
+    }
+
+    /// <summary>
+    /// 将回调结果保存到协程结束后再输出，避免加载器在同一帧完成时留下悬空测试状态。
+    /// finally 向下释放枚举器，使测试面板被禁用时仍可执行加载器的取消清理。
+    /// </summary>
+    private IEnumerator EnterGasTurbineProcessDetailAsync(string transitionId)
+    {
+        BusinessSceneCommandResult result = default;
+        IEnumerator entering = _processDetailCoordinator.EnterAsync(
+            GasPowerSceneId,
+            ProcessId,
+            GasTurbineStepId,
+            GasTurbineProcessDetailId,
+            transitionId,
+            commandResult => result = commandResult);
+        try
+        {
+            while (entering.MoveNext())
+            {
+                yield return entering.Current;
+            }
+        }
+        finally
+        {
+            (entering as IDisposable)?.Dispose();
+        }
+
+        _processDetailTestRoutine = null;
+        if (!result.Success)
+        {
+            _processDetailTransitionId = string.Empty;
+        }
+        Report(result.Success
+            ? $"燃气轮机关键环节加载通过：{result.Message}"
+            : $"燃气轮机关键环节加载失败：{result.Message}");
+    }
+
+    /// <summary>
+    /// 使用进入时生成的同一事务标识退出当前关键环节，不调用重置场景，
+    /// 从而验证协调器恢复二层相机、交互门与资源租约的正式路径。
+    /// </summary>
+    private void ExitGasTurbineProcessDetail()
+    {
+        if (!EnsureProcessDetailCoordinator())
+        {
+            return;
+        }
+        if (_processDetailTestRoutine != null)
+        {
+            StopProcessDetailTest();
+            Report("已取消正在加载的燃气轮机关键环节。");
+            return;
+        }
+        if (!_processDetailCoordinator.IsActive)
+        {
+            Report("当前没有已加载的关键环节。");
+            return;
+        }
+        if (!string.Equals(_processDetailCoordinator.ActiveProcessDetailId, GasTurbineProcessDetailId, StringComparison.Ordinal) ||
+            string.IsNullOrEmpty(_processDetailTransitionId))
+        {
+            Report("当前活动关键环节不是本测试会话加载，未执行退出。");
+            return;
+        }
+
+        BusinessSceneCommandResult result = _processDetailCoordinator.Exit(
+            GasPowerSceneId,
+            GasTurbineProcessDetailId,
+            _processDetailTransitionId);
+        if (result.Success)
+        {
+            _processDetailTransitionId = string.Empty;
+        }
+        Report(result.Success
+            ? $"燃气轮机关键环节退出通过：{result.Message}"
+            : $"燃气轮机关键环节退出失败：{result.Message}");
+    }
+
+    /// <summary>
+    /// 仅取消本面板尚未提交的加载候选，不主动退出已经提交的关键环节。
+    /// 面板隐藏或禁用不应改变用户当前稳定的第三层视图。
+    /// </summary>
+    private void StopProcessDetailTest()
+    {
+        if (_processDetailTestRoutine == null)
+        {
+            return;
+        }
+
+        StopCoroutine(_processDetailTestRoutine);
+        _processDetailTestRoutine = null;
+        if (_processDetailCoordinator != null && !_processDetailCoordinator.IsActive &&
+            !string.IsNullOrEmpty(_processDetailTransitionId))
+        {
+            _processDetailCoordinator.AbortPrepared(
+                GasPowerSceneId,
+                GasTurbineProcessDetailId,
+                _processDetailTransitionId);
+            _processDetailTransitionId = string.Empty;
+        }
+    }
+
+    /// <summary>
     /// 将选中的稳定节点切换到一个固定四态。Normal（正常态）也必须经过正式接口，
     /// 这样才能同时验证状态登记器的基础材质恢复和其它三种状态高亮路径。
     /// </summary>
     private void ApplyVisualState(BusinessSceneNodeVisualState visualState)
     {
-        if (!EnsureProcessController())
+        ApplyVisualState(
+            VisualStateNodeIds[_visualStateNodeIndex],
+            _visualStateNodeLabels[_visualStateNodeIndex].text,
+            visualState);
+    }
+
+    /// <summary>
+    /// 状态测试同时经过第二层正式控制器和第三层协调器。
+    /// 协调器会缓存未加载关键环节的状态，并在加载完成后重放；已加载实例则立即更新视觉和播放许可。
+    /// </summary>
+    private void ApplyVisualState(string nodeId, string nodeLabel, BusinessSceneNodeVisualState visualState)
+    {
+        if (!EnsureProcessController() || !EnsureProcessDetailCoordinator())
         {
             return;
         }
 
-        string nodeId = VisualStateNodeIds[_visualStateNodeIndex];
         BusinessSceneCommandResult result = _processController.UpdateNodeVisualState(nodeId, visualState);
+        if (result.Success)
+        {
+            result = _processDetailCoordinator.UpdateNodeVisualState(nodeId, visualState);
+        }
+
         Report(result.Success
-            ? $"{_visualStateNodeLabels[_visualStateNodeIndex].text}：{GetVisualStateLabel(visualState)}测试通过。"
-            : $"{_visualStateNodeLabels[_visualStateNodeIndex].text}：{GetVisualStateLabel(visualState)}测试失败：{result.Message}");
+            ? $"{nodeLabel}：{GetVisualStateLabel(visualState)}测试通过。"
+            : $"{nodeLabel}：{GetVisualStateLabel(visualState)}测试失败：{result.Message}");
     }
 
     /// <summary>
@@ -490,23 +608,33 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
     /// </summary>
     private void ClearVisualState()
     {
-        if (!EnsureProcessController())
+        ClearVisualState(VisualStateNodeIds[_visualStateNodeIndex], _visualStateNodeLabels[_visualStateNodeIndex].text);
+    }
+
+    /// <summary>
+    /// 清除第二层和第三层的状态覆盖。第三层状态缺失会恢复播放，符合燃气关键环节的状态驱动规则。
+    /// </summary>
+    private void ClearVisualState(string nodeId, string nodeLabel)
+    {
+        if (!EnsureProcessController() || !EnsureProcessDetailCoordinator())
         {
             return;
         }
 
-        string nodeId = VisualStateNodeIds[_visualStateNodeIndex];
         BusinessSceneCommandResult result = _processController.ClearNodeVisualState(nodeId);
+        if (result.Success)
+        {
+            result = _processDetailCoordinator.ClearNodeVisualState(nodeId);
+        }
+
         Report(result.Success
-            ? $"{_visualStateNodeLabels[_visualStateNodeIndex].text}：已清除动态状态。"
-            : $"{_visualStateNodeLabels[_visualStateNodeIndex].text}：清除失败：{result.Message}");
+            ? $"{nodeLabel}：已清除动态状态。"
+            : $"{nodeLabel}：清除失败：{result.Message}");
     }
 
     /// <summary>
-    /// 按正常、告警、故障顺序轮巡当前模型；离线视觉由控制器开关管理，不在默认测试流程中展示。
-    /// </summary>
-    /// <summary>
-    /// 按正常、告警、故障顺序轮巡当前模型；离线视觉由共享配置开关管理，不在默认测试流程中展示。
+    /// 按正常、告警、故障、离线顺序轮巡当前模型。离线状态会始终写入正式状态接口，
+    /// 其视觉是否显示由共享配置开关决定，从而同时覆盖状态缓存与展示开关两条路径。
     /// </summary>
     private IEnumerator RunVisualStateTest()
     {
@@ -539,6 +667,8 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
                 return "告警（半透明覆盖 + 同色描边）";
             case BusinessSceneNodeVisualState.Fault:
                 return "故障（半透明覆盖 + 同色描边）";
+            case BusinessSceneNodeVisualState.Offline:
+                return "离线（由共享配置决定是否显示覆盖）";
             default:
                 return "正常（基础视觉）";
         }
@@ -546,15 +676,8 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
 
     private IEnumerator RunAutoTest()
     {
-        _unitId = "all";
         ResetScene();
         yield return new WaitForSecondsRealtime(_autoTestInterval);
-
-        for (int index = 0; index < StepIds.Length; index++)
-        {
-            EnterStep(StepIds[index], "all", true);
-            yield return new WaitForSecondsRealtime(_autoTestInterval);
-        }
 
         ResetScene();
         _autoTestRoutine = null;
@@ -659,6 +782,25 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
         return false;
     }
 
+    /// <summary>
+    /// 仅绑定当前场景已装配的第三层协调器。面板不自行创建协调器，避免测试绕过目录、资源加载器和相机依赖校验。
+    /// </summary>
+    private bool EnsureProcessDetailCoordinator()
+    {
+        if (_processDetailCoordinator == null)
+        {
+            BindRuntimeReferences();
+        }
+
+        if (_processDetailCoordinator != null)
+        {
+            return true;
+        }
+
+        Report("未找到 ProcessDetailCoordinator。");
+        return false;
+    }
+
     private bool EnsureBridgeManager()
     {
         if (_bridgeManager == null)
@@ -687,6 +829,11 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
             _bridgeManager = GetComponent<UnityIframeBridgeManager>();
         }
 
+        if (_processDetailCoordinator == null)
+        {
+            _processDetailCoordinator = GetComponent<ProcessDetailCoordinator>();
+        }
+
         if (_processController == null)
         {
             _processController = FindFirstObjectByType<PowerPlantProcessController>();
@@ -695,6 +842,42 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
         if (_bridgeManager == null)
         {
             _bridgeManager = FindFirstObjectByType<UnityIframeBridgeManager>();
+        }
+
+        if (_processDetailCoordinator == null)
+        {
+            _processDetailCoordinator = FindFirstObjectByType<ProcessDetailCoordinator>();
+        }
+    }
+
+    /// <summary>
+    /// 通过协调器公开状态显示当前第三层生命周期；不读取或依赖其私有运行时对象。
+    /// </summary>
+    private string GetProcessDetailState()
+    {
+        if (_processDetailCoordinator == null)
+        {
+            return "关键环节协调器未绑定";
+        }
+
+        if (_processDetailCoordinator.IsActive)
+        {
+            return $"已加载：{_processDetailCoordinator.ActiveProcessDetailId}";
+        }
+
+        if (_processDetailCoordinator.HasPreparedProcessDetail)
+        {
+            return $"已准备待提交：{_processDetailCoordinator.PreparedProcessDetailId}";
+        }
+
+        switch (_processDetailCoordinator.ResourceState)
+        {
+            case ProcessDetailResourceRuntimeState.Loading:
+                return "关键环节正在加载。";
+            case ProcessDetailResourceRuntimeState.Failed:
+                return "关键环节上次加载失败，请查看最近结果。";
+            default:
+                return "当前未加载关键环节。";
         }
     }
 
@@ -710,7 +893,7 @@ public sealed class PowerPlantRuntimeTestPanel : MonoBehaviour
 
     private string GetSelectedStepId()
     {
-        return _processController != null ? _processController.CurrentStepId : StepIds[0];
+        return "默认状态";
     }
 
     private void Report(string message)

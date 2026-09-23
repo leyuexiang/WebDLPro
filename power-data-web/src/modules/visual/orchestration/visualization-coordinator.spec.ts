@@ -214,4 +214,55 @@ describe('VisualizationCoordinator', () => {
     })).toMatchObject({ status: 'rejected', error: { code: 'runtime.disposed' } })
     expect(coordinator.submit({ type: 'system.release' })).toEqual({ status: 'ignored', reason: 'idempotent' })
   })
+
+  /**
+   * 事务取代发生在稳定版本提交前，因此两个在途命令可携带同一个稳定版本；首个事务提交后，
+   * 再使用旧版本发起的命令已经是陈旧命令，必须继续受乐观并发校验保护。
+   */
+  it('允许同版本命令取代在途事务，并拒绝提交后仍携带旧版本的命令', () => {
+    const store = useVisualizationStore()
+    const coordinator = new VisualizationCoordinator(store)
+    const firstTransitionId = toTransitionId('transition.revision.first')
+    const replacingTransitionId = toTransitionId('transition.revision.replacing')
+    const staleTransitionId = toTransitionId('transition.revision.stale')
+    const sceneId = toSceneId('wind-power')
+    const firstTopologyId = toTopologyId('topology.wind.overview')
+    const replacingTopologyId = toTopologyId('topology.wind.collection')
+
+    expect(coordinator.submit({
+      type: 'transition.begin',
+      transitionId: firstTransitionId,
+      sceneId,
+      topologyId: firstTopologyId,
+      actionId: null,
+      expectedContextRevision: 0,
+    })).toMatchObject({ status: 'accepted', transitionId: firstTransitionId })
+    expect(coordinator.submit({
+      type: 'transition.begin',
+      transitionId: replacingTransitionId,
+      sceneId,
+      topologyId: replacingTopologyId,
+      actionId: null,
+      expectedContextRevision: 0,
+    })).toMatchObject({ status: 'accepted', supersededTransitionId: firstTransitionId })
+
+    coordinator.submit({ type: 'unity.status.reported', transitionId: replacingTransitionId, status: 'ready' })
+    coordinator.submit({ type: 'topology.status.reported', transitionId: replacingTransitionId, status: 'ready' })
+    expect(coordinator.submit({
+      type: 'transition.commit',
+      transitionId: replacingTransitionId,
+      sceneId,
+      topologyId: replacingTopologyId,
+      actionId: null,
+    })).toMatchObject({ status: 'accepted', contextRevision: 1 })
+
+    expect(coordinator.submit({
+      type: 'transition.begin',
+      transitionId: staleTransitionId,
+      sceneId,
+      topologyId: firstTopologyId,
+      actionId: null,
+      expectedContextRevision: 0,
+    })).toMatchObject({ status: 'rejected', error: { code: 'context.revision.conflict' } })
+  })
 })

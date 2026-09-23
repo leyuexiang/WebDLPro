@@ -4,7 +4,7 @@ using System.Collections;
 namespace WebDLPro.Unity.SceneRuntime
 {
     /// <summary>
-    /// 九个业务场景可声明的统一能力。能力清单用于在调用前明确拒绝不支持的动作，
+    /// 业务场景可声明的统一能力。能力清单用于在调用前明确拒绝不支持的动作，
     /// 不能把“未实现”当作成功，也不能从场景显示名称反推能力。
     /// </summary>
     [Flags]
@@ -12,7 +12,6 @@ namespace WebDLPro.Unity.SceneRuntime
     {
         None = 0,
         Initialize = 1 << 0,
-        EnterProcessStep = 1 << 1,
         FocusNode = 1 << 2,
         UpdateNodeVisualState = 1 << 3,
         SetRouteFlow = 1 << 4,
@@ -21,7 +20,9 @@ namespace WebDLPro.Unity.SceneRuntime
         SetNodeVisibility = 1 << 7,
         ClearSelection = 1 << 8,
         // 清除设备动态状态与 Normal 四态语义不同：前者恢复模型登记时的基础材质颜色，后者是平台明确下发的正常态。
-        ClearNodeVisualState = 1 << 9
+        ClearNodeVisualState = 1 << 9,
+        // 命名镜头点只移动相机，不触发流程、模型显隐、描边或状态变化。
+        MoveCameraToPose = 1 << 10
     }
 
     /// <summary>设备视觉状态固定为四态，禁止场景控制器自行扩展不可互通的字符串枚举。</summary>
@@ -67,6 +68,17 @@ namespace WebDLPro.Unity.SceneRuntime
         }
     }
 
+    /// <summary>
+    /// 总览代表建筑的异常视觉接口。运行时场景层只依赖稳定建筑 ID 和四态枚举，
+    /// 高亮插件、材质和闪烁实现留在具体呈现组件，避免产生程序集反向依赖。
+    /// </summary>
+    public interface IOverviewBuildingVisualStatePresenter
+    {
+        void ApplyVisualState(BusinessSceneNodeVisualState visualState);
+        void ClearVisualState();
+        void ReleaseVisualState();
+    }
+
     /// <summary>初始化上下文只携带稳定目录标识和事务标识，不暴露场景路径或加载对象。</summary>
     public readonly struct BusinessSceneInitializationContext
     {
@@ -85,6 +97,19 @@ namespace WebDLPro.Unity.SceneRuntime
     }
 
     /// <summary>
+    /// 变电站等场景入口所需的节点交互与四态控制契约。
+    /// 接口位于场景运行程序集，具体实现可留在默认 Assembly-CSharp，避免场景入口反向引用具体控制器类型。
+    /// </summary>
+    public interface IBusinessSceneNodeInteractionController
+    {
+        bool SupportsNodeVisualState { get; }
+        bool TryFocusNode(string nodeId, bool isolate, out string message);
+        bool TryClearSelection(out string message);
+        BusinessSceneCommandResult UpdateNodeVisualState(string sceneNodeId, BusinessSceneNodeVisualState visualState);
+        BusinessSceneCommandResult ClearNodeVisualState(string sceneNodeId);
+    }
+
+    /// <summary>
     /// 所有业务场景必须实现的统一控制接口。初始化允许跨帧执行；其他命令返回同步结构化结果，
     /// 场景若未声明对应能力，必须返回 capability-unsupported，禁止静默空执行。
     /// </summary>
@@ -93,7 +118,6 @@ namespace WebDLPro.Unity.SceneRuntime
         string SceneId { get; }
         BusinessSceneCapability Capabilities { get; }
         IEnumerator InitializeAsync(BusinessSceneInitializationContext context, Action<BusinessSceneCommandResult> completed);
-        BusinessSceneCommandResult EnterProcessStep(string processId, string stepId, string unitId, bool isolate);
         BusinessSceneCommandResult FocusNode(string sceneNodeId, bool isolate);
         BusinessSceneCommandResult ClearSelection();
         BusinessSceneCommandResult UpdateNodeVisualState(string sceneNodeId, BusinessSceneNodeVisualState visualState);

@@ -1,5 +1,17 @@
 import { describe, expect, it, vi } from 'vitest'
-import { toActionId, toProcessId, toSceneActivationId, toSceneId, toSceneNodeId, toStepId, toTransitionId } from '@/config/scene-topology/identifiers'
+import {
+  toActionId,
+  toCameraPoseId,
+  toProcessDetailId,
+  toProcessDetailResourceId,
+  toProcessId,
+  toSceneActivationId,
+  toSceneId,
+  toSceneNodeId,
+  toStepId,
+  toTransitionId,
+} from '@/config/scene-topology/identifiers'
+import type { ProcessDetailDefinition } from '@/config/scene-topology/types'
 import { VisualizationRuntimeViewOpenPort } from '@/modules/visual/runtime/visualization-runtime-view-open-port'
 import type { VisualizationRuntimeHostController } from '@/modules/visual/runtime/visualization-runtime-host'
 
@@ -61,23 +73,14 @@ describe('view.open Unity 运行时端口', () => {
     })
   })
 
-  it('流程动作只转换为内层白名单载荷，失败不透出运行时原因', async () => {
+  it('默认状态动作转换为 resetScene，失败不透出运行时原因', async () => {
     const runtime = createRuntime(false)
     const port = new VisualizationRuntimeViewOpenPort(runtime)
 
     await expect(port.executeAction({
-      type: 'enterProcessStep',
-      processId: toProcessId('wind-power-generation'),
-      stepId: toStepId('overview'),
-      defaultUnitId: 'all',
-      isolate: true,
+      type: 'resetScene',
     }, toActionId('action.wind.overview'), toTransitionId('transition.wind.2'))).resolves.toEqual({ success: false, errorCode: 'action.execute.failed' })
-    expect(runtime.sendCommandAndWait).toHaveBeenCalledWith('enterProcessStep', {
-      processId: toProcessId('wind-power-generation'),
-      stepId: toStepId('overview'),
-      unitId: 'all',
-      isolate: true,
-    })
+    expect(runtime.sendCommandAndWait).toHaveBeenCalledWith('resetScene', {})
   })
 
   it('聚焦动作使用当前视图事务作为显式选择标识', async () => {
@@ -94,6 +97,55 @@ describe('view.open Unity 运行时端口', () => {
       sceneNodeId: toSceneNodeId('scene-node.gas-turbine'),
       selectionId: transitionId,
       isolate: false,
+    })
+  })
+
+  it('第三层准备、提交、取消和退出都携带同一事务标识', async () => {
+    const runtime = createRuntime()
+    const port = new VisualizationRuntimeViewOpenPort(runtime)
+    const transitionId = toTransitionId('transition.gas-turbine.detail.01')
+    const detail: ProcessDetailDefinition = {
+      sceneId: toSceneId('gas-power'),
+      processId: toProcessId('gas-power-generation'),
+      stepId: toStepId('gas-turbine'),
+      processDetailId: toProcessDetailId('process-detail.gas-power.gas-turbine'),
+      resourceId: toProcessDetailResourceId('process-detail-resource.gas-power.gas-turbine'),
+      cameraPoseId: toCameraPoseId('camera-pose.gas-power.gas-turbine'),
+      stateNodeId: toSceneNodeId('node.gas-turbine'),
+    }
+
+    await expect(port.prepareProcessDetail(detail, transitionId)).resolves.toEqual({ success: true })
+    await expect(port.commitProcessDetail(detail.sceneId, detail.processDetailId, transitionId)).resolves.toEqual({ success: true })
+    await expect(port.abortProcessDetail(detail.sceneId, detail.processDetailId, transitionId)).resolves.toEqual({ success: true })
+    await expect(port.setProcessDetailPlayback(detail.sceneId, detail.processDetailId, false)).resolves.toEqual({ success: true })
+    await expect(port.exitProcessDetail(detail.sceneId, detail.processDetailId, transitionId)).resolves.toEqual({ success: true })
+
+    expect(runtime.sendCommandAndWait).toHaveBeenNthCalledWith(1, 'prepareProcessDetail', {
+      sceneId: detail.sceneId,
+      processId: detail.processId,
+      stepId: detail.stepId,
+      processDetailId: detail.processDetailId,
+      transitionId,
+    })
+    expect(runtime.sendCommandAndWait).toHaveBeenNthCalledWith(2, 'commitProcessDetail', {
+      sceneId: detail.sceneId,
+      processDetailId: detail.processDetailId,
+      transitionId,
+    })
+    expect(runtime.sendCommandAndWait).toHaveBeenNthCalledWith(3, 'abortProcessDetail', {
+      sceneId: detail.sceneId,
+      processDetailId: detail.processDetailId,
+      transitionId,
+    })
+    expect(runtime.sendCommandAndWait).toHaveBeenNthCalledWith(4, 'setProcessDetailPlayback', {
+      sceneId: detail.sceneId,
+      processDetailId: detail.processDetailId,
+      playing: false,
+    })
+    expect(runtime.sendCommandAndWait).toHaveBeenNthCalledWith(5, 'exitProcessDetail', {
+      sceneId: detail.sceneId,
+      processDetailId: detail.processDetailId,
+      transitionId,
     })
   })
 })

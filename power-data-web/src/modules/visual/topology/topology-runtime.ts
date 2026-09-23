@@ -3,6 +3,32 @@ import type { DeviceVisualStatus, TopologyDefinition } from '@/config/scene-topo
 import type { TopologyRegistry } from '@/config/scene-topology/topology-registry'
 import { TopologyDeviceStateCache, type TopologyNodeStateApplyResult, type TopologyNodeStateBatch } from '@/modules/visual/topology/topology-device-state-cache'
 
+/**
+ * 第三层关键环节使用的独立数据源描述。
+ *
+ * 这里保存的是已审核的 JSON 路径、散列、图元数量和逐图元业务绑定，
+ * 不保存 Meta2D 实例或图片对象；因此切换关键环节只替换同一画布的数据，
+ * 不会创建第二个画布或把状态图元复制到新容器。
+ */
+export interface TopologyDataContext {
+  readonly contextId: string
+  /** 渲染器标识决定由哪套现有公共画布消费上下文，不允许按文件名或场景标题推断。 */
+  /**
+   * `manifest-json` 表示复用清单式公共画布的第三层只读 JSON；它与第二层筛选文件共用一个
+   * Meta2D 实例，但不会把关键环节文件混入第二层组合状态。
+   */
+  readonly renderer: 'gas-v3' | 'coal-v2' | 'solar' | 'manifest-json'
+  readonly topologyPath: string
+  readonly sourceSha256: string
+  readonly expectedPenCount: number
+  /**
+   * 第三层图元到正式业务节点及三维节点的绑定；未提供三维节点的图元只能二维显示。
+   * `nodeId` 是中央选择状态和第二层拓扑共用的业务主键，`sceneNodeId` 是已审核的 Unity 节点，
+   * 两者均由源清单显式登记，运行时不按标题、坐标或数组顺序推断。
+   */
+  readonly bindings: readonly { readonly penId: string; readonly nodeId: string; readonly sceneNodeId?: string }[]
+}
+
 /** 单个拓扑的有限视图状态；不保存 Canvas、图片、事件回调或原始设备消息。 */
 export interface TopologyViewState {
   zoom: number
@@ -31,6 +57,8 @@ export interface PreparedTopology {
 /** 画布适配器只实现当前活动画布所需最小能力；运行时不拥有第二个 Canvas 实例。 */
 export interface TopologyCanvasPort {
   setTopology(topology: TopologyDefinition): void
+  /** 可选的独立数据上下文入口；旧版通用画布无需处理该字段。 */
+  setTopologyDataContext?(context: TopologyDataContext | undefined): void
   setSelection(nodeIds: readonly NodeId[], routeIds: readonly RouteId[]): void
   /** 状态覆盖与选择、缩放、平移分离；实现方只能更新当前画布节点状态，不能替换拓扑定义。 */
   setNodeStatuses(statuses: ReadonlyMap<NodeId, DeviceVisualStatus>): void
@@ -51,6 +79,8 @@ export class TopologyRuntime {
   /** 实时设备状态与准备缓存分离，状态更新不会改变拓扑定义、视图状态或活动事务。 */
   private readonly deviceStateCache: TopologyDeviceStateCache
   private activeTopology: PreparedTopology | undefined
+  /** 活动拓扑保持第二层定义时，单独记录第三层状态节点筛选，避免实时批次把全场景状态扩散到细节模型。 */
+  private activeProcessDetailStateNodeId: SceneNodeId | undefined
   private disposed = false
 
   public constructor(
@@ -100,9 +130,22 @@ export class TopologyRuntime {
 
     try {
       this.canvas.setTopology(prepared.topology)
-      const viewState = this.viewStateByTopologyId.get(prepared.topologyId) ?? this.getDefaultViewState()
-      this.canvas.restoreViewState(viewState)
-      this.canvas.setSelection(viewState.selectedNodeIds, viewState.selectedRouteIds)
+      // 业务层激活必须清除第三层独立文件，避免返回第二层后仍显示关键环节 JSON。
+      this.canvas.setTopologyDataContext?.(undefined)
+      this.activeProcessDetailStateNodeId = undefined
+      const restoredViewState = this.viewStateByTopologyId.get(prepared.topologyId)
+      /*
+       * 首次激活没有用户产生的视口快照，不能伪造 { 缩放: 1, 平移: 0 } 并下发给画布。
+       * JSON 源图元坐标可能远离原点，伪默认值会覆盖画布首次的全图适配，造成数据已加载但
+       * 所有图元落在可视区外。只有从真实活动画布缓存过的视口才允许恢复；首次进入则让
+       * 画布组件依据全部图元自动居中。两种分支都显式清空选择，保持稳定业务状态一致。
+       */
+      if (restoredViewState) {
+        this.canvas.restoreViewState(restoredViewState)
+        this.canvas.setSelection(restoredViewState.selectedNodeIds, restoredViewState.selectedRouteIds)
+      } else {
+        this.canvas.setSelection([], [])
+      }
       // 新画布定义先恢复，再写当前拓扑的状态覆盖；状态缓存不会改动选择、缩放、平移或路径定义。
       this.deviceStateCache.setActiveContext(prepared.sceneId, prepared.topologyId)
       this.canvas.setNodeStatuses(this.deviceStateCache.getActiveTopologyNodeStatuses())
@@ -125,6 +168,108 @@ export class TopologyRuntime {
       }
       return false
     }
+  }
+
+  /**
+   * 在同一业务场景内切换第三层关键环节数据。
+   * 活动 topologyId（拓扑标识）保持为第二层业务拓扑，确保状态缓存仍能按正式节点投影；
+   * 只有画布数据源和第三层状态节点筛选发生变化。
+   */
+  public activateProcessDetail(
+    sceneId: SceneId,
+    stateNodeId: SceneNodeId,
+    context: TopologyDataContext,
+  ): boolean {
+    if (this.disposed || !this.activeTopology || this.activeTopology.sceneId !== sceneId) return false
+    try {
+      this.canvas.setTopologyDataContext?.(context)
+      this.activeProcessDetailStateNodeId = stateNodeId
+      this.deviceStateCache.setActiveContext(sceneId, this.activeTopology.topologyId, stateNodeId)
+      this.canvas.setNodeStatuses(this.deviceStateCache.getActiveTopologyNodeStatuses())
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /**
+   * 兼容未发布拓扑上下文的旧测试/占位清单：保留当前业务拓扑结构，只收窄三维状态投影。
+   * 正式清单必须登记 topologyDataContextId 并走 activateProcessDetail，不能依赖此兼容入口。
+   */
+  public activateProcessDetailStateOnly(sceneId: SceneId, stateNodeId: SceneNodeId): boolean {
+    if (this.disposed || !this.activeTopology || this.activeTopology.sceneId !== sceneId) return false
+    this.activeProcessDetailStateNodeId = stateNodeId
+    this.deviceStateCache.setActiveContext(sceneId, this.activeTopology.topologyId, stateNodeId)
+    this.canvas.setNodeStatuses(this.deviceStateCache.getActiveTopologyNodeStatuses())
+    return true
+  }
+
+  /**
+   * 平台总览成功切入后停用业务拓扑，但不销毁或替换唯一 Canvas。
+   * 当前视口先写入有限缓存，选择同步清空；重复停用保持幂等，状态更新随后只进入权威缓存而不会触碰隐藏旧图。
+   */
+  public deactivate(): boolean {
+    if (this.disposed) return false
+    const previousTopology = this.activeTopology
+    if (!previousTopology) {
+      this.activeProcessDetailStateNodeId = undefined
+      this.deviceStateCache.setActiveContext(undefined, undefined)
+      return true
+    }
+
+    try {
+      this.cacheActiveViewState(previousTopology.topologyId)
+      const cachedState = this.viewStateByTopologyId.get(previousTopology.topologyId) ?? this.getDefaultViewState()
+      this.cacheViewState(previousTopology.topologyId, {
+        ...cachedState,
+        selectedNodeIds: [],
+        selectedRouteIds: [],
+      })
+      this.canvas.setSelection([], [])
+      this.canvas.setTopologyDataContext?.(undefined)
+      this.activeProcessDetailStateNodeId = undefined
+      this.activeTopology = undefined
+      this.deviceStateCache.setActiveContext(undefined, undefined)
+      return true
+    } catch {
+      // 停用失败时保留原活动拓扑，由事务层回切 Unity 或进入明确错误态，不能提交隐藏但仍可操作的旧拓扑。
+      return false
+    }
+  }
+
+  /**
+   * 兼容未登记第三层上下文的旧入口：保存视口后暂时撤销二维活动拓扑，并保留已校验的
+   * `sceneId + stateNodeId`（场景编号 + 状态节点编号）作为唯一三维投影目标。正式清单已经登记独立
+   * JSON 时不调用此方法，而是由 activateProcessDetail 在同一公共画布上切换数据上下文；保留本入口仅为
+   * 旧占位清单和历史测试提供明确的降级语义。
+   */
+  public suspendForProcessDetail(sceneId: SceneId, stateNodeId: SceneNodeId): boolean {
+    if (this.disposed) return false
+    const previousTopology = this.activeTopology
+    // 调用方只能从同一业务场景进入第三层，防止目录错误将另一场景的设备状态投递给当前独立模型。
+    if (!previousTopology || previousTopology.sceneId !== sceneId) return false
+
+    try {
+      this.cacheActiveViewState(previousTopology.topologyId)
+      this.canvas.setTopologyDataContext?.(undefined)
+      this.activeProcessDetailStateNodeId = stateNodeId
+      this.activeTopology = undefined
+      this.deviceStateCache.setActiveContext(sceneId, undefined, stateNodeId)
+      return true
+    } catch {
+      // 保存失败时继续保留旧活动拓扑，事务遮罩会阻断操作并由上层退出刚加载的第三层实例。
+      return false
+    }
+  }
+
+  /**
+   * 已处第三层时只切换状态投影目标，不激活拓扑、不触碰画布，也不重新加载 Unity 资源。
+   * 调用方必须先由目录验证同场景目标；活动二维拓扑存在时拒绝重定向，防止第二层状态被错误收窄。
+   */
+  public retargetProcessDetail(sceneId: SceneId, stateNodeId: SceneNodeId): boolean {
+    if (this.disposed || this.activeTopology) return false
+    this.deviceStateCache.setActiveContext(sceneId, undefined, stateNodeId)
+    return true
   }
 
   /** 单次选择只更新当前画布，不重建拓扑、节点索引或路径缓存。 */
@@ -159,7 +304,14 @@ export class TopologyRuntime {
       }
     }
 
-    this.deviceStateCache.setActiveContext(this.activeTopology?.sceneId, this.activeTopology?.topologyId)
+    /*
+     * 第二层以活动拓扑建立完整场景投影；兼容旧入口在第三层没有活动拓扑时，suspendForProcessDetail
+     * 已经登记了唯一状态节点筛选。这里不得用 undefined 覆盖该上下文，否则停止按钮提交的故障态会只写入
+     * 缓存而不会生成 Unity 状态命令。
+     */
+    if (this.activeTopology) {
+      this.deviceStateCache.setActiveContext(this.activeTopology.sceneId, this.activeTopology.topologyId, this.activeProcessDetailStateNodeId)
+    }
     return this.deviceStateCache.apply(batch, (candidate) => {
       /*
        * 二维画布必须先成功接纳候选完整快照，缓存才会交换权威状态引用。
@@ -195,6 +347,7 @@ export class TopologyRuntime {
     if (this.disposed) return
     this.disposed = true
     this.activeTopology = undefined
+    this.activeProcessDetailStateNodeId = undefined
     this.preparedByTopologyId.clear()
     this.viewStateByTopologyId.clear()
     this.deviceStateCache.dispose()
@@ -249,11 +402,17 @@ export class TopologyRuntime {
     if (!previousTopology) return
 
     try {
-      const viewState = this.viewStateByTopologyId.get(previousTopology.topologyId) ?? this.getDefaultViewState()
+      const viewState = this.viewStateByTopologyId.get(previousTopology.topologyId)
       this.canvas.setTopology(previousTopology.topology)
-      this.canvas.restoreViewState(viewState)
-      this.canvas.setSelection(viewState.selectedNodeIds, viewState.selectedRouteIds)
-      this.deviceStateCache.setActiveContext(previousTopology.sceneId, previousTopology.topologyId)
+      this.canvas.setTopologyDataContext?.(undefined)
+      // 与正常首次激活保持同一规则：没有真实快照时不覆盖组件的初始全图适配。
+      if (viewState) {
+        this.canvas.restoreViewState(viewState)
+        this.canvas.setSelection(viewState.selectedNodeIds, viewState.selectedRouteIds)
+      } else {
+        this.canvas.setSelection([], [])
+      }
+      this.deviceStateCache.setActiveContext(previousTopology.sceneId, previousTopology.topologyId, this.activeProcessDetailStateNodeId)
       this.canvas.setNodeStatuses(this.deviceStateCache.getActiveTopologyNodeStatuses())
     } catch {
       // 补偿失败不记录底层异常或重试；运行时的明确错误态会释放用户交互并避免无界恢复循环。

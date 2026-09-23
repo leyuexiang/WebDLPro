@@ -82,14 +82,18 @@ effect.seeThroughIntensity = 0f;
 4. 每个已绑定渲染器的每个材质槽必须存在控制器配置的颜色属性候选，例如 `_BaseColor` 或 `_BASE_COLOR`，否则整套状态能力应判定不可用。
 5. 黑色系统、无独立模型的逻辑设备、资料未确认的对象不得加入状态绑定。
 6. 状态更新不得移动相机、改变流程步骤、改变拓扑选择、重置场景或修改管线显隐；故障导致的管线停流是唯一已定义的状态联动。
+7. 燃气、燃煤拓扑上层“现场控制与保护”节点只用于拓扑发起的三维聚焦，可聚合主设备、对应控制线和控制柜，但不得写入 `_visualStateBindings`，也不得进入三维鼠标反向选择索引；下层“现场设备”节点必须各自只绑定一个主设备，并独占反向选择与四态视觉。
+8. `_nodes` 中每个节点均提供“聚焦相机点位（可选）”：填写场景内 Transform 后，拓扑或三维点击聚焦会平滑移动到该点位的世界坐标与旋转；留空时继续根据节点目标模型的合并包围盒执行默认聚焦。重新执行燃气场景配置菜单时，已按同一 `sceneNodeId` 保存的点位引用必须保留。
 
 燃煤场景当前允许四态的显式绑定：
 
 | sceneNodeId | 绑定模型 |
 | --- | --- |
-| `node.coal-boiler` | 燃煤锅炉、汽包、下降管。 |
-| `node.coal-steam-turbine` | 低中高压汽轮机。 |
-| `node.coal-generator` | 发电机、励磁机。 |
+| `node.coal-feeder` | 给煤机。 |
+| `node.coal-boiler` | 锅炉。 |
+| `node.coal-steam-turbine` | 汽轮机。 |
+| `node.coal-generator` | 发电机。 |
+| `node.coal-precipitator` | 除尘器。 |
 
 燃气场景当前允许四态的显式绑定：
 
@@ -98,6 +102,7 @@ effect.seeThroughIntensity = 0f;
 | `gas-turbine` | 燃气轮机。 |
 | `hrsg` | 余热锅炉。 |
 | `steam-turbine` | 蒸汽轮机。 |
+| `generator` | 发电机。 |
 
 ## 六、总览与关键流程场景搭建标准
 

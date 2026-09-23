@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { toSceneId, toTopologyId, toTransitionId } from '@/config/scene-topology/identifiers'
+import { OVERVIEW_SCENE_ID, toSceneId, toTopologyId, toTransitionId } from '@/config/scene-topology/identifiers'
 import { getVisualizationTransitionOverlayState } from '@/modules/visual/orchestration/visualization-transition-overlay'
 
 describe('getVisualizationTransitionOverlayState', () => {
@@ -28,6 +28,15 @@ describe('getVisualizationTransitionOverlayState', () => {
       targetTopologyId: null,
       runtimeStatus: 'ready',
     })).toEqual({ visible: false })
+  })
+
+  it('平台总览以无拓扑目标作为完整切换事务并持续遮罩', () => {
+    expect(getVisualizationTransitionOverlayState({
+      activeTransitionId: toTransitionId('transition.overview'),
+      targetSceneId: OVERVIEW_SCENE_ID,
+      targetTopologyId: null,
+      runtimeStatus: 'switching',
+    })).toEqual({ visible: true })
   })
 
   it('不完整或迟到的事务状态不能锁住已恢复的稳定视图', () => {

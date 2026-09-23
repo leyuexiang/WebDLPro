@@ -1,4 +1,9 @@
-/** 页面加载后允许完成清单、拓扑和三维准备的最长时间。 */
+/**
+ * 页面加载后允许完成配置、清单、拓扑和外层协议组合装配的最长时间。
+ * 第二版协议的 system.ready（系统就绪）不再等待 Unity；Unity 及初始稳定视图
+ * 由收到 system.init（系统初始化）后启动的独立 120 秒门限负责。因此这里仍保持
+ * 15 秒短门限，只约束不含大资源下载的外层装配过程。
+ */
 export const EMBEDDED_SHELL_STARTUP_TIMEOUT_MS = 15_000
 
 /** 计时器接口可替换为假计时器，使启动期限测试不依赖真实等待。 */
@@ -33,7 +38,7 @@ export class EmbeddedShellStartupDeadline {
     }, EMBEDDED_SHELL_STARTUP_TIMEOUT_MS)
   }
 
-  /** 运行时组合根成功启动并发送 system.ready 后关闭期限。 */
+  /** 外层协议组合根成功启动并发送 system.ready（系统就绪）后关闭页面级期限。 */
   public succeed(): void {
     if (this.settled) return
     this.settled = true

@@ -1,6 +1,7 @@
-import { SCENE_IDS, isSceneId, validateStableIdentifier } from '@/config/scene-topology/identifiers'
+import { SCENE_IDS, isOverviewSceneId, isSceneId, validateStableIdentifier } from '@/config/scene-topology/identifiers'
 import type { SceneTopologyManifest, SceneTopologyManifestValidationIssue } from '@/config/scene-topology/types'
 import { MAX_TOPOLOGY_DRILLDOWN_CONTENT_COUNT } from '@/config/scene-topology/topology-drilldown-registry'
+import { hasTopologyIconKey } from '@/services/topology/topology-icon-registry'
 
 /** 与 Unity 节点快照水位表一致；结构清单超过该值会使清除补偿无法保证完整交付。 */
 export const MAX_DEVICE_STATE_SCENE_NODE_TARGETS_PER_SCENE = 500
@@ -208,6 +209,10 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
     appendIssue(issues, 'drilldown.capacity', '下钻说明内容数量超过固定容量。')
   }
   const actionItems = readArray(manifest, 'actions', issues, 'manifest.actions')
+  // 未交付第三层的旧场景清单按零项处理；一旦提供目录，后续会执行完整唯一性与交叉引用校验。
+  const processDetailItems = manifest.processDetails === undefined
+    ? []
+    : readArray(manifest, 'processDetails', issues, 'manifest.process-details')
   const unityMappingItems = readArray(manifest, 'unitySceneMappings', issues, 'manifest.unity-scene-mappings')
   const manifestVersion = typeof manifest.manifestVersion === 'string' ? manifest.manifestVersion : ''
 
@@ -596,6 +601,44 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
     }
   }
 
+  /**
+   * 第三层目录独立于第二层流程步骤映射：同一场景可登记零到多个环节，但入口、资源、相机位和流程步骤组合都必须唯一。
+   * 校验只读取显式稳定编号，不扫描标题、拓扑节点或模型名称推断绑定。
+   */
+  const processDetailsById = new Map<string, UnknownRecord>()
+  const processDetailResourceIds = new Set<string>()
+  const processDetailCameraPoseIds = new Set<string>()
+  const processDetailStepReferences = new Set<string>()
+  for (const item of processDetailItems) {
+    if (!isRecord(item) || !validateIdentifier(item.processDetailId, '关键环节标识', issues)) {
+      appendIssue(issues, 'process-detail.shape', '关键环节目录项缺少有效稳定标识。')
+      continue
+    }
+    const processDetailId = String(item.processDetailId)
+    if (processDetailsById.has(processDetailId)) appendIssue(issues, 'process-detail.duplicate', '关键环节标识重复。')
+    processDetailsById.set(processDetailId, item)
+    if (!isSceneId(item.sceneId)) appendIssue(issues, 'process-detail.scene', '关键环节必须引用固定业务场景。')
+    if (!validateIdentifier(item.processId, '关键环节流程标识', issues) || !validateIdentifier(item.stepId, '关键环节步骤标识', issues)) {
+      appendIssue(issues, 'process-detail.process-step', '关键环节流程或步骤标识无效。')
+    }
+    for (const [field, label, used, duplicateCode] of [
+      ['resourceId', '关键环节资源标识', processDetailResourceIds, 'process-detail.duplicate-resource'],
+      ['cameraPoseId', '关键环节相机位标识', processDetailCameraPoseIds, 'process-detail.duplicate-camera-pose'],
+    ] as const) {
+      if (!validateIdentifier(item[field], label, issues)) continue
+      const identifier = String(item[field])
+      if (used.has(identifier)) appendIssue(issues, duplicateCode, `${label}重复。`)
+      used.add(identifier)
+    }
+    validateIdentifier(item.stateNodeId, '关键环节状态节点标识', issues)
+    if (item.topologyDataContextId !== undefined) {
+      validateIdentifier(item.topologyDataContextId, '关键环节拓扑数据上下文标识', issues)
+    }
+    const stepReference = `${String(item.sceneId)}:${String(item.processId)}:${String(item.stepId)}`
+    if (processDetailStepReferences.has(stepReference)) appendIssue(issues, 'process-detail.duplicate-step', '同一场景的关键环节流程步骤组合重复。')
+    processDetailStepReferences.add(stepReference)
+  }
+
   const actionsById = new Map<string, UnknownRecord>()
   for (const item of actionItems) {
     if (!isRecord(item) || !validateIdentifier(item.actionId, '动作标识', issues)) {
@@ -606,14 +649,37 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
     const actionId = item.actionId as string
     if (actionsById.has(actionId)) appendIssue(issues, 'action.duplicate', '动作标识重复。')
     actionsById.set(actionId, item)
-    if (!isSceneId(item.targetSceneId) || !validateIdentifier(item.targetTopologyId, '动作目标拓扑标识', issues)) {
-      appendIssue(issues, 'action.target', '动作目标场景或拓扑无效。')
+    const targetViewMode = item.targetViewMode
+    const isBusinessTarget = targetViewMode === 'business' && isSceneId(item.targetSceneId)
+    const isProcessDetailTarget = targetViewMode === 'process-detail' && isSceneId(item.targetSceneId)
+    const isOverviewTarget = targetViewMode === 'overview' && isOverviewSceneId(item.targetSceneId)
+    if (!isBusinessTarget && !isProcessDetailTarget && !isOverviewTarget) {
+      appendIssue(issues, 'action.target', '动作目标场景或视图模式无效。')
+    } else if (isBusinessTarget) {
+      if (!validateIdentifier(item.targetTopologyId, '动作目标拓扑标识', issues) || item.processDetailId !== undefined) {
+        appendIssue(issues, 'action.target', '业务动作必须只携带目标拓扑。')
+      }
+    } else if (isProcessDetailTarget && (!validateIdentifier(item.processDetailId, '动作关键环节标识', issues) || item.targetTopologyId !== undefined)) {
+      appendIssue(issues, 'action.target', '第三层动作必须只携带关键环节标识。')
+    } else if (isOverviewTarget && (item.targetTopologyId !== undefined || item.processDetailId !== undefined)) {
+      // 平台总览没有业务拓扑或关键环节；显式拒绝占位编号，避免合作方把总览误当成第十四个业务场景。
+      appendIssue(issues, 'action.target', '平台总览动作不得携带拓扑或关键环节标识。')
     }
     if (item.configVersion !== manifestVersion) appendIssue(issues, 'action.version', '动作版本与清单版本不一致。')
     if (!['keep-current-context', 'commit-view-with-warning'].includes(String(item.failurePolicy))) appendIssue(issues, 'action.failure-policy', '动作失败策略无效。')
     readArray(item, 'allowedParameters', issues, 'action.parameters').forEach((parameter) => validateIdentifier(parameter, '动作参数标识', issues))
-    if (!isRecord(item.unityAction) || !['none', 'enterProcessStep', 'focusNode', 'resetScene', 'setRouteFlow'].includes(String(item.unityAction.type))) {
+    if (!isRecord(item.unityAction) || !['none', 'enterProcessDetail', 'focusNode', 'resetScene', 'setRouteFlow'].includes(String(item.unityAction.type))) {
       appendIssue(issues, 'action.unity-action', '动作必须包含受控Unity动作。')
+    } else if (targetViewMode === 'process-detail') {
+      if (item.unityAction.type !== 'enterProcessDetail' || item.unityAction.processDetailId !== item.processDetailId || item.failurePolicy !== 'keep-current-context') {
+        appendIssue(issues, 'action.process-detail-contract', '第三层动作必须使用同一关键环节编号并保持当前上下文失败策略。')
+      }
+    } else if (targetViewMode === 'overview') {
+      if (item.unityAction.type !== 'none' || item.failurePolicy !== 'keep-current-context') {
+        appendIssue(issues, 'action.overview-contract', '平台总览动作必须保持当前上下文失败策略且不得执行额外Unity动作。')
+      }
+    } else if (item.unityAction.type === 'enterProcessDetail') {
+      appendIssue(issues, 'action.business-detail-command', '业务动作不得调用第三层进入命令。')
     }
   }
 
@@ -647,20 +713,6 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
       'Unity场景映射重复登记了路径标识。',
     )
 
-    /** 流程唯一性按“流程标识 + 步骤标识”判断；同一流程可合法拥有多个不同步骤。 */
-    const processStepReferences = new Set<string>()
-    for (const processStep of readArray(item, 'processSteps', issues, 'unity-mapping.process-steps')) {
-      if (!isRecord(processStep) || !validateIdentifier(processStep.processId, '流程标识', issues) || !validateIdentifier(processStep.stepId, '步骤标识', issues)) {
-        appendIssue(issues, 'unity-mapping.process-step', 'Unity流程步骤映射无效。')
-        continue
-      }
-      const processStepReference = `${processStep.processId}:${processStep.stepId}`
-      if (processStepReferences.has(processStepReference)) {
-        appendIssue(issues, 'unity-mapping.duplicate-process-step', 'Unity场景映射重复登记了流程步骤。')
-      } else {
-        processStepReferences.add(processStepReference)
-      }
-    }
   }
 
   /**
@@ -688,6 +740,15 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
     }
     for (const actionId of readArray(scene, 'supportedActionIds', issues, 'scene.action-ids').map(String)) {
       if (actionsById.get(actionId)?.targetSceneId !== sceneId) appendIssue(issues, 'scene.action-scene', `场景${sceneId}引用了不存在或目标不一致的动作。`)
+    }
+  }
+
+  // 第三层状态节点必须同时存在于对应场景的显式 Unity 节点映射，不能以模型名称或目录顺序推断。
+  for (const detail of processDetailsById.values()) {
+    const sceneId = String(detail.sceneId)
+    if (!scenesById.has(sceneId)) appendIssue(issues, 'process-detail.scene-missing', '关键环节引用的场景未登记。')
+    if (!registeredSceneNodeIdsBySceneId.get(sceneId)?.has(String(detail.stateNodeId))) {
+      appendIssue(issues, 'process-detail.state-node', '关键环节状态节点未在所属 Unity 场景中登记。')
     }
   }
 
@@ -731,6 +792,10 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
         appendIssue(issues, 'drilldown.node-id-collision', '下钻局部节点标识不得复用正式拓扑节点标识。')
       }
       hasNonEmptyString(localNode, 'title', issues, 'drilldown.node-title')
+      // 说明节点必须显式引用正式图标登记表；不接受图片路径、generic占位或按标题推断的未知键。
+      if (!validateIdentifier(localNode.iconKey, '下钻图标键', issues) || !hasTopologyIconKey(String(localNode.iconKey))) {
+        appendIssue(issues, 'drilldown.node-icon-key', '下钻局部节点必须使用图标登记表中的受控图标键。')
+      }
       if (localNode.kind !== 'source' && localNode.kind !== 'logic' && localNode.kind !== 'boundary') {
         appendIssue(issues, 'drilldown.node-kind', '下钻局部节点类型无效。')
       } else {
@@ -817,10 +882,16 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
   }
 
   for (const action of actionsById.values()) {
-    const targetTopology = topologiesById.get(String(action.targetTopologyId))
     const targetSceneId = String(action.targetSceneId)
-    if (!targetTopology || targetTopology.sceneId !== targetSceneId) appendIssue(issues, 'action.topology-scene', '动作目标拓扑不属于目标场景。')
-    validateUnityAction(action.unityAction, targetSceneId, unityMappingsBySceneId, issues)
+    if (action.targetViewMode === 'process-detail') {
+      const detail = processDetailsById.get(String(action.processDetailId))
+      if (!detail || detail.sceneId !== targetSceneId) appendIssue(issues, 'action.process-detail-scene', '动作关键环节不属于目标场景。')
+    } else if (action.targetViewMode === 'business') {
+      const targetTopology = topologiesById.get(String(action.targetTopologyId))
+      if (!targetTopology || targetTopology.sceneId !== targetSceneId) appendIssue(issues, 'action.topology-scene', '动作目标拓扑不属于目标场景。')
+    }
+    // 平台总览没有业务场景映射，且已在动作形状校验中强制为 none；这里只校验业务场景的真实三维引用。
+    if (isSceneId(action.targetSceneId)) validateUnityAction(action.unityAction, targetSceneId, unityMappingsBySceneId, issues)
   }
 
   /*
@@ -828,6 +899,8 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
    * 权限与事务编排；反向收录检查让动作与场景声明形成双向闭环。
    */
   for (const [actionId, action] of actionsById) {
+    // 平台总览不属于业务场景闭集，因此没有 SceneDefinition 可承载反向动作列表。
+    if (action.targetViewMode === 'overview') continue
     const scene = scenesById.get(String(action.targetSceneId))
     const declaredActionIds = scene ? readArray(scene, 'supportedActionIds', issues, 'scene.action-ids').map(String) : []
     if (!scene || !declaredActionIds.includes(actionId)) {
@@ -873,20 +946,12 @@ function validateUnityAction(
   if (!mapping) return
   const sceneNodeIds = new Set(readArray(mapping, 'sceneNodeIds', issues, 'unity-mapping.nodes').map(String))
   const routeIds = new Set(readArray(mapping, 'routeIds', issues, 'unity-mapping.routes').map(String))
-  const processSteps = new Set(
-    readArray(mapping, 'processSteps', issues, 'unity-mapping.process-steps')
-      .filter(isRecord)
-      .map((step) => `${String(step.processId)}:${String(step.stepId)}`),
-  )
 
   if (action.type === 'focusNode' && !sceneNodeIds.has(String(action.sceneNodeId))) {
     appendIssue(issues, 'action.scene-node', '聚焦动作引用了未登记的三维节点。')
   }
   if (action.type === 'setRouteFlow' && !routeIds.has(String(action.routeId))) {
     appendIssue(issues, 'action.route', '路径动作引用了未登记的Unity路径。')
-  }
-  if (action.type === 'enterProcessStep' && !processSteps.has(`${String(action.processId)}:${String(action.stepId)}`)) {
-    appendIssue(issues, 'action.process-step', '流程动作引用了未登记的Unity流程步骤。')
   }
 }
 

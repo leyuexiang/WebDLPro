@@ -35,9 +35,10 @@ Shader "自定义/URP/管道流动"
         {
             Name "前向渲染"
             Tags { "LightMode" = "UniversalForward" }
-            // 使用常规透明混合，让材质面板中的整体透明度直接作用于最终画面。
+            // 飞线属于信号覆盖层，即使穿过模型也必须可见；关闭深度写入，避免改变场景深度缓冲。
             Blend SrcAlpha OneMinusSrcAlpha
             ZWrite Off
+            ZTest Always
 
             HLSLPROGRAM
             #pragma vertex Vert

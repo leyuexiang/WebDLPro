@@ -1,6 +1,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import type { ActionId, NodeId, RouteId, SceneActivationId, SceneId, SceneNodeId, TopologyId, TransitionId } from '@/config/scene-topology/identifiers'
+import { isOverviewSceneId } from '@/config/scene-topology/identifiers'
+import type { ActionId, NodeId, OverviewSceneId, ProcessDetailId, RouteId, SceneActivationId, SceneId, SceneNodeId, TopologyId, TransitionId, ViewSceneId } from '@/config/scene-topology/identifiers'
 
 /** 选择来源用于阻断二维单击、Unity 反向选择和外层事件之间的聚焦回环。 */
 export type VisualizationSelectionSource = 'topology' | 'unity' | 'external' | 'system'
@@ -23,12 +24,37 @@ export interface VisualizationSceneLoadProgress {
   progress: number
 }
 
-/** 可序列化的稳定上下文，是外层状态快照和 view.changed（视图变更）事件的唯一来源。 */
-export interface VisualizationStableContext {
-  sceneId: SceneId
-  topologyId: TopologyId
+/** 可序列化的稳定上下文；平台总览不保存或伪造 topologyId。 */
+type VisualizationStableContextBase = {
   actionId: ActionId | null
   contextRevision: number
+}
+
+export type BusinessVisualizationStableContext = VisualizationStableContextBase & { sceneId: SceneId; topologyId: TopologyId }
+export type OverviewVisualizationStableContext = VisualizationStableContextBase & { sceneId: OverviewSceneId; topologyId?: never }
+/**
+ * 第三层只保存稳定环节编号，明确禁止第二层 topologyId 进入该状态。
+ * 独立二维拓扑由关键环节目录中的 topologyDataContextId 另行解析，不与第二层编号混用。
+ */
+export type ProcessDetailVisualizationStableContext = VisualizationStableContextBase & {
+  sceneId: SceneId
+  topologyId?: never
+  processDetailId: ProcessDetailId
+}
+export type VisualizationStableContext = BusinessVisualizationStableContext | ProcessDetailVisualizationStableContext | OverviewVisualizationStableContext
+
+/** 在稳定上下文中收窄业务分支，只有该分支可进入拓扑清单与业务状态投影。 */
+export function isBusinessVisualizationStableContext(
+  value: VisualizationStableContext,
+): value is BusinessVisualizationStableContext {
+  return !isOverviewSceneId(value.sceneId) && 'topologyId' in value
+}
+
+/** 带关键环节编号且不携带第二层 topologyId 的业务场景属于第三层。 */
+export function isProcessDetailVisualizationStableContext(
+  value: VisualizationStableContext,
+): value is ProcessDetailVisualizationStableContext {
+  return !isOverviewSceneId(value.sceneId) && 'processDetailId' in value
 }
 
 /** 有限诊断不保存异常对象或完整外部载荷，只保留稳定代码与关联标识。 */
@@ -50,8 +76,9 @@ export type VisualizationTransitionOutcome = 'completed' | 'failed' | 'supersede
  */
 export interface VisualizationTransitionSummary {
   transitionId: TransitionId
-  sceneId: SceneId
-  topologyId: TopologyId
+  sceneId: ViewSceneId
+  topologyId: TopologyId | null
+  processDetailId?: ProcessDetailId | null
   actionId: ActionId | null
   previousContextRevision: number
   outcome: VisualizationTransitionOutcome
@@ -72,8 +99,9 @@ export const useVisualizationStore = defineStore('visualization', () => {
    */
   const sceneActivationId = ref<SceneActivationId | null>(null)
   const activeTransitionId = ref<TransitionId | null>(null)
-  const targetSceneId = ref<SceneId | null>(null)
+  const targetSceneId = ref<ViewSceneId | null>(null)
   const targetTopologyId = ref<TopologyId | null>(null)
+  const targetProcessDetailId = ref<ProcessDetailId | null>(null)
   const targetActionId = ref<ActionId | null>(null)
   const runtimeStatus = ref<VisualizationRuntimeStatus>('idle')
   const unityStatus = ref<VisualizationSubsystemStatus>('idle')
@@ -89,11 +117,14 @@ export const useVisualizationStore = defineStore('visualization', () => {
   const activeTransitionStartedAt = ref<number | null>(null)
   const recentTransitionSummaries = ref<readonly VisualizationTransitionSummary[]>([])
 
+  /**
+   * 会话级单调上下文版本与稳定内容分离保存。物理回退失败时必须清空无法证明的场景组合，
+   * 但不能把已经发布过的版本回退到零，否则父页面会把错误态误判成一次全新会话。
+   */
+  const contextRevision = ref(0)
+
   /** 稳定上下文存在才允许外层桥对外声明可用，切换中的目标字段永远不会提前暴露为当前视图。 */
   const hasStableContext = computed(() => stableContext.value !== null && runtimeStatus.value === 'ready')
-
-  /** 当前上下文版本只从稳定上下文派生，未提交状态一律返回 0。 */
-  const contextRevision = computed(() => stableContext.value?.contextRevision ?? 0)
 
   /**
    * 开始新的场景—拓扑事务。旧事务在协调器创建新 transitionId（切换事务标识）后失去提交权；
@@ -101,16 +132,18 @@ export const useVisualizationStore = defineStore('visualization', () => {
    */
   function beginTransition(
     transitionId: TransitionId,
-    sceneId: SceneId,
-    topologyId: TopologyId,
+    sceneId: ViewSceneId,
+    topologyId: TopologyId | null,
     actionId: ActionId | null,
     forceSceneSwitch = false,
+    processDetailId: ProcessDetailId | null = null,
   ): void {
     // 新事务抵达即记录旧事务为 superseded（已取代），不等待其迟到回调；后续回调会因事务标识不匹配被过滤。
     appendActiveTransitionSummary('superseded')
     activeTransitionId.value = transitionId
     targetSceneId.value = sceneId
     targetTopologyId.value = topologyId
+    targetProcessDetailId.value = processDetailId
     targetActionId.value = actionId
     runtimeStatus.value = forceSceneSwitch || stableContext.value?.sceneId !== sceneId ? 'switching' : 'preparing'
     topologyStatus.value = 'preparing'
@@ -143,29 +176,47 @@ export const useVisualizationStore = defineStore('visualization', () => {
    */
   function commitStableContext(
     transitionId: TransitionId,
-    sceneId: SceneId,
-    topologyId: TopologyId,
+    sceneId: ViewSceneId,
+    topologyId: TopologyId | null,
     actionId: ActionId | null,
     nextSceneActivationId: SceneActivationId | null = sceneActivationId.value,
+    processDetailId: ProcessDetailId | null = null,
   ): boolean {
     if (activeTransitionId.value !== transitionId) return false
+    const targetsOverview = isOverviewSceneId(sceneId)
+    const targetsProcessDetail = !targetsOverview && topologyId === null && processDetailId !== null
+    const targetsBusiness = !targetsOverview && topologyId !== null && processDetailId === null
+    if (!targetsOverview && !targetsProcessDetail && !targetsBusiness) return false
+    if (targetsOverview && (topologyId !== null || processDetailId !== null)) return false
 
     appendActiveTransitionSummary('completed')
-    stableContext.value = {
-      sceneId,
-      topologyId,
-      actionId,
-      contextRevision: (stableContext.value?.contextRevision ?? 0) + 1,
+    const nextContextRevision = contextRevision.value + 1
+    contextRevision.value = nextContextRevision
+    if (targetsOverview) {
+      stableContext.value = { sceneId, actionId: null, contextRevision: nextContextRevision }
+    } else if (targetsProcessDetail) {
+      stableContext.value = { sceneId, processDetailId, actionId, contextRevision: nextContextRevision }
+    } else {
+      // 业务分支已在入口拒绝空拓扑，保证稳定业务上下文永远同时拥有场景和拓扑。
+      stableContext.value = { sceneId, topologyId: topologyId!, actionId, contextRevision: nextContextRevision }
     }
     sceneActivationId.value = nextSceneActivationId
     activeTransitionId.value = null
     targetSceneId.value = null
     targetTopologyId.value = null
+    targetProcessDetailId.value = null
     targetActionId.value = null
     runtimeStatus.value = 'ready'
     unityStatus.value = 'ready'
-    topologyStatus.value = 'ready'
+    topologyStatus.value = targetsOverview || targetsProcessDetail ? 'idle' : 'ready'
     sceneLoadProgress.value = null
+    if (targetsOverview) {
+      // 平台总览提交时清空选择；第三层必须保留进入前选择，供返回第二层原样恢复。
+      selectedNodeIds.value = []
+      selectedRouteIds.value = []
+      selectedSceneNodeId.value = null
+      selectionSource.value = 'system'
+    }
     activeTransitionStartedAt.value = null
     return true
   }
@@ -188,14 +239,21 @@ export const useVisualizationStore = defineStore('visualization', () => {
     activeTransitionId.value = null
     targetSceneId.value = null
     targetTopologyId.value = null
+    targetProcessDetailId.value = null
     targetActionId.value = null
     runtimeStatus.value = stableContext.value ? 'ready' : 'error'
     sceneLoadProgress.value = null
     if (stableContext.value) {
-      // 事务失败后继续展示上一个稳定场景与拓扑，因此两个子系统状态必须同步恢复为 ready。
-      // 若保留 preparing/failed，会形成“稳定上下文可用但遮罩仍认为正在切换”的混合状态。
+      // 失败后恢复上一个稳定视图；平台总览保持拓扑空闲，业务场景恢复同一 Canvas 就绪态。
       unityStatus.value = 'ready'
-      topologyStatus.value = 'ready'
+      const stableWithoutTopology = isOverviewSceneId(stableContext.value.sceneId) || isProcessDetailVisualizationStableContext(stableContext.value)
+      topologyStatus.value = stableWithoutTopology ? 'idle' : 'ready'
+      if (isOverviewSceneId(stableContext.value.sceneId)) {
+        selectedNodeIds.value = []
+        selectedRouteIds.value = []
+        selectedSceneNodeId.value = null
+        selectionSource.value = 'system'
+      }
     } else {
       unityStatus.value = 'failed'
       topologyStatus.value = 'failed'
@@ -218,6 +276,7 @@ export const useVisualizationStore = defineStore('visualization', () => {
     activeTransitionId.value = null
     targetSceneId.value = null
     targetTopologyId.value = null
+    targetProcessDetailId.value = null
     targetActionId.value = null
     runtimeStatus.value = 'error'
     unityStatus.value = 'failed'
@@ -261,7 +320,6 @@ export const useVisualizationStore = defineStore('visualization', () => {
     if (
       !activeTransitionId.value
       || !targetSceneId.value
-      || !targetTopologyId.value
     ) return
 
     const startedAt = activeTransitionStartedAt.value ?? Date.now()
@@ -269,8 +327,10 @@ export const useVisualizationStore = defineStore('visualization', () => {
       transitionId: activeTransitionId.value,
       sceneId: targetSceneId.value,
       topologyId: targetTopologyId.value,
+      processDetailId: targetProcessDetailId.value,
       actionId: targetActionId.value,
-      previousContextRevision: stableContext.value?.contextRevision ?? 0,
+      // 即使上一次物理恢复失败并清空稳定内容，摘要仍引用会话单调版本，不能倒退为零。
+      previousContextRevision: contextRevision.value,
       outcome,
       elapsedMs: Math.max(0, Date.now() - startedAt),
       diagnosticCode,
@@ -288,6 +348,7 @@ export const useVisualizationStore = defineStore('visualization', () => {
     activeTransitionId.value = null
     targetSceneId.value = null
     targetTopologyId.value = null
+    targetProcessDetailId.value = null
     targetActionId.value = null
     runtimeStatus.value = 'released'
     unityStatus.value = 'disposed'
@@ -300,6 +361,8 @@ export const useVisualizationStore = defineStore('visualization', () => {
     latestDiagnostic.value = null
     activeTransitionStartedAt.value = null
     recentTransitionSummaries.value = []
+    // release（释放）终止当前会话；下一次会创建新仓库和新会话，因此允许从零重新开始。
+    contextRevision.value = 0
   }
 
   return {
@@ -308,6 +371,7 @@ export const useVisualizationStore = defineStore('visualization', () => {
     activeTransitionId,
     targetSceneId,
     targetTopologyId,
+    targetProcessDetailId,
     targetActionId,
     runtimeStatus,
     unityStatus,

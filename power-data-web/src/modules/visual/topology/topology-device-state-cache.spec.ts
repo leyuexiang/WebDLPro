@@ -59,7 +59,7 @@ function createRegistry(): TopologyRegistry {
     scenes,
     topologies,
     actions: [],
-    unitySceneMappings: scenes.map((scene) => ({ sceneId: scene.sceneId, mappingVersion: scene.sceneMappingVersion, processSteps: [], sceneNodeIds: scene.sceneId === gasSceneId ? [primarySceneNodeId, standbySceneNodeId] : scene.sceneId === windSceneId ? [windSceneNodeId] : [], routeIds: [] })),
+    unitySceneMappings: scenes.map((scene) => ({ sceneId: scene.sceneId, mappingVersion: scene.sceneMappingVersion, sceneNodeIds: scene.sceneId === gasSceneId ? [primarySceneNodeId, standbySceneNodeId] : scene.sceneId === windSceneId ? [windSceneNodeId] : [], routeIds: [] })),
   })
   if (result.status !== 'ready') throw new Error(`节点状态缓存夹具无效：${result.issues.map((issue) => issue.code).join(',')}`)
   return result.registry

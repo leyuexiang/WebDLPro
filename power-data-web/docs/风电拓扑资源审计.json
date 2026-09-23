@@ -1,0 +1,402 @@
+{
+  "说明": "仅读取压缩包内图片，未执行脚本。风电.zip 为默认网络、业务、关键环节总图。",
+  "变体": {
+    "architecture": {
+      "pens": 48,
+      "images": 28,
+      "titleBackgroundPenIds": [
+        "1bbff66",
+        "7505c4f4",
+        "dc8538",
+        "865babf",
+        "6406b68",
+        "1058fb89",
+        "2c32ca67"
+      ],
+      "processNodePenIds": [
+        "9f8e2b6",
+        "66a63a90",
+        "c87292d"
+      ],
+      "sourceHash": "f2e2969943c38babc93b6bb02e8f818975126962e32bc3873b98365b36b32ceb",
+      "resourcePaths": [
+        "assets/21960efa9d7b5349021290020a64889d5bf9116717949f55b5be9225fe67162a.png",
+        "assets/24ebf71e12d52b8eefa670e47598f2d2a983ad9c8144a48c54995269286485f4.png",
+        "assets/3bccb7e7c803d154697613cbf9442e7a1a0558ae700eff0fe525e3fa1540b50f.png",
+        "assets/9dcf00f20a365b2173fdd125676166950388cf84cd7fb0f4765eb29685bc1c38.png",
+        "assets/boiler-safety-control.png",
+        "assets/chemical-water-control.png",
+        "assets/data-server.png",
+        "assets/enterprise-system.png",
+        "assets/fc2eb70c87fa47ee40600832dd9de280ba60b79aedbaaf99304ed30043fd5ffb.png",
+        "assets/firewall-compact.png",
+        "assets/generator.png",
+        "assets/operator.png",
+        "background/flow-light-3.png"
+      ]
+    },
+    "business": {
+      "pens": 31,
+      "images": 6,
+      "titleBackgroundPenIds": [
+        "5660738b",
+        "387ce21f",
+        "dc99914",
+        "b7d4825",
+        "cf4d67b",
+        "0d090d4"
+      ],
+      "processNodePenIds": [
+        "78826709",
+        "5d16d6f9",
+        "68dbdc25",
+        "c56687c",
+        "4a301c9",
+        "107cb1"
+      ],
+      "sourceHash": "056b6995f67fb625cfbd08dc10407b52ac54bbf6deadef6c2d4c83f7355248bb",
+      "resourcePaths": [
+        "background/flow-light-3.png"
+      ]
+    },
+    "business-key-process": {
+      "pens": 103,
+      "images": 32,
+      "titleBackgroundPenIds": [
+        "33e12454",
+        "f36ac94",
+        "e8d3efe",
+        "1c490480",
+        "4647f5c",
+        "166bab1"
+      ],
+      "processNodePenIds": [
+        "2a5210d5",
+        "d21fd8e",
+        "54d1e021",
+        "d6a35ed",
+        "0deda7",
+        "a10d819"
+      ],
+      "sourceHash": "22b82ca838fe778c9a977d3acafa93e8d0fd77807f1a292dc98adfa85becb759",
+      "resourcePaths": [
+        "assets/21960efa9d7b5349021290020a64889d5bf9116717949f55b5be9225fe67162a.png",
+        "assets/24ebf71e12d52b8eefa670e47598f2d2a983ad9c8144a48c54995269286485f4.png",
+        "assets/3bccb7e7c803d154697613cbf9442e7a1a0558ae700eff0fe525e3fa1540b50f.png",
+        "assets/9dcf00f20a365b2173fdd125676166950388cf84cd7fb0f4765eb29685bc1c38.png",
+        "assets/boiler-safety-control.png",
+        "assets/chemical-water-control.png",
+        "assets/fc2eb70c87fa47ee40600832dd9de280ba60b79aedbaaf99304ed30043fd5ffb.png",
+        "assets/generator.png",
+        "background/flow-light-3.png"
+      ]
+    },
+    "key-process": {
+      "pens": 84,
+      "images": 32,
+      "titleBackgroundPenIds": [
+        "6cb7caa",
+        "645f1a9",
+        "a1b6f8",
+        "76bdf94",
+        "627967d5",
+        "2bf7bdf6"
+      ],
+      "processNodePenIds": [],
+      "sourceHash": "359edd93b215b76722d3c2b42beedc3c5803c00568ea1f474a6807c788c25bd1",
+      "resourcePaths": [
+        "assets/21960efa9d7b5349021290020a64889d5bf9116717949f55b5be9225fe67162a.png",
+        "assets/24ebf71e12d52b8eefa670e47598f2d2a983ad9c8144a48c54995269286485f4.png",
+        "assets/3bccb7e7c803d154697613cbf9442e7a1a0558ae700eff0fe525e3fa1540b50f.png",
+        "assets/9dcf00f20a365b2173fdd125676166950388cf84cd7fb0f4765eb29685bc1c38.png",
+        "assets/boiler-safety-control.png",
+        "assets/chemical-water-control.png",
+        "assets/fc2eb70c87fa47ee40600832dd9de280ba60b79aedbaaf99304ed30043fd5ffb.png",
+        "assets/generator.png",
+        "background/flow-light-3.png"
+      ]
+    },
+    "network": {
+      "pens": 86,
+      "images": 31,
+      "titleBackgroundPenIds": [
+        "49ccb4f",
+        "3f848c1",
+        "fa6a1fe",
+        "be887ae",
+        "12b08daf",
+        "90f9076"
+      ],
+      "processNodePenIds": [],
+      "sourceHash": "53f507b20988a6267caca74b347c9515d112688669982b94209d8fd6f490381f",
+      "resourcePaths": [
+        "assets/boiler-safety-control.png",
+        "assets/chemical-water-control.png",
+        "assets/data-server.png",
+        "assets/enterprise-system.png",
+        "assets/firewall-compact.png",
+        "assets/operator.png",
+        "assets/switch-compact.png",
+        "assets/switch.png",
+        "background/flow-light-3.png"
+      ]
+    },
+    "network-business": {
+      "pens": 96,
+      "images": 31,
+      "titleBackgroundPenIds": [
+        "ec6cf6e",
+        "7bee951",
+        "1dbaa69c",
+        "225572f3",
+        "dbef4df",
+        "16bcd02f"
+      ],
+      "processNodePenIds": [
+        "730f9118",
+        "eb7d4da",
+        "5b1b946",
+        "53f5be",
+        "f48a03d",
+        "050e39b"
+      ],
+      "sourceHash": "aa62e831dca4fe499c83b0b6aaa6e6911c09c5963f466c905b83c841274a7086",
+      "resourcePaths": [
+        "assets/boiler-safety-control.png",
+        "assets/chemical-water-control.png",
+        "assets/data-server.png",
+        "assets/enterprise-system.png",
+        "assets/firewall-compact.png",
+        "assets/operator.png",
+        "assets/switch-compact.png",
+        "assets/switch.png",
+        "background/flow-light-3.png"
+      ]
+    },
+    "network-business-key-process": {
+      "pens": 128,
+      "images": 43,
+      "titleBackgroundPenIds": [
+        "1aeb61",
+        "24384824",
+        "748a6a1",
+        "39d73f43",
+        "08c05a7",
+        "4a5310d"
+      ],
+      "processNodePenIds": [
+        "59539828",
+        "55ce2ad0",
+        "2f6e06",
+        "2bfdf432",
+        "42e6522b",
+        "6596f4f"
+      ],
+      "sourceHash": "08db7672e29370482d58364240f3f11aaec44c510f0fb56e30df034efb29afde",
+      "resourcePaths": [
+        "assets/21960efa9d7b5349021290020a64889d5bf9116717949f55b5be9225fe67162a.png",
+        "assets/24ebf71e12d52b8eefa670e47598f2d2a983ad9c8144a48c54995269286485f4.png",
+        "assets/3bccb7e7c803d154697613cbf9442e7a1a0558ae700eff0fe525e3fa1540b50f.png",
+        "assets/9dcf00f20a365b2173fdd125676166950388cf84cd7fb0f4765eb29685bc1c38.png",
+        "assets/boiler-safety-control.png",
+        "assets/chemical-water-control.png",
+        "assets/data-server.png",
+        "assets/enterprise-system.png",
+        "assets/fc2eb70c87fa47ee40600832dd9de280ba60b79aedbaaf99304ed30043fd5ffb.png",
+        "assets/firewall-compact.png",
+        "assets/generator.png",
+        "assets/operator.png",
+        "assets/switch-compact.png",
+        "assets/switch.png",
+        "background/flow-light-3.png"
+      ]
+    },
+    "network-key-process": {
+      "pens": 110,
+      "images": 43,
+      "titleBackgroundPenIds": [
+        "26e36a28",
+        "6019877",
+        "0b85737",
+        "51750a0",
+        "17cbc953",
+        "f68a7e9"
+      ],
+      "processNodePenIds": [],
+      "sourceHash": "5a3313cc9040635705d3b018c2fb3d7672769111fb8d57013def77892c5f4e8e",
+      "resourcePaths": [
+        "assets/21960efa9d7b5349021290020a64889d5bf9116717949f55b5be9225fe67162a.png",
+        "assets/24ebf71e12d52b8eefa670e47598f2d2a983ad9c8144a48c54995269286485f4.png",
+        "assets/3bccb7e7c803d154697613cbf9442e7a1a0558ae700eff0fe525e3fa1540b50f.png",
+        "assets/9dcf00f20a365b2173fdd125676166950388cf84cd7fb0f4765eb29685bc1c38.png",
+        "assets/boiler-safety-control.png",
+        "assets/chemical-water-control.png",
+        "assets/data-server.png",
+        "assets/enterprise-system.png",
+        "assets/fc2eb70c87fa47ee40600832dd9de280ba60b79aedbaaf99304ed30043fd5ffb.png",
+        "assets/firewall-compact.png",
+        "assets/generator.png",
+        "assets/operator.png",
+        "assets/switch-compact.png",
+        "assets/switch.png",
+        "background/flow-light-3.png"
+      ]
+    }
+  },
+  "资源映射": {
+    "/cloud/2026/09/02/14/01a060e5-da5e-72a4-962e-af307317ef19.png": "assets/firewall-compact.png",
+    "/cloud/2026/09/01/22/01a05d5c-426d-7f73-b5c7-cd1fa8a6154d.png": "assets/data-server.png",
+    "/cloud/2026/09/01/22/01a05d65-5dcf-771a-9305-7396acd505e3.png": "assets/data-server.png",
+    "/cloud/2026/09/01/23/01a05d7e-9bcf-7fff-ac87-21ff091b0b1b.png": "assets/generator.png",
+    "/cloud/2026/09/09/20/01a08639-799b-7a65-8a8f-e31e02cb35fe.png": "assets/21960efa9d7b5349021290020a64889d5bf9116717949f55b5be9225fe67162a.png",
+    "/cloud/2026/09/09/20/01a08638-aebf-7339-8f9d-8df5b3b88af5.png": "assets/3bccb7e7c803d154697613cbf9442e7a1a0558ae700eff0fe525e3fa1540b50f.png",
+    "/cloud/2026/09/01/22/01a05d66-272b-76fe-8d9c-2a2361e8d23b.png": "assets/operator.png",
+    "/cloud/2026/09/01/22/01a05d66-42e8-7d5b-84cf-7956690cd995.png": "assets/operator.png",
+    "/cloud/2026/09/01/22/01a05d5a-a2e5-7e73-a174-bab829502b4c.png": "assets/enterprise-system.png",
+    "/cloud/2026/09/09/19/01a085ee-550a-730f-88af-d790f1148bcd.png": "assets/chemical-water-control.png",
+    "/cloud/2026/09/09/19/01a085ee-07b2-7487-a60f-a54b4ebc048c.png": "assets/chemical-water-control.png",
+    "/cloud/2026/09/01/22/01a05d75-b20c-7e1f-9f04-6f70a3344851.png": "assets/boiler-safety-control.png",
+    "/cloud/2026/09/09/19/01a085f5-3c02-7b3f-b8c9-3d4aa6030153.png": "assets/24ebf71e12d52b8eefa670e47598f2d2a983ad9c8144a48c54995269286485f4.png",
+    "/cloud/2026/09/09/20/01a08638-eb38-76d2-8445-51b87247d834.png": "assets/9dcf00f20a365b2173fdd125676166950388cf84cd7fb0f4765eb29685bc1c38.png",
+    "/cloud/2026/09/09/20/01a08639-15ae-7ed0-9ab4-539dee85ade1.png": "assets/fc2eb70c87fa47ee40600832dd9de280ba60b79aedbaaf99304ed30043fd5ffb.png",
+    "/cloud/2026/09/09/19/01a085ee-352c-7587-ba00-b77266e4aaf6.png": "assets/chemical-water-control.png",
+    "/material/装饰/流光3.png": "background/flow-light-3.png",
+    "/cloud/2026/09/02/15/01a060eb-17fa-7810-b14f-7bbec5590cf1.png": "assets/switch-compact.png",
+    "/cloud/2026/09/02/15/01a06107-aef5-72c1-bc06-4a639f6cea17.png": "assets/switch.png"
+  },
+  "资源散列": {
+    "/cloud/2026/09/02/14/01a060e5-da5e-72a4-962e-af307317ef19.png": {
+      "公共路径": "assets/firewall-compact.png",
+      "SHA-256": "69eb24dd21a1d003dbede41cd0a40e266242005d55ecd3833ba74f09a114d7b0",
+      "字节数": 1156663,
+      "帧数": 1,
+      "说明": "源图片为 PNG 静态图；图元名称 gif 仅是组态类型，不代表多帧资源。"
+    },
+    "/cloud/2026/09/01/22/01a05d5c-426d-7f73-b5c7-cd1fa8a6154d.png": {
+      "公共路径": "assets/data-server.png",
+      "SHA-256": "530d3fc13221c734d8a858e909318243f598b07f241a9c485d554507fd820068",
+      "字节数": 1022421,
+      "帧数": 1,
+      "说明": "源图片为 PNG 静态图；图元名称 gif 仅是组态类型，不代表多帧资源。"
+    },
+    "/cloud/2026/09/01/22/01a05d65-5dcf-771a-9305-7396acd505e3.png": {
+      "公共路径": "assets/data-server.png",
+      "SHA-256": "530d3fc13221c734d8a858e909318243f598b07f241a9c485d554507fd820068",
+      "字节数": 1022421,
+      "帧数": 1,
+      "说明": "源图片为 PNG 静态图；图元名称 gif 仅是组态类型，不代表多帧资源。"
+    },
+    "/cloud/2026/09/01/23/01a05d7e-9bcf-7fff-ac87-21ff091b0b1b.png": {
+      "公共路径": "assets/generator.png",
+      "SHA-256": "109786806eaac0b50d83b6f936f40d17153d05b3b032994ee28a44b2691a9fc6",
+      "字节数": 1728744,
+      "帧数": 1,
+      "说明": "源图片为 PNG 静态图；图元名称 gif 仅是组态类型，不代表多帧资源。"
+    },
+    "/cloud/2026/09/09/20/01a08639-799b-7a65-8a8f-e31e02cb35fe.png": {
+      "公共路径": "assets/21960efa9d7b5349021290020a64889d5bf9116717949f55b5be9225fe67162a.png",
+      "SHA-256": "21960efa9d7b5349021290020a64889d5bf9116717949f55b5be9225fe67162a",
+      "字节数": 1091307,
+      "帧数": 1,
+      "说明": "源图片为 PNG 静态图；图元名称 gif 仅是组态类型，不代表多帧资源。"
+    },
+    "/cloud/2026/09/09/20/01a08638-aebf-7339-8f9d-8df5b3b88af5.png": {
+      "公共路径": "assets/3bccb7e7c803d154697613cbf9442e7a1a0558ae700eff0fe525e3fa1540b50f.png",
+      "SHA-256": "3bccb7e7c803d154697613cbf9442e7a1a0558ae700eff0fe525e3fa1540b50f",
+      "字节数": 1823974,
+      "帧数": 1,
+      "说明": "源图片为 PNG 静态图；图元名称 gif 仅是组态类型，不代表多帧资源。"
+    },
+    "/cloud/2026/09/01/22/01a05d66-272b-76fe-8d9c-2a2361e8d23b.png": {
+      "公共路径": "assets/operator.png",
+      "SHA-256": "2df25d7612010634e5629e5a52d4c634b576444c2b7ea8cf76a21212552bdfa4",
+      "字节数": 757188,
+      "帧数": 1,
+      "说明": "源图片为 PNG 静态图；图元名称 gif 仅是组态类型，不代表多帧资源。"
+    },
+    "/cloud/2026/09/01/22/01a05d66-42e8-7d5b-84cf-7956690cd995.png": {
+      "公共路径": "assets/operator.png",
+      "SHA-256": "2df25d7612010634e5629e5a52d4c634b576444c2b7ea8cf76a21212552bdfa4",
+      "字节数": 757188,
+      "帧数": 1,
+      "说明": "源图片为 PNG 静态图；图元名称 gif 仅是组态类型，不代表多帧资源。"
+    },
+    "/cloud/2026/09/01/22/01a05d5a-a2e5-7e73-a174-bab829502b4c.png": {
+      "公共路径": "assets/enterprise-system.png",
+      "SHA-256": "19dcad3def4614abf883d93cfa7412d1987746c281caf583222c0fbf0c066f8a",
+      "字节数": 996871,
+      "帧数": 1,
+      "说明": "源图片为 PNG 静态图；图元名称 gif 仅是组态类型，不代表多帧资源。"
+    },
+    "/cloud/2026/09/09/19/01a085ee-550a-730f-88af-d790f1148bcd.png": {
+      "公共路径": "assets/chemical-water-control.png",
+      "SHA-256": "b011121d41fd5c5120f175568c67e49d84eb66556973676d70635376f809b966",
+      "字节数": 1342948,
+      "帧数": 1,
+      "说明": "源图片为 PNG 静态图；图元名称 gif 仅是组态类型，不代表多帧资源。"
+    },
+    "/cloud/2026/09/09/19/01a085ee-07b2-7487-a60f-a54b4ebc048c.png": {
+      "公共路径": "assets/chemical-water-control.png",
+      "SHA-256": "b011121d41fd5c5120f175568c67e49d84eb66556973676d70635376f809b966",
+      "字节数": 1342948,
+      "帧数": 1,
+      "说明": "源图片为 PNG 静态图；图元名称 gif 仅是组态类型，不代表多帧资源。"
+    },
+    "/cloud/2026/09/01/22/01a05d75-b20c-7e1f-9f04-6f70a3344851.png": {
+      "公共路径": "assets/boiler-safety-control.png",
+      "SHA-256": "fe44783bc63ef1f69551cba04ad53c53a41fc89feebc2a0d94a850d6c9b80fbb",
+      "字节数": 1113214,
+      "帧数": 1,
+      "说明": "源图片为 PNG 静态图；图元名称 gif 仅是组态类型，不代表多帧资源。"
+    },
+    "/cloud/2026/09/09/19/01a085f5-3c02-7b3f-b8c9-3d4aa6030153.png": {
+      "公共路径": "assets/24ebf71e12d52b8eefa670e47598f2d2a983ad9c8144a48c54995269286485f4.png",
+      "SHA-256": "24ebf71e12d52b8eefa670e47598f2d2a983ad9c8144a48c54995269286485f4",
+      "字节数": 1512492,
+      "帧数": 1,
+      "说明": "源图片为 PNG 静态图；图元名称 gif 仅是组态类型，不代表多帧资源。"
+    },
+    "/cloud/2026/09/09/20/01a08638-eb38-76d2-8445-51b87247d834.png": {
+      "公共路径": "assets/9dcf00f20a365b2173fdd125676166950388cf84cd7fb0f4765eb29685bc1c38.png",
+      "SHA-256": "9dcf00f20a365b2173fdd125676166950388cf84cd7fb0f4765eb29685bc1c38",
+      "字节数": 1855354,
+      "帧数": 1,
+      "说明": "源图片为 PNG 静态图；图元名称 gif 仅是组态类型，不代表多帧资源。"
+    },
+    "/cloud/2026/09/09/20/01a08639-15ae-7ed0-9ab4-539dee85ade1.png": {
+      "公共路径": "assets/fc2eb70c87fa47ee40600832dd9de280ba60b79aedbaaf99304ed30043fd5ffb.png",
+      "SHA-256": "fc2eb70c87fa47ee40600832dd9de280ba60b79aedbaaf99304ed30043fd5ffb",
+      "字节数": 2040934,
+      "帧数": 1,
+      "说明": "源图片为 PNG 静态图；图元名称 gif 仅是组态类型，不代表多帧资源。"
+    },
+    "/cloud/2026/09/09/19/01a085ee-352c-7587-ba00-b77266e4aaf6.png": {
+      "公共路径": "assets/chemical-water-control.png",
+      "SHA-256": "b011121d41fd5c5120f175568c67e49d84eb66556973676d70635376f809b966",
+      "字节数": 1342948,
+      "帧数": 1,
+      "说明": "源图片为 PNG 静态图；图元名称 gif 仅是组态类型，不代表多帧资源。"
+    },
+    "/material/装饰/流光3.png": {
+      "公共路径": "background/flow-light-3.png",
+      "SHA-256": "ba8187270926d7debab4e2073959d603c10b126425efc533883ac60c4579130e",
+      "字节数": 2048794,
+      "帧数": 1,
+      "说明": "源图片为 PNG 静态图；图元名称 gif 仅是组态类型，不代表多帧资源。"
+    },
+    "/cloud/2026/09/02/15/01a060eb-17fa-7810-b14f-7bbec5590cf1.png": {
+      "公共路径": "assets/switch-compact.png",
+      "SHA-256": "cb72eb3dc26fab5c53c23d6867455bfdddd5e7201cba90243b2f21fcb127af76",
+      "字节数": 1041780,
+      "帧数": 1,
+      "说明": "源图片为 PNG 静态图；图元名称 gif 仅是组态类型，不代表多帧资源。"
+    },
+    "/cloud/2026/09/02/15/01a06107-aef5-72c1-bc06-4a639f6cea17.png": {
+      "公共路径": "assets/switch.png",
+      "SHA-256": "a956a9c6b2bea6570c74070907fb9d934dd91bf9ac2428a5280c636a723c9782",
+      "字节数": 1367760,
+      "帧数": 1,
+      "说明": "源图片为 PNG 静态图；图元名称 gif 仅是组态类型，不代表多帧资源。"
+    }
+  }
+}

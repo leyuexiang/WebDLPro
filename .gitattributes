@@ -1,1 +1,2 @@
 *.fbx filter=lfs diff=lfs merge=lfs -text
+Docs/图标.7z filter=lfs diff=lfs merge=lfs -text

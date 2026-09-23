@@ -46,7 +46,7 @@ function createRegistry(): TopologyRegistry {
       { topologyId: 'gas-power.detail', sceneId: 'gas-power', title: '燃气测试明细拓扑', configVersion: version, nodes: [], edges: [] },
     ],
     actions: [],
-    unitySceneMappings: SCENE_IDS.map((sceneId) => ({ sceneId, mappingVersion: version, processSteps: [], sceneNodeIds: sceneId === 'gas-power' ? [gasSceneNodeId, passiveSceneNodeId] : [], routeIds: [] })),
+    unitySceneMappings: SCENE_IDS.map((sceneId) => ({ sceneId, mappingVersion: version, sceneNodeIds: sceneId === 'gas-power' ? [gasSceneNodeId, passiveSceneNodeId] : [], routeIds: [] })),
   })
   if (result.status !== 'ready') throw new Error('测试清单必须通过注册表校验。')
   return result.registry
@@ -75,6 +75,9 @@ describe('单画布多拓扑运行时', () => {
     expect(prepared).toBeDefined()
     expect(runtime.activate(prepared!, transitionId)).toBe(true)
     expect(canvas.setTopology).toHaveBeenCalledTimes(1)
+    // 首图没有用户视口缓存，运行时必须让 Meta2D 自动适配全部源图元，而不是覆盖为原点视口。
+    expect(canvas.restoreViewState).not.toHaveBeenCalled()
+    expect(canvas.setSelection).toHaveBeenLastCalledWith([], [])
     expect(runtime.getActiveTopology()?.topologyId).toBe(toTopologyId('gas-power.detail'))
   })
 
@@ -87,6 +90,68 @@ describe('单画布多拓扑运行时', () => {
     expect(runtime.activate(prepared!, toTransitionId('transition-new'))).toBe(false)
     expect(crossScene).toBeUndefined()
     expect(canvas.setTopology).not.toHaveBeenCalled()
+  })
+
+  it('进入平台总览时停用拓扑并清空选择，但保留唯一画布和视口缓存', () => {
+    const canvas = createCanvas()
+    const runtime = new TopologyRuntime(createRegistry(), canvas)
+    const sceneId = toSceneId('gas-power')
+    const topologyId = toTopologyId('gas-power.overview')
+    const selectedNodeId = toNodeId('node.gas-turbine')
+    const transitionId = toTransitionId('transition-overview-deactivate')
+    const prepared = runtime.prepare(sceneId, topologyId, transitionId)
+
+    expect(runtime.activate(prepared!, transitionId)).toBe(true)
+    runtime.setSelection([selectedNodeId], [])
+    canvas.getViewState.mockReturnValue({ zoom: 1.4, offsetX: 18, offsetY: -9 })
+    const topologyCallsBeforeDeactivate = canvas.setTopology.mock.calls.length
+
+    expect(runtime.deactivate()).toBe(true)
+    expect(runtime.deactivate()).toBe(true)
+    expect(runtime.getActiveTopology()).toBeUndefined()
+    expect(canvas.setTopology).toHaveBeenCalledTimes(topologyCallsBeforeDeactivate)
+    expect(canvas.dispose).not.toHaveBeenCalled()
+    expect(canvas.setSelection).toHaveBeenLastCalledWith([], [])
+
+    const restored = runtime.prepare(sceneId, topologyId, toTransitionId('transition-overview-return'))
+    expect(runtime.activate(restored!, toTransitionId('transition-overview-return'))).toBe(true)
+    expect(canvas.restoreViewState).toHaveBeenLastCalledWith({
+      zoom: 1.4,
+      offsetX: 18,
+      offsetY: -9,
+      selectedNodeIds: [],
+      selectedRouteIds: [],
+    })
+  })
+
+  it('暂停至关键环节后持续投影唯一状态节点且不重绘隐藏拓扑', () => {
+    const canvas = createCanvas()
+    const runtime = new TopologyRuntime(createRegistry(), canvas)
+    const sceneId = toSceneId('gas-power')
+    const topologyId = toTopologyId('gas-power.overview')
+    const sourceNodeId = toNodeId('node.gas-turbine')
+    const processDetailStateNodeId = toSceneNodeId('scene-node.gas-turbine')
+    const prepared = runtime.prepare(sceneId, topologyId, toTransitionId('transition-process-detail-state-context'))
+
+    expect(runtime.activate(prepared!, toTransitionId('transition-process-detail-state-context'))).toBe(true)
+    const statusDrawCallsBeforeSuspend = canvas.setNodeStatuses.mock.calls.length
+
+    // 第三层没有二维拓扑，但必须保留已登记的唯一三维状态节点，供播放、停止等实时状态继续下发 Unity。
+    expect(runtime.suspendForProcessDetail(sceneId, processDetailStateNodeId)).toBe(true)
+    const result = runtime.applyDeviceStates({
+      sourceRevision: 21,
+      items: [{ nodeId: sourceNodeId, deviceStatus: 'fault', statusUpdatedAt: '2026-08-31T04:20:00.000Z' }],
+    })
+
+    expect(runtime.getActiveTopology()).toBeUndefined()
+    expect(result.activeTopologyNodeStatuses).toEqual(new Map())
+    expect(result.activeSceneNodeStateUpdates).toEqual(new Map([[processDetailStateNodeId, {
+      visualState: 'fault',
+      statusUpdatedAt: '2026-08-31T04:20:00.000Z',
+      sourceRevision: 21,
+    }]]))
+    // 拓扑容器已被隐藏并禁用交互，状态更新不得触发其重绘；只允许协调器向 Unity 投影上述唯一节点。
+    expect(canvas.setNodeStatuses).toHaveBeenCalledTimes(statusDrawCallsBeforeSuspend)
   })
 
   it('选择只更新当前画布，释放后清理并禁止后续调用', () => {

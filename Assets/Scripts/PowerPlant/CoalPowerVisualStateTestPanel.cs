@@ -10,39 +10,24 @@ using WebDLPro.Unity.SceneRuntime;
 [DisallowMultipleComponent]
 public sealed class CoalPowerVisualStateTestPanel : MonoBehaviour
 {
-    private const string CoalPowerGenerationProcessId = "coal-power-generation";
-    private const string AllUnitsId = "all";
-
-    // 顺序与 CoalPower 场景中已序列化的流程步骤映射保持一致；测试面板只使用这些稳定标识，
-    // 不通过模型名称或层级路径推断关键环节，从而与网页桥接进入流程的实际路径完全相同。
-    private static readonly string[] ProcessStepIds =
-    {
-        "overview",
-        "combustion",
-        "water-steam-cycle",
-        "power-output"
-    };
-
-    private static readonly string[] ProcessStepLabels =
-    {
-        "总览",
-        "燃烧系统",
-        "水汽循环",
-        "电力送出"
-    };
-
+    // 顺序与 CoalPower 场景属性面板中的一图元一模型绑定保持一致；测试面板只使用稳定节点标识，
+    // 不通过模型名称或层级路径推断设备，从而与网页拓扑和 Unity 反向选择使用同一份映射语义。
     private static readonly string[] NodeIds =
     {
+        "node.coal-feeder",
         "node.coal-boiler",
         "node.coal-steam-turbine",
-        "node.coal-generator"
+        "node.coal-generator",
+        "node.coal-precipitator"
     };
 
     private static readonly string[] NodeLabels =
     {
+        "给煤机",
         "锅炉",
         "汽轮机",
-        "发电机"
+        "发电机",
+        "除尘器"
     };
 
     [SerializeField] private PowerPlantProcessController _processController;
@@ -83,7 +68,7 @@ public sealed class CoalPowerVisualStateTestPanel : MonoBehaviour
         }
 
         const float width = 430f;
-        const float height = 342f;
+        const float height = 250f;
         Rect panelRect = new Rect(12f, 12f, Mathf.Min(width, Screen.width - 24f), height);
         GUI.Box(panelRect, GUIContent.none);
         GUILayout.BeginArea(new Rect(panelRect.x + 12f, panelRect.y + 10f, panelRect.width - 24f, panelRect.height - 20f));
@@ -94,17 +79,6 @@ public sealed class CoalPowerVisualStateTestPanel : MonoBehaviour
         {
             _showPanel = false;
         }
-        GUILayout.EndHorizontal();
-
-        GUILayout.Space(6f);
-        GUILayout.Label("流程直接切换：");
-        GUILayout.BeginHorizontal();
-        DrawProcessStepButton(0);
-        DrawProcessStepButton(1);
-        GUILayout.EndHorizontal();
-        GUILayout.BeginHorizontal();
-        DrawProcessStepButton(2);
-        DrawProcessStepButton(3);
         GUILayout.EndHorizontal();
 
         GUILayout.Label("选择设备：");
@@ -156,50 +130,6 @@ public sealed class CoalPowerVisualStateTestPanel : MonoBehaviour
         GUILayout.EndArea();
     }
 #endif
-
-    /// <summary>
-    /// 直接进入燃煤场景属性面板已配置的流程步骤。总览恢复全厂层级，三个关键环节则由
-    /// PowerPlantProcessController（发电厂流程控制器）统一处理无关模型的原色半透明与焦点描边。
-    /// 测试入口不直接修改物体激活状态或材质，避免与网页桥接的正式行为出现差异。
-    /// </summary>
-    private void DrawProcessStepButton(int stepIndex)
-    {
-        if (GUILayout.Button(ProcessStepLabels[stepIndex], GUILayout.ExpandWidth(true)))
-        {
-            EnterProcessStep(ProcessStepIds[stepIndex]);
-        }
-    }
-
-    private void EnterProcessStep(string stepId)
-    {
-        if (!TryGetController())
-        {
-            return;
-        }
-
-        // 关键环节明确使用 isolate（隔离）模式，确保按钮验证的是当前流程定义的核心模型
-        // 与无关模型半透明上下文；overview（总览）由控制器内部忽略该参数并恢复全场展示。
-        bool success = _processController.TryEnterProcessStep(
-            CoalPowerGenerationProcessId,
-            stepId,
-            AllUnitsId,
-            true,
-            out string message);
-        Report(success ? $"已切换至{GetProcessStepLabel(stepId)}：{message}" : $"流程切换失败：{message}");
-    }
-
-    private static string GetProcessStepLabel(string stepId)
-    {
-        for (int stepIndex = 0; stepIndex < ProcessStepIds.Length; stepIndex++)
-        {
-            if (ProcessStepIds[stepIndex] == stepId)
-            {
-                return ProcessStepLabels[stepIndex];
-            }
-        }
-
-        return stepId;
-    }
 
     private void ApplyState(BusinessSceneNodeVisualState visualState)
     {

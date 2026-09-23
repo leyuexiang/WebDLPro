@@ -33,7 +33,7 @@ function createValidManifest(): SceneTopologyManifest {
     scenes,
     topologies: scenes.map((scene) => ({ topologyId: scene.defaultTopologyId, sceneId: scene.sceneId, title: `测试拓扑-${scene.sceneId}`, configVersion: version, nodes: [], edges: [] })),
     actions: [],
-    unitySceneMappings: scenes.map((scene) => ({ sceneId: scene.sceneId, mappingVersion: version, processSteps: [], sceneNodeIds: [], routeIds: [] })),
+    unitySceneMappings: scenes.map((scene) => ({ sceneId: scene.sceneId, mappingVersion: version, sceneNodeIds: [], routeIds: [] })),
   }
 }
 

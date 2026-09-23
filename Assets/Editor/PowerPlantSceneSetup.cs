@@ -18,7 +18,7 @@ public static class PowerPlantSceneSetup
     private const string CoalSceneRootName = "SceneRoot";
     private const string CoalEquipmentRootName = "Equipment";
 
-    [MenuItem("Tools/WebDLPro/Configure Current Power Plant Scene")]
+    [MenuItem("Tools/WebDLPro/场景配置/配置当前燃气发电场景")]
     private static void ConfigureCurrentScene()
     {
         Scene activeScene = SceneManager.GetActiveScene();
@@ -65,15 +65,36 @@ public static class PowerPlantSceneSetup
             interactionCamera,
             contextFadeMaterial,
             new[] { GetRequiredObject(sceneRoot.transform, "地面") },
-            GetRequiredObjects(sceneRoot.transform,
-                "排水口管道002", "海水进水口管道", "排水口管道1", "管道5", "凝结水到锅炉管道2", "Circle001", "余热锅炉管道001", "汽轮机管道1", "取水泵站管道"),
-            GetDirectChildren(sceneRoot.transform),
             GetRequiredObject(sceneRoot.transform, "烟囱"),
             GetRequiredObject(sceneRoot.transform, "燃气轮机"),
             GetRequiredObject(sceneRoot.transform, "余热锅炉"),
             GetRequiredObject(sceneRoot.transform, "低中高压汽轮机"),
             GetRequiredObject(sceneRoot.transform, "发电机"),
-            GetRequiredObject(sceneRoot.transform, "变压站+电网"));
+            GetOptionalObject(sceneRoot.transform, "变压站+电网"),
+            new[]
+            {
+                GetRequiredObject(sceneRoot.transform, "燃气轮机"),
+                GetRequiredObject(sceneRoot.transform, "地面电线/地面电线02"),
+                GetRequiredObject(sceneRoot.transform, "控制柜/控制柜02")
+            },
+            new[]
+            {
+                GetRequiredObject(sceneRoot.transform, "控制柜/控制柜01"),
+                GetRequiredObject(sceneRoot.transform, "地面电线/地面电线01"),
+                GetRequiredObject(sceneRoot.transform, "余热锅炉")
+            },
+            new[]
+            {
+                GetRequiredObject(sceneRoot.transform, "低中高压汽轮机"),
+                GetRequiredObject(sceneRoot.transform, "地面电线/地面电线03"),
+                GetRequiredObject(sceneRoot.transform, "控制柜/控制柜03")
+            },
+            new[]
+            {
+                GetRequiredObject(sceneRoot.transform, "发电机"),
+                GetRequiredObject(sceneRoot.transform, "地面电线/地面电线04"),
+                GetRequiredObject(sceneRoot.transform, "控制柜/控制柜04")
+            });
         EditorUtility.SetDirty(runtimeRoot);
         EditorSceneManager.MarkSceneDirty(activeScene);
         EditorSceneManager.SaveScene(activeScene);
@@ -89,8 +110,8 @@ public static class PowerPlantSceneSetup
     /// PowerPlantProcessController 的属性面板（Inspector）中通过对象引用配置并保存。
     /// 该入口只负责创建桥接所需的空壳，避免再次把模型名称固化到编辑器代码中。
     /// </summary>
-    [MenuItem("Tools/WebDLPro/Configure Coal Power Scene (Inspector)")]
-    [MenuItem("Tools/WebDLPro/Configure Coal Power Scene")]
+    [MenuItem("Tools/WebDLPro/场景配置/准备燃煤发电场景（属性面板）")]
+    [MenuItem("Tools/WebDLPro/场景配置/准备燃煤发电场景")]
     private static void PrepareCoalSceneForInspector()
     {
         Scene activeScene = SceneManager.GetActiveScene();
@@ -141,6 +162,12 @@ public static class PowerPlantSceneSetup
             runtimeRoot);
     }
 
+    private static GameObject GetOptionalObject(Transform root, string objectPath)
+    {
+        Transform target = root.Find(objectPath);
+        return target != null ? target.gameObject : null;
+    }
+
     private static GameObject GetRequiredObject(Transform root, string objectName)
     {
         Transform target = root.Find(objectName);
@@ -150,17 +177,6 @@ public static class PowerPlantSceneSetup
         }
 
         return target.gameObject;
-    }
-
-    private static GameObject[] GetRequiredObjects(Transform root, params string[] objectNames)
-    {
-        GameObject[] objects = new GameObject[objectNames.Length];
-        for (int index = 0; index < objectNames.Length; index++)
-        {
-            objects[index] = GetRequiredObject(root, objectNames[index]);
-        }
-
-        return objects;
     }
 
     private static GameObject[] GetDirectChildren(Transform root)
@@ -199,7 +215,7 @@ public static class PowerPlantSceneSetup
         return material;
     }
 
-    [MenuItem("Tools/WebDLPro/Configure Current Power Plant Scene", true)]
+    [MenuItem("Tools/WebDLPro/场景配置/配置当前燃气发电场景", true)]
     private static bool ValidateConfigureCurrentScene()
     {
         return SceneManager.GetActiveScene().IsValid();

@@ -35,11 +35,6 @@ namespace WebDLPro.Unity.SceneRuntime
                 "场景控制器声明支持初始化，但未提供具体初始化实现。"));
             }
 
-        public virtual BusinessSceneCommandResult EnterProcessStep(string processId, string stepId, string unitId, bool isolate)
-        {
-            return NotImplementedOrUnsupported(BusinessSceneCapability.EnterProcessStep);
-        }
-
         public virtual BusinessSceneCommandResult FocusNode(string sceneNodeId, bool isolate)
         {
             return NotImplementedOrUnsupported(BusinessSceneCapability.FocusNode);

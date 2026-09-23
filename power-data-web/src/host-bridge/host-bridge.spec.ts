@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { SCENE_IDS, toSessionId } from '@/config/scene-topology/identifiers'
+import { OVERVIEW_SCENE_ID, SCENE_IDS, toSessionId } from '@/config/scene-topology/identifiers'
 import { createHostBridgeStartup, HostBridge } from '@/host-bridge/host-bridge'
 import { HOST_PROTOCOL_CHANNEL, HOST_PROTOCOL_VERSION, type HostEventMessage } from '@/host-bridge/host-protocol'
 import { WindowMessageRouter } from '@/host-bridge/message-router'
@@ -33,8 +33,8 @@ function createCommandEnvelope(): Record<string, unknown> {
 
 describe('外层桥安全边界', () => {
   it('启动参数必须同时匹配部署来源、实例标识和固定协议版本', () => {
-    const valid = createHostBridgeStartup('?parentOrigin=https%3A%2F%2Fportal.example.test&instanceId=visual-shell-01&protocolVersion=1', deploymentConfiguration, () => sessionId)
-    const forgedOrigin = createHostBridgeStartup('?parentOrigin=https%3A%2F%2Fforged.example.test&instanceId=visual-shell-01&protocolVersion=1', deploymentConfiguration, () => sessionId)
+    const valid = createHostBridgeStartup('?parentOrigin=https%3A%2F%2Fportal.example.test&instanceId=visual-shell-01&protocolVersion=2', deploymentConfiguration, () => sessionId)
+    const forgedOrigin = createHostBridgeStartup('?parentOrigin=https%3A%2F%2Fforged.example.test&instanceId=visual-shell-01&protocolVersion=2', deploymentConfiguration, () => sessionId)
 
     expect(valid.status).toBe('ready')
     expect(forgedOrigin.status).toBe('invalid')
@@ -95,6 +95,7 @@ describe('外层桥安全边界', () => {
       payload: {
         manifestVersion: '2026.08.04.1',
         sceneIds: SCENE_IDS,
+        overviewSceneId: OVERVIEW_SCENE_ID,
         commandCapabilities: ['system.init', 'state.get'],
         eventCapabilities: ['system.ack', 'system.error'],
       },

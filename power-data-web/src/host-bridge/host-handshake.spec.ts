@@ -12,6 +12,7 @@ const metadata: HostHandshakeMetadata = {
 }
 
 const stableContext: HostVisualizationContext = {
+  viewMode: 'business',
   sceneId: 'gas-power' as never,
   topologyId: 'gas-power.overview' as never,
   actionId: null,
@@ -37,7 +38,7 @@ describe('外层初始化握手', () => {
     const { handshake, sent, onInitialize } = createHandshake()
     handshake.start()
     const initialized = await handshake.handle({
-      channel: 'power-scene-topology-shell', version: 1, instanceId: 'visual-shell-01', sessionId: toSessionId('session-test-01'), messageId: 'parent-init-01', type: 'system.init', timestamp: 1,
+      channel: 'power-scene-topology-shell', version: 2, instanceId: 'visual-shell-01', sessionId: toSessionId('session-test-01'), messageId: 'parent-init-01', type: 'system.init', timestamp: 1,
       payload: { sceneId: 'gas-power' as never, topologyId: 'gas-power.overview' as never, expectedManifestVersion: metadata.manifestVersion },
     })
 
@@ -52,7 +53,7 @@ describe('外层初始化握手', () => {
     const { handshake, sent, onInitialize } = createHandshake()
     handshake.start()
     const initialized = await handshake.handle({
-      channel: 'power-scene-topology-shell', version: 1, instanceId: 'visual-shell-01', sessionId: toSessionId('session-test-01'), messageId: 'parent-init-02', type: 'system.init', timestamp: 1,
+      channel: 'power-scene-topology-shell', version: 2, instanceId: 'visual-shell-01', sessionId: toSessionId('session-test-01'), messageId: 'parent-init-02', type: 'system.init', timestamp: 1,
       payload: { sceneId: 'gas-power' as never, topologyId: 'gas-power.overview' as never, expectedManifestVersion: 'old-manifest' },
     })
 
@@ -65,7 +66,7 @@ describe('外层初始化握手', () => {
     const { handshake, onInitialize } = createHandshake()
     handshake.start()
     const accepted = await handshake.handle({
-      channel: 'power-scene-topology-shell', version: 1, instanceId: 'visual-shell-01', sessionId: toSessionId('session-test-01'), messageId: 'parent-view-01', type: 'view.open', timestamp: 1,
+      channel: 'power-scene-topology-shell', version: 2, instanceId: 'visual-shell-01', sessionId: toSessionId('session-test-01'), messageId: 'parent-view-01', type: 'view.open', timestamp: 1,
       // 夹具仅验证握手门禁，不模拟后续场景与拓扑协调器的业务执行。
       payload: { sceneId: 'gas-power' as never, topologyId: 'gas-power.overview' as never },
     })
@@ -75,7 +76,37 @@ describe('外层初始化握手', () => {
     expect(handshake.getStatus()).toBe('awaiting-init')
   })
 
-  it('15 秒超时后保持可初始化，并在释放时取消等待计时器', async () => {
+  it('初始化等待期间拒绝第二条 init，且不覆盖或排队首条命令', async () => {
+    let resolveInitialization: ((result: { success: true; context: HostVisualizationContext }) => void) | undefined
+    const onInitialize = vi.fn(() => new Promise<{ success: true; context: HostVisualizationContext }>((resolve) => {
+      resolveInitialization = resolve
+    }))
+    const { handshake, sent } = createHandshake(onInitialize)
+    handshake.start()
+
+    const first = handshake.handle({
+      channel: 'power-scene-topology-shell', version: 2, instanceId: 'visual-shell-01', sessionId: toSessionId('session-test-01'), messageId: 'parent-init-first', type: 'system.init', timestamp: 1,
+      payload: { sceneId: 'gas-power' as never, topologyId: 'gas-power.overview' as never },
+    })
+    const second = await handshake.handle({
+      channel: 'power-scene-topology-shell', version: 2, instanceId: 'visual-shell-01', sessionId: toSessionId('session-test-01'), messageId: 'parent-init-second', type: 'system.init', timestamp: 2,
+      payload: { sceneId: 'gas-power' as never, topologyId: 'gas-power.overview' as never },
+    })
+
+    expect(second).toBe(false)
+    expect(onInitialize).toHaveBeenCalledTimes(1)
+    expect(sent.at(-1)?.[0]).toMatchObject({
+      type: 'system.ack',
+      replyTo: 'parent-init-second',
+      payload: { success: false, error: { code: 'protocol.capacity.exceeded' } },
+    })
+
+    resolveInitialization?.({ success: true, context: stableContext })
+    await expect(first).resolves.toBe(true)
+    expect(sent.filter((entry) => (entry[0] as { replyTo?: string }).replyTo === 'parent-init-first')).toHaveLength(1)
+  })
+
+  it('等待父页面初始化 15 秒超时后仍可初始化，并在释放时取消计时器', async () => {
     vi.useFakeTimers()
     const { handshake, onInitialize } = createHandshake()
     handshake.start()
@@ -83,7 +114,7 @@ describe('外层初始化握手', () => {
     expect(handshake.getStatus()).toBe('timed-out')
 
     await handshake.handle({
-      channel: 'power-scene-topology-shell', version: 1, instanceId: 'visual-shell-01', sessionId: toSessionId('session-test-01'), messageId: 'parent-init-03', type: 'system.init', timestamp: 1,
+      channel: 'power-scene-topology-shell', version: 2, instanceId: 'visual-shell-01', sessionId: toSessionId('session-test-01'), messageId: 'parent-init-03', type: 'system.init', timestamp: 1,
       payload: { sceneId: 'gas-power' as never, topologyId: 'gas-power.overview' as never },
     })
     handshake.dispose()
@@ -102,7 +133,7 @@ describe('外层初始化握手', () => {
     handshake.start()
 
     const initialization = handshake.handle({
-      channel: 'power-scene-topology-shell', version: 1, instanceId: 'visual-shell-01', sessionId: toSessionId('session-test-01'), messageId: 'parent-init-disposed', type: 'system.init', timestamp: 1,
+      channel: 'power-scene-topology-shell', version: 2, instanceId: 'visual-shell-01', sessionId: toSessionId('session-test-01'), messageId: 'parent-init-disposed', type: 'system.init', timestamp: 1,
       payload: { sceneId: 'gas-power' as never, topologyId: 'gas-power.overview' as never },
     })
     handshake.dispose()

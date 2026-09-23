@@ -14,9 +14,9 @@ function createContent(duplicateSingleBranch: boolean): TopologyDrilldownContent
     sourceNodeId: toNodeId('source.formal'),
     duplicateSingleBranch,
     nodes: [
-      { id: 'source', title: '来源', kind: 'source', x: 50, y: 14 },
-      { id: 'logic.1', title: '直接子节点', kind: 'logic', x: 50, y: 53 },
-      { id: 'boundary.1', title: '模型说明', kind: 'boundary', x: 50, y: 84 },
+      { id: 'source', title: '来源', kind: 'source', iconKey: 'plc', x: 50, y: 14 },
+      { id: 'logic.1', title: '直接子节点', kind: 'logic', iconKey: 'instrument', x: 50, y: 53 },
+      { id: 'boundary.1', title: '模型说明', kind: 'boundary', iconKey: 'gas-turbine', x: 50, y: 84 },
     ],
     edges: [
       { id: 'edge.source.1', fromId: 'source', toId: 'logic.1' },

@@ -1,24 +1,52 @@
+import type { SceneActivationId } from '@/config/scene-topology/identifiers'
+import type { ActionDefinition } from '@/config/scene-topology/types'
 import type { TopologyRegistry } from '@/config/scene-topology/topology-registry'
 import type { HostCommandExecutionResult } from '@/host-bridge/host-command-lifecycle'
 import type { HostDispatchableDomainCommand } from '@/host-bridge/host-command-dispatcher'
 import type { HostProtocolError, WorkflowTriggerPayload } from '@/host-bridge/host-protocol'
 import type { VisualizationCoordinatorFacade } from '@/modules/visual/orchestration/visualization-coordinator-facade'
 import type { ViewOpenTransactionHandler } from '@/modules/visual/orchestration/view-open-transaction-handler'
+import type { ProcessDetailTransactionHandler } from '@/modules/visual/orchestration/process-detail-transaction-handler'
+import { isProcessDetailVisualizationStableContext } from '@/modules/visual/orchestration/visualization.store'
+
+/** 跨场景进入关键环节前，必须等待最新权威设备状态完成向目标物理场景的重放。 */
+export type CrossSceneProcessDetailStateSynchronizer = (sceneActivationId?: SceneActivationId) => Promise<boolean>
+
+/** 跨场景流程动作在两个内部阶段之间仍受同一外层关联标识约束，超时后不得继续启动关键环节。 */
+interface ActiveCrossSceneProcessDetailTransition {
+  cancelled: boolean
+}
 
 /** 流程触发处理器可以明确限定为同场景或跨场景，防止组合根把两类动作混入同一隐式分支。 */
 export type WorkflowTriggerScope = 'same-scene' | 'cross-scene'
 
 /**
  * `workflow.trigger`（流程触发）事务处理器。
- * 它只把已登记动作投影成现有 `view.open` 原子事务，不能直接写状态、调用画布、发送窗口消息或释放 Unity。
+ * 它将已登记动作投影到现有视图与关键环节事务；跨场景第三层会先建立目标业务场景，
+ * 但不能直接写状态、调用画布、发送窗口消息或释放 Unity。
  */
 export class WorkflowTriggerTransactionHandler {
+  /** 只保存当前跨场景关键环节命令的取消标记；外层生命周期容量固定，记录会在异步入口结束后立即删除。 */
+  private readonly activeCrossSceneProcessDetails = new Map<string, ActiveCrossSceneProcessDetailTransition>()
+
   public constructor(
     private readonly registry: TopologyRegistry,
     private readonly viewOpen: Pick<ViewOpenTransactionHandler, 'submit'>,
     private readonly coordinator: VisualizationCoordinatorFacade,
     private readonly scope: WorkflowTriggerScope = 'same-scene',
+    private readonly processDetail?: Pick<ProcessDetailTransactionHandler, 'submit' | 'exitCurrentToDefaultBusiness' | 'cancelTimedOutCommand'>,
+    private readonly synchronizeCrossSceneProcessDetailState: CrossSceneProcessDetailStateSynchronizer = async () => true,
   ) {}
+
+  /**
+   * 旧的视图打开事务由其自身端口处理超时；本处理器只转发第三层独立资源事务。
+   * 未登记关键环节的流程处理器保持空操作，不会凭动作名称猜测需要释放的 Unity 资源。
+   */
+  public cancelTimedOutCommand(correlationId: string): void {
+    const activeCrossSceneProcessDetail = this.activeCrossSceneProcessDetails.get(correlationId)
+    if (activeCrossSceneProcessDetail) activeCrossSceneProcessDetail.cancelled = true
+    this.processDetail?.cancelTimedOutCommand(correlationId)
+  }
 
   /** 仅接收已由外层分派器校验过的流程触发意图；跨场景动作留给任务-035的专用路径处理。 */
   public async submit(command: HostDispatchableDomainCommand): Promise<HostCommandExecutionResult> {
@@ -63,6 +91,38 @@ export class WorkflowTriggerTransactionHandler {
       return this.failure('action.execute.failed', 'validation', '流程动作参数尚未配置到 Unity 受控字段映射。')
     }
 
+    /**
+     * 第三层动作和从第三层返回的业务动作统一交给独立事务处理器。
+     * 跨场景离开关键环节时，先恢复当前场景的默认业务拓扑，形成可回退的稳定中间态；
+     * 随后再执行目标场景切换，避免目标动作被同场景退出校验提前拒绝。
+     */
+    const startsInProcessDetail = isProcessDetailVisualizationStableContext(currentContext)
+    if (startsInProcessDetail && this.scope === 'cross-scene') {
+      if (!this.processDetail) return this.failure('protocol.capability.undeclared', 'validation', '当前发布未接入关键环节事务能力。')
+      return this.exitProcessDetailAndContinue(action, payload, correlationId, currentContext.contextRevision)
+    }
+    if (action.targetViewMode === 'overview') {
+      /*
+       * 合作方从统一动作清单触发平台总览，但底层仍复用既有无拓扑 view.open（视图打开）事务。
+       * 总览载荷按协议不得携带 actionId 或占位 topologyId，避免污染稳定上下文和业务拓扑注册表。
+       */
+      return this.viewOpen.submit({
+        type: 'view.open',
+        correlationId,
+        payload: {
+          sceneId: action.targetSceneId,
+          expectedContextRevision: payload.expectedContextRevision ?? currentContext.contextRevision,
+        },
+      })
+    }
+    if (action.targetViewMode === 'process-detail' || startsInProcessDetail) {
+      if (!this.processDetail) return this.failure('protocol.capability.undeclared', 'validation', '当前发布未接入关键环节事务能力。')
+      if (action.targetViewMode === 'process-detail' && this.scope === 'cross-scene') {
+        return this.enterCrossSceneProcessDetail(action, payload, correlationId, currentContext.contextRevision)
+      }
+      return this.processDetail.submit({ type: 'workflow.trigger', correlationId, payload })
+    }
+
     /*
      * 复用唯一原子处理器：同场景时其不会发送 switchScene；跨场景时严格按“预解析 → 切场景 → 动作 → 激活 → 提交”推进。
      * 两种范围都不会触发运行时释放或重新下载，且旧事务取代、超时和失败恢复继续由同一处理器统一治理。
@@ -77,6 +137,129 @@ export class WorkflowTriggerTransactionHandler {
         expectedContextRevision: payload.expectedContextRevision ?? currentContext.contextRevision,
       },
     })
+  }
+
+  /**
+   * 从第三层跨场景时先完成当前资源退出和默认拓扑恢复，再基于最新上下文版本继续目标事务。
+   * 这样目标加载失败时，现有 view.open 补偿逻辑可以恢复到来源业务总览，而不是落入不可重放的第三层错误态。
+   */
+  private async exitProcessDetailAndContinue(
+    action: ActionDefinition,
+    payload: WorkflowTriggerPayload,
+    correlationId: string,
+    expectedContextRevision: number,
+  ): Promise<HostCommandExecutionResult> {
+    const exited = await this.processDetail!.exitCurrentToDefaultBusiness(expectedContextRevision, correlationId)
+    if (!exited.success) return exited
+
+    const sourceSnapshot = this.coordinator.getSnapshot()
+    const sourceContext = sourceSnapshot.stableContext
+    if (!sourceContext || sourceSnapshot.runtimeStatus !== 'ready' || !('topologyId' in sourceContext)) {
+      return this.failure('action.execute.failed', 'executing-action', '当前关键环节退出后未形成可切换场景的稳定业务上下文。')
+    }
+
+    if (action.targetViewMode === 'process-detail') {
+      return this.enterCrossSceneProcessDetail(action, payload, correlationId, sourceContext.contextRevision)
+    }
+    if (action.targetViewMode === 'overview') {
+      // 退出第三层后的最新上下文版本必须继续传给同一个无拓扑总览事务，防止旧命令覆盖新视图。
+      return this.viewOpen.submit({
+        type: 'view.open',
+        correlationId,
+        payload: {
+          sceneId: action.targetSceneId,
+          expectedContextRevision: sourceContext.contextRevision,
+        },
+      })
+    }
+    return this.viewOpen.submit({
+      type: 'view.open',
+      correlationId,
+      payload: {
+        sceneId: action.targetSceneId,
+        topologyId: action.targetTopologyId,
+        actionId: action.actionId,
+        expectedContextRevision: sourceContext.contextRevision,
+      },
+    })
+  }
+
+  /**
+   * 跨场景关键环节不能直接调用只接受当前活动业务控制器的 Unity 命令。
+   * 这里先进入目标场景默认拓扑，确认目标控制器和物理场景实例已稳定，再阻塞式重放最新设备状态，
+   * 最后把同一外层动作交给现有第三层两阶段事务；不复制场景切换、拓扑激活或关键环节资源逻辑。
+   */
+  private async enterCrossSceneProcessDetail(
+    action: Extract<ActionDefinition, { targetViewMode: 'process-detail' }>,
+    payload: WorkflowTriggerPayload,
+    correlationId: string,
+    expectedContextRevision: number,
+  ): Promise<HostCommandExecutionResult> {
+    const targetScene = this.registry.getScene(action.targetSceneId)
+    if (!targetScene) return this.failure('scene.unknown', 'validation', '关键环节所属业务场景未在当前原子清单中登记。')
+
+    const active: ActiveCrossSceneProcessDetailTransition = { cancelled: false }
+    this.activeCrossSceneProcessDetails.set(correlationId, active)
+    try {
+      const opened = await this.viewOpen.submit({
+        type: 'view.open',
+        correlationId,
+        payload: {
+          sceneId: targetScene.sceneId,
+          topologyId: targetScene.defaultTopologyId,
+          expectedContextRevision,
+        },
+      })
+      if (!opened.success) return opened
+      if (active.cancelled) return this.superseded(opened.transitionId)
+
+      const targetSnapshot = this.coordinator.getSnapshot()
+      const targetContext = targetSnapshot.stableContext
+      if (
+        !targetContext
+        || targetSnapshot.runtimeStatus !== 'ready'
+        || !('topologyId' in targetContext)
+        || targetContext.sceneId !== targetScene.sceneId
+        || targetContext.topologyId !== targetScene.defaultTopologyId
+      ) {
+        return this.failure('action.execute.failed', 'switching-scene', '目标业务场景未形成可进入关键环节的稳定上下文。')
+      }
+
+      let synchronized = false
+      try {
+        synchronized = await this.synchronizeCrossSceneProcessDetailState(targetSnapshot.sceneActivationId ?? undefined)
+      } catch {
+        synchronized = false
+      }
+      if (active.cancelled) return this.superseded(opened.transitionId)
+      if (!synchronized) {
+        return this.failure('action.execute.failed', 'executing-action', '目标业务场景未能在进入关键环节前完成最新设备状态重放。')
+      }
+
+      return this.processDetail!.submit({
+        type: 'workflow.trigger',
+        correlationId,
+        payload: {
+          ...payload,
+          // 场景准备阶段已经提交一次内部稳定上下文，第三层必须基于该最新版本取得提交权。
+          expectedContextRevision: targetContext.contextRevision,
+        },
+      })
+    } finally {
+      if (this.activeCrossSceneProcessDetails.get(correlationId) === active) {
+        this.activeCrossSceneProcessDetails.delete(correlationId)
+      }
+    }
+  }
+
+  /** 超时或新命令取代跨场景准备后，旧调用只能返回已取代，不能继续启动第三层资源事务。 */
+  private superseded(transitionId?: HostCommandExecutionResult['transitionId']): HostCommandExecutionResult {
+    return {
+      success: false,
+      status: 'superseded',
+      ...(transitionId ? { transitionId } : {}),
+      error: { code: 'command.superseded', stage: 'executing-action', message: '跨场景关键环节事务已被更新请求取代。', recoverable: true },
+    }
   }
 
   /** 统一返回协议许可的有限失败，不包含参数值、原始外层载荷或 Unity 内部错误。 */

@@ -20,7 +20,8 @@ const visualBaselinePagePath = fileURLToPath(new URL('../visual-regression/host/
  * 两枚节点服务于“完整快照缺失已绑定设备”的回归，避免为了测试清除语义而构造正式协议禁止的空状态数组。
  */
 function createTestManifest() {
-  const sceneIds = ['coal-power', 'gas-power', 'wind-power', 'solar-power', 'substation', 'distribution', 'consumption', 'microgrid', 'dispatch']
+  // 回归壳覆盖固定十三场景闭集；换流站与开关站虽无三维动作，仍需验证公开导航和拓扑上下文。
+  const sceneIds = ['coal-power', 'gas-power', 'wind-power', 'solar-power', 'substation', 'distribution', 'consumption', 'microgrid', 'dispatch', 'step-up-substation', 'step-down-substation', 'converter-station', 'switching-station']
   const manifestVersion = 'local-shell-regression.1'
   const gasResetActionId = 'action.gas.reset'
   const windResetActionId = 'action.wind.reset'
@@ -91,6 +92,8 @@ function createTestManifest() {
         actionId: gasResetActionId,
         title: '测试燃气场景重置',
         targetSceneId: 'gas-power',
+        // 夹具仍只验证第二层业务动作；显式视图模式避免旧清单格式被第二版校验器静默接受。
+        targetViewMode: 'business',
         targetTopologyId: 'topology.gas-power.detail',
         allowedParameters: [],
         unityAction: { type: 'resetScene' },
@@ -101,6 +104,8 @@ function createTestManifest() {
         actionId: windResetActionId,
         title: '测试风电场景重置',
         targetSceneId: 'wind-power',
+        // 风电同样保持业务拓扑视图，不创建与本轮无关的关键环节占位资源。
+        targetViewMode: 'business',
         targetTopologyId: 'topology.wind-power.overview',
         allowedParameters: [],
         unityAction: { type: 'resetScene' },
@@ -111,7 +116,6 @@ function createTestManifest() {
     unitySceneMappings: scenes.map((scene) => ({
       sceneId: scene.sceneId,
       mappingVersion: scene.sceneMappingVersion,
-      processSteps: [],
       // 三维节点清单与上方二维节点一一对应，保证壳从二维引用派生三维目标的真实路径能够通过校验。
       sceneNodeIds: scene.sceneId === 'gas-power' ? ['scene-node.gas-turbine', 'scene-node.gas-generator'] : [],
       routeIds: [],

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createCoalPowerManifest, createHostPage } from '../scripts/build-gas-power-smoke-release.mjs'
 import { coalPowerEdgeColors } from '../scripts/coal-power-topology.mjs'
 import { createLocalProcessConfigLoader } from '../src/config/process/local-process-config'
-import { createRuntimeRegistry } from '../src/config/process/runtime-registry'
+import { createRuntimeRegistry, readWebglRuntimeIdentity } from '../src/config/process/runtime-registry'
 import { validateSceneTopologyManifest } from '../src/config/scene-topology/validator'
 
 /**
@@ -14,11 +14,11 @@ describe('燃煤发电拓扑发布契约', () => {
     'system.fuel-management', 'system.enterprise-core-switch', 'system.enterprise-firewall',
     'system.pi-historian', 'system.dmz-industrial-firewall', 'endpoint.remote-maintenance-gateway',
     'system.unit-operator-station', 'system.monitor-core-switch-primary', 'system.monitor-core-switch-standby',
-    'system.auxiliary-operator-station', 'system.sis-performance-station', 'system.boiler-dcs',
-    'system.steam-turbine-dcs', 'system.generator-excitation-controller', 'system.desulfurization-plc',
+    'system.auxiliary-operator-station', 'system.sis-performance-station', 'system.coal-boiler-control',
+    'system.coal-steam-turbine-control', 'system.coal-generator-control', 'system.desulfurization-plc',
     'system.denitrification-plc', 'system.coal-handling-ash-plc', 'system.sis-safety-controller',
-    'asset.coal-mill-actuator', 'asset.induced-draft-fan-vfd', 'asset.furnace-pressure-transmitter',
-    'asset.steam-turbine-valve-actuator', 'asset.generator-protection-device',
+    'asset.coal-mill-actuator', 'asset.coal-boiler', 'asset.furnace-pressure-transmitter',
+    'asset.coal-steam-turbine', 'asset.coal-generator',
     'asset.desulfurization-circulation-pump', 'asset.denitrification-ammonia-valve',
     'asset.coal-belt-controller', 'asset.esd-emergency-actuator',
   ] as const
@@ -33,58 +33,12 @@ describe('燃煤发电拓扑发布契约', () => {
     'route.coal.monitor-primary-to-steam-turbine-dcs', 'route.coal.monitor-primary-to-generator-excitation',
     'route.coal.monitor-standby-to-desulfurization', 'route.coal.monitor-standby-to-denitrification',
     'route.coal.monitor-standby-to-coal-handling', 'route.coal.monitor-standby-to-sis',
-    'route.coal.boiler-dcs-to-coal-mill', 'route.coal.boiler-dcs-to-fan-vfd',
-    'route.coal.boiler-dcs-to-furnace-pressure', 'route.coal.steam-turbine-dcs-to-valve',
-    'route.coal.generator-excitation-to-protection', 'route.coal.desulfurization-to-pump',
+    'route.coal.boiler-dcs-to-coal-mill', 'route.coal.boiler-dcs-to-boiler',
+    'route.coal.boiler-dcs-to-furnace-pressure', 'route.coal.steam-turbine-dcs-to-turbine',
+    'route.coal.generator-excitation-to-generator', 'route.coal.desulfurization-to-pump',
     'route.coal.denitrification-to-ammonia-valve', 'route.coal.coal-handling-to-belt-controller',
     'route.coal.sis-to-esd',
   ] as const
-
-  const expectedFlows = {
-    'topology.coal-power.combustion': {
-      nodes: [
-        'system.unit-operator-station', 'system.monitor-core-switch-primary', 'system.monitor-core-switch-standby',
-        'system.auxiliary-operator-station', 'system.sis-performance-station', 'system.boiler-dcs',
-        'system.sis-safety-controller', 'asset.coal-mill-actuator', 'asset.induced-draft-fan-vfd',
-        'asset.furnace-pressure-transmitter', 'asset.esd-emergency-actuator',
-      ],
-      edges: [
-        'route.coal.monitor-primary-to-operator', 'route.coal.monitor-primary-to-sis-performance',
-        'route.coal.monitor-primary-to-standby', 'route.coal.monitor-standby-to-auxiliary-operator',
-        'route.coal.monitor-primary-to-boiler-dcs', 'route.coal.monitor-standby-to-sis',
-        'route.coal.boiler-dcs-to-coal-mill', 'route.coal.boiler-dcs-to-fan-vfd',
-        'route.coal.boiler-dcs-to-furnace-pressure', 'route.coal.sis-to-esd',
-      ],
-    },
-    'topology.coal-power.water-steam-cycle': {
-      nodes: [
-        'system.unit-operator-station', 'system.monitor-core-switch-primary', 'system.monitor-core-switch-standby',
-        'system.auxiliary-operator-station', 'system.sis-performance-station', 'system.steam-turbine-dcs',
-        'system.sis-safety-controller', 'asset.steam-turbine-valve-actuator', 'asset.esd-emergency-actuator',
-      ],
-      edges: [
-        'route.coal.monitor-primary-to-operator', 'route.coal.monitor-primary-to-sis-performance',
-        'route.coal.monitor-primary-to-standby', 'route.coal.monitor-standby-to-auxiliary-operator',
-        'route.coal.monitor-primary-to-steam-turbine-dcs', 'route.coal.monitor-standby-to-sis',
-        'route.coal.steam-turbine-dcs-to-valve', 'route.coal.sis-to-esd',
-      ],
-    },
-    'topology.coal-power.power-output': {
-      nodes: [
-        'system.unit-operator-station', 'system.monitor-core-switch-primary', 'system.monitor-core-switch-standby',
-        'system.auxiliary-operator-station', 'system.sis-performance-station', 'system.steam-turbine-dcs',
-        'system.generator-excitation-controller', 'system.sis-safety-controller', 'asset.steam-turbine-valve-actuator',
-        'asset.generator-protection-device', 'asset.esd-emergency-actuator',
-      ],
-      edges: [
-        'route.coal.monitor-primary-to-operator', 'route.coal.monitor-primary-to-sis-performance',
-        'route.coal.monitor-primary-to-standby', 'route.coal.monitor-standby-to-auxiliary-operator',
-        'route.coal.monitor-primary-to-steam-turbine-dcs', 'route.coal.monitor-primary-to-generator-excitation',
-        'route.coal.monitor-standby-to-sis', 'route.coal.steam-turbine-dcs-to-valve',
-        'route.coal.generator-excitation-to-protection', 'route.coal.sis-to-esd',
-      ],
-    },
-  } as const
 
   it('发布燃煤总图的 27 个节点和 27 条已核验连线', async () => {
     const manifest = await createCoalPowerManifest('overview-contract-test')
@@ -94,9 +48,50 @@ describe('燃煤发电拓扑发布契约', () => {
     expect(overview?.edges.map((edge) => edge.edgeId)).toEqual(overviewEdgeIds)
     expect(overview?.nodes).toHaveLength(27)
     expect(overview?.edges).toHaveLength(27)
-    expect(overview?.nodes.every((node) => node.deviceStatus === 'offline' && node.doubleClickBehavior === 'emit-node')).toBe(true)
+    // 未收到外部状态快照时所有发布节点均以正常为基线；离线只能由外部状态明确下发。
+    expect(overview?.nodes.every((node) => node.deviceStatus === 'normal' && node.doubleClickBehavior === 'emit-node')).toBe(true)
     expect(overview?.edges.every((edge) => edge.evidenceStatus === 'verified')).toBe(true)
     expect(new Set(overview?.nodes.map((node) => node.nodeId))).toHaveLength(27)
+  })
+
+  it('总览显式发布三组燃煤重点区域，且新版不发布过滤拓扑', async () => {
+    const manifest = await createCoalPowerManifest('focus-region-contract-test')
+    const overview = manifest.topologies.find((topology) => topology.topologyId === 'topology.coal-power.overview')
+
+    expect(overview?.focusRegions).toEqual([
+      {
+        regionId: 'focus.coal-boiler-control',
+        anchorNodeId: 'system.coal-boiler-control',
+        nodeIds: [
+          'system.coal-boiler-control',
+          'asset.coal-mill-actuator',
+          'asset.coal-boiler',
+          'asset.furnace-pressure-transmitter',
+        ],
+        label: '锅炉控制区域',
+      },
+      {
+        regionId: 'focus.coal-steam-turbine-control',
+        anchorNodeId: 'system.coal-steam-turbine-control',
+        nodeIds: ['system.coal-steam-turbine-control', 'asset.coal-steam-turbine'],
+        label: '汽轮机控制区域',
+      },
+      {
+        regionId: 'focus.coal-generator-control',
+        anchorNodeId: 'system.coal-generator-control',
+        nodeIds: ['system.coal-generator-control', 'asset.coal-generator'],
+        label: '发电机控制区域',
+      },
+    ])
+    /**
+     * 新版图纸只交付一张总览。这里同时锁定数量与 filter（过滤规则）缺失，防止后续有人
+     * 仅移除入口却把旧流程子图继续写入正式清单，造成可被外部协议间接打开的隐藏功能。
+     */
+    const coalTopologies = manifest.topologies.filter((topology) => topology.sceneId === 'coal-power')
+    expect(coalTopologies).toHaveLength(1)
+    expect(coalTopologies[0]?.topologyId).toBe('topology.coal-power.overview')
+    expect(coalTopologies.every((topology) => topology.filter === undefined)).toBe(true)
+    expect(validateSceneTopologyManifest(manifest)).toEqual([])
   })
 
   it('保留资料第二节的连线颜色、实虚线和协议标签', async () => {
@@ -130,27 +125,34 @@ describe('燃煤发电拓扑发布契约', () => {
     }))
   })
 
-  it('三个关键流程只引用总图，并严格复用资料的节点和连线集合', async () => {
-    const manifest = await createCoalPowerManifest('flow-contract-test')
+  it('燃煤单元层与现场层采用避让重点区域的对齐坐标', async () => {
+    const manifest = await createCoalPowerManifest('coal-layout-contract-test')
     const overview = manifest.topologies.find((topology) => topology.topologyId === 'topology.coal-power.overview')
-    const overviewPositions = new Map(overview?.nodes.map((node) => [node.nodeId, { x: node.x, y: node.y }]))
+    const nodesById = new Map(overview?.nodes.map((node) => [node.nodeId, node]))
 
-    for (const [topologyId, expected] of Object.entries(expectedFlows)) {
-      const flow = manifest.topologies.find((topology) => topology.topologyId === topologyId)
-      expect(flow?.filter?.sourceTopologyId).toBe('topology.coal-power.overview')
-      expect(flow?.nodes).toEqual([])
-      expect(flow?.edges).toEqual([])
-      expect(flow?.filter?.visibleNodeIds).toEqual(expected.nodes)
-      expect(flow?.filter?.visibleEdgeIds).toEqual(expected.edges)
-      expect(flow?.filter?.allowedOrphanNodeIds).toBeUndefined()
-      expect(flow?.filter?.nodeLayoutOverrides).toHaveLength(expected.nodes.length)
-      for (const override of flow?.filter?.nodeLayoutOverrides ?? []) {
-        expect({ x: override.x, y: override.y }).toEqual(overviewPositions.get(override.nodeId))
-      }
+    // 锅炉三分支集中在左侧并保持足够间隔，汽机及后续一对一控制链路继续拉开，重点区域不会互相包围。
+    expect(['asset.coal-mill-actuator', 'asset.coal-boiler', 'asset.furnace-pressure-transmitter']
+      .map((nodeId) => nodesById.get(nodeId)?.x)).toEqual([2, 11, 20])
+    expect(nodesById.get('system.coal-boiler-control')?.x).toBe(11)
+    expect(['system.coal-steam-turbine-control', 'system.coal-generator-control', 'system.desulfurization-plc',
+      'system.denitrification-plc', 'system.coal-handling-ash-plc', 'system.sis-safety-controller']
+      .map((nodeId) => nodesById.get(nodeId)?.x)).toEqual([33, 47, 61, 75, 87, 96])
+
+    // 一对一现场边两端横坐标一致，路由器因此可以直接绘制竖直边，不需要斜向避让。
+    const alignedPairs = [
+      ['system.coal-steam-turbine-control', 'asset.coal-steam-turbine'],
+      ['system.coal-generator-control', 'asset.coal-generator'],
+      ['system.desulfurization-plc', 'asset.desulfurization-circulation-pump'],
+      ['system.denitrification-plc', 'asset.denitrification-ammonia-valve'],
+      ['system.coal-handling-ash-plc', 'asset.coal-belt-controller'],
+      ['system.sis-safety-controller', 'asset.esd-emergency-actuator'],
+    ] as const
+    for (const [controllerId, fieldNodeId] of alignedPairs) {
+      expect(nodesById.get(controllerId)?.x).toBe(nodesById.get(fieldNodeId)?.x)
     }
   })
 
-  it('只登记 Unity 已确认的三个三维节点，不写入平台设备字段', async () => {
+  it('只登记 Unity 已确认的八个三维节点，不写入平台设备字段', async () => {
     const manifest = await createCoalPowerManifest('mapping-contract-test')
     const overview = manifest.topologies.find((topology) => topology.topologyId === 'topology.coal-power.overview')
     const mappedNodes = overview?.nodes
@@ -158,9 +160,14 @@ describe('燃煤发电拓扑发布契约', () => {
       .map((node) => ({ nodeId: node.nodeId, sceneNodeId: node.sceneNodeId }))
 
     expect(mappedNodes).toEqual([
-      { nodeId: 'system.boiler-dcs', sceneNodeId: 'node.coal-boiler' },
-      { nodeId: 'system.steam-turbine-dcs', sceneNodeId: 'node.coal-steam-turbine' },
-      { nodeId: 'system.generator-excitation-controller', sceneNodeId: 'node.coal-generator' },
+      { nodeId: 'system.coal-boiler-control', sceneNodeId: 'unit.coal-boiler.control' },
+      { nodeId: 'system.coal-steam-turbine-control', sceneNodeId: 'unit.coal-steam-turbine.control' },
+      { nodeId: 'system.coal-generator-control', sceneNodeId: 'unit.coal-generator.control' },
+      { nodeId: 'system.coal-handling-ash-plc', sceneNodeId: 'node.coal-precipitator' },
+      { nodeId: 'asset.coal-mill-actuator', sceneNodeId: 'node.coal-feeder' },
+      { nodeId: 'asset.coal-boiler', sceneNodeId: 'node.coal-boiler' },
+      { nodeId: 'asset.coal-steam-turbine', sceneNodeId: 'node.coal-steam-turbine' },
+      { nodeId: 'asset.coal-generator', sceneNodeId: 'node.coal-generator' },
     ])
     expect(overview?.nodes.every((node) => !Object.prototype.hasOwnProperty.call(node, 'deviceId'))).toBe(true)
     expect(Object.prototype.hasOwnProperty.call(manifest, 'deviceMappings')).toBe(false)
@@ -168,41 +175,81 @@ describe('燃煤发电拓扑发布契约', () => {
     expect(validateSceneTopologyManifest(manifest)).toEqual([])
   })
 
-  it('四个动作、四个 Unity 流程步骤和场景入口保持一致', async () => {
+  it('发布总览动作、汽轮机第三层动作和燃煤场景入口', async () => {
     const manifest = await createCoalPowerManifest('action-contract-test')
     const coalScene = manifest.scenes.find((scene) => scene.sceneId === 'coal-power')
     const coalMapping = manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'coal-power')
 
     expect(coalScene?.defaultTopologyId).toBe('topology.coal-power.overview')
-    expect(coalScene?.topologyIds).toEqual([
-      'topology.coal-power.overview', 'topology.coal-power.combustion',
-      'topology.coal-power.water-steam-cycle', 'topology.coal-power.power-output',
-    ])
+    expect(coalScene?.topologyIds).toEqual(['topology.coal-power.overview'])
     expect(coalScene?.supportedActionIds).toEqual([
-      'action.coal-power.overview', 'action.coal-power.combustion',
-      'action.coal-power.water-steam-cycle', 'action.coal-power.power-output',
+      'action.coal-power.overview',
+      'action.coal-power.steam-turbine',
     ])
-    expect(coalMapping?.sceneNodeIds).toEqual(['node.coal-boiler', 'node.coal-steam-turbine', 'node.coal-generator'])
-    expect(coalMapping?.processSteps).toEqual([
-      { processId: 'coal-power-generation', stepId: 'overview' },
-      { processId: 'coal-power-generation', stepId: 'combustion' },
-      { processId: 'coal-power-generation', stepId: 'water-steam-cycle' },
-      { processId: 'coal-power-generation', stepId: 'power-output' },
+    expect(coalMapping?.sceneNodeIds).toEqual([
+      'node.coal-feeder',
+      'unit.coal-boiler.control',
+      'unit.coal-steam-turbine.control',
+      'unit.coal-generator.control',
+      'node.coal-boiler',
+      'node.coal-steam-turbine',
+      'node.coal-generator',
+      'node.coal-precipitator',
     ])
+    expect(coalMapping).not.toHaveProperty('processSteps')
     expect(coalMapping?.routeIds).toEqual([])
 
-    expect(manifest.actions).toHaveLength(4)
+    expect(manifest.actions).toHaveLength(2)
     expect(manifest.actions.map((action) => action.actionId)).toEqual(coalScene?.supportedActionIds)
-    expect(manifest.actions.every((action) => (
-      action.targetSceneId === 'coal-power' &&
-      action.failurePolicy === 'keep-current-context' &&
-      action.unityAction.type === 'enterProcessStep' &&
-      action.unityAction.processId === 'coal-power-generation' &&
-      action.unityAction.defaultUnitId === 'all' &&
-      action.unityAction.isolate === true
-    ))).toBe(true)
+    expect(manifest.actions.find((action) => action.actionId === 'action.coal-power.overview')).toEqual(expect.objectContaining({
+      targetSceneId: 'coal-power',
+      targetViewMode: 'business',
+      failurePolicy: 'keep-current-context',
+      unityAction: { type: 'resetScene' },
+    }))
+    const steamTurbineAction = manifest.actions.find((action) => action.actionId === 'action.coal-power.steam-turbine')
+    expect(steamTurbineAction).toEqual(expect.objectContaining({
+      targetSceneId: 'coal-power',
+      targetViewMode: 'process-detail',
+      processDetailId: 'process-detail.coal-power.steam-turbine',
+      failurePolicy: 'keep-current-context',
+      unityAction: { type: 'enterProcessDetail', processDetailId: 'process-detail.coal-power.steam-turbine' },
+    }))
+    expect(steamTurbineAction).not.toHaveProperty('targetTopologyId')
+    expect(manifest.processDetails).toEqual([{
+      sceneId: 'coal-power',
+      processId: 'coal-power-generation',
+      stepId: 'steam-turbine',
+      processDetailId: 'process-detail.coal-power.steam-turbine',
+      resourceId: 'process-detail-resource.coal-power.steam-turbine',
+      cameraPoseId: 'camera-pose.coal-power.steam-turbine',
+      stateNodeId: 'node.coal-steam-turbine',
+      topologyDataContextId: 'process-detail.coal-power.steam-turbine',
+    }])
+    /**
+     * 旧流程动作即使仍存在于参考源码，也绝不能进入正式清单；否则外部调用方可绕过页面入口
+     * 直接触发已经下线的二维/三维流程视图。
+     */
+    expect(JSON.stringify({ topologies: manifest.topologies, actions: manifest.actions, mappings: manifest.unitySceneMappings }))
+      .not.toMatch(/combustion|water-steam-cycle|power-output/)
     // 燃煤清单必须声明燃煤专用网页入口键，避免 Unity 已切到燃煤而握手元数据仍显示燃气。
     expect(manifest.unityRuntimeKey).toBe('coal-plant-release')
+  })
+
+  it('构建身份缺失或仍是占位格式时不生成 Unity 运行时登记', () => {
+    const missingIdentity = readWebglRuntimeIdentity({})
+    const invalidIdentity = readWebglRuntimeIdentity({
+      VITE_POWER_UNITY_BUILD_ID: 'local-webgl-topology-link',
+      VITE_POWER_UNITY_RESOURCE_DIGEST: 'local-webgl-topology-link',
+    })
+
+    expect(missingIdentity.identity).toBeUndefined()
+    expect(missingIdentity.issues.map((issue) => issue.code)).toEqual([
+      'runtime.build-id',
+      'runtime.resource-digest',
+    ])
+    expect(invalidIdentity.identity).toBeUndefined()
+    expect(invalidIdentity.issues.map((issue) => issue.code)).toContain('runtime.resource-digest')
   })
 
   it('燃煤总览通过专用运行时登记申请同一个 Unity 单实例', () => {
@@ -219,6 +266,12 @@ describe('燃煤发电拓扑发布契约', () => {
         addressMode: 'fixed-origin',
       },
       issues: [],
+    }, {
+      identity: {
+        buildId: 'unity-contract-test',
+        resourceDigest: `sha256:${'a'.repeat(64)}`,
+      },
+      issues: [],
     })
     const loader = createLocalProcessConfigLoader(registry)
     const coalResult = loader.load('coal-overview')
@@ -227,6 +280,7 @@ describe('燃煤发电拓扑发布契约', () => {
     expect(registry.list().map((runtime) => runtime.runtimeKey)).toEqual([
       'gas-plant-release',
       'coal-plant-release',
+      'solar-plant-release',
     ])
     expect(coalResult).toMatchObject({
       status: 'ready',

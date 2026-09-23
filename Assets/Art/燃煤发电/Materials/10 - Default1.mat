@@ -1,6 +1,6 @@
 %YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
---- !u!114 &-2094633051334507711
+--- !u!114 &-6510823192766975327
 MonoBehaviour:
   m_ObjectHideFlags: 11
   m_CorrespondingSourceObject: {fileID: 0}
@@ -112,7 +112,7 @@ Material:
     - _QueueControl: 0
     - _QueueOffset: 0
     - _REFLECTIONS_IOR: 1.52
-    - _REFLECTIONS_ROUGHNESS: 0
+    - _REFLECTIONS_ROUGHNESS: 0.24
     - _REFLECTIONS_WEIGHT: 0.66
     - _ReceiveShadows: 1
     - _Smoothness: 0
@@ -126,8 +126,8 @@ Material:
     - _WorkflowMode: 1
     - _ZWrite: 1
     m_Colors:
-    - _BASE_COLOR: {r: 0.81960785, g: 0.79607844, b: 0.7411765, a: 1}
-    - _BaseColor: {r: 0.91607994, g: 0.90436536, b: 0.8762218, a: 1}
+    - _BASE_COLOR: {r: 0.20433722, g: 0.39155596, b: 0.676259, a: 1}
+    - _BaseColor: {r: 0.4893738, g: 0.6588109, b: 0.8413264, a: 1}
     - _Color: {r: 1, g: 1, b: 1, a: 1}
     - _EMISSION_COLOR: {r: 0, g: 0, b: 0, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}

@@ -8,18 +8,21 @@ using UnityEngine.SceneManagement;
 using WebDLPro.Unity.SceneRuntime;
 
 /// <summary>
-/// 统一生成九个业务空场景、启动场景、目录资产和构建场景顺序。
-/// 映射表来自当前任务中确认的固定九场景，不从模型名称、旧 SampleScene 或文件扫描推断；
+/// 统一生成十三个业务空场景、启动场景、目录资产和构建场景顺序。
+/// 映射表来自当前任务中确认的固定十三场景，不从模型名称、旧 SampleScene 或文件扫描推断；
 /// 生成器只允许首次创建，发现部分既有资产会立即失败，避免覆盖用户后续编辑的业务场景。
 /// </summary>
 public static class BusinessSceneBootstrapGenerator
 {
     private const string CatalogAssetPath = "Assets/Configuration/BusinessSceneCatalog.asset";
+    private const string OverviewCatalogAssetPath = "Assets/Configuration/OverviewSceneCatalog.asset";
     private const string BootstrapScenePath = "Assets/Scenes/Bootstrap.unity";
+    private const string OverviewScenePath = OverviewSceneCatalog.OverviewScenePath;
+    private const string VisualStateConfigAssetPath = "Assets/Configuration/PowerPlantVisualStateConfig.asset";
     private const string LegacyGasScenePath = "Assets/Scenes/SampleScene.unity";
 
     /// <summary>
-    /// 九项数组既是唯一映射来源，也是构建登记顺序。场景键使用对外稳定 sceneId，
+    /// 十三项数组既是唯一映射来源，也是构建登记顺序。场景键使用对外稳定 sceneId，
     /// 而文件名使用可读的 PascalCase 业务名，二者的差异必须经由目录资产显式关联。
     /// </summary>
     private static readonly SceneDefinition[] BusinessScenes =
@@ -29,11 +32,11 @@ public static class BusinessSceneBootstrapGenerator
             "Assets/Scenes/Business/CoalPower.unity",
             // 燃煤场景已交付显式模型绑定，能力清单与燃气场景保持同一套受控接口；路径流仍未确认。
             BusinessSceneCapability.Initialize |
-            BusinessSceneCapability.EnterProcessStep |
             BusinessSceneCapability.FocusNode |
             BusinessSceneCapability.ClearSelection |
             BusinessSceneCapability.UpdateNodeVisualState |
             BusinessSceneCapability.ClearNodeVisualState |
+            BusinessSceneCapability.MoveCameraToPose |
             BusinessSceneCapability.SetNodeVisibility |
             BusinessSceneCapability.ResetScene |
             BusinessSceneCapability.Release,
@@ -42,31 +45,51 @@ public static class BusinessSceneBootstrapGenerator
             "gas-power",
             "Assets/Scenes/Business/GasPower.unity",
             BusinessSceneCapability.Initialize |
-            BusinessSceneCapability.EnterProcessStep |
             BusinessSceneCapability.FocusNode |
             BusinessSceneCapability.ClearSelection |
             // 燃气场景的四态能力由运行时显式登记三台真实模型后再次校验；
             // 目录提前声明用于让场景解析器核对预期能力，适配器仍会在登记失败时拒绝命令。
             BusinessSceneCapability.UpdateNodeVisualState |
             BusinessSceneCapability.ClearNodeVisualState |
+            BusinessSceneCapability.MoveCameraToPose |
             BusinessSceneCapability.SetNodeVisibility |
             BusinessSceneCapability.ResetScene |
             BusinessSceneCapability.Release,
             false),
-        new SceneDefinition("wind-power", "Assets/Scenes/Business/WindPower.unity", BusinessSceneCapability.Release, true),
-        new SceneDefinition("solar-power", "Assets/Scenes/Business/SolarPower.unity", BusinessSceneCapability.Release, true),
+        new SceneDefinition(
+            "wind-power",
+            "Assets/Scenes/Business/WindPower.unity",
+            SubstationOverviewController.SupportedCapabilities | BusinessSceneCapability.MoveCameraToPose,
+            false),
+        new SceneDefinition(
+            "solar-power",
+            "Assets/Scenes/Business/SolarPower.unity",
+            // 光伏场景已登记逆变器控制与逆变器模型，开放聚焦、选择清除和真实设备四态。
+            BusinessSceneCapability.Initialize |
+            BusinessSceneCapability.FocusNode |
+            BusinessSceneCapability.ClearSelection |
+            BusinessSceneCapability.UpdateNodeVisualState |
+            BusinessSceneCapability.ClearNodeVisualState |
+            BusinessSceneCapability.MoveCameraToPose |
+            BusinessSceneCapability.ResetScene |
+            BusinessSceneCapability.Release,
+            false),
         new SceneDefinition("substation", "Assets/Scenes/Business/Substation.unity", BusinessSceneCapability.Release, true),
         new SceneDefinition("distribution", "Assets/Scenes/Business/Distribution.unity", BusinessSceneCapability.Release, true),
         new SceneDefinition("consumption", "Assets/Scenes/Business/Consumption.unity", BusinessSceneCapability.Release, true),
         new SceneDefinition("microgrid", "Assets/Scenes/Business/Microgrid.unity", BusinessSceneCapability.Release, true),
-        new SceneDefinition("dispatch", "Assets/Scenes/Business/Dispatch.unity", BusinessSceneCapability.Release, true)
+        new SceneDefinition("dispatch", "Assets/Scenes/Business/Dispatch.unity", BusinessSceneCapability.Release, true),
+        new SceneDefinition("step-up-substation", "Assets/Scenes/Business/StepUpSubstation.unity", SubstationOverviewController.SupportedCapabilities, false),
+        new SceneDefinition("step-down-substation", "Assets/Scenes/Business/StepDownSubstation.unity", SubstationOverviewController.SupportedCapabilities, false),
+        new SceneDefinition("converter-station", "Assets/Scenes/Business/ConverterStation.unity", SubstationOverviewController.SupportedCapabilities, false),
+        new SceneDefinition("switching-station", "Assets/Scenes/Business/SwitchingStation.unity", SubstationOverviewController.SupportedCapabilities, false)
     };
 
     /// <summary>
     /// 供菜单和无界面命令行共用的唯一生成入口。
     /// 首次运行会创建全部资产；后续运行只校验既有资产并重建构建设置，绝不重写场景文件。
     /// </summary>
-    [MenuItem("Tools/WebDLPro/场景/创建九个业务空场景与映射")]
+    [MenuItem("Tools/WebDLPro/场景配置/创建十三个业务空场景与映射")]
     public static void CreateOrValidateBusinessSceneBootstrap()
     {
         bool allAssetsExist = AreAllGeneratedAssetsPresent();
@@ -74,7 +97,7 @@ public static class BusinessSceneBootstrapGenerator
         if (anyAssetsExist && !allAssetsExist)
         {
             throw new InvalidOperationException(
-                "检测到九场景生成资产不完整。为防止覆盖已有编辑内容，生成器不会继续写入；请先恢复缺失资产后再执行。");
+                "检测到十三场景生成资产不完整。为防止覆盖已有编辑内容，生成器不会继续写入；请先恢复缺失资产后再执行。");
         }
 
         if (!allAssetsExist)
@@ -94,16 +117,17 @@ public static class BusinessSceneBootstrapGenerator
             }
         }
 
+        EnsureOverviewAssets();
         ConfigureBuildScenes();
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
         ValidateGeneratedAssets();
-        Debug.Log("九个业务空场景、启动场景、目录映射和构建设置已就绪。");
+        Debug.Log("十三个业务空场景、启动场景、目录映射和构建设置已就绪。");
     }
 
     /// <summary>
     /// 正式目录资产保存 sceneId、unitySceneKey 与场景路径的一对一关系。
-    /// 空场景已具备可加载文件，因此登记为 Available；八个占位场景只声明幂等 Release，
+    /// 空场景已具备可加载文件，因此登记为 Available；五个占位场景只声明幂等 Release，
     /// 燃气场景能力严格复用已核对的适配器声明，其他业务能力只能由后续控制器任务补充。
     /// </summary>
     private static BusinessSceneCatalog CreateCatalogAsset()
@@ -135,12 +159,14 @@ public static class BusinessSceneBootstrapGenerator
         Scene bootstrapScene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
         GameObject runtimeRoot = new GameObject("BootstrapRuntime");
         runtimeRoot.AddComponent<LoadingOverlayController>();
-        // 资产包加载器只在发布 WebGL 中下载九个业务场景；编辑器仍按正式目录直接加载，
+        // 资产包加载器只在发布 WebGL 中下载十三个业务场景；编辑器仍按正式目录直接加载，
         // 因此启动场景保持轻量且不会把业务重资源放入首屏玩家数据。
         runtimeRoot.AddComponent<SceneBundleRuntimeLoader>();
         MultiSceneCoordinator coordinator = runtimeRoot.AddComponent<MultiSceneCoordinator>();
         coordinator.SetSceneCatalogForEditor(catalog);
         runtimeRoot.AddComponent<UnityIframeBridgeManager>();
+        // 本地从 Bootstrap 直接播放时自动进入总览；组件在正式构建中不执行，平台协议仍是生产唯一入口。
+        runtimeRoot.AddComponent<BootstrapOverviewAutoEnterTest>();
         EditorSceneManager.SaveScene(bootstrapScene, BootstrapScenePath, false);
     }
 
@@ -157,6 +183,143 @@ public static class BusinessSceneBootstrapGenerator
         EditorSceneManager.SaveScene(businessScene, definition.ScenePath, false);
     }
 
+    /// <summary>
+    /// 创建或校验独立总览场景和目录。总览使用内置立方体作为开发占位，
+    /// 正式美术资源到位后只替换场景内容，不改变总览目录路径和业务目录边界。
+    /// </summary>
+    private static void EnsureOverviewAssets()
+    {
+        EnsureFolder("Assets/Configuration");
+        EnsureFolder("Assets/Scenes/Overview");
+
+        OverviewSceneCatalog overviewCatalog = AssetDatabase.LoadAssetAtPath<OverviewSceneCatalog>(OverviewCatalogAssetPath);
+        if (overviewCatalog == null)
+        {
+            overviewCatalog = ScriptableObject.CreateInstance<OverviewSceneCatalog>();
+            overviewCatalog.SetEntryForEditor(new OverviewSceneCatalogEntry(
+                OverviewSceneCatalog.OverviewSceneId,
+                OverviewSceneCatalog.OverviewSceneId,
+                OverviewScenePath,
+                BusinessSceneCapability.Initialize | BusinessSceneCapability.Release));
+            AssetDatabase.CreateAsset(overviewCatalog, OverviewCatalogAssetPath);
+        }
+
+        if (AssetDatabase.LoadAssetAtPath<SceneAsset>(OverviewScenePath) == null)
+        {
+            CreateOverviewPlaceholderScene();
+        }
+
+        ConfigureBootstrapOverviewCatalog(overviewCatalog);
+    }
+
+    /// <summary>用 Unity 内置立方体搭建十三个总览建筑占位，不依赖外部模型和材质资源。</summary>
+    private static void CreateOverviewPlaceholderScene()
+    {
+        Scene overviewScene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+        GameObject runtimeRoot = new GameObject("OverviewRuntime");
+        OverviewSceneController overviewController = runtimeRoot.AddComponent<OverviewSceneController>();
+        PowerPlantVisualStateConfig visualStateConfig = AssetDatabase.LoadAssetAtPath<PowerPlantVisualStateConfig>(VisualStateConfigAssetPath);
+        if (visualStateConfig == null)
+        {
+            throw new InvalidOperationException("总览建筑异常视觉缺少共享状态配置资产。");
+        }
+
+        GameObject ground = GameObject.CreatePrimitive(PrimitiveType.Plane);
+        ground.name = "OverviewGroundPlaceholder";
+        ground.transform.SetParent(runtimeRoot.transform, false);
+        ground.transform.localScale = new Vector3(2.5f, 1f, 2.5f);
+
+        for (int index = 0; index < BusinessScenes.Length; index++)
+        {
+            float angle = index * Mathf.PI * 2f / BusinessScenes.Length;
+            SceneDefinition definition = BusinessScenes[index];
+            GameObject building = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            // Unity 对象名只服务于编辑器阅读；使用业务角色生成可读名称，稳定映射仍单独写入占位组件。
+            building.name = $"OverviewBuilding_{ToPascalCase(definition.SceneId)}";
+            building.transform.SetParent(runtimeRoot.transform, false);
+            building.transform.localPosition = new Vector3(Mathf.Cos(angle) * 7f, 1f, Mathf.Sin(angle) * 7f);
+            building.transform.localScale = new Vector3(2f, 2f + index % 3, 2f);
+            Renderer renderer = building.GetComponent<Renderer>();
+            Collider interactionCollider = building.GetComponent<Collider>();
+            OverviewBuildingVisualStatePresenter presenter = building.AddComponent<OverviewBuildingVisualStatePresenter>();
+            presenter.ConfigureForEditor(renderer, visualStateConfig);
+            OverviewBuildingPlaceholder placeholder = building.AddComponent<OverviewBuildingPlaceholder>();
+            placeholder.ConfigureForEditor(
+                $"overview-building.{definition.SceneId}",
+                definition.SceneId,
+                renderer,
+                interactionCollider,
+                presenter);
+        }
+
+        GameObject cameraObject = new GameObject("OverviewCamera");
+        cameraObject.transform.SetParent(runtimeRoot.transform, false);
+        cameraObject.transform.localPosition = new Vector3(0f, 18f, -18f);
+        cameraObject.transform.localRotation = Quaternion.Euler(42f, 0f, 0f);
+        Camera overviewCamera = cameraObject.AddComponent<Camera>();
+        overviewController.ConfigureForEditor(overviewCamera);
+
+        GameObject lightObject = new GameObject("OverviewLight");
+        lightObject.transform.SetParent(runtimeRoot.transform, false);
+        lightObject.transform.localRotation = Quaternion.Euler(50f, -30f, 0f);
+        lightObject.AddComponent<Light>().type = LightType.Directional;
+
+        EditorSceneManager.SaveScene(overviewScene, OverviewScenePath, false);
+    }
+
+    /// <summary>把稳定 sceneId 转换为仅供 Unity 编辑器阅读的 PascalCase 业务角色名。</summary>
+    private static string ToPascalCase(string sceneId)
+    {
+        string[] words = sceneId.Split('-');
+        System.Text.StringBuilder builder = new System.Text.StringBuilder(sceneId.Length);
+        for (int wordIndex = 0; wordIndex < words.Length; wordIndex++)
+        {
+            if (string.IsNullOrEmpty(words[wordIndex]))
+            {
+                continue;
+            }
+
+            builder.Append(char.ToUpperInvariant(words[wordIndex][0]));
+            if (words[wordIndex].Length > 1)
+            {
+                builder.Append(words[wordIndex], 1, words[wordIndex].Length - 1);
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    /// <summary>为既有 Bootstrap 补齐独立总览目录引用，避免依赖运行时动态查找。</summary>
+    private static void ConfigureBootstrapOverviewCatalog(OverviewSceneCatalog overviewCatalog)
+    {
+        Scene bootstrapScene = EditorSceneManager.OpenScene(BootstrapScenePath, OpenSceneMode.Additive);
+        try
+        {
+            GameObject[] roots = bootstrapScene.GetRootGameObjects();
+            for (int rootIndex = 0; rootIndex < roots.Length; rootIndex++)
+            {
+                MultiSceneCoordinator coordinator = roots[rootIndex].GetComponent<MultiSceneCoordinator>();
+                if (coordinator == null)
+                {
+                    continue;
+                }
+
+                coordinator.SetOverviewSceneCatalogForEditor(overviewCatalog);
+                if (roots[rootIndex].GetComponent<BootstrapOverviewAutoEnterTest>() == null)
+                {
+                    // 既有 Bootstrap 同样补齐本地联调入口，保持首次生成与升级路径一致。
+                    roots[rootIndex].AddComponent<BootstrapOverviewAutoEnterTest>();
+                }
+                EditorSceneManager.MarkSceneDirty(bootstrapScene);
+                EditorSceneManager.SaveScene(bootstrapScene, BootstrapScenePath, false);
+                return;
+            }
+        }
+        finally
+        {
+            EditorSceneManager.CloseScene(bootstrapScene, true);
+        }
+    }
     /// <summary>
     /// 用户已确认旧 SampleScene 就是燃气发电的真实场景，因此只移动资产路径并保留原 GUID、YAML 和全部未提交内容。
     /// 迁移失败时立即抛错；不会复制、重建或修改旧燃气场景内部对象，避免破坏用户正在调整的模型与材质。
@@ -181,14 +344,15 @@ public static class BusinessSceneBootstrapGenerator
     }
 
     /// <summary>
-    /// 构建索引零固定为 Bootstrap，其后九项与目录数组同序，确保运行时首次场景是轻量启动壳。
+    /// 构建索引零固定为 Bootstrap，其后十三项与目录数组同序，确保运行时首次场景是轻量启动壳。
     /// 旧 SampleScene 资产不会被删除；它不再进入正式构建，避免未映射的旧燃气内容误作为业务场景发布。
     /// </summary>
     private static void ConfigureBuildScenes()
     {
-        List<EditorBuildSettingsScene> buildScenes = new List<EditorBuildSettingsScene>(BusinessScenes.Length + 1)
+        List<EditorBuildSettingsScene> buildScenes = new List<EditorBuildSettingsScene>(BusinessScenes.Length + 2)
         {
-            new EditorBuildSettingsScene(BootstrapScenePath, true)
+            new EditorBuildSettingsScene(BootstrapScenePath, true),
+            new EditorBuildSettingsScene(OverviewScenePath, true)
         };
         for (int index = 0; index < BusinessScenes.Length; index++)
         {
@@ -219,7 +383,7 @@ public static class BusinessSceneBootstrapGenerator
         return false;
     }
 
-    /// <summary>只有启动场景、目录资产和九个业务场景全部存在时，才允许走无覆盖校验分支。</summary>
+    /// <summary>只有启动场景、目录资产和十三个业务场景全部存在时，才允许走无覆盖校验分支。</summary>
     private static bool AreAllGeneratedAssetsPresent()
     {
         if (!File.Exists(ToAbsolutePath(BootstrapScenePath)) || !File.Exists(ToAbsolutePath(CatalogAssetPath)))
@@ -246,16 +410,25 @@ public static class BusinessSceneBootstrapGenerator
         BusinessSceneCatalog catalog = AssetDatabase.LoadAssetAtPath<BusinessSceneCatalog>(CatalogAssetPath);
         if (catalog == null)
         {
-            throw new InvalidOperationException("未能加载正式九场景目录资产。");
+            throw new InvalidOperationException("未能加载正式十三场景目录资产。");
         }
         IReadOnlyList<BusinessSceneCatalogValidationIssue> issues = catalog.ValidateForRuntime();
         if (issues.Count > 0)
         {
-            throw new InvalidOperationException($"正式九场景目录校验失败：{issues[0].Code}，{issues[0].Message}");
+            throw new InvalidOperationException($"正式十三场景目录校验失败：{issues[0].Code}，{issues[0].Message}");
         }
         if (AssetDatabase.LoadAssetAtPath<SceneAsset>(BootstrapScenePath) == null)
         {
             throw new InvalidOperationException("未能加载 Bootstrap 启动场景。");
+        }
+        if (AssetDatabase.LoadAssetAtPath<SceneAsset>(OverviewScenePath) == null)
+        {
+            throw new InvalidOperationException("未能加载独立 Overview 场景。");
+        }
+        OverviewSceneCatalog overviewCatalog = AssetDatabase.LoadAssetAtPath<OverviewSceneCatalog>(OverviewCatalogAssetPath);
+        if (overviewCatalog == null || overviewCatalog.ValidateForRuntime().Count > 0)
+        {
+            throw new InvalidOperationException("独立 Overview 场景目录校验失败。");
         }
         for (int index = 0; index < BusinessScenes.Length; index++)
         {

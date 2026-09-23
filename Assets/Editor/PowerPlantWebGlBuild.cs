@@ -9,7 +9,7 @@ using UnityEngine;
 using WebDLPro.Unity.SceneRuntime;
 
 /// <summary>
-/// 为九个业务场景提供稳定、可重复的 WebGL 构建入口。
+/// 为正式业务场景目录提供稳定、可重复的 WebGL 构建入口。
 /// 开发构建与正式构建显式分离，避免正式包意外携带开发模式；旧命令行入口保留为开发构建兼容别名，
 /// 从而不要求既有自动化立即修改，同时禁止通过手动切换 Build Settings 来改变构建性质。
 /// </summary>
@@ -39,6 +39,13 @@ public static class PowerPlantWebGlBuild
         public string[] setNodeVisualStateRequiredFields;
         public int clearNodeVisualStateSchemaVersion;
         public string[] clearNodeVisualStateRequiredFields;
+        public int processDetailCommandSchemaVersion;
+        public string[] prepareProcessDetailRequiredFields;
+        public string[] commitProcessDetailRequiredFields;
+        public string[] abortProcessDetailRequiredFields;
+        public string[] enterProcessDetailRequiredFields;
+        public string[] exitProcessDetailRequiredFields;
+        public string[] setProcessDetailPlaybackRequiredFields;
     }
 
     public const string DevelopmentOutputPath = "Builds/WebGL-Development";
@@ -65,27 +72,46 @@ public static class PowerPlantWebGlBuild
     private const int InitialWebGlMemorySizeInMegabytes = 256;
     private const int MaximumWebGlMemorySizeInMegabytes = 2048;
     private const int WebGlGeometricMemoryGrowthCapInMegabytes = 256;
+    // 高质量包通过提高 URP（通用渲染管线）内部渲染分辨率改善斜边和细线锯齿；
+    // 该值只在高质量构建期间写入，构建结束后恢复各质量档原渲染比例。
+    private const float HighQualityRenderScale = 1.5f;
 
     /// <summary>
     /// 兼容既有“高亮流程”命令行入口：该入口语义固定为开发构建，
     /// 便于保留调试符号和开发诊断；正式发布必须改用 BuildProductionWebGl。
     /// </summary>
-    [MenuItem("Tools/Power Plant/WebGL/Build Highlight Flow WebGL")]
+    [MenuItem("Tools/WebDLPro/WebGL/构建高亮流程开发包")]
     public static void BuildHighlightFlowWebGl()
     {
         BuildDevelopmentWebGl();
     }
 
     /// <summary>构建开发 WebGL 包：仅此入口显式启用开发模式，用于本地排错与测试。</summary>
-    [MenuItem("Tools/Power Plant/WebGL/Build Development WebGL")]
+    [MenuItem("Tools/WebDLPro/WebGL/构建开发包")]
     public static void BuildDevelopmentWebGl()
     {
         BuildWebGl(DevelopmentOutputPath, true, ResolveReleaseId());
     }
 
     /// <summary>构建正式 WebGL 包：不附加开发模式，作为发布流水线的唯一正式入口。</summary>
-    [MenuItem("Tools/Power Plant/WebGL/Build Production WebGL")]
+    [MenuItem("Tools/WebDLPro/WebGL/构建正式包")]
     public static void BuildProductionWebGl()
+    {
+        BuildProductionWebGlWithQuality(false);
+    }
+
+    /// <summary>
+    /// 构建高渲染质量正式包。该入口只在本次构建期间把 WebGL 质量档切换到
+    /// High Fidelity（高保真）档，启用 4 倍多重采样抗锯齿和高保真 URP（通用渲染管线）；
+    /// 构建结束后恢复编辑器原质量档，避免影响日常编辑器预览和普通交付包。
+    /// </summary>
+    [MenuItem("Tools/WebDLPro/WebGL/构建高质量正式包")]
+    public static void BuildHighQualityProductionWebGl()
+    {
+        BuildProductionWebGlWithQuality(true);
+    }
+
+    private static void BuildProductionWebGlWithQuality(bool highQuality)
     {
         string releaseId = ResolveReleaseId();
         string releaseDirectory = Path.Combine(ProductionOutputPath, releaseId);
@@ -102,7 +128,40 @@ public static class PowerPlantWebGlBuild
             ".staging",
             $"{releaseId}-{Guid.NewGuid():N}",
             "unity");
-        BuildWebGl(stagingDirectory, false, releaseId);
+        int originalQualityLevel = QualitySettings.GetQualityLevel();
+        float originalHighQualityRenderScale = 1f;
+        try
+        {
+            if (highQuality)
+            {
+                // 质量档索引来自 ProjectSettings/QualitySettings.asset 的显式顺序：
+                // Performant=0、Balanced=1、High Fidelity=2。只在构建期间切换，避免持久化修改项目设置。
+                QualitySettings.SetQualityLevel(2, true);
+                // 高保真质量档默认比例为 1.0；临时提升到 1.5 可用超采样降低几何边缘阶梯感。
+                // URP 资源对象由质量档切换后提供，避免修改项目资产文件或污染普通构建。
+                var highQualityPipeline = UnityEngine.Rendering.GraphicsSettings.renderPipelineAsset as UnityEngine.Rendering.Universal.UniversalRenderPipelineAsset;
+                if (highQualityPipeline != null)
+                {
+                    originalHighQualityRenderScale = highQualityPipeline.renderScale;
+                    highQualityPipeline.renderScale = HighQualityRenderScale;
+                }
+            }
+            BuildWebGl(stagingDirectory, false, releaseId);
+        }
+        finally
+        {
+            if (highQuality)
+            {
+                var highQualityPipeline = UnityEngine.Rendering.GraphicsSettings.renderPipelineAsset as UnityEngine.Rendering.Universal.UniversalRenderPipelineAsset;
+                if (highQualityPipeline != null)
+                {
+                    // 恢复高保真管线资源原比例，防止本次构建改变编辑器质量预览状态。
+                    highQualityPipeline.renderScale = originalHighQualityRenderScale;
+                }
+            }
+            // 无论构建成功、失败还是异常退出，都恢复编辑器原质量档，避免后续工作被高质量设置意外影响。
+            QualitySettings.SetQualityLevel(originalQualityLevel, true);
+        }
         Directory.CreateDirectory(ProductionOutputPath);
         Directory.Move(Path.GetDirectoryName(stagingDirectory), releaseDirectory);
 
@@ -175,6 +234,7 @@ public static class PowerPlantWebGlBuild
             // 先生成资产包和文本清单，再让播放器在裁剪阶段读取该清单，保留只存在于业务场景包中的控制器类型。
             // 若此步骤失败，正式构建仍停留在暂存目录，不会覆盖任何已发布版本。
             PowerPlantSceneBundleBuild.BuildSceneBundles(outputPath, releaseId);
+            PowerPlantProcessDetailBundleBuild.BuildProcessDetailBundles(outputPath, releaseId);
             string assetBundleManifestPath = PowerPlantSceneBundleBuild.GetAssetBundleManifestPath(outputPath);
             if (!File.Exists(assetBundleManifestPath))
             {
@@ -183,7 +243,7 @@ public static class PowerPlantWebGlBuild
 
             BuildPlayerOptions options = new BuildPlayerOptions
             {
-                // 主播放器只打入轻量 Bootstrap。九个业务场景由紧随其后的资产包构建写入同级 SceneBundles，
+                // 主播放器只打入轻量 Bootstrap。Overview 与业务场景由紧随其后的资产包构建写入同级 SceneBundles，
                 // 这样首屏不再把九个场景资源收敛进单一 WebGL 数据文件。
                 scenes = new[] { BootstrapScenePath },
                 locationPathName = outputPath,
@@ -261,31 +321,40 @@ public static class PowerPlantWebGlBuild
             setNodeVisualStateSchemaVersion = WebGlProtocolContract.SetNodeVisualStateSchemaVersion,
             setNodeVisualStateRequiredFields = WebGlProtocolContract.CreateSetNodeVisualStateRequiredFields(),
             clearNodeVisualStateSchemaVersion = WebGlProtocolContract.ClearNodeVisualStateSchemaVersion,
-            clearNodeVisualStateRequiredFields = WebGlProtocolContract.CreateClearNodeVisualStateRequiredFields()
+            clearNodeVisualStateRequiredFields = WebGlProtocolContract.CreateClearNodeVisualStateRequiredFields(),
+            processDetailCommandSchemaVersion = WebGlProtocolContract.ProcessDetailCommandSchemaVersion,
+            prepareProcessDetailRequiredFields = WebGlProtocolContract.CreatePrepareProcessDetailRequiredFields(),
+            commitProcessDetailRequiredFields = WebGlProtocolContract.CreateCommitProcessDetailRequiredFields(),
+            abortProcessDetailRequiredFields = WebGlProtocolContract.CreateAbortProcessDetailRequiredFields(),
+            enterProcessDetailRequiredFields = WebGlProtocolContract.CreateEnterProcessDetailRequiredFields(),
+            exitProcessDetailRequiredFields = WebGlProtocolContract.CreateExitProcessDetailRequiredFields(),
+            setProcessDetailPlaybackRequiredFields = WebGlProtocolContract.CreateSetProcessDetailPlaybackRequiredFields()
         };
         string metadataPath = Path.Combine(absoluteOutputPath, WebGlProtocolContract.MetadataFileName);
         File.WriteAllText(metadataPath, JsonUtility.ToJson(metadata, true), new UTF8Encoding(false));
     }
 
     /// <summary>
-    /// 构建设置保留九个场景的编辑器登记，供目录校验与资产包构建使用；
-    /// 但主播放器不直接使用该列表，只允许 Bootstrap 进入首屏数据。顺序错误会阻止发布。
+    /// 构建设置登记 Bootstrap、独立 Overview 和完整业务场景目录；业务目录校验读取正式场景集合。
+    /// 主播放器仍只嵌入 Bootstrap，Overview 与业务场景统一通过场景资源包按需加载。
     /// </summary>
     private static void ValidateBuildSettings()
     {
         EditorBuildSettingsScene[] buildScenes = EditorBuildSettings.scenes;
-        if (buildScenes == null || buildScenes.Length != BusinessSceneCatalog.GetRequiredSceneIds().Count + 1 ||
-            !buildScenes[0].enabled || !string.Equals(buildScenes[0].path, BootstrapScenePath, StringComparison.Ordinal))
+        int expectedBuildSceneCount = BusinessSceneCatalog.GetRequiredSceneIds().Count + 2;
+        if (buildScenes == null || buildScenes.Length != expectedBuildSceneCount ||
+            !buildScenes[0].enabled || !string.Equals(buildScenes[0].path, BootstrapScenePath, StringComparison.Ordinal) ||
+            !buildScenes[1].enabled || !string.Equals(buildScenes[1].path, OverviewSceneCatalog.OverviewScenePath, StringComparison.Ordinal))
         {
-            throw new BuildFailedException("构建设置必须以 Bootstrap 为索引零，并登记完整九个业务场景。");
+            throw new BuildFailedException("构建设置必须依次登记 Bootstrap、Overview 和完整业务场景目录。");
         }
 
-        int enabledBusinessSceneCount = buildScenes.Count(scene =>
+        int enabledNonBootstrapSceneCount = buildScenes.Count(scene =>
             scene.enabled &&
             !string.Equals(scene.path, BootstrapScenePath, StringComparison.Ordinal));
-        if (enabledBusinessSceneCount != BusinessSceneCatalog.GetRequiredSceneIds().Count)
+        if (enabledNonBootstrapSceneCount != expectedBuildSceneCount - 1)
         {
-            throw new BuildFailedException("构建设置中的业务场景数量不完整，不能构建资源包。");
+            throw new BuildFailedException("构建设置中的 Overview 或业务场景数量不完整，不能构建资源包。");
         }
     }
 

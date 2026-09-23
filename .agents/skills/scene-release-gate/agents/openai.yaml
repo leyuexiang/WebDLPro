@@ -1,0 +1,4 @@
+interface:
+  display_name: "场景发布门禁同步"
+  short_description: "同步新增场景和关键环节的发布门禁、测试清单及项目文档"
+  default_prompt: "使用 $scene-release-gate 处理新增或更新场景、关键环节、拓扑动作或三维映射，并同步门禁、测试与发布文档。"

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { access, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { formatProcessDetailTopologyIssue, validateProcessDetailTopologies } from './process-detail-topology-contract.mjs'
 
 const integrityFileName = 'artifact-integrity.json'
 const textExtensions = new Set(['.css', '.html', '.js', '.json', '.md', '.mjs', '.svg'])
@@ -15,12 +16,51 @@ const allowedDeliveryRootEntries = new Set([
   'artifact-integrity.json', 'shell', 'unity',
 ])
 const requiredUnityCommandCapabilities = Object.freeze([
-  'init', 'resize', 'switchScene', 'enterProcessStep', 'resetScene', 'focusNode', 'clearSelection',
+  'init', 'resize', 'switchScene', 'moveCameraToPose', 'enterProcessDetail', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'resetCamera', 'focusNode', 'clearSelection',
   'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose',
 ])
-// 结构版本5开始把三维反向选择和空白清除能力写入版本化元数据；旧结构版本4仍允许作为历史回滚包读取。
+const requiredEnterProcessDetailFields = Object.freeze(['sceneId', 'processId', 'stepId', 'processDetailId', 'transitionId'])
+const requiredPrepareProcessDetailFields = Object.freeze(['sceneId', 'processId', 'stepId', 'processDetailId', 'transitionId'])
+const requiredCommitProcessDetailFields = Object.freeze(['sceneId', 'processDetailId', 'transitionId'])
+const requiredAbortProcessDetailFields = Object.freeze(['sceneId', 'processDetailId', 'transitionId'])
+const requiredExitProcessDetailFields = Object.freeze(['sceneId', 'processDetailId', 'transitionId'])
+const requiredSetProcessDetailPlaybackFields = Object.freeze(['sceneId', 'processDetailId', 'playing'])
+// 结构版本10在命名镜头点基础上增加独立相机复位能力；旧构建不得绕过右上角复位按钮发布门禁。
 const requiredUnityEventCapabilities = Object.freeze([
   'ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'selectionCleared', 'disposed',
+])
+/**
+ * 当前合作方以动作摘要生成全部可绑定入口，因此二十三项公开动作属于发布契约本身，不能只做两份清单的相对一致性检查。
+ * 目标、视图和三维动作类型一并固定，防止生成器与摘要同时回退，或把普通场景导航误写成未实现的流程能力。
+ */
+const requiredPublishedActionContracts = Object.freeze([
+  { actionId: 'action.scene.overview', targetSceneId: 'overview', targetViewMode: 'overview', unityActionType: 'none' },
+  { actionId: 'action.gas-power.overview', targetSceneId: 'gas-power', targetViewMode: 'business', targetTopologyId: 'topology.gas-power.overview', unityActionType: 'resetScene' },
+  { actionId: 'action.gas-power.gas-turbine', targetSceneId: 'gas-power', targetViewMode: 'process-detail', processDetailId: 'process-detail.gas-power.gas-turbine', unityActionType: 'enterProcessDetail' },
+  { actionId: 'action.coal-power.overview', targetSceneId: 'coal-power', targetViewMode: 'business', targetTopologyId: 'topology.coal-power.overview', unityActionType: 'resetScene' },
+  { actionId: 'action.coal-power.steam-turbine', targetSceneId: 'coal-power', targetViewMode: 'process-detail', processDetailId: 'process-detail.coal-power.steam-turbine', unityActionType: 'enterProcessDetail' },
+  { actionId: 'action.wind-power.overview', targetSceneId: 'wind-power', targetViewMode: 'business', targetTopologyId: 'topology.wind-power.overview', unityActionType: 'none' },
+  { actionId: 'action.solar-power.overview', targetSceneId: 'solar-power', targetViewMode: 'business', targetTopologyId: 'topology.solar-power.overview', unityActionType: 'none' },
+  { actionId: 'action.solar-power.inverter', targetSceneId: 'solar-power', targetViewMode: 'process-detail', processDetailId: 'process-detail.solar-power.inverter', unityActionType: 'enterProcessDetail' },
+  { actionId: 'action.step-up-substation.overview', targetSceneId: 'step-up-substation', targetViewMode: 'business', targetTopologyId: 'topology.step-up-substation.overview', unityActionType: 'resetScene' },
+  { actionId: 'action.step-down-substation.overview', targetSceneId: 'step-down-substation', targetViewMode: 'business', targetTopologyId: 'topology.step-down-substation.overview', unityActionType: 'resetScene' },
+  { actionId: 'action.converter-station.overview', targetSceneId: 'converter-station', targetViewMode: 'business', targetTopologyId: 'topology.converter-station.overview', unityActionType: 'resetScene' },
+  { actionId: 'action.switching-station.overview', targetSceneId: 'switching-station', targetViewMode: 'business', targetTopologyId: 'topology.switching-station.overview', unityActionType: 'resetScene' },
+  { actionId: 'action.step-up-substation.transformer-protection', targetSceneId: 'step-up-substation', targetViewMode: 'process-detail', processDetailId: 'process-detail.step-up-substation.transformer-protection', unityActionType: 'enterProcessDetail' },
+  { actionId: 'action.step-up-substation.busbar-protection', targetSceneId: 'step-up-substation', targetViewMode: 'process-detail', processDetailId: 'process-detail.step-up-substation.busbar-protection', unityActionType: 'enterProcessDetail' },
+  { actionId: 'action.step-up-substation.line-protection', targetSceneId: 'step-up-substation', targetViewMode: 'process-detail', processDetailId: 'process-detail.step-up-substation.line-protection', unityActionType: 'enterProcessDetail' },
+  { actionId: 'action.step-down-substation.transformer-protection', targetSceneId: 'step-down-substation', targetViewMode: 'process-detail', processDetailId: 'process-detail.step-down-substation.transformer-protection', unityActionType: 'enterProcessDetail' },
+  { actionId: 'action.step-down-substation.busbar-protection', targetSceneId: 'step-down-substation', targetViewMode: 'process-detail', processDetailId: 'process-detail.step-down-substation.busbar-protection', unityActionType: 'enterProcessDetail' },
+  { actionId: 'action.step-down-substation.line-protection', targetSceneId: 'step-down-substation', targetViewMode: 'process-detail', processDetailId: 'process-detail.step-down-substation.line-protection', unityActionType: 'enterProcessDetail' },
+  { actionId: 'action.converter-station.transformer-protection', targetSceneId: 'converter-station', targetViewMode: 'process-detail', processDetailId: 'process-detail.converter-station.transformer-protection', unityActionType: 'enterProcessDetail' },
+  { actionId: 'action.converter-station.busbar-protection', targetSceneId: 'converter-station', targetViewMode: 'process-detail', processDetailId: 'process-detail.converter-station.busbar-protection', unityActionType: 'enterProcessDetail' },
+  { actionId: 'action.converter-station.line-protection', targetSceneId: 'converter-station', targetViewMode: 'process-detail', processDetailId: 'process-detail.converter-station.line-protection', unityActionType: 'enterProcessDetail' },
+  { actionId: 'action.switching-station.busbar-protection', targetSceneId: 'switching-station', targetViewMode: 'process-detail', processDetailId: 'process-detail.switching-station.busbar-protection', unityActionType: 'enterProcessDetail' },
+  { actionId: 'action.switching-station.line-protection', targetSceneId: 'switching-station', targetViewMode: 'process-detail', processDetailId: 'process-detail.switching-station.line-protection', unityActionType: 'enterProcessDetail' },
+])
+const navigationOnlySceneIds = Object.freeze([
+  // 风电当前只交付总览导航；开关站已交付母线保护和线路保护。
+  'wind-power',
 ])
 const deviceIdentifierSuffixes = new Set(['id', 'ids'])
 const deviceMappingSuffixes = new Set(['mapping', 'mappings'])
@@ -127,6 +167,22 @@ async function calculateSha256(filePath) {
 }
 
 /**
+ * 对指定目录的普通文件生成稳定资源摘要。聚合输入同时包含规范化相对路径、字节数和单文件摘要，
+ * 因此文件改名、增删或内容变化都会改变结果；大型 Unity 文件始终流式读取，不占用整包内存。
+ */
+export async function calculateDirectoryResourceDigest(rootDirectory) {
+  const digest = createHash('sha256')
+  const files = await listReleaseFiles(rootDirectory)
+  for (const filePath of files) {
+    const relativePath = normalizeRelativePath(rootDirectory, filePath)
+    const fileStats = await stat(filePath)
+    const fileDigest = await calculateSha256(filePath)
+    digest.update(`${relativePath}\0${fileStats.size}\0${fileDigest}\n`, 'utf8')
+  }
+  return `sha256:${digest.digest('hex')}`
+}
+
+/**
  * 为最终暂存目录生成不可变完整性清单。完整性文件不摘要自身，避免循环依赖；
  * 其余文件包含字节数和安全哈希算法（SHA-256）摘要，可用于部署前后检查是否被原位修改。
  */
@@ -198,6 +254,13 @@ export async function validateReleaseArtifact(rootDirectory) {
     issues.push('缺少或无法解析 Unity 版本化协议能力文件。')
   }
 
+  /**
+   * 构建工具会把 public/topology 原样复制到 shell/topology。门禁直接检查最终目录，确保清单登记的
+   * 三项第三层上下文都有完整、未篡改且不夹带资源副本的独立二维拓扑，而非只相信源码审计结果。
+   */
+  const processDetailTopologyIssues = await validateProcessDetailTopologies(path.join(rootDirectory, 'shell', 'topology'))
+  issues.push(...processDetailTopologyIssues.map(formatProcessDetailTopologyIssue))
+
   const packageType = releaseManifest.packageType
   const isLocalTest = packageType === 'local-test'
   if (!['local-test', 'partner-integration', 'standalone-formal'].includes(packageType)) {
@@ -207,6 +270,20 @@ export async function validateReleaseArtifact(rootDirectory) {
   if (releaseManifest.deploymentMode !== expectedDeploymentMode) issues.push('发布摘要的部署模式与包类型不一致。')
   const expectedEntryMode = isLocalTest ? 'local-bootstrap-host' : 'platform-direct-shell-redirect'
   if (releaseManifest.deployment?.entryMode !== expectedEntryMode) issues.push('发布摘要的入口模式与包类型不一致。')
+  /*
+   * Unity 大资源不能套用普通版本化文件的长期不可变缓存。这里校验摘要中的固定策略和全部受控目录，
+   * 使遗漏任一目录、重新开启离线数据缓存或把 no-store 改成长缓存都会在发布目录落盘前失败。
+   */
+  const cachePolicy = releaseManifest.cachePolicy ?? {}
+  const requiredUnityNoStorePaths = ['unity/Build/', 'unity/SceneBundles/', 'unity/ProcessDetailBundles/']
+  const declaredUnityNoStorePaths = Array.isArray(cachePolicy.unityLargeResourcePaths)
+    ? new Set(cachePolicy.unityLargeResourcePaths)
+    : new Set()
+  if (cachePolicy.unityWebGLDataCaching !== false ||
+      cachePolicy.unityLargeResources !== 'no-store' ||
+      requiredUnityNoStorePaths.some((resourcePath) => !declaredUnityNoStorePaths.has(resourcePath))) {
+    issues.push('发布摘要必须关闭 Unity 网页图形离线数据缓存，并声明主播放器、场景资源包和关键环节资源使用 no-store（禁止存储）。')
+  }
   if (releaseManifest.deployment?.addressMode !== 'runtime-self-origin' && releaseManifest.deployment?.publicEntryUrl !== `${releaseManifest.deployment?.publicOrigin}/`) {
     issues.push('发布摘要的公开根入口与浏览器公开来源不一致。')
   }
@@ -228,6 +305,13 @@ export async function validateReleaseArtifact(rootDirectory) {
   const hasSelfTestPage = await exists(path.join(rootDirectory, 'self-test.html'))
   if (Boolean(releaseManifest.selfTestIncluded) !== hasSelfTestPage) issues.push('发布摘要的自测页声明与目录不一致。')
   if (!isLocalTest && hasSelfTestPage) issues.push('合作方联调包和正式包禁止包含内部自测页。')
+  /**
+   * 播放/停止网页演示控件已经退出交付契约；播放能力仍由既有 Unity 交互和受控协议保留。
+   * 摘要继续携带旧开关会让平台误以为壳提供按钮，因此三类新包都必须删除该过期字段。
+   */
+  if (Object.hasOwn(releaseManifest, 'playbackControlsIncluded')) {
+    issues.push('发布摘要不得再声明已废弃的关键环节网页播放控件。')
+  }
   if (await exists(path.join(rootDirectory, 'scene-topology-base-manifest.json'))) {
     issues.push('发布包不得携带已废弃的基础清单；三类包只允许一份场景拓扑结构清单。')
   }
@@ -247,6 +331,174 @@ export async function validateReleaseArtifact(rootDirectory) {
     if (new Set(sourceNodeIds).size !== sourceNodeIds.length) issues.push('结构清单的来源节点标识必须在资源内全局唯一。')
     if (topologyManifest.manifestVersion !== releaseManifest.manifestVersion) issues.push('结构清单版本与发布摘要不一致。')
     if (topologyManifest.unityBuildId !== releaseManifest.unityReleaseId) issues.push('Unity 构建标识在结构清单与发布摘要中不一致。')
+    /**
+     * 合作方绑定菜单直接消费 workflowActions（流程动作摘要），因此摘要必须逐项镜像结构清单中的公开导航信息。
+     * 这里只比较有限稳定字段，不把 Unity 内部动作、参数白名单或失败策略重复暴露到发布摘要。
+     */
+    const expectedWorkflowActions = Array.isArray(topologyManifest.actions)
+      ? topologyManifest.actions.map((action) => ({
+          actionId: action?.actionId,
+          title: action?.title,
+          targetSceneId: action?.targetSceneId,
+          targetViewMode: action?.targetViewMode,
+          ...(action?.targetTopologyId ? { targetTopologyId: action.targetTopologyId } : {}),
+          ...(action?.processDetailId ? { processDetailId: action.processDetailId } : {}),
+        }))
+      : []
+    if (!Array.isArray(releaseManifest.workflowActions) || JSON.stringify(releaseManifest.workflowActions) !== JSON.stringify(expectedWorkflowActions)) {
+      issues.push('发布摘要的流程动作必须与结构清单逐项一致，避免合作方遗漏新增场景或绑定到失效目标。')
+    }
+    const publishedActions = Array.isArray(topologyManifest.actions) ? topologyManifest.actions : []
+    const actionById = new Map(publishedActions.map((action) => [action?.actionId, action]))
+    const hasInvalidPublishedAction = requiredPublishedActionContracts.some((contract) => {
+      const action = actionById.get(contract.actionId)
+      if (!action || typeof action.title !== 'string' || action.title.trim().length === 0) return true
+      if (action.targetSceneId !== contract.targetSceneId || action.targetViewMode !== contract.targetViewMode ||
+          action.unityAction?.type !== contract.unityActionType || action.failurePolicy !== 'keep-current-context' ||
+          !Array.isArray(action.allowedParameters) || action.allowedParameters.length !== 0) return true
+      const topologyMatches = contract.targetTopologyId === undefined
+        ? !Object.hasOwn(action, 'targetTopologyId')
+        : action.targetTopologyId === contract.targetTopologyId
+      const processDetailMatches = contract.processDetailId === undefined
+        ? !Object.hasOwn(action, 'processDetailId')
+        : action.processDetailId === contract.processDetailId
+      return !topologyMatches || !processDetailMatches
+    })
+    const requiredActionIds = new Set(requiredPublishedActionContracts.map((contract) => contract.actionId))
+    if (publishedActions.length !== requiredPublishedActionContracts.length || actionById.size !== requiredPublishedActionContracts.length ||
+        [...actionById.keys()].some((actionId) => !requiredActionIds.has(actionId)) || hasInvalidPublishedAction) {
+       issues.push('结构清单必须完整发布当前二十三项公开动作及其固定目标，禁止两份清单同时回退或伪造三维流程能力。')
+    }
+
+    /**
+     * supportedActionIds（支持动作标识集合）是场景侧的反向索引，必须与动作目标双向一致。
+     * 先按目标场景构建索引，再逐场景比较集合，避免嵌套扫描并同时发现遗漏、重复和越权引用。
+     */
+    const actionIdsBySceneId = new Map()
+    for (const action of publishedActions) {
+      if (action?.targetSceneId === 'overview' || typeof action?.targetSceneId !== 'string' || typeof action?.actionId !== 'string') continue
+      const actionIds = actionIdsBySceneId.get(action.targetSceneId) ?? []
+      actionIds.push(action.actionId)
+      actionIdsBySceneId.set(action.targetSceneId, actionIds)
+    }
+    const scenes = Array.isArray(topologyManifest.scenes) ? topologyManifest.scenes : []
+    const sceneById = new Map(scenes.map((scene) => [scene?.sceneId, scene]))
+    const hasMissingTargetScene = [...actionIdsBySceneId.keys()].some((sceneId) => !sceneById.has(sceneId))
+    const hasInvalidSceneActionIndex = hasMissingTargetScene || scenes.some((scene) => {
+      const expectedActionIds = actionIdsBySceneId.get(scene?.sceneId) ?? []
+      const supportedActionIds = scene?.supportedActionIds
+      if (!Array.isArray(supportedActionIds)) return true
+      const supportedActionIdSet = new Set(supportedActionIds)
+      return supportedActionIds.length !== expectedActionIds.length || supportedActionIdSet.size !== supportedActionIds.length ||
+        expectedActionIds.some((actionId) => !supportedActionIdSet.has(actionId))
+    })
+    if (hasInvalidSceneActionIndex) {
+      issues.push('业务场景的支持动作标识必须与指向该场景的公开动作双向一致。')
+    }
+
+    /**
+     * 风电当前只提供场景导航；开关站已提供两项保护关键环节。必须指向本场景默认总览拓扑，且不得登记流程步骤或第三层目录。
+     * 该约束把“可从菜单进入场景”和“已实现三维工艺能力”明确分开。
+     */
+    const unityMappingBySceneId = new Map(
+      (Array.isArray(topologyManifest.unitySceneMappings) ? topologyManifest.unitySceneMappings : [])
+        .map((mapping) => [mapping?.sceneId, mapping]),
+    )
+    const hasInvalidNavigationScene = navigationOnlySceneIds.some((sceneId) => {
+      const topologyId = `topology.${sceneId}.overview`
+      const actionId = `action.${sceneId}.overview`
+      const scene = sceneById.get(sceneId)
+      const mapping = unityMappingBySceneId.get(sceneId)
+      return !scene || scene.defaultTopologyId !== topologyId || !Array.isArray(scene.topologyIds) ||
+        scene.topologyIds.length !== 1 || scene.topologyIds[0] !== topologyId ||
+        !Array.isArray(scene.supportedActionIds) || scene.supportedActionIds.length !== 1 || scene.supportedActionIds[0] !== actionId ||
+        !mapping
+    })
+    const processDetails = Array.isArray(topologyManifest.processDetails) ? topologyManifest.processDetails : []
+    if (hasInvalidNavigationScene || processDetails.some((detail) => navigationOnlySceneIds.includes(detail?.sceneId))) {
+      issues.push('风电只能发布无三维流程副作用的总览导航；开关站已发布母线保护和线路保护，不能按导航-only场景拒绝其第三层目录。')
+    }
+    const gasTurbineDetail = processDetails.find((detail) => detail?.processDetailId === 'process-detail.gas-power.gas-turbine')
+    const coalSteamTurbineDetail = processDetails.find((detail) => detail?.processDetailId === 'process-detail.coal-power.steam-turbine')
+    const solarInverterDetail = processDetails.find((detail) => detail?.processDetailId === 'process-detail.solar-power.inverter')
+    const gasTurbineAction = Array.isArray(topologyManifest.actions)
+      ? topologyManifest.actions.find((action) => action?.actionId === 'action.gas-power.gas-turbine')
+      : undefined
+    const coalSteamTurbineAction = Array.isArray(topologyManifest.actions)
+      ? topologyManifest.actions.find((action) => action?.actionId === 'action.coal-power.steam-turbine')
+      : undefined
+    const solarInverterAction = Array.isArray(topologyManifest.actions)
+      ? topologyManifest.actions.find((action) => action?.actionId === 'action.solar-power.inverter')
+      : undefined
+    const gasMapping = Array.isArray(topologyManifest.unitySceneMappings)
+      ? topologyManifest.unitySceneMappings.find((mapping) => mapping?.sceneId === 'gas-power')
+      : undefined
+    const coalMapping = Array.isArray(topologyManifest.unitySceneMappings)
+      ? topologyManifest.unitySceneMappings.find((mapping) => mapping?.sceneId === 'coal-power')
+      : undefined
+    if (processDetails.length !== 14 || !gasTurbineDetail ||
+        gasTurbineDetail.sceneId !== 'gas-power' || gasTurbineDetail.processId !== 'gas-power-generation' ||
+        gasTurbineDetail.stepId !== 'gas-turbine' ||
+        gasTurbineDetail.resourceId !== 'process-detail-resource.gas-power.gas-turbine' ||
+        gasTurbineDetail.cameraPoseId !== 'camera-pose.gas-power.gas-turbine' ||
+        gasTurbineDetail.stateNodeId !== 'node.gas-turbine' ||
+        gasTurbineDetail.topologyDataContextId !== 'process-detail.gas-power.gas-turbine' || !coalSteamTurbineDetail ||
+        coalSteamTurbineDetail.sceneId !== 'coal-power' || coalSteamTurbineDetail.processId !== 'coal-power-generation' ||
+        coalSteamTurbineDetail.stepId !== 'steam-turbine' ||
+        coalSteamTurbineDetail.resourceId !== 'process-detail-resource.coal-power.steam-turbine' ||
+        coalSteamTurbineDetail.cameraPoseId !== 'camera-pose.coal-power.steam-turbine' ||
+        coalSteamTurbineDetail.stateNodeId !== 'node.coal-steam-turbine' ||
+        coalSteamTurbineDetail.topologyDataContextId !== 'process-detail.coal-power.steam-turbine' || !solarInverterDetail ||
+        solarInverterDetail.sceneId !== 'solar-power' || solarInverterDetail.processId !== 'solar-power-generation' ||
+        solarInverterDetail.stepId !== 'inverter' ||
+        solarInverterDetail.resourceId !== 'process-detail-resource.solar-power.inverter' ||
+        solarInverterDetail.cameraPoseId !== 'camera-pose.solar-power.inverter' ||
+        solarInverterDetail.stateNodeId !== 'node.solar-inverter' ||
+        solarInverterDetail.topologyDataContextId !== 'process-detail.solar-power.inverter') {
+      issues.push('结构清单必须发布三项既有第三层目录、三个变电场景各三项保护关键环节及开关站两项保护关键环节，共十四项。')
+    }
+    const expectedSubstationDetails = [
+      ['step-up-substation', 'transformer-protection', 'node.step-up-transformer'],
+      ['step-up-substation', 'busbar-protection', 'unit.step-up-protection.control'],
+      ['step-up-substation', 'line-protection', 'node.step-up-breaker'],
+      ['step-down-substation', 'transformer-protection', 'node.step-down-transformer'],
+      ['step-down-substation', 'busbar-protection', 'unit.step-down-protection.control'],
+      ['step-down-substation', 'line-protection', 'node.step-down-breaker'],
+      ['converter-station', 'transformer-protection', 'node.converter-transformer'],
+      ['converter-station', 'busbar-protection', 'unit.converter-protection.control'],
+      ['converter-station', 'line-protection', 'node.converter-breaker'],
+      ['switching-station', 'busbar-protection', 'unit.switching-protection.control'],
+      ['switching-station', 'line-protection', 'node.switching-breaker'],
+    ]
+    const hasInvalidSubstationDetail = expectedSubstationDetails.some(([sceneId, stepId, stateNodeId]) => {
+      const detailId = `process-detail.${sceneId}.${stepId}`
+      const detail = processDetails.find((item) => item?.processDetailId === detailId)
+      return !detail || detail.sceneId !== sceneId || detail.processId !== `${sceneId}-operation` ||
+        detail.stepId !== stepId || detail.resourceId !== `process-detail-resource.${sceneId}.${stepId}` ||
+        detail.cameraPoseId !== `camera-pose.${sceneId}.${stepId}` || detail.stateNodeId !== stateNodeId ||
+        detail.topologyDataContextId !== detailId
+    })
+    if (hasInvalidSubstationDetail) {
+      issues.push('四个变电站类场景的十一项保护关键环节必须同时声明资源、相机位、状态节点和拓扑上下文。')
+    }
+    if (!gasTurbineAction || gasTurbineAction.targetViewMode !== 'process-detail' ||
+        gasTurbineAction.processDetailId !== 'process-detail.gas-power.gas-turbine' ||
+        Object.prototype.hasOwnProperty.call(gasTurbineAction, 'targetTopologyId') ||
+        gasTurbineAction.unityAction?.type !== 'enterProcessDetail') {
+      issues.push('燃气轮机动作必须进入不携带第二层拓扑编号的独立第三层，不能回退为旧流程步骤。')
+    }
+    if (!coalSteamTurbineAction || coalSteamTurbineAction.targetViewMode !== 'process-detail' ||
+        coalSteamTurbineAction.processDetailId !== 'process-detail.coal-power.steam-turbine' ||
+        Object.prototype.hasOwnProperty.call(coalSteamTurbineAction, 'targetTopologyId') ||
+        coalSteamTurbineAction.unityAction?.type !== 'enterProcessDetail') {
+      issues.push('燃煤汽轮机动作必须进入不携带第二层拓扑编号的独立第三层，不能回退为旧流程步骤。')
+    }
+    if (!solarInverterAction || solarInverterAction.targetViewMode !== 'process-detail' ||
+        solarInverterAction.processDetailId !== 'process-detail.solar-power.inverter' ||
+        Object.prototype.hasOwnProperty.call(solarInverterAction, 'targetTopologyId') ||
+        solarInverterAction.unityAction?.type !== 'enterProcessDetail') {
+      issues.push('光伏逆变器动作必须进入独立第三层，不能回退为普通总览导航或流程步骤。')
+    }
     const sourceTopology = Array.isArray(topologyManifest.topologies)
       ? topologyManifest.topologies.find((topology) => topology?.topologyId === releaseManifest.nodeProtocolPolicy?.sourceTopologyId)
       : undefined
@@ -264,17 +516,102 @@ export async function validateReleaseArtifact(rootDirectory) {
   }
 
   if (unityProtocolMetadata) {
+    const runtimeIdentity = releaseManifest.runtimeIdentity
+    const unityDirectory = path.join(rootDirectory, 'unity')
+    if (!runtimeIdentity || runtimeIdentity.buildId !== releaseManifest.unityReleaseId ||
+        typeof runtimeIdentity.resourceDigest !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(runtimeIdentity.resourceDigest)) {
+      issues.push('发布摘要必须以 Unity 发布标识和有效 SHA-256 资源摘要声明运行时身份。')
+    } else {
+      const actualResourceDigest = await calculateDirectoryResourceDigest(unityDirectory)
+      if (actualResourceDigest !== runtimeIdentity.resourceDigest) {
+        issues.push('运行时资源摘要与发布目录中的 Unity 实际文件不一致。')
+      }
+
+      // 前端壳必须真正编译进同一身份值；只写发布摘要不能约束 iframe 握手使用哪个 Unity 产物。
+      const shellDirectory = path.join(rootDirectory, 'shell')
+      const shellFiles = await exists(shellDirectory) ? await listReleaseFiles(shellDirectory) : []
+      let shellContainsBuildId = false
+      let shellContainsResourceDigest = false
+      for (const shellFile of shellFiles) {
+        if (path.extname(shellFile).toLowerCase() !== '.js') continue
+        const source = await readFile(shellFile, 'utf8')
+        shellContainsBuildId ||= source.includes(runtimeIdentity.buildId)
+        shellContainsResourceDigest ||= source.includes(runtimeIdentity.resourceDigest)
+      }
+      if (!shellContainsBuildId || !shellContainsResourceDigest) {
+        issues.push('协议壳未编译进与 Unity 发布目录一致的构建标识和资源摘要。')
+      }
+    }
+
     const capabilities = new Set(Array.isArray(unityProtocolMetadata.commandCapabilities) ? unityProtocolMetadata.commandCapabilities : [])
     const eventCapabilities = new Set(Array.isArray(unityProtocolMetadata.eventCapabilities) ? unityProtocolMetadata.eventCapabilities : [])
-    const isSupportedSchema = unityProtocolMetadata.schemaVersion === 4 || unityProtocolMetadata.schemaVersion === 5
-    const missingEventsInCurrentSchema = unityProtocolMetadata.schemaVersion === 5 &&
-      requiredUnityEventCapabilities.some((capability) => !eventCapabilities.has(capability))
-    if (!isSupportedSchema || unityProtocolMetadata.channel !== 'power3d-unity' ||
-      unityProtocolMetadata.protocolVersion !== 1 || unityProtocolMetadata.unityReleaseId !== releaseManifest.unityReleaseId ||
+    const missingEvents = requiredUnityEventCapabilities.some((capability) => !eventCapabilities.has(capability))
+    const enterProcessDetailFields = new Set(Array.isArray(unityProtocolMetadata.enterProcessDetailRequiredFields)
+      ? unityProtocolMetadata.enterProcessDetailRequiredFields
+      : [])
+    const prepareProcessDetailFields = new Set(Array.isArray(unityProtocolMetadata.prepareProcessDetailRequiredFields)
+      ? unityProtocolMetadata.prepareProcessDetailRequiredFields
+      : [])
+    const commitProcessDetailFields = new Set(Array.isArray(unityProtocolMetadata.commitProcessDetailRequiredFields)
+      ? unityProtocolMetadata.commitProcessDetailRequiredFields
+      : [])
+    const abortProcessDetailFields = new Set(Array.isArray(unityProtocolMetadata.abortProcessDetailRequiredFields)
+      ? unityProtocolMetadata.abortProcessDetailRequiredFields
+      : [])
+    const exitProcessDetailFields = new Set(Array.isArray(unityProtocolMetadata.exitProcessDetailRequiredFields)
+      ? unityProtocolMetadata.exitProcessDetailRequiredFields
+      : [])
+    const playbackFields = new Set(Array.isArray(unityProtocolMetadata.setProcessDetailPlaybackRequiredFields)
+      ? unityProtocolMetadata.setProcessDetailPlaybackRequiredFields
+      : [])
+    const missingEnterProcessDetailFields = requiredEnterProcessDetailFields.some((field) => !enterProcessDetailFields.has(field))
+    const missingPrepareProcessDetailFields = requiredPrepareProcessDetailFields.some((field) => !prepareProcessDetailFields.has(field))
+    const missingCommitProcessDetailFields = requiredCommitProcessDetailFields.some((field) => !commitProcessDetailFields.has(field))
+    const missingAbortProcessDetailFields = requiredAbortProcessDetailFields.some((field) => !abortProcessDetailFields.has(field))
+    const missingExitProcessDetailFields = requiredExitProcessDetailFields.some((field) => !exitProcessDetailFields.has(field))
+    const missingPlaybackFields = requiredSetProcessDetailPlaybackFields.some((field) => !playbackFields.has(field))
+    if (unityProtocolMetadata.schemaVersion !== 10 || unityProtocolMetadata.channel !== 'power3d-unity' ||
+      unityProtocolMetadata.protocolVersion !== 2 || unityProtocolMetadata.unityReleaseId !== releaseManifest.unityReleaseId ||
+      unityProtocolMetadata.processDetailCommandSchemaVersion !== 2 ||
       requiredUnityCommandCapabilities.some((capability) => !capabilities.has(capability)) ||
-      missingEventsInCurrentSchema) {
+      missingEvents || missingEnterProcessDetailFields || missingPrepareProcessDetailFields ||
+      missingCommitProcessDetailFields || missingAbortProcessDetailFields || missingExitProcessDetailFields || missingPlaybackFields) {
       issues.push('Unity 协议能力文件的发布标识、结构版本或必需命令与发布摘要不一致。')
     }
+
+    /*
+     * 元数据只是声明，浏览器真正收到的 ready 能力来自 Unity 输出的 index.html 桥接脚本。
+     * 两者必须同时包含同一组命令；若只改 JSON 而漏改 .jslib/模板，静态门禁会通过但运行时握手必然失败。
+     * 兼容测试夹具允许没有 index.html，但真实交付包一旦包含该入口就必须逐项核对能力字符串。
+     */
+    const unityEntryPath = path.join(rootDirectory, 'unity', 'index.html')
+    if (await exists(unityEntryPath)) {
+      const unityEntrySource = await readFile(unityEntryPath, 'utf8')
+      const missingBridgeCapabilities = requiredUnityCommandCapabilities.filter((capability) => (
+        !unityEntrySource.includes(`'${capability}'`) && !unityEntrySource.includes(`\"${capability}\"`)
+      ))
+      if (missingBridgeCapabilities.length > 0) {
+        issues.push(`Unity 实际网页桥接未声明必需命令：${missingBridgeCapabilities.join('、')}。`)
+      }
+    }
+  }
+
+  /**
+   * 外层和 Unity 必须同时锁定第二版；第一版父页面不能把“不携带第二层 topologyId”误读为普通业务视图。
+   * 第三层独立拓扑仍由发布目录的 topologyDataContextId 在内部绑定，不进入外层稳定视图载荷。
+   */
+  if (releaseManifest.protocolVersions?.host !== 2 || releaseManifest.protocolVersions?.unity !== 2) {
+    issues.push('发布摘要必须声明外层与 Unity 均使用第二版协议。')
+  }
+
+  /**
+   * 外层握手保持15秒短预算，Unity 初始稳定视图与场景终态各自拥有120秒预算。
+   * 不能只声明一个含义模糊的总启动超时，否则平台无法按第二版协议正确分段计时。
+   */
+  if (releaseManifest.runtimeTimeouts?.outerReadyMilliseconds !== 15_000 ||
+      releaseManifest.runtimeTimeouts?.unityAndInitialViewMilliseconds !== 120_000 ||
+      releaseManifest.runtimeTimeouts?.sceneSwitchResultMilliseconds !== 120_000) {
+    issues.push('发布摘要必须声明外层就绪15秒、Unity初始稳定视图120秒、场景终态120秒的分阶段超时。')
   }
 
   if (releaseManifest.platformArtifactPatchingAllowed !== false) issues.push('发布摘要必须明确禁止平台修改构建产物。')
@@ -285,8 +622,10 @@ export async function validateReleaseArtifact(rootDirectory) {
   }
   if (!releaseManifest.includedCapabilities?.includes('node-events') ||
       !releaseManifest.includedCapabilities?.includes('node-states') ||
-      !releaseManifest.includedCapabilities?.includes('node-scene-mapping')) {
-    issues.push('发布摘要必须声明节点事件、节点状态和节点到三维映射能力。')
+      !releaseManifest.includedCapabilities?.includes('node-scene-mapping') ||
+      !releaseManifest.includedCapabilities?.includes('process-detail')) {
+    // “节点到三维映射能力”作为固定诊断短语保留，便于发布流水线和既有联调检查精确识别能力缺失。
+    issues.push('发布摘要必须声明节点事件、节点状态、节点到三维映射能力和独立第三层能力。')
   }
   if (releaseManifest.includedCapabilities?.includes('device-mapping') ||
       releaseManifest.excludedCapabilities?.includes('node-events') ||
@@ -359,6 +698,7 @@ export async function validateReleaseArtifact(rootDirectory) {
     const files = await listReleaseFiles(rootDirectory)
     let reportedUnexpectedPath = false
     let reportedInternalPath = false
+    let reportedLegacyPlaybackControls = false
     for (const filePath of files) {
       const relativePath = normalizeRelativePath(rootDirectory, filePath)
       const rootEntry = relativePath.split('/')[0]
@@ -372,12 +712,20 @@ export async function validateReleaseArtifact(rootDirectory) {
       }
       if (!textExtensions.has(path.extname(relativePath).toLowerCase()) || relativePath === integrityFileName) continue
       const content = await readFile(filePath, 'utf8')
-      // Unity 官方 loader（加载器）内含面向本地开发的错误提示词，不代表发布配置指向本机；
-      // 仅对我方生成的入口、说明、摘要和服务脚本执行本机地址门禁，避免误伤不可改写的 Unity 运行资源。
-      if (!relativePath.startsWith('unity/') && loopbackAddressPattern.test(content)) issues.push(`正式交付文本仍包含本机地址：${relativePath}`)
+      // 旧播放控件带有稳定数据标记；只扫描壳文本即可阻止历史按钮回流，无需读取 Unity 大资源或匹配中文文案。
+      if (!reportedLegacyPlaybackControls && relativePath.startsWith('shell/') && content.includes('data-partner-playback-controls')) {
+        issues.push('协议壳不得携带已废弃的关键环节网页播放控件。')
+        reportedLegacyPlaybackControls = true
+      }
+      /*
+       * 第三方前端依赖可能内置“未配置主机时回退本机”的通用库文案，它不是本包部署配置且不可原位修改。
+       * 本机地址门禁只扫描我方生成、会被联调人员读取或执行的根级入口、说明、摘要、清单和服务脚本；
+       * Unity 官方加载器和供应商代码继续由完整性摘要保护，避免误把依赖默认值判成实际部署地址。
+       */
+      const shouldScanDeploymentAddress = !relativePath.includes('/') || relativePath === 'shell/index.html'
+      if (shouldScanDeploymentAddress && loopbackAddressPattern.test(content)) issues.push(`正式交付文本仍包含本机地址：${relativePath}`)
       if (internalTestMarkerPattern.test(content)) issues.push(`正式交付文本仍包含内部自测内容：${relativePath}`)
     }
-
     const serverSource = await readFile(path.join(rootDirectory, 'server.mjs'), 'utf8').catch(() => '')
     if (isRuntimeSelfOrigin) {
       if (!serverSource.includes("const addressMode = \"runtime-self-origin\"") ||

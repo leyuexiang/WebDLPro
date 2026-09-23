@@ -37,7 +37,9 @@ function createCommand<TType extends HostCommandMessage['type']>(
 ): Extract<HostCommandMessage, { type: TType }> {
   return {
     channel: 'power-scene-topology-shell',
-    version: 1,
+    // 第二版协议才能表达不携带第二层 topologyId 的第三层稳定状态；
+    // 关键环节独立拓扑由子应用内部的 topologyDataContextId 解析。
+    version: 2,
     instanceId: 'visual-shell-01',
     sessionId: toSessionId('session-test-01'),
     messageId: `parent-${type.replaceAll('.', '-')}-01`,
@@ -102,6 +104,33 @@ describe('外层命令分派器', () => {
     expect(stateResult).toEqual({ success: true, status: 'completed', contextRevision: 4 })
     expect(disposeResult).toEqual({ success: true, status: 'disposed' })
     expect(facade.submit).toHaveBeenCalledWith({ type: 'system.release' })
+  })
+
+  it('错误态清空稳定内容后仍以会话单调版本响应查询和拒绝旧命令', async () => {
+    const coordinator: HostCommandCoordinatorPort = { submit: vi.fn() }
+    const { dispatcher } = createDispatcher(createSnapshot({
+      stableContext: null,
+      contextRevision: 4,
+      runtimeStatus: 'error',
+      unityStatus: 'failed',
+      topologyStatus: 'failed',
+    }), coordinator)
+
+    const stateResult = await dispatcher.execute(createCommand('state.get', {}))
+    const staleResult = await dispatcher.execute(createCommand('view.open', {
+      sceneId: toSceneId('wind-power'),
+      topologyId: toTopologyId('wind-power.overview'),
+      expectedContextRevision: 3,
+    }))
+
+    // 错误态没有可伪造的稳定场景，但版本仍是四；父页面无需先接受一次四到零的反向跳变再重试。
+    expect(stateResult).toEqual({ success: true, status: 'completed', contextRevision: 4 })
+    expect(staleResult).toMatchObject({
+      success: false,
+      contextRevision: 4,
+      error: { code: 'context.revision.conflict' },
+    })
+    expect(coordinator.submit).not.toHaveBeenCalled()
   })
 
   it('流程与设备批次都以最小领域意图转交协调端口', async () => {

@@ -18,8 +18,6 @@ public sealed class PowerPlantProcessControllerEditor : Editor
     private const string NodesPropertyName = "_nodes";
     private const string VisualStateColorPropertyNamesPropertyName = "_visualStateColorPropertyNames";
     private const string VisualStateBindingsPropertyName = "_visualStateBindings";
-    private const string ProcessStepBindingsPropertyName = "_processStepBindings";
-    private const string UnitIdBindingsPropertyName = "_unitIdBindings";
 
     private SerializedProperty _configuredProcessId;
     private SerializedProperty _sceneRoot;
@@ -27,8 +25,6 @@ public sealed class PowerPlantProcessControllerEditor : Editor
     private SerializedProperty _nodes;
     private SerializedProperty _visualStateColorPropertyNames;
     private SerializedProperty _visualStateBindings;
-    private SerializedProperty _processStepBindings;
-    private SerializedProperty _unitIdBindings;
 
     private void OnEnable()
     {
@@ -38,8 +34,6 @@ public sealed class PowerPlantProcessControllerEditor : Editor
         _nodes = serializedObject.FindProperty(NodesPropertyName);
         _visualStateColorPropertyNames = serializedObject.FindProperty(VisualStateColorPropertyNamesPropertyName);
         _visualStateBindings = serializedObject.FindProperty(VisualStateBindingsPropertyName);
-        _processStepBindings = serializedObject.FindProperty(ProcessStepBindingsPropertyName);
-        _unitIdBindings = serializedObject.FindProperty(UnitIdBindingsPropertyName);
     }
 
     public override void OnInspectorGUI()
@@ -47,7 +41,7 @@ public sealed class PowerPlantProcessControllerEditor : Editor
         serializedObject.Update();
 
         EditorGUILayout.HelpBox(
-            "燃煤节点、四态目标、流程步骤和机组标识映射均在此组件的属性面板（Inspector）中配置：标识与对象引用由场景负责人手工填写。运行时只读取保存后的序列化值，不按模型名称自动绑定。",
+            "场景节点和四态目标均在此组件的属性面板（Inspector）中配置：每个节点可选填写聚焦相机点位；留空时使用模型包围盒默认聚焦。标识与对象引用由场景负责人手工填写，运行时不按模型名称自动绑定。",
             MessageType.Info);
 
         if (_configuredProcessId != null)
@@ -96,8 +90,6 @@ public sealed class PowerPlantProcessControllerEditor : Editor
 
         ValidateNodeBindings(_nodes, "节点绑定", nodeIds, errors);
         ValidateVisualStateBindings(_visualStateBindings, _visualStateColorPropertyNames, nodeIds, errors, warnings);
-        ValidateProcessStepBindings(_processStepBindings, nodeIds, errors);
-        ValidateUnitIdBindings(_unitIdBindings, errors);
 
         serializedObject.ApplyModifiedProperties();
 
@@ -122,7 +114,7 @@ public sealed class PowerPlantProcessControllerEditor : Editor
 
     /// <summary>
     /// 检查普通场景节点：标识必须唯一，目标数组必须包含真实场景对象且至少有一个渲染器。
-    /// plant.overview 与其他节点共享目标是允许的，因此这里只检查每项自身是否完整。
+                // 每个节点独立校验完整性，不允许节点间共享配置掩盖缺项。
     /// </summary>
     private static void ValidateNodeBindings(
         SerializedProperty bindings,
@@ -136,11 +128,13 @@ public sealed class PowerPlantProcessControllerEditor : Editor
             return;
         }
 
+        Dictionary<GameObject, string> pointerNodeIdByTarget = new Dictionary<GameObject, string>();
         for (int index = 0; index < bindings.arraySize; index++)
         {
             SerializedProperty element = bindings.GetArrayElementAtIndex(index);
             SerializedProperty id = element.FindPropertyRelative("_id");
             SerializedProperty targets = element.FindPropertyRelative("_targets");
+            SerializedProperty topologyOnlySelection = element.FindPropertyRelative("_topologyOnlySelection");
             string sceneNodeId = id != null ? id.stringValue : string.Empty;
 
             if (string.IsNullOrWhiteSpace(sceneNodeId))
@@ -153,6 +147,32 @@ public sealed class PowerPlantProcessControllerEditor : Editor
             }
 
             ValidateTargetArray(targets, $"{label}[{index}]", errors, requireRenderer: true);
+
+            // 仅拓扑节点可以与下级物理设备共享主设备；两个允许三维点击的节点不得共享目标，
+            // 否则运行时反向索引会被后写节点覆盖，导致模型点击选中错误的拓扑节点。
+            bool isTopologyOnly = topologyOnlySelection != null && topologyOnlySelection.boolValue;
+            if (isTopologyOnly || targets == null || !targets.isArray)
+            {
+                continue;
+            }
+
+            for (int targetIndex = 0; targetIndex < targets.arraySize; targetIndex++)
+            {
+                GameObject targetObject = targets.GetArrayElementAtIndex(targetIndex).objectReferenceValue as GameObject;
+                if (targetObject == null)
+                {
+                    continue;
+                }
+
+                if (pointerNodeIdByTarget.TryGetValue(targetObject, out string existingNodeId))
+                {
+                    errors.Add($"允许三维点击的节点 {sceneNodeId} 与 {existingNodeId} 共享目标：{targetObject.name}。");
+                }
+                else
+                {
+                    pointerNodeIdByTarget.Add(targetObject, sceneNodeId);
+                }
+            }
         }
     }
 
@@ -205,117 +225,6 @@ public sealed class PowerPlantProcessControllerEditor : Editor
                 errors,
                 requireRenderer: true,
                 colorPropertyNames: configuredColorPropertyNames);
-        }
-    }
-
-    /// <summary>
-    /// 校验属性面板中的流程步骤映射：同一 stepId + unitId 只能出现一次，所有可见节点和描边节点都必须
-    /// 已经存在于普通节点绑定。这里不验证模型名称，也不替换引用，确保运行时只执行场景作者明确保存的映射。
-    /// </summary>
-    private static void ValidateProcessStepBindings(
-        SerializedProperty bindings,
-        HashSet<string> nodeIds,
-        List<string> errors)
-    {
-        if (bindings == null || !bindings.isArray || bindings.arraySize == 0)
-        {
-            errors.Add("流程步骤绑定为空。");
-            return;
-        }
-
-        HashSet<string> stepKeys = new HashSet<string>(System.StringComparer.Ordinal);
-        for (int index = 0; index < bindings.arraySize; index++)
-        {
-            SerializedProperty element = bindings.GetArrayElementAtIndex(index);
-            string stepId = element.FindPropertyRelative("_stepId")?.stringValue ?? string.Empty;
-            string unitId = element.FindPropertyRelative("_unitId")?.stringValue ?? string.Empty;
-            string focusNodeId = element.FindPropertyRelative("_focusNodeId")?.stringValue ?? string.Empty;
-            SerializedProperty visibleNodeIds = element.FindPropertyRelative("_visibleNodeIds");
-
-            if (string.IsNullOrWhiteSpace(stepId))
-            {
-                errors.Add($"流程步骤绑定[{index}]缺少 stepId。");
-            }
-
-            if (string.IsNullOrWhiteSpace(unitId))
-            {
-                unitId = "all";
-            }
-            if (unitId != "all" && unitId != "1" && unitId != "2")
-            {
-                errors.Add($"流程步骤绑定[{index}]的 unitId 无效：{unitId}，只允许 all、1、2。");
-            }
-
-            string stepKey = $"{stepId}\u001f{unitId}";
-            if (!stepKeys.Add(stepKey))
-            {
-                errors.Add($"流程步骤绑定存在重复 stepId + unitId：{stepId} + {unitId}。");
-            }
-
-            if (string.IsNullOrWhiteSpace(focusNodeId) || !nodeIds.Contains(focusNodeId))
-            {
-                errors.Add($"流程步骤绑定[{index}]的描边节点未登记：{focusNodeId}。");
-            }
-
-            if (visibleNodeIds == null || !visibleNodeIds.isArray || visibleNodeIds.arraySize == 0)
-            {
-                errors.Add($"流程步骤绑定[{index}]没有可见节点。");
-                continue;
-            }
-
-            for (int nodeIndex = 0; nodeIndex < visibleNodeIds.arraySize; nodeIndex++)
-            {
-                string sceneNodeId = visibleNodeIds.GetArrayElementAtIndex(nodeIndex).stringValue;
-                if (string.IsNullOrWhiteSpace(sceneNodeId) || !nodeIds.Contains(sceneNodeId))
-                {
-                    errors.Add($"流程步骤绑定[{index}]引用了未登记可见节点：{sceneNodeId}。");
-                }
-            }
-        }
-    }
-
-    /// <summary>
-    /// 校验场景属性面板中的机组规范标识和别名：同一别名不能指向两个规范机组，
-    /// 空别名会导致运行时无法建立完整索引。步骤中使用的规范 unitId 不要求重复登记。
-    /// </summary>
-    private static void ValidateUnitIdBindings(SerializedProperty bindings, List<string> errors)
-    {
-        if (bindings == null || !bindings.isArray || bindings.arraySize == 0)
-        {
-            // 只有 all 步骤的场景可以不登记机组别名；运行时仍可直接使用 all。
-            return;
-        }
-
-        HashSet<string> aliases = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
-        for (int index = 0; index < bindings.arraySize; index++)
-        {
-            SerializedProperty element = bindings.GetArrayElementAtIndex(index);
-            string canonicalUnitId = element.FindPropertyRelative("_canonicalUnitId")?.stringValue ?? string.Empty;
-            SerializedProperty aliasArray = element.FindPropertyRelative("_aliases");
-            if (string.IsNullOrWhiteSpace(canonicalUnitId) || canonicalUnitId == "all")
-            {
-                errors.Add($"机组标识映射[{index}]缺少合法 canonicalUnitId（规范机组标识）。");
-            }
-
-            if (aliasArray == null || !aliasArray.isArray || aliasArray.arraySize == 0)
-            {
-                errors.Add($"机组标识映射[{index}]没有 aliases（机组别名）。");
-                continue;
-            }
-
-            for (int aliasIndex = 0; aliasIndex < aliasArray.arraySize; aliasIndex++)
-            {
-                string alias = aliasArray.GetArrayElementAtIndex(aliasIndex).stringValue;
-                if (string.IsNullOrWhiteSpace(alias))
-                {
-                    errors.Add($"机组标识映射[{index}]的 aliases[{aliasIndex}]为空。");
-                    continue;
-                }
-                if (!aliases.Add(alias.Trim()))
-                {
-                    errors.Add($"机组标识映射存在重复别名：{alias}。");
-                }
-            }
         }
     }
 
