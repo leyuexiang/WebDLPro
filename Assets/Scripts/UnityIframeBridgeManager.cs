@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using WebDLPro.Unity.SceneRuntime;
+using WebDLPro.Unity.Security;
 
 /// <summary>
 /// Unity 与父页面 iframe 容器之间的通信管理器。
@@ -299,6 +300,21 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
 
     private void Awake()
     {
+        // 首先检查安全性：时间锁定和许可证验证
+        if (CommunicationSecurityManager.Instance.IsExpired())
+        {
+            Debug.LogError("[UnityIframeBridge] 系统试用期已过期，无法启动。请联系开发商续期。");
+            StatusText = "系统已过期，请联系开发商。";
+            // 阻止后续初始化
+            return;
+        }
+        
+        int remainingDays = CommunicationSecurityManager.Instance.GetRemainingDays();
+        if (remainingDays <= 7 && remainingDays > 0)
+        {
+            Debug.LogWarning($"[UnityIframeBridge] 系统将在 {remainingDays} 天后过期。");
+        }
+
 #if UNITY_WEBGL && !UNITY_EDITOR
         // 左侧平台控件被点击后，iframe 中的 Unity 画布会暂时失去焦点。
         // 保持 WebGL 运行循环可用，确保父页面的 postMessage 指令能立即更新三维画面，
@@ -407,11 +423,44 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         {
             return;
         }
+        
+        // 安全检查：如果已过期，拒绝所有消息
+        if (CommunicationSecurityManager.Instance.IsExpired())
+        {
+            Debug.LogError("[UnityIframeBridge] 系统已过期，拒绝处理消息。");
+            return;
+        }
 
         BridgeMessage message;
         try
         {
+            // 先尝试解析外层消息结构
             message = JsonUtility.FromJson<BridgeMessage>(messageJson);
+            
+            // 如果消息包含加密的 payload，进行解密
+            if (message != null && message.payload != null && !string.IsNullOrEmpty(message.payload.text))
+            {
+                // 检查是否为加密消息（以特定标记开头）
+                if (message.payload.text.StartsWith("ENC:"))
+                {
+                    try
+                    {
+                        string encryptedData = message.payload.text.Substring(4);
+                        string decryptedJson = CommunicationSecurityManager.Instance.DecryptPayload(encryptedData);
+                        // 重新解析解密后的 payload
+                        BridgePayload decryptedPayload = JsonUtility.FromJson<BridgePayload>(decryptedJson);
+                        if (decryptedPayload != null)
+                        {
+                            message.payload = decryptedPayload;
+                        }
+                    }
+                    catch (Exception decryptEx)
+                    {
+                        Debug.LogWarning($"[UnityIframeBridge] 消息解密失败：{decryptEx.Message}");
+                        return;
+                    }
+                }
+            }
         }
         catch (Exception exception)
         {
@@ -1205,6 +1254,16 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
     /// <summary>统一把已经由受控模型序列化的信封交给浏览器桥；编辑器测试保留同一日志前缀用于断言。</summary>
     private static void SendSerializedMessage(string messageJson)
     {
+        // 安全检查：过期后不发送任何消息
+        if (CommunicationSecurityManager.Instance.IsExpired())
+        {
+            Debug.LogError("[UnityIframeBridge] 系统已过期，无法发送消息。");
+            return;
+        }
+        
+        // 可选：对敏感消息进行加密（根据需要启用）
+        // string encryptedJson = EncryptMessageIfNeeded(messageJson);
+        
 #if UNITY_WEBGL && !UNITY_EDITOR
         Power3dUnityBridge_SendToParent(messageJson);
 #else
