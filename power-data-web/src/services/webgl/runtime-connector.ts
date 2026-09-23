@@ -82,6 +82,12 @@ interface PendingCommand {
 
 const COMMAND_TIMEOUT_MS = 10_000
 /**
+ * 第三层关键环节需要下载并解压独立资源包，还要完成包装预制体实例化、状态重放和相机校验。
+ * 这类命令不能沿用普通 10 秒确认窗口，否则冷缓存环境会在 Unity 已经正常执行时被前端误判为失败。
+ * 该值仍是有限上限；命令最多按同一请求标识重试一次，不会形成无界等待或重复事务。
+ */
+export const PROCESS_DETAIL_COMMAND_TIMEOUT_MS = 60_000
+/**
  * 场景切换接收确认后的最终结果等待预算。
  * 冷缓存下共享资源下载、解压与场景初始化可能连续三十秒没有中间进度，因此这里与外层场景事务的
  * 一百二十秒发布契约对齐；合法进度仍会刷新窗口，但外层事务总预算会继续提供最终有限边界。
@@ -118,6 +124,15 @@ const IDEMPOTENT_COMMANDS = new Set<WebglCommandType>([
   'setRouteFlow',
   'setNodeVisibility',
   'dispose',
+])
+/** 需要长确认窗口的第三层命令闭集；普通查询、场景复位和节点状态命令继续使用 10 秒窗口。 */
+const LONG_RUNNING_PROCESS_DETAIL_COMMANDS = new Set<WebglCommandType>([
+  'prepareProcessDetail',
+  'commitProcessDetail',
+  'abortProcessDetail',
+  'enterProcessDetail',
+  'exitProcessDetail',
+  'setProcessDetailPlayback',
 ])
 
 /** 由单实例宿主创建的安全消息连接器。它是整个前端唯一接触 window.message 的位置。 */
@@ -569,7 +584,7 @@ export class WebglRuntimeConnector {
 
     const messageId = `${this.instanceId}-${++this.nextMessageSequence}`
     const envelope = createWebglCommand(this.instanceId, messageId, command, payload)
-    const timeoutHandle = setTimeout(() => this.handleCommandTimeout(messageId), COMMAND_TIMEOUT_MS)
+    const timeoutHandle = setTimeout(() => this.handleCommandTimeout(messageId), this.resolveCommandTimeoutMs(command))
     this.pendingCommands.set(messageId, { envelope, retryCount: 0, timeoutHandle })
     this.postCommand(envelope)
     return messageId
@@ -587,7 +602,7 @@ export class WebglRuntimeConnector {
 
     if (pending.retryCount === 0 && IDEMPOTENT_COMMANDS.has(pending.envelope.type)) {
       pending.retryCount = 1
-      pending.timeoutHandle = setTimeout(() => this.handleCommandTimeout(messageId), COMMAND_TIMEOUT_MS)
+      pending.timeoutHandle = setTimeout(() => this.handleCommandTimeout(messageId), this.resolveCommandTimeoutMs(pending.envelope.type))
       this.postCommand(pending.envelope)
       return
     }
@@ -621,6 +636,14 @@ export class WebglRuntimeConnector {
   private refreshSceneSwitchTimeout(pending: PendingCommand): void {
     clearTimeout(pending.timeoutHandle)
     pending.timeoutHandle = setTimeout(() => this.handleCommandTimeout(pending.envelope.messageId), SCENE_SWITCH_RESULT_TIMEOUT_MS)
+  }
+
+  /**
+   * 首次接收确认和幂等重试都必须使用同一类命令的预算；否则第一次可以等待资源准备，
+   * 第二次却会回退到普通 10 秒窗口，仍会在冷缓存下错误结束关键环节事务。
+   */
+  private resolveCommandTimeoutMs(command: WebglCommandType): number {
+    return LONG_RUNNING_PROCESS_DETAIL_COMMANDS.has(command) ? PROCESS_DETAIL_COMMAND_TIMEOUT_MS : COMMAND_TIMEOUT_MS
   }
 
   /** 失败是终态：清空本实例全部资源，旧窗口后续消息会因 source 或监听器缺失而失效。 */

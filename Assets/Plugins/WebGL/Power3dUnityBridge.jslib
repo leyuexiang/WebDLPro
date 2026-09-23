@@ -49,7 +49,9 @@ mergeInto(LibraryManager.library, {
     // moveCameraToPose（命名镜头定位）与 resetCamera（相机复位）都只改变当前镜头；
     // 任一能力缺失都会在握手阶段被前端判定为不兼容。
     var commandCapabilities = [
-      'init', 'resize', 'switchScene', 'enterProcessStep', 'moveCameraToPose', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail',
+      // 必须与前端 WEBGL_COMMAND_TYPES（网页图形命令白名单）和模板兜底桥保持一致；
+      // enterProcessStep 已废弃，继续声明会让 ready 载荷无法通过前端字段校验。
+      'init', 'resize', 'switchScene', 'moveCameraToPose', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail',
       'enterProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback',
       'resetScene', 'resetCamera', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState',
  'setRouteFlow', 'setNodeVisibility', 'dispose'

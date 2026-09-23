@@ -13,7 +13,7 @@ using WebDLPro.Unity.SceneRuntime;
 /// 外部平台只传递流程、步骤、机组和路由标识；模型名称、显隐集合、材质与描边策略全部保留在 Unity 内。
 /// </summary>
 [DisallowMultipleComponent]
-public sealed class PowerPlantProcessController : MonoBehaviour, IBusinessSceneInteractionGate, IBusinessSceneNamedCameraVisualFocusController
+public sealed class PowerPlantProcessController : MonoBehaviour, IBusinessSceneInteractionGate, IBusinessSceneNamedCameraVisualFocusController, IBusinessSceneNodeInteractionController
 {
     private const string GasPowerGenerationProcessId = "gas-power-generation";
     // 管道流动由专用 Shader（着色器）读取材质速度属性驱动；运行时只覆盖渲染器属性块，不修改共享材质资产。

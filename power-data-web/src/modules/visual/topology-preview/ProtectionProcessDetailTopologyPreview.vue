@@ -4,7 +4,7 @@ import ManifestTopologyJsonPreview from './ManifestTopologyJsonPreview.vue'
 import { STEP_DOWN_SUBSTATION_TOPOLOGY_PREVIEW_PROFILE } from './step-down-substation-topology-preview-profile'
 import { getProcessDetailTopologyDataContext } from '@/modules/visual/topology/process-detail-topology-contexts'
 
-/** 预览页只核对三份公共图纸；正式九场景绑定仍以场景限定的上下文编号为准。 */
+/** 预览页只核对三份公共图纸；正式四个站类场景的十一项绑定仍以场景限定的上下文编号为准。 */
 const protectionOptions = Object.freeze([
   Object.freeze({ key: 'transformer-protection', label: '变压保护' }),
   Object.freeze({ key: 'busbar-protection', label: '母线保护' }),
@@ -18,7 +18,7 @@ const activeKey = ref(protectionOptions[0]!.key)
 const activeLabel = computed(() => protectionOptions.find((item) => item.key === activeKey.value)?.label ?? '')
 
 /**
- * 独立验收入口固定使用降压站命名空间，避免引入虚假的三维动作；三场景共享同一文件，
+ * 独立验收入口固定使用降压站命名空间，避免引入虚假的三维动作；四个站类场景共享同一文件，
  * 因而这里看到的画面与升压站、换流站对应关键环节完全一致。
  */
 async function showProtection(key: ProtectionKey): Promise<void> {
@@ -39,7 +39,7 @@ onMounted(async () => {
     <header class="protection-preview__toolbar">
       <div>
         <h1>保护关键环节拓扑预览</h1>
-        <p>当前：{{ activeLabel }}；三场景共用画面文件，正式状态上下文相互独立。</p>
+        <p>当前：{{ activeLabel }}；四个站类场景共用画面文件，正式状态上下文相互独立。</p>
       </div>
       <nav aria-label="保护关键环节切换">
         <button

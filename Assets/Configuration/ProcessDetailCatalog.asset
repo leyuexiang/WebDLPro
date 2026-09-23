@@ -52,3 +52,146 @@ MonoBehaviour:
     _availability: 1
     _editorPrefab: {fileID: 5617771883254390857, guid: 0848ba37fac725f47a6c27d7277419d8,
       type: 3}
+  - _sceneId: step-up-substation
+    _processId: step-up-substation-operation
+    _stepId: transformer-protection
+    _processDetailId: process-detail.step-up-substation.transformer-protection
+    _resourceId: process-detail-resource.step-up-substation.transformer-protection
+    _cameraPoseId: camera-pose.step-up-substation.transformer-protection
+    _stateNodeIds:
+    - node.step-up-transformer
+    _dynamicTargetIds:
+    - node.step-up-transformer
+    _availability: 1
+    _editorPrefab: {fileID: 669093843138395835, guid: 8652e95a4a7213e4f9d6cde96752e0c1,
+      type: 3}
+  - _sceneId: step-up-substation
+    _processId: step-up-substation-operation
+    _stepId: busbar-protection
+    _processDetailId: process-detail.step-up-substation.busbar-protection
+    _resourceId: process-detail-resource.step-up-substation.busbar-protection
+    _cameraPoseId: camera-pose.step-up-substation.busbar-protection
+    _stateNodeIds:
+    - unit.step-up-protection.control
+    _dynamicTargetIds:
+    - unit.step-up-protection.control
+    _availability: 1
+    _editorPrefab: {fileID: 1652927362773362724, guid: 1c99ecb0e1e1d144d950294823f2642a,
+      type: 3}
+  - _sceneId: step-up-substation
+    _processId: step-up-substation-operation
+    _stepId: line-protection
+    _processDetailId: process-detail.step-up-substation.line-protection
+    _resourceId: process-detail-resource.step-up-substation.line-protection
+    _cameraPoseId: camera-pose.step-up-substation.line-protection
+    _stateNodeIds:
+    - node.step-up-breaker
+    _dynamicTargetIds:
+    - node.step-up-breaker
+    _availability: 1
+    _editorPrefab: {fileID: 6181971203075841652, guid: fefb475fe1924ee4cb70a457e5bd15d7,
+      type: 3}
+  - _sceneId: step-down-substation
+    _processId: step-down-substation-operation
+    _stepId: transformer-protection
+    _processDetailId: process-detail.step-down-substation.transformer-protection
+    _resourceId: process-detail-resource.step-down-substation.transformer-protection
+    _cameraPoseId: camera-pose.step-down-substation.transformer-protection
+    _stateNodeIds:
+    - node.step-down-transformer
+    _dynamicTargetIds:
+    - node.step-down-transformer
+    _availability: 1
+    _editorPrefab: {fileID: 1455786794523301643, guid: 92f9fac3e77235044aac8ced78590adf,
+      type: 3}
+  - _sceneId: step-down-substation
+    _processId: step-down-substation-operation
+    _stepId: busbar-protection
+    _processDetailId: process-detail.step-down-substation.busbar-protection
+    _resourceId: process-detail-resource.step-down-substation.busbar-protection
+    _cameraPoseId: camera-pose.step-down-substation.busbar-protection
+    _stateNodeIds:
+    - unit.step-down-protection.control
+    _dynamicTargetIds:
+    - unit.step-down-protection.control
+    _availability: 1
+    _editorPrefab: {fileID: 1702758715871207821, guid: c6da0dc57dc0488498f1e8f787e9d269,
+      type: 3}
+  - _sceneId: step-down-substation
+    _processId: step-down-substation-operation
+    _stepId: line-protection
+    _processDetailId: process-detail.step-down-substation.line-protection
+    _resourceId: process-detail-resource.step-down-substation.line-protection
+    _cameraPoseId: camera-pose.step-down-substation.line-protection
+    _stateNodeIds:
+    - node.step-down-breaker
+    _dynamicTargetIds:
+    - node.step-down-breaker
+    _availability: 1
+    _editorPrefab: {fileID: 7979820747611972470, guid: 695894dab1f252b4985baa03b94fbab5,
+      type: 3}
+  - _sceneId: converter-station
+    _processId: converter-station-operation
+    _stepId: transformer-protection
+    _processDetailId: process-detail.converter-station.transformer-protection
+    _resourceId: process-detail-resource.converter-station.transformer-protection
+    _cameraPoseId: camera-pose.converter-station.transformer-protection
+    _stateNodeIds:
+    - node.converter-transformer
+    _dynamicTargetIds:
+    - node.converter-transformer
+    _availability: 1
+    _editorPrefab: {fileID: 5353875278348746633, guid: f958d547d04c4884ba20bc2c7eb03300,
+      type: 3}
+  - _sceneId: converter-station
+    _processId: converter-station-operation
+    _stepId: busbar-protection
+    _processDetailId: process-detail.converter-station.busbar-protection
+    _resourceId: process-detail-resource.converter-station.busbar-protection
+    _cameraPoseId: camera-pose.converter-station.busbar-protection
+    _stateNodeIds:
+    - unit.converter-protection.control
+    _dynamicTargetIds:
+    - unit.converter-protection.control
+    _availability: 1
+    _editorPrefab: {fileID: 1177165390141498534, guid: 25215df481a2fb24bb8e61ac58e9d926,
+      type: 3}
+  - _sceneId: converter-station
+    _processId: converter-station-operation
+    _stepId: line-protection
+    _processDetailId: process-detail.converter-station.line-protection
+    _resourceId: process-detail-resource.converter-station.line-protection
+    _cameraPoseId: camera-pose.converter-station.line-protection
+    _stateNodeIds:
+    - node.converter-breaker
+    _dynamicTargetIds:
+    - node.converter-breaker
+    _availability: 1
+    _editorPrefab: {fileID: 1442655375075841143, guid: 67ed34c4d2464a047ba18aad5d4f842b,
+      type: 3}
+  - _sceneId: switching-station
+    _processId: switching-station-operation
+    _stepId: busbar-protection
+    _processDetailId: process-detail.switching-station.busbar-protection
+    _resourceId: process-detail-resource.switching-station.busbar-protection
+    _cameraPoseId: camera-pose.switching-station.busbar-protection
+    _stateNodeIds:
+    - unit.switching-protection.control
+    _dynamicTargetIds:
+    - unit.switching-protection.control
+    _availability: 1
+    _editorPrefab: {fileID: 3787088207334842826, guid: 5c00da6c7645f454282c45ae62265ad6,
+      type: 3}
+  - _sceneId: switching-station
+    _processId: switching-station-operation
+    _stepId: line-protection
+    _processDetailId: process-detail.switching-station.line-protection
+    _resourceId: process-detail-resource.switching-station.line-protection
+    _cameraPoseId: camera-pose.switching-station.line-protection
+    _stateNodeIds:
+    - node.switching-breaker
+    _dynamicTargetIds:
+    - node.switching-breaker
+    _availability: 1
+    _editorPrefab: {fileID: 8926689273709824047, guid: ef6743025b33f754891603cca5777ebd,
+      type: 3}

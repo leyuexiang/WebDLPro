@@ -23,6 +23,58 @@ node .agents/skills/scene-release-gate/scripts/inspect-release-contract.mjs
 
 该摘要来自 `createConfiguredPowerScenesManifest()`（配置场景清单生成函数）。把其输出与本次需求对比，明确新增、删除和保留项。需要定位实现、门禁或文档时读取 [项目文件地图](references/project-map.md)；发生任一契约变化时完整读取 [变更检查表](references/change-checklist.md)。
 
+## 失败复盘与防复发
+
+以下规则来自一次真实发布失败，属于每次 Unity 重建和联调包生成前的强制预检，不得只依赖浏览器最终报错发现问题。
+
+### 1. 网页图形协议能力漂移会伪装成启动超时
+
+曾出现 Unity `ready` 消息仍声明已废弃的 `enterProcessStep`，而前端 `WEBGL_COMMAND_TYPES`（网页图形命令白名单）已经移除该动作。结果不是清晰的协议错误，而是握手被拒绝后显示 `runtime.startup.timeout`（运行时启动超时）。
+
+每次 Unity 构建前必须确认以下三处能力集合一致，并且不包含废弃动作：
+
+- `Assets/WebGLTemplates/EmbeddedViewport/index.html` 的 `commandCapabilities`（模板兜底桥能力清单）。
+- `Assets/Plugins/WebGL/Power3dUnityBridge.jslib` 的 `commandCapabilities`（正式 Unity 桥接能力清单）。
+- 前端 `WEBGL_COMMAND_TYPES`（网页图形命令白名单）及协议能力配置。
+
+预检必须包含一个负向断言：`enterProcessStep` 不得出现在模板、`.jslib` 或构建后的能力数组中；能力集合发生变化时必须同步更新正向/负向测试。
+
+### 2. Unity 场景目录声明必须等于运行时控制器能力
+
+曾出现四个变电场景的 `BusinessSceneCatalog.asset`（业务场景目录）仍登记最小能力值 `97`，但 `SubstationOverviewController`（变电站总览控制器）实际返回 `877`。Unity 因此返回：`scene-controller-unavailable`，并报告 `expected` 与 `actual` 能力不一致。
+
+每个发布场景都必须做以下等式校验：
+
+```text
+BusinessSceneCatalog._declaredCapabilities
+    == 场景控制器 SupportedCapabilities
+```
+
+禁止只检查场景能否加载；必须至少执行一次公开 `workflow.trigger`（流程触发）动作，确认控制器初始化和场景切换结果成功。新增 `FocusNode`（节点聚焦）、`ClearSelection`（清除选择）、`UpdateNodeVisualState`（更新节点视觉状态）或四态能力时，目录声明、控制器实现、反向映射和测试必须同一提交同步更新。
+
+### 3. Unity 改动后禁止复用旧发布目录
+
+Unity 资源、场景、脚本、材质或配置发生任何改动后，必须生成新的唯一 `unityReleaseId`（Unity 发布标识），并确认包内运行时元数据的 `buildId` 与该标识完全相同。生成器必须显式传入 `--unity-release-id`，不得让脚本自动挑选历史目录。
+
+发布目录已存在、构建日志不是本次标识、或包内 `release-manifest.json` 引用旧 Unity 标识时，立即停止，不得覆盖旧目录或继续打包。
+
+### 4. 联调包参数必须与包类型匹配
+
+`partner-integration`（合作方联调）包必须满足：
+
+- 端口固定为 `5575`。
+- 监听地址不能是 `127.0.0.1`，通常使用 `0.0.0.0`。
+- `includeSelfTest`（内部自测页开关）必须为 `false`。
+- 未提供真实部署来源时使用 `runtime-self-origin`（运行时同源模式），不能把回环地址写进合作方包。
+
+本地测试包可以使用回环地址和 `self-test.html`，但不得把本地测试包冒充联调包交付。
+
+### 5. 最终包必须做服务级验证和归档校验
+
+产物门禁通过后，仍必须启动最终包的 `server.mjs`（服务入口）并检查：根入口、`scene-topology-manifest.json` 和 `unity/index.html` 均返回 HTTP `200`（成功响应）。随后直接读取包内清单，复核动作数、场景数、关键环节数、拓扑数及四个变电场景的 `sceneNodeIds`（场景节点标识）数量。
+
+压缩包必须从已校验的最终目录生成，不得从 `.staging`（临时目录）或旧发布目录压缩；归档后至少验证目录清单可读，并记录压缩包大小和 SHA-256（安全哈希）值。
+
 ## 执行流程
 
 1. 审计当前清单和工作区，识别用户已有改动；不得回退或覆盖无关变更。

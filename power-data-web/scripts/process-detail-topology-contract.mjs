@@ -2,6 +2,45 @@ import { createHash } from 'node:crypto'
 import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 
+const protectionTopologyDefinitions = Object.freeze({
+  'step-up-substation': Object.freeze(['transformer-protection', 'busbar-protection', 'line-protection']),
+  'step-down-substation': Object.freeze(['transformer-protection', 'busbar-protection', 'line-protection']),
+  'converter-station': Object.freeze(['transformer-protection', 'busbar-protection', 'line-protection']),
+  'switching-station': Object.freeze(['busbar-protection', 'line-protection']),
+})
+
+const protectionTopologyMetadata = Object.freeze({
+  'transformer-protection': Object.freeze({
+    topologyPath: 'process-detail/protection/transformer-protection/topology.json',
+    sourceSha256: 'cebf00fc7b375ff7bff26e29da3d722edc378f825d75813f384825b9a24f5431',
+    expectedPenCount: 37,
+    bindingPenIds: Object.freeze(['13641187', '3ca46467', '5c62b7c9', '638bfdc8', '4c977fd', '5ba41a5e', '2afc53b']),
+  }),
+  'busbar-protection': Object.freeze({
+    topologyPath: 'process-detail/protection/busbar-protection/topology.json',
+    sourceSha256: '0b6ed18b48c7039cf3f0079642f1b9d2197c9a2890fd5a28d50839eca7161eb4',
+    expectedPenCount: 35,
+    bindingPenIds: Object.freeze(['764bd402', 'cb91449', '3e2176c6', '276dbcd0', '6c957795', '149e5ff']),
+  }),
+  'line-protection': Object.freeze({
+    topologyPath: 'process-detail/protection/line-protection/topology.json',
+    sourceSha256: 'e635617e600c787442823d0887c79bc581bbb244a63a9dc1c51d732be6b2c08c',
+    expectedPenCount: 34,
+    bindingPenIds: Object.freeze(['c15baad', '692fe9ae', '16a5c2d1', 'b8f3ceb', 'a5f4bae', '31d8ffd']),
+  }),
+})
+
+/** 四个变电站类场景复用三份经过验收的保护拓扑文件；场景差异由上下文绑定中的 nodeId 前缀表达。 */
+const protectionTopologyContracts = Object.freeze(
+  Object.entries(protectionTopologyDefinitions).flatMap(([sceneId, stepIds]) => stepIds.map((stepId) => {
+    const metadata = protectionTopologyMetadata[stepId]
+    return Object.freeze({
+      contextId: `process-detail.${sceneId}.${stepId}`,
+      ...metadata,
+    })
+  })),
+)
+
 /**
  * 三项第三层拓扑的不可变发布合同。散列锁定经过验收的原始文件，图元数量用于提供更直观的
  * 结构诊断，显式绑定图元则保证二维状态投影不会在文件仍可解析时静默失效。
@@ -28,6 +67,7 @@ export const processDetailTopologyContracts = Object.freeze([
     expectedPenCount: 19,
     bindingPenIds: Object.freeze(['df25e45', '2cf7b170']),
   }),
+  ...protectionTopologyContracts,
 ])
 
 /**
@@ -62,7 +102,11 @@ async function listProcessDetailFiles(topologyRoot) {
 export async function validateProcessDetailTopologies(topologyRoot) {
   const issues = []
   const actualFiles = await listProcessDetailFiles(topologyRoot)
-  const expectedFiles = new Set(processDetailTopologyContracts.map((contract) => contract.topologyPath))
+  const expectedFiles = new Set([
+    ...processDetailTopologyContracts.map((contract) => contract.topologyPath),
+    // 绑定清单是正式运行时合同的一部分，不属于合同外资源。
+    'process-detail/protection/topology-bindings.json',
+  ])
   for (const file of actualFiles) {
     if (!expectedFiles.has(file)) {
       issues.push(Object.freeze({ code: 'process-detail.topology-extra-resource', contextId: null, file }))
@@ -113,6 +157,20 @@ export async function validateProcessDetailTopologies(topologyRoot) {
       issues.push(Object.freeze({ code: 'process-detail.topology-binding-missing', contextId: contract.contextId, file: contract.topologyPath }))
     }
   }
+  const bindingsPath = path.join(topologyRoot, 'process-detail', 'protection', 'topology-bindings.json')
+  try {
+    const bindings = JSON.parse((await readFile(bindingsPath)).toString('utf8'))
+    const topologyEntries = Array.isArray(bindings?.topologies) ? bindings.topologies : []
+    const expectedContextIds = new Set(processDetailTopologyContracts
+      .filter((contract) => contract.contextId.includes('substation') || contract.contextId.includes('converter-station') || contract.contextId.includes('switching-station'))
+      .map((contract) => contract.contextId))
+    const actualContextIds = new Set(topologyEntries.map((entry) => entry?.topologyDataContextId))
+    if (topologyEntries.length !== expectedContextIds.size || [...expectedContextIds].some((contextId) => !actualContextIds.has(contextId))) {
+      issues.push(Object.freeze({ code: 'process-detail.topology-binding-manifest-mismatch', contextId: null, file: 'process-detail/protection/topology-bindings.json' }))
+    }
+  } catch {
+    issues.push(Object.freeze({ code: 'process-detail.topology-binding-manifest-invalid', contextId: null, file: 'process-detail/protection/topology-bindings.json' }))
+  }
   return Object.freeze(issues)
 }
 
@@ -126,6 +184,8 @@ export function formatProcessDetailTopologyIssue(issue) {
     'process-detail.topology-pen-count-mismatch': '第三层拓扑图元数量与验收版本不一致',
     'process-detail.topology-pen-id-invalid': '第三层拓扑图元编号缺失或重复',
     'process-detail.topology-binding-missing': '第三层拓扑缺少已登记的状态绑定图元',
+    'process-detail.topology-binding-manifest-mismatch': '第三层拓扑运行时绑定清单与正式上下文不一致',
+    'process-detail.topology-binding-manifest-invalid': '第三层拓扑运行时绑定清单缺失或不是合法 JSON',
   }
   return `${labels[issue.code] ?? '第三层拓扑合同校验失败'}：${issue.file}。`
 }

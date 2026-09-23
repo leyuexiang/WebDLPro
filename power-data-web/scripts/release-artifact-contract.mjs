@@ -30,7 +30,7 @@ const requiredUnityEventCapabilities = Object.freeze([
   'ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'selectionCleared', 'disposed',
 ])
 /**
- * 当前合作方以动作摘要生成全部可绑定入口，因此十二项公开动作属于发布契约本身，不能只做两份清单的相对一致性检查。
+ * 当前合作方以动作摘要生成全部可绑定入口，因此二十三项公开动作属于发布契约本身，不能只做两份清单的相对一致性检查。
  * 目标、视图和三维动作类型一并固定，防止生成器与摘要同时回退，或把普通场景导航误写成未实现的流程能力。
  */
 const requiredPublishedActionContracts = Object.freeze([
@@ -42,14 +42,25 @@ const requiredPublishedActionContracts = Object.freeze([
   { actionId: 'action.wind-power.overview', targetSceneId: 'wind-power', targetViewMode: 'business', targetTopologyId: 'topology.wind-power.overview', unityActionType: 'none' },
   { actionId: 'action.solar-power.overview', targetSceneId: 'solar-power', targetViewMode: 'business', targetTopologyId: 'topology.solar-power.overview', unityActionType: 'none' },
   { actionId: 'action.solar-power.inverter', targetSceneId: 'solar-power', targetViewMode: 'process-detail', processDetailId: 'process-detail.solar-power.inverter', unityActionType: 'enterProcessDetail' },
-  { actionId: 'action.step-up-substation.overview', targetSceneId: 'step-up-substation', targetViewMode: 'business', targetTopologyId: 'topology.step-up-substation.overview', unityActionType: 'none' },
-  { actionId: 'action.step-down-substation.overview', targetSceneId: 'step-down-substation', targetViewMode: 'business', targetTopologyId: 'topology.step-down-substation.overview', unityActionType: 'none' },
-  { actionId: 'action.converter-station.overview', targetSceneId: 'converter-station', targetViewMode: 'business', targetTopologyId: 'topology.converter-station.overview', unityActionType: 'none' },
-  { actionId: 'action.switching-station.overview', targetSceneId: 'switching-station', targetViewMode: 'business', targetTopologyId: 'topology.switching-station.overview', unityActionType: 'none' },
+  { actionId: 'action.step-up-substation.overview', targetSceneId: 'step-up-substation', targetViewMode: 'business', targetTopologyId: 'topology.step-up-substation.overview', unityActionType: 'resetScene' },
+  { actionId: 'action.step-down-substation.overview', targetSceneId: 'step-down-substation', targetViewMode: 'business', targetTopologyId: 'topology.step-down-substation.overview', unityActionType: 'resetScene' },
+  { actionId: 'action.converter-station.overview', targetSceneId: 'converter-station', targetViewMode: 'business', targetTopologyId: 'topology.converter-station.overview', unityActionType: 'resetScene' },
+  { actionId: 'action.switching-station.overview', targetSceneId: 'switching-station', targetViewMode: 'business', targetTopologyId: 'topology.switching-station.overview', unityActionType: 'resetScene' },
+  { actionId: 'action.step-up-substation.transformer-protection', targetSceneId: 'step-up-substation', targetViewMode: 'process-detail', processDetailId: 'process-detail.step-up-substation.transformer-protection', unityActionType: 'enterProcessDetail' },
+  { actionId: 'action.step-up-substation.busbar-protection', targetSceneId: 'step-up-substation', targetViewMode: 'process-detail', processDetailId: 'process-detail.step-up-substation.busbar-protection', unityActionType: 'enterProcessDetail' },
+  { actionId: 'action.step-up-substation.line-protection', targetSceneId: 'step-up-substation', targetViewMode: 'process-detail', processDetailId: 'process-detail.step-up-substation.line-protection', unityActionType: 'enterProcessDetail' },
+  { actionId: 'action.step-down-substation.transformer-protection', targetSceneId: 'step-down-substation', targetViewMode: 'process-detail', processDetailId: 'process-detail.step-down-substation.transformer-protection', unityActionType: 'enterProcessDetail' },
+  { actionId: 'action.step-down-substation.busbar-protection', targetSceneId: 'step-down-substation', targetViewMode: 'process-detail', processDetailId: 'process-detail.step-down-substation.busbar-protection', unityActionType: 'enterProcessDetail' },
+  { actionId: 'action.step-down-substation.line-protection', targetSceneId: 'step-down-substation', targetViewMode: 'process-detail', processDetailId: 'process-detail.step-down-substation.line-protection', unityActionType: 'enterProcessDetail' },
+  { actionId: 'action.converter-station.transformer-protection', targetSceneId: 'converter-station', targetViewMode: 'process-detail', processDetailId: 'process-detail.converter-station.transformer-protection', unityActionType: 'enterProcessDetail' },
+  { actionId: 'action.converter-station.busbar-protection', targetSceneId: 'converter-station', targetViewMode: 'process-detail', processDetailId: 'process-detail.converter-station.busbar-protection', unityActionType: 'enterProcessDetail' },
+  { actionId: 'action.converter-station.line-protection', targetSceneId: 'converter-station', targetViewMode: 'process-detail', processDetailId: 'process-detail.converter-station.line-protection', unityActionType: 'enterProcessDetail' },
+  { actionId: 'action.switching-station.busbar-protection', targetSceneId: 'switching-station', targetViewMode: 'process-detail', processDetailId: 'process-detail.switching-station.busbar-protection', unityActionType: 'enterProcessDetail' },
+  { actionId: 'action.switching-station.line-protection', targetSceneId: 'switching-station', targetViewMode: 'process-detail', processDetailId: 'process-detail.switching-station.line-protection', unityActionType: 'enterProcessDetail' },
 ])
 const navigationOnlySceneIds = Object.freeze([
-  // 光伏已经交付逆变器关键环节，不再属于“仅总览导航”场景。
-  'wind-power', 'step-up-substation', 'step-down-substation', 'converter-station', 'switching-station',
+  // 风电当前只交付总览导航；开关站已交付母线保护和线路保护。
+  'wind-power',
 ])
 const deviceIdentifierSuffixes = new Set(['id', 'ids'])
 const deviceMappingSuffixes = new Set(['mapping', 'mappings'])
@@ -356,7 +367,7 @@ export async function validateReleaseArtifact(rootDirectory) {
     const requiredActionIds = new Set(requiredPublishedActionContracts.map((contract) => contract.actionId))
     if (publishedActions.length !== requiredPublishedActionContracts.length || actionById.size !== requiredPublishedActionContracts.length ||
         [...actionById.keys()].some((actionId) => !requiredActionIds.has(actionId)) || hasInvalidPublishedAction) {
-      issues.push('结构清单必须完整发布当前十二项公开动作及其固定目标，禁止两份清单同时回退或伪造三维流程能力。')
+       issues.push('结构清单必须完整发布当前二十三项公开动作及其固定目标，禁止两份清单同时回退或伪造三维流程能力。')
     }
 
     /**
@@ -386,7 +397,7 @@ export async function validateReleaseArtifact(rootDirectory) {
     }
 
     /**
-     * 风电和两站当前只提供场景导航：必须指向本场景默认总览拓扑，且不得登记流程步骤或第三层目录。
+     * 风电当前只提供场景导航；开关站已提供两项保护关键环节。必须指向本场景默认总览拓扑，且不得登记流程步骤或第三层目录。
      * 该约束把“可从菜单进入场景”和“已实现三维工艺能力”明确分开。
      */
     const unityMappingBySceneId = new Map(
@@ -405,7 +416,7 @@ export async function validateReleaseArtifact(rootDirectory) {
     })
     const processDetails = Array.isArray(topologyManifest.processDetails) ? topologyManifest.processDetails : []
     if (hasInvalidNavigationScene || processDetails.some((detail) => navigationOnlySceneIds.includes(detail?.sceneId))) {
-      issues.push('风电、升压站和降压站只能发布无三维流程副作用的总览导航，流程步骤和第三层目录必须为空。')
+      issues.push('风电只能发布无三维流程副作用的总览导航；开关站已发布母线保护和线路保护，不能按导航-only场景拒绝其第三层目录。')
     }
     const gasTurbineDetail = processDetails.find((detail) => detail?.processDetailId === 'process-detail.gas-power.gas-turbine')
     const coalSteamTurbineDetail = processDetails.find((detail) => detail?.processDetailId === 'process-detail.coal-power.steam-turbine')
@@ -425,7 +436,7 @@ export async function validateReleaseArtifact(rootDirectory) {
     const coalMapping = Array.isArray(topologyManifest.unitySceneMappings)
       ? topologyManifest.unitySceneMappings.find((mapping) => mapping?.sceneId === 'coal-power')
       : undefined
-    if (processDetails.length !== 3 || !gasTurbineDetail ||
+    if (processDetails.length !== 14 || !gasTurbineDetail ||
         gasTurbineDetail.sceneId !== 'gas-power' || gasTurbineDetail.processId !== 'gas-power-generation' ||
         gasTurbineDetail.stepId !== 'gas-turbine' ||
         gasTurbineDetail.resourceId !== 'process-detail-resource.gas-power.gas-turbine' ||
@@ -444,7 +455,31 @@ export async function validateReleaseArtifact(rootDirectory) {
         solarInverterDetail.cameraPoseId !== 'camera-pose.solar-power.inverter' ||
         solarInverterDetail.stateNodeId !== 'node.solar-inverter' ||
         solarInverterDetail.topologyDataContextId !== 'process-detail.solar-power.inverter') {
-      issues.push('结构清单必须且只能发布燃气轮机、燃煤汽轮机与光伏逆变器三项独立第三层目录。')
+      issues.push('结构清单必须发布三项既有第三层目录、三个变电场景各三项保护关键环节及开关站两项保护关键环节，共十四项。')
+    }
+    const expectedSubstationDetails = [
+      ['step-up-substation', 'transformer-protection', 'node.step-up-transformer'],
+      ['step-up-substation', 'busbar-protection', 'unit.step-up-protection.control'],
+      ['step-up-substation', 'line-protection', 'node.step-up-breaker'],
+      ['step-down-substation', 'transformer-protection', 'node.step-down-transformer'],
+      ['step-down-substation', 'busbar-protection', 'unit.step-down-protection.control'],
+      ['step-down-substation', 'line-protection', 'node.step-down-breaker'],
+      ['converter-station', 'transformer-protection', 'node.converter-transformer'],
+      ['converter-station', 'busbar-protection', 'unit.converter-protection.control'],
+      ['converter-station', 'line-protection', 'node.converter-breaker'],
+      ['switching-station', 'busbar-protection', 'unit.switching-protection.control'],
+      ['switching-station', 'line-protection', 'node.switching-breaker'],
+    ]
+    const hasInvalidSubstationDetail = expectedSubstationDetails.some(([sceneId, stepId, stateNodeId]) => {
+      const detailId = `process-detail.${sceneId}.${stepId}`
+      const detail = processDetails.find((item) => item?.processDetailId === detailId)
+      return !detail || detail.sceneId !== sceneId || detail.processId !== `${sceneId}-operation` ||
+        detail.stepId !== stepId || detail.resourceId !== `process-detail-resource.${sceneId}.${stepId}` ||
+        detail.cameraPoseId !== `camera-pose.${sceneId}.${stepId}` || detail.stateNodeId !== stateNodeId ||
+        detail.topologyDataContextId !== detailId
+    })
+    if (hasInvalidSubstationDetail) {
+      issues.push('四个变电站类场景的十一项保护关键环节必须同时声明资源、相机位、状态节点和拓扑上下文。')
     }
     if (!gasTurbineAction || gasTurbineAction.targetViewMode !== 'process-detail' ||
         gasTurbineAction.processDetailId !== 'process-detail.gas-power.gas-turbine' ||

@@ -9,7 +9,7 @@ Material:
   m_PrefabAsset: {fileID: 0}
   m_Name: "\u7535\u7EBF"
   m_Shader: {fileID: 4800000, guid: aa5b1f13a654a50418b589a80fd5d26d, type: 3}
-  m_Parent: {fileID: 2100000, guid: c20304ec8d230fb46b29ed442044f395, type: 2}
+  m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords: []
   m_InvalidKeywords: []
@@ -32,11 +32,18 @@ Material:
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     m_Ints: []
-    m_Floats: []
+    m_Floats:
+    - _BaseOpacity: 1
+    - _Color2S: 5
+    - _ColorS: 10
+    - _DE2: -10
+    - _FlowSpeed: 1
+    - _UVRotation: 90
     m_Colors:
     - _BaseColor: {r: 0.6320754, g: 0.6320754, b: 0.6320754, a: 1}
     - _Color: {r: 0, g: 0.69145536, b: 1, a: 0}
     - _Color2: {r: 0, g: 0.6496544, b: 1, a: 0}
+    - _MaskUV: {r: 1, g: 1, b: 0, a: 0}
     - _MaskUV2: {r: 1, g: 2, b: 0, a: 0}
     - _Speed: {r: 0, g: -0.3, b: 0, a: 0}
     - _Speed2: {r: 0, g: -0.3, b: 0, a: 0}

@@ -5,6 +5,7 @@ import { WIND_TOPOLOGY_PREVIEW_PROFILE } from './wind-topology-preview-profile'
 
 /** 风电包装层只固定业务清单，公共画布实现由所有清单式第二层拓扑共享。 */
 defineProps<{ fullscreenTarget?: HTMLElement | null; suspended?: boolean }>()
+const emit = defineEmits<{ readyChange: [ready: boolean] }>()
 
 const preview = ref<InstanceType<typeof ManifestTopologyJsonPreview> | null>(null)
 
@@ -21,5 +22,6 @@ defineExpose({
     :profile="WIND_TOPOLOGY_PREVIEW_PROFILE"
     :fullscreen-target="fullscreenTarget"
     :suspended="suspended"
+    @ready-change="emit('readyChange', $event)"
   />
 </template>

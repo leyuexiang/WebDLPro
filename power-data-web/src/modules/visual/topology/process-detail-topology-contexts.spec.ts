@@ -13,9 +13,9 @@ describe('第三层关键环节拓扑数据上下文', () => {
       ['process-detail.gas-power.gas-turbine', ['process-detail/gas-power/gas-turbine/topology.json', 32, '30652c2a8a2b5bf0af76c70501baa94e2ece57edb57fd35d164486546103b9ba']],
       ['process-detail.coal-power.steam-turbine', ['process-detail/coal-power/steam-turbine/topology.json', 45, '5c7262f198f4b4443d863d07a8b39f5bd0d9d841cb03d820b5535c736c78a79c']],
       ['process-detail.solar-power.inverter', ['process-detail/solar-power/inverter/topology.json', 19, '6391b1212c07664721cbccfea4bb9d5f7ef06487655b08fbf09d4b09e9018686']],
-      ['process-detail.step-down-substation.transformer-protection', ['process-detail/protection/transformer-protection/topology.json', 37, 'a6b41ef5c00d0a18498d40f06e5a3c91ae90bfcbdf19403b6e4a67b06e824647']],
-      ['process-detail.step-down-substation.busbar-protection', ['process-detail/protection/busbar-protection/topology.json', 35, '1b9ad1dd05c718220c00414d1d030a8965e8738ef61b7c2cde1df5e4a59cdd93']],
-      ['process-detail.step-down-substation.line-protection', ['process-detail/protection/line-protection/topology.json', 34, 'e9fcb283169bfa8e269c28c65e22747e38e8b338d4a5e2b2dc1f754f466d12c6']],
+      ['process-detail.step-down-substation.transformer-protection', ['process-detail/protection/transformer-protection/topology.json', 37, 'cebf00fc7b375ff7bff26e29da3d722edc378f825d75813f384825b9a24f5431']],
+      ['process-detail.step-down-substation.busbar-protection', ['process-detail/protection/busbar-protection/topology.json', 35, '0b6ed18b48c7039cf3f0079642f1b9d2197c9a2890fd5a28d50839eca7161eb4']],
+      ['process-detail.step-down-substation.line-protection', ['process-detail/protection/line-protection/topology.json', 34, 'e635617e600c787442823d0887c79bc581bbb244a63a9dc1c51d732be6b2c08c']],
     ])
 
     for (const context of PROCESS_DETAIL_TOPOLOGY_DATA_CONTEXTS.filter((item) => expected.has(item.contextId))) {
@@ -32,18 +32,17 @@ describe('第三层关键环节拓扑数据上下文', () => {
     }
   })
 
-  it('三个场景共用三份源文件，但九个上下文和状态节点完全独立', () => {
+  it('四个站类场景共用三份源文件，但十一个上下文和图元绑定完全独立', () => {
     const protectionContexts = PROCESS_DETAIL_TOPOLOGY_DATA_CONTEXTS.filter((context) => context.renderer === 'manifest-json')
-    expect(protectionContexts).toHaveLength(9)
-    expect(new Set(protectionContexts.map((context) => context.contextId)).size).toBe(9)
+    expect(protectionContexts).toHaveLength(11)
+    expect(new Set(protectionContexts.map((context) => context.contextId)).size).toBe(11)
     expect(new Set(protectionContexts.map((context) => context.topologyPath)).size).toBe(3)
 
-    // 节点标识是中央状态缓存的主键；全局不重复即可从数据结构上阻断跨场景状态污染。
-    const nodeIds = protectionContexts.flatMap((context) => context.bindings.map((binding) => binding.nodeId))
-    expect(new Set(nodeIds).size).toBe(nodeIds.length)
+    // 同一站点的不同保护图允许复用同一正式业务节点；唯一性约束落在“上下文 + 图元”组合上。
+    const bindingKeys = protectionContexts.flatMap((context) => context.bindings.map((binding) => `${context.contextId}:${binding.penId}`))
+    expect(new Set(bindingKeys).size).toBe(bindingKeys.length)
     for (const context of protectionContexts) {
-      const sceneId = context.contextId.split('.')[1]
-      expect(context.bindings.every((binding) => binding.nodeId.includes(`.${sceneId}.`))).toBe(true)
+      expect(context.bindings.every((binding) => binding.nodeId && binding.sceneNodeId)).toBe(true)
     }
   })
 
@@ -68,4 +67,24 @@ describe('第三层关键环节拓扑数据上下文', () => {
     }))
     expect(getProcessDetailTopologyDataContext('process-detail.unknown')).toBeUndefined()
   })
+
+  it('保护图元按源图可见设备语义绑定到站类二维节点和三维节点', () => {
+    const context = getProcessDetailTopologyDataContext('process-detail.step-up-substation.transformer-protection')!
+    expect(context.bindings).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        penId: '13641187',
+        nodeId: 'system.step-up-measurement-control',
+        sceneNodeId: 'unit.step-up-measurement.control',
+      }),
+      expect.objectContaining({
+        penId: '2afc53b',
+        nodeId: 'asset.step-up-transformer',
+        sceneNodeId: 'node.step-up-transformer',
+      }),
+    ]))
+    for (const contextItem of PROCESS_DETAIL_TOPOLOGY_DATA_CONTEXTS.filter((item) => item.renderer === 'manifest-json')) {
+      expect(contextItem.bindings.every((binding) => binding.nodeId && binding.sceneNodeId)).toBe(true)
+    }
+  })
+
 })

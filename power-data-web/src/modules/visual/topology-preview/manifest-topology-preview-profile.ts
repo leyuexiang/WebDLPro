@@ -1,5 +1,6 @@
 import type { Meta2dData, Pen } from '@meta2d/core'
 import type { TopologyDataContext } from '@/modules/visual/topology/topology-runtime'
+import type { SubstationTopologyRuntimeBinding } from './substation-topology-runtime-bindings'
 
 /** 清单式第二层拓扑的完整文件描述；每个筛选组合只能命中一项。 */
 export interface ManifestTopologyPreviewVariant {
@@ -37,6 +38,8 @@ export interface ManifestTopologyPreviewProfile {
   readonly sceneLabel: string
   readonly defaultVariantId: string
   readonly filterGroups: readonly ManifestTopologyPreviewFilterGroup[]
+  /** 正式发布用的 penId → nodeId → sceneNodeId 清单；预览层不得自行推导绑定。 */
+  readonly runtimeBindings?: readonly SubstationTopologyRuntimeBinding[]
   createDefaultSelection(): ReadonlySet<string>
   toggleFilter(current: ReadonlySet<string>, filterId: string, checked: boolean): ReadonlySet<string>
   resolveVariant(selected: ReadonlySet<string>): ManifestTopologyPreviewVariant | undefined

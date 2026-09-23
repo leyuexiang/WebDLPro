@@ -10,7 +10,7 @@ using UnityEngine;
 using WebDLPro.Unity.SceneRuntime;
 
 /// <summary>
-/// 构建独立 Overview 与九个业务场景的 WebGL 资产包，并生成可由运行时校验的场景目录与内容摘要。
+/// 构建独立 Overview 与完整业务场景目录的 WebGL 资产包，并生成可由运行时校验的场景目录与内容摘要。
 /// Overview 使用独立场景类型字段，不进入九项业务目录闭集。
 /// </summary>
 public static class PowerPlantSceneBundleBuild
@@ -127,7 +127,7 @@ public static class PowerPlantSceneBundleBuild
 
         if (inputs.Count != BusinessSceneCatalog.GetRequiredSceneIds().Count + 1)
         {
-            throw new BuildFailedException("场景资源构建必须且只能接收独立总览和九个业务场景。");
+            throw new BuildFailedException("场景资源构建必须且只能接收独立总览和完整业务场景目录。");
         }
         return inputs;
     }
@@ -167,7 +167,7 @@ public static class PowerPlantSceneBundleBuild
     }
 
     /// <summary>
-    /// 显式声明共享包、独立总览包和九个业务场景包。非共享依赖由 Unity 随所属场景包收集；
+    /// 显式声明共享包、独立总览包和正式业务场景包。非共享依赖由 Unity 随所属场景包收集；
     /// 共享依赖被单独声明后，Unity 清单会把它们列为各场景包的依赖，避免同一资源复制多份。
     /// </summary>
     private static List<AssetBundleBuild> CreateBundleBuilds(IReadOnlyList<SceneBuildInput> inputs, List<string> sharedDependencyPaths)
@@ -364,14 +364,14 @@ public static class PowerPlantSceneBundleBuild
     }
 
     /// <summary>
-    /// 构建结束后检查本任务可证明的发布结构：九个场景均有独立包，目录中的哈希、字节数与文件齐全，
+    /// 构建结束后检查本任务可证明的发布结构：所有正式场景均有独立包，目录中的哈希、字节数与文件齐全，
     /// 每个场景包依赖项均能在目录中解析。浏览器实际加载由任务-020联调包回归覆盖，目标硬件缓存与性能预算由任务-054验收。
     /// </summary>
     private static void ValidateBuildOutput(SceneBundleCatalogDocument catalog, string bundleOutputDirectory)
     {
         if (catalog.scenes == null || catalog.scenes.Length != BusinessSceneCatalog.GetRequiredSceneIds().Count + 1)
         {
-            throw new BuildFailedException("场景资源目录未包含独立 Overview 和完整九场景。");
+            throw new BuildFailedException("场景资源目录未包含独立 Overview 和完整业务场景目录。");
         }
         HashSet<string> bundleNames = new HashSet<string>(catalog.bundles.Select(bundle => bundle.bundleName), StringComparer.Ordinal);
         for (int index = 0; index < catalog.scenes.Length; index++)

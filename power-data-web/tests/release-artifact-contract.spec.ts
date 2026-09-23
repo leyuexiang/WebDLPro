@@ -12,7 +12,7 @@ import {
 const webProjectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 /**
- * 生成发布门禁需要的最小联合结构清单。夹具保留当前十二项公开动作和八个动作目标场景，
+ * 生成发布门禁需要的最小联合结构清单。夹具保留当前二十三项公开动作和八个动作目标场景，
  * 使正向用例本身不能再把“只有燃气、燃煤动作”的旧清单当成合格发布基线。
  */
 function createTopologyManifest() {
@@ -45,7 +45,11 @@ function createTopologyManifest() {
       topologyIds: [`topology.${sceneId}.overview`],
       supportedActionIds: sceneId === 'solar-power'
         ? ['action.solar-power.overview', 'action.solar-power.inverter']
-        : [`action.${sceneId}.overview`],
+        : ['step-up-substation', 'step-down-substation', 'converter-station'].includes(sceneId)
+          ? [`action.${sceneId}.overview`, ...['transformer-protection', 'busbar-protection', 'line-protection'].map((stepId) => `action.${sceneId}.${stepId}`)]
+          : sceneId === 'switching-station'
+            ? [`action.${sceneId}.overview`, 'action.switching-station.busbar-protection', 'action.switching-station.line-protection']
+            : [`action.${sceneId}.overview`],
     }))],
     topologies: [{
       topologyId: 'topology.gas-power.overview',
@@ -126,10 +130,30 @@ function createTopologyManifest() {
       targetViewMode: 'business',
       targetTopologyId: `topology.${sceneId}.overview`,
       allowedParameters: [],
-      unityAction: { type: 'none' },
+      unityAction: { type: ['step-up-substation', 'step-down-substation', 'converter-station', 'switching-station'].includes(sceneId) ? 'resetScene' : 'none' },
       failurePolicy: 'keep-current-context',
       configVersion: manifestVersion,
-    })), {
+    })), ...['step-up-substation', 'step-down-substation', 'converter-station'].flatMap((sceneId) => ['transformer-protection', 'busbar-protection', 'line-protection'].map((stepId) => ({
+      actionId: `action.${sceneId}.${stepId}`,
+      title: `进入${sceneId}${stepId}关键环节`,
+      targetSceneId: sceneId,
+      targetViewMode: 'process-detail',
+      processDetailId: `process-detail.${sceneId}.${stepId}`,
+      allowedParameters: [],
+      unityAction: { type: 'enterProcessDetail', processDetailId: `process-detail.${sceneId}.${stepId}` },
+      failurePolicy: 'keep-current-context',
+      configVersion: manifestVersion,
+    }))), ...['switching-station'].flatMap((sceneId) => ['busbar-protection', 'line-protection'].map((stepId) => ({
+      actionId: `action.${sceneId}.${stepId}`,
+      title: `进入${sceneId}${stepId}关键环节`,
+      targetSceneId: sceneId,
+      targetViewMode: 'process-detail',
+      processDetailId: `process-detail.${sceneId}.${stepId}`,
+      allowedParameters: [],
+      unityAction: { type: 'enterProcessDetail', processDetailId: `process-detail.${sceneId}.${stepId}` },
+      failurePolicy: 'keep-current-context',
+      configVersion: manifestVersion,
+    }))), {
       actionId: 'action.solar-power.inverter',
       title: '进入光伏逆变器关键环节',
       targetSceneId: 'solar-power',
@@ -167,7 +191,35 @@ function createTopologyManifest() {
       cameraPoseId: 'camera-pose.solar-power.inverter',
       stateNodeId: 'node.solar-inverter',
       topologyDataContextId: 'process-detail.solar-power.inverter',
-    }],
+    }, ...['step-up-substation', 'step-down-substation', 'converter-station'].flatMap((sceneId) => {
+      const nodePrefix = sceneId === 'converter-station' ? 'converter' : sceneId === 'step-up-substation' ? 'step-up' : 'step-down'
+      return [
+        ['transformer-protection', `node.${nodePrefix}-transformer`],
+        ['busbar-protection', `unit.${nodePrefix}-protection.control`],
+        ['line-protection', `node.${nodePrefix}-breaker`],
+      ].map(([stepId, stateNodeId]) => ({
+        sceneId,
+        processId: `${sceneId}-operation`,
+        stepId,
+        processDetailId: `process-detail.${sceneId}.${stepId}`,
+        resourceId: `process-detail-resource.${sceneId}.${stepId}`,
+        cameraPoseId: `camera-pose.${sceneId}.${stepId}`,
+        stateNodeId,
+        topologyDataContextId: `process-detail.${sceneId}.${stepId}`,
+      }))
+    }), ...['switching-station'].flatMap((sceneId) => [
+      ['busbar-protection', 'unit.switching-protection.control'],
+      ['line-protection', 'node.switching-breaker'],
+    ].map(([stepId, stateNodeId]) => ({
+      sceneId,
+      processId: `${sceneId}-operation`,
+      stepId,
+      processDetailId: `process-detail.${sceneId}.${stepId}`,
+      resourceId: `process-detail-resource.${sceneId}.${stepId}`,
+      cameraPoseId: `camera-pose.${sceneId}.${stepId}`,
+      stateNodeId,
+      topologyDataContextId: `process-detail.${sceneId}.${stepId}`,
+    })))],
     unitySceneMappings: [{
       sceneId: 'gas-power',
       mappingVersion: 'mapping.gas-power.1',
@@ -215,7 +267,7 @@ function createReleaseManifest() {
       unityLargeResourcePaths: ['unity/Build/', 'unity/SceneBundles/', 'unity/ProcessDetailBundles/'],
     },
     excludedCapabilities: ['route-mapping', 'other-eight-scene-content'],
-    // 合作方动作菜单读取该摘要；从当前十二项结构动作生成相同公开投影，避免测试夹具手工维护时再次漏项。
+    // 合作方动作菜单读取该摘要；从当前十四项第三层结构生成相同公开投影，避免测试夹具手工维护时再次漏项。
     workflowActions: createTopologyManifest().actions.map((action) => ({
       actionId: action.actionId,
       title: action.title,
@@ -409,7 +461,7 @@ describe('发布产物输出标准', () => {
       await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
 
       expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
-        expect.stringContaining('完整发布当前十二项公开动作'),
+        expect.stringContaining('完整发布当前二十三项公开动作'),
       ]))
     } finally {
       rmSync(root, { recursive: true, force: true })
@@ -453,7 +505,7 @@ describe('发布产物输出标准', () => {
       await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
 
       expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
-        expect.stringContaining('完整发布当前十二项公开动作'),
+        expect.stringContaining('完整发布当前二十三项公开动作'),
       ]))
     } finally {
       rmSync(root, { recursive: true, force: true })

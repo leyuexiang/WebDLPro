@@ -62,10 +62,21 @@ describe('燃气与燃煤拓扑无下钻发布契约', () => {
       'action.converter-station.overview',
       'action.switching-station.overview',
       'action.solar-power.inverter',
+      'action.step-up-substation.transformer-protection',
+      'action.step-up-substation.busbar-protection',
+      'action.step-up-substation.line-protection',
+      'action.step-down-substation.transformer-protection',
+      'action.step-down-substation.busbar-protection',
+      'action.step-down-substation.line-protection',
+      'action.converter-station.transformer-protection',
+      'action.converter-station.busbar-protection',
+      'action.converter-station.line-protection',
+      'action.switching-station.busbar-protection',
+      'action.switching-station.line-protection',
     ])
 
-    // 风电和两站只增加无副作用导航动作，Unity 未声明的 overview（总览）流程步骤仍必须为空。
-    for (const sceneId of ['wind-power', 'step-up-substation', 'step-down-substation', 'converter-station', 'switching-station']) {
+    // 风电只增加无副作用导航动作；四个变电站类场景的第三层能力通过独立动作和目录发布。
+    for (const sceneId of ['wind-power']) {
       expect(manifest.scenes.find((scene) => scene.sceneId === sceneId)?.supportedActionIds).toEqual([`action.${sceneId}.overview`])
       expect(manifest.unitySceneMappings.find((mapping) => mapping.sceneId === sceneId)).not.toHaveProperty('processSteps')
     }
@@ -75,6 +86,14 @@ describe('燃气与燃煤拓扑无下钻发布契约', () => {
       'action.solar-power.inverter',
     ])
     expect(manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'solar-power')).not.toHaveProperty('processSteps')
+    expect(manifest.scenes.find((scene) => scene.sceneId === 'switching-station')?.supportedActionIds).toEqual([
+      'action.switching-station.overview',
+      'action.switching-station.busbar-protection',
+      'action.switching-station.line-protection',
+    ])
+    expect(manifest.processDetails.filter((detail) => detail.sceneId === 'switching-station')).toHaveLength(2)
+    expect(manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'switching-station')).not.toHaveProperty('processSteps')
+
 
     // 历史键只能返回缺失，不能为了兼容旧页面保留隐藏说明内容。
     expect(result.registry.getDrilldownContent('gas.mark-vie', manifest.manifestVersion).status).toBe('missing')

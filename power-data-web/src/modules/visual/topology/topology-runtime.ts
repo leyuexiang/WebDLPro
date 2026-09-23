@@ -21,7 +21,12 @@ export interface TopologyDataContext {
   readonly topologyPath: string
   readonly sourceSha256: string
   readonly expectedPenCount: number
-  readonly bindings: readonly { readonly penId: string; readonly nodeId: string }[]
+  /**
+   * 第三层图元到正式业务节点及三维节点的绑定；未提供三维节点的图元只能二维显示。
+   * `nodeId` 是中央选择状态和第二层拓扑共用的业务主键，`sceneNodeId` 是已审核的 Unity 节点，
+   * 两者均由源清单显式登记，运行时不按标题、坐标或数组顺序推断。
+   */
+  readonly bindings: readonly { readonly penId: string; readonly nodeId: string; readonly sceneNodeId?: string }[]
 }
 
 /** 单个拓扑的有限视图状态；不保存 Canvas、图片、事件回调或原始设备消息。 */

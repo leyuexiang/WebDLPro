@@ -84,6 +84,26 @@ describe('燃气总览发布契约', () => {
     expect(partnerServerSource).toContain('const packageType = "partner-integration"')
   })
 
+  it('Unity 正式桥接和模板兜底桥只声明当前网页图形协议能力', () => {
+    const templateSource = readFileSync('../Assets/WebGLTemplates/EmbeddedViewport/index.html', 'utf8')
+    const jslibSource = readFileSync('../Assets/Plugins/WebGL/Power3dUnityBridge.jslib', 'utf8')
+    const extractCommandList = (source: string, declaration: string, nextDeclaration: string) => {
+      const start = source.indexOf(declaration)
+      const end = source.indexOf(nextDeclaration, start)
+      expect(start).toBeGreaterThan(-1)
+      expect(end).toBeGreaterThan(start)
+      return source.slice(start, end)
+    }
+
+    /**
+     * enterProcessStep（旧流程步骤命令）已经从 WEBGL_COMMAND_TYPES（网页图形命令白名单）移除。
+     * 两个 Unity 入口必须同时拒绝该旧标识；否则 ready 载荷会在运行时连接器的字段校验阶段被整体拒绝，
+     * 页面只能显示握手超时，无法定位到真实能力不一致原因。
+     */
+    expect(extractCommandList(templateSource, 'const commandCapabilities = [', 'const eventCapabilities = [')).not.toContain("'enterProcessStep'")
+    expect(extractCommandList(jslibSource, 'var commandCapabilities = [', 'var eventCapabilities = [')).not.toContain("'enterProcessStep'")
+  })
+
   it('总览23个源节点全部按 nodeId 上报且结构清单不预置平台设备事实', async () => {
     const manifest = await createGasOnlyManifest('node-protocol-contract-test')
     const overview = manifest.topologies.find((candidate) => candidate.topologyId === 'topology.gas-power.overview')

@@ -3,9 +3,11 @@ import { computed, ref } from 'vue'
 import ManifestTopologyJsonPreview from './ManifestTopologyJsonPreview.vue'
 import { CONVERTER_STATION_TOPOLOGY_PREVIEW_PROFILE } from './converter-station-topology-preview-profile'
 import type { TopologyDataContext } from '@/modules/visual/topology/topology-runtime'
+import type { ProcessNodeId, RouteId } from '@/config/process/identifiers'
 
 /** 正式面板提供全屏祖先和暂停信号；独立路由省略两项即可复用同一画布。 */
-defineProps<{ fullscreenTarget?: HTMLElement | null; suspended?: boolean }>()
+const props = defineProps<{ fullscreenTarget?: HTMLElement | null; suspended?: boolean; selectedNodeIds?: readonly ProcessNodeId[]; selectedRouteIds?: readonly RouteId[] }>()
+const emit = defineEmits<{ selectNode: [nodeId: ProcessNodeId]; clearSelection: []; readyChange: [ready: boolean] }>()
 
 const preview = ref<InstanceType<typeof ManifestTopologyJsonPreview> | null>(null)
 
@@ -15,6 +17,7 @@ defineExpose({
   resetView: () => preview.value?.resetView(),
   // 只转发已经登记的第三层上下文，未知编号由上层清单查询阶段拒绝。
   setTopologyDataContext: (context: TopologyDataContext | undefined) => preview.value?.setTopologyDataContext(context),
+  setSelection: (nodeIds: readonly ProcessNodeId[], routeIds: readonly RouteId[]) => preview.value?.setSelection(nodeIds, routeIds),
 })
 </script>
 
@@ -24,5 +27,10 @@ defineExpose({
     :profile="CONVERTER_STATION_TOPOLOGY_PREVIEW_PROFILE"
     :fullscreen-target="fullscreenTarget"
     :suspended="suspended"
+    :selected-node-ids="props.selectedNodeIds"
+    :selected-route-ids="props.selectedRouteIds"
+    @select-node="emit('selectNode', $event)"
+    @clear-selection="emit('clearSelection')"
+    @ready-change="emit('readyChange', $event)"
   />
 </template>

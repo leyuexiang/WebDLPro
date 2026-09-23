@@ -7,7 +7,7 @@ import { LOCAL_PROCESS_CONFIG_VERSION } from '../src/config/process/config-versi
 import { createConfiguredPowerScenesManifest } from '../scripts/build-gas-power-smoke-release.mjs'
 import { coalPowerEdgeColors } from '../scripts/coal-power-topology.mjs'
 
-/** 三个场景只允许使用资料和 Unity 属性面板已经核验的十八对映射，测试不得按名称自动扩充。 */
+/** 七个已交付场景只允许使用资料和 Unity 属性面板已经核验的三十九对映射，测试不得按名称自动扩充。 */
 const verifiedMappings = Object.freeze([
   Object.freeze({ sceneId: 'gas-power', nodeId: 'system.gas-turbine-control', sceneNodeId: 'unit.gas-turbine.control' }),
   Object.freeze({ sceneId: 'gas-power', nodeId: 'system.gas-hrsg-control', sceneNodeId: 'unit.gas-hrsg.control' }),
@@ -53,7 +53,7 @@ function readManifestBaseTitle(title: string): string {
 }
 
 describe('燃气、燃煤与光伏联合场景清单', () => {
-  it('在同一原子清单中装配三场景总览和三项已核验第三层', async () => {
+  it('在同一原子清单中装配三场景总览和十四项已核验第三层', async () => {
     const manifest = await createConfiguredPowerScenesManifest('dual-selection-contract', 'coal-power')
 
     expect(validateSceneTopologyManifest(manifest)).toEqual([])
@@ -63,7 +63,7 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
     expect(manifest.actions.filter((action) => action.targetSceneId === 'gas-power')).toHaveLength(2)
     expect(manifest.actions.filter((action) => action.targetSceneId === 'coal-power')).toHaveLength(2)
     expect(manifest.actions.filter((action) => action.targetSceneId === 'solar-power')).toHaveLength(2)
-    expect(manifest.actions).toHaveLength(12)
+    expect(manifest.actions).toHaveLength(23)
     expect(manifest.actions.find((action) => action.actionId === 'action.scene.overview')).toEqual({
       actionId: 'action.scene.overview',
       title: '返回全局总览',
@@ -76,7 +76,7 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
     })
     // 新版产品范围取消流程子图和下钻；联合清单必须发布空的下钻集合，避免旧入口被协议直接调用。
     expect(manifest.drilldowns).toEqual([])
-    expect(manifest.processDetails).toEqual([{
+    expect(manifest.processDetails.slice(0, 3)).toEqual([{
       sceneId: 'gas-power',
       processId: 'gas-power-generation',
       stepId: 'gas-turbine',
@@ -104,6 +104,10 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
       stateNodeId: 'node.solar-inverter',
       topologyDataContextId: 'process-detail.solar-power.inverter',
     }])
+    expect(manifest.processDetails.filter((detail) => detail.sceneId === 'step-up-substation')).toHaveLength(3)
+    expect(manifest.processDetails.filter((detail) => detail.sceneId === 'step-down-substation')).toHaveLength(3)
+    expect(manifest.processDetails.filter((detail) => detail.sceneId === 'converter-station')).toHaveLength(3)
+    expect(manifest.processDetails.filter((detail) => detail.sceneId === 'switching-station')).toHaveLength(2)
 
     const gasOverview = manifest.topologies.find((topology) => topology.topologyId === 'topology.gas-power.overview')
     const coalOverview = manifest.topologies.find((topology) => topology.topologyId === 'topology.coal-power.overview')
@@ -218,10 +222,10 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
         'action.solar-power.inverter',
       ])
       /**
-       * 合作方菜单只消费动作清单，因此六个新增场景各登记一个无三维副作用的总览导航动作。
+       * 合作方菜单只消费动作清单；开关站已登记总览、母线保护和线路保护，风电仅登记总览导航，另外三个变电场景各登记三项保护关键环节。
        * processSteps（流程步骤）字段必须不存在，防止导航兼容层被误解为控制器已实现的工艺能力。
        */
-      for (const sceneId of ['wind-power', 'step-up-substation', 'step-down-substation', 'converter-station', 'switching-station']) {
+      for (const sceneId of ['wind-power']) {
         const actionId = `action.${sceneId}.overview`
         expect(manifest.scenes.find((scene) => scene.sceneId === sceneId)?.supportedActionIds).toEqual([actionId])
         expect(manifest.unitySceneMappings.find((mapping) => mapping.sceneId === sceneId)).not.toHaveProperty('processSteps')
@@ -230,9 +234,22 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
           targetViewMode: 'business',
           targetTopologyId: `topology.${sceneId}.overview`,
           allowedParameters: [],
-          unityAction: { type: 'none' },
+          unityAction: ['step-up-substation', 'step-down-substation', 'converter-station', 'switching-station'].includes(sceneId)
+            ? { type: 'resetScene' }
+            : { type: 'none' },
           failurePolicy: 'keep-current-context',
         }))
+      }
+      expect(manifest.scenes.find((scene) => scene.sceneId === 'switching-station')?.supportedActionIds).toEqual([
+        'action.switching-station.overview',
+        'action.switching-station.busbar-protection',
+        'action.switching-station.line-protection',
+      ])
+      expect(manifest.actions.filter((action) => action.targetSceneId === 'switching-station' && action.targetViewMode === 'process-detail')).toHaveLength(2)
+      expect(manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'switching-station')).not.toHaveProperty('processSteps')
+      for (const sceneId of ['step-up-substation', 'step-down-substation', 'converter-station']) {
+        expect(manifest.scenes.find((scene) => scene.sceneId === sceneId)?.supportedActionIds).toHaveLength(4)
+        expect(manifest.actions.filter((action) => action.targetSceneId === sceneId && action.targetViewMode === 'process-detail')).toHaveLength(3)
       }
     }
   })

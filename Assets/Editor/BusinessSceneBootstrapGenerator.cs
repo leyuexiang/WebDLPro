@@ -8,8 +8,8 @@ using UnityEngine.SceneManagement;
 using WebDLPro.Unity.SceneRuntime;
 
 /// <summary>
-/// 统一生成十一个业务空场景、启动场景、目录资产和构建场景顺序。
-/// 映射表来自当前任务中确认的固定十一场景，不从模型名称、旧 SampleScene 或文件扫描推断；
+/// 统一生成十三个业务空场景、启动场景、目录资产和构建场景顺序。
+/// 映射表来自当前任务中确认的固定十三场景，不从模型名称、旧 SampleScene 或文件扫描推断；
 /// 生成器只允许首次创建，发现部分既有资产会立即失败，避免覆盖用户后续编辑的业务场景。
 /// </summary>
 public static class BusinessSceneBootstrapGenerator
@@ -22,7 +22,7 @@ public static class BusinessSceneBootstrapGenerator
     private const string LegacyGasScenePath = "Assets/Scenes/SampleScene.unity";
 
     /// <summary>
-    /// 九项数组既是唯一映射来源，也是构建登记顺序。场景键使用对外稳定 sceneId，
+    /// 十三项数组既是唯一映射来源，也是构建登记顺序。场景键使用对外稳定 sceneId，
     /// 而文件名使用可读的 PascalCase 业务名，二者的差异必须经由目录资产显式关联。
     /// </summary>
     private static readonly SceneDefinition[] BusinessScenes =
@@ -70,6 +70,7 @@ public static class BusinessSceneBootstrapGenerator
             BusinessSceneCapability.ClearSelection |
             BusinessSceneCapability.UpdateNodeVisualState |
             BusinessSceneCapability.ClearNodeVisualState |
+            BusinessSceneCapability.MoveCameraToPose |
             BusinessSceneCapability.ResetScene |
             BusinessSceneCapability.Release,
             false),
@@ -79,14 +80,16 @@ public static class BusinessSceneBootstrapGenerator
         new SceneDefinition("microgrid", "Assets/Scenes/Business/Microgrid.unity", BusinessSceneCapability.Release, true),
         new SceneDefinition("dispatch", "Assets/Scenes/Business/Dispatch.unity", BusinessSceneCapability.Release, true),
         new SceneDefinition("step-up-substation", "Assets/Scenes/Business/StepUpSubstation.unity", SubstationOverviewController.SupportedCapabilities, false),
-        new SceneDefinition("step-down-substation", "Assets/Scenes/Business/StepDownSubstation.unity", SubstationOverviewController.SupportedCapabilities, false)
+        new SceneDefinition("step-down-substation", "Assets/Scenes/Business/StepDownSubstation.unity", SubstationOverviewController.SupportedCapabilities, false),
+        new SceneDefinition("converter-station", "Assets/Scenes/Business/ConverterStation.unity", SubstationOverviewController.SupportedCapabilities, false),
+        new SceneDefinition("switching-station", "Assets/Scenes/Business/SwitchingStation.unity", SubstationOverviewController.SupportedCapabilities, false)
     };
 
     /// <summary>
     /// 供菜单和无界面命令行共用的唯一生成入口。
     /// 首次运行会创建全部资产；后续运行只校验既有资产并重建构建设置，绝不重写场景文件。
     /// </summary>
-    [MenuItem("Tools/WebDLPro/场景配置/创建十一个业务空场景与映射")]
+    [MenuItem("Tools/WebDLPro/场景配置/创建十三个业务空场景与映射")]
     public static void CreateOrValidateBusinessSceneBootstrap()
     {
         bool allAssetsExist = AreAllGeneratedAssetsPresent();
@@ -94,7 +97,7 @@ public static class BusinessSceneBootstrapGenerator
         if (anyAssetsExist && !allAssetsExist)
         {
             throw new InvalidOperationException(
-                "检测到十一场景生成资产不完整。为防止覆盖已有编辑内容，生成器不会继续写入；请先恢复缺失资产后再执行。");
+                "检测到十三场景生成资产不完整。为防止覆盖已有编辑内容，生成器不会继续写入；请先恢复缺失资产后再执行。");
         }
 
         if (!allAssetsExist)
@@ -119,12 +122,12 @@ public static class BusinessSceneBootstrapGenerator
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
         ValidateGeneratedAssets();
-        Debug.Log("十一个业务空场景、启动场景、目录映射和构建设置已就绪。");
+        Debug.Log("十三个业务空场景、启动场景、目录映射和构建设置已就绪。");
     }
 
     /// <summary>
     /// 正式目录资产保存 sceneId、unitySceneKey 与场景路径的一对一关系。
-    /// 空场景已具备可加载文件，因此登记为 Available；八个占位场景只声明幂等 Release，
+    /// 空场景已具备可加载文件，因此登记为 Available；五个占位场景只声明幂等 Release，
     /// 燃气场景能力严格复用已核对的适配器声明，其他业务能力只能由后续控制器任务补充。
     /// </summary>
     private static BusinessSceneCatalog CreateCatalogAsset()
@@ -156,7 +159,7 @@ public static class BusinessSceneBootstrapGenerator
         Scene bootstrapScene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
         GameObject runtimeRoot = new GameObject("BootstrapRuntime");
         runtimeRoot.AddComponent<LoadingOverlayController>();
-        // 资产包加载器只在发布 WebGL 中下载十一个业务场景；编辑器仍按正式目录直接加载，
+        // 资产包加载器只在发布 WebGL 中下载十三个业务场景；编辑器仍按正式目录直接加载，
         // 因此启动场景保持轻量且不会把业务重资源放入首屏玩家数据。
         runtimeRoot.AddComponent<SceneBundleRuntimeLoader>();
         MultiSceneCoordinator coordinator = runtimeRoot.AddComponent<MultiSceneCoordinator>();
@@ -209,7 +212,7 @@ public static class BusinessSceneBootstrapGenerator
         ConfigureBootstrapOverviewCatalog(overviewCatalog);
     }
 
-    /// <summary>用 Unity 内置立方体搭建十一个总览建筑占位，不依赖外部模型和材质资源。</summary>
+    /// <summary>用 Unity 内置立方体搭建十三个总览建筑占位，不依赖外部模型和材质资源。</summary>
     private static void CreateOverviewPlaceholderScene()
     {
         Scene overviewScene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
@@ -341,7 +344,7 @@ public static class BusinessSceneBootstrapGenerator
     }
 
     /// <summary>
-    /// 构建索引零固定为 Bootstrap，其后十一项与目录数组同序，确保运行时首次场景是轻量启动壳。
+    /// 构建索引零固定为 Bootstrap，其后十三项与目录数组同序，确保运行时首次场景是轻量启动壳。
     /// 旧 SampleScene 资产不会被删除；它不再进入正式构建，避免未映射的旧燃气内容误作为业务场景发布。
     /// </summary>
     private static void ConfigureBuildScenes()
@@ -380,7 +383,7 @@ public static class BusinessSceneBootstrapGenerator
         return false;
     }
 
-    /// <summary>只有启动场景、目录资产和十一个业务场景全部存在时，才允许走无覆盖校验分支。</summary>
+    /// <summary>只有启动场景、目录资产和十三个业务场景全部存在时，才允许走无覆盖校验分支。</summary>
     private static bool AreAllGeneratedAssetsPresent()
     {
         if (!File.Exists(ToAbsolutePath(BootstrapScenePath)) || !File.Exists(ToAbsolutePath(CatalogAssetPath)))
@@ -407,12 +410,12 @@ public static class BusinessSceneBootstrapGenerator
         BusinessSceneCatalog catalog = AssetDatabase.LoadAssetAtPath<BusinessSceneCatalog>(CatalogAssetPath);
         if (catalog == null)
         {
-            throw new InvalidOperationException("未能加载正式十一场景目录资产。");
+            throw new InvalidOperationException("未能加载正式十三场景目录资产。");
         }
         IReadOnlyList<BusinessSceneCatalogValidationIssue> issues = catalog.ValidateForRuntime();
         if (issues.Count > 0)
         {
-            throw new InvalidOperationException($"正式十一场景目录校验失败：{issues[0].Code}，{issues[0].Message}");
+            throw new InvalidOperationException($"正式十三场景目录校验失败：{issues[0].Code}，{issues[0].Message}");
         }
         if (AssetDatabase.LoadAssetAtPath<SceneAsset>(BootstrapScenePath) == null)
         {

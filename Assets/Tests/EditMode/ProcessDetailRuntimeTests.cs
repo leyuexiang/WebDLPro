@@ -287,7 +287,7 @@ namespace WebDLPro.Unity.Tests
             Assert.That(catalog, Is.Not.Null);
             Assert.That(prefab, Is.Not.Null);
             Assert.That(catalog.ValidateForRuntime(), Is.Empty);
-            Assert.That(catalog.Entries.Count, Is.EqualTo(3), "当前应登记燃气轮机、燃煤汽轮机和光伏逆变器三个正式项。");
+            Assert.That(catalog.Entries.Count, Is.EqualTo(14), "当前应登记燃气轮机、燃煤汽轮机、光伏逆变器、三个站类的九项保护关键环节以及开关站的母线保护和线路保护。");
 
             Assert.That(
                 catalog.TryGet("gas-power", "process-detail.gas-power.gas-turbine", out ProcessDetailCatalogEntry entry),
@@ -375,6 +375,113 @@ namespace WebDLPro.Unity.Tests
             Assert.That(serializedShaft.FindProperty("_playOnEnable")?.boolValue, Is.True);
         }
 
+        [Test]
+        public void 三个站类的保护关键环节使用显式模型绑定和四态包装()
+        {
+            ProcessDetailCatalog catalog = AssetDatabase.LoadAssetAtPath<ProcessDetailCatalog>(CatalogPath);
+            Assert.That(catalog, Is.Not.Null);
+
+            string[] sceneIds = { "step-up-substation", "step-down-substation", "converter-station" };
+            string[] technologies = { "step-up", "step-down", "converter" };
+            string[] steps = { "transformer-protection", "busbar-protection", "line-protection" };
+            string[] sourcePaths =
+            {
+                "Assets/Art/变电站关键环节/变压保护.fbx",
+                "Assets/Art/变电站关键环节/母线保护.fbx",
+                "Assets/Art/变电站关键环节/线路保护.fbx"
+            };
+            int[] expectedRendererCounts = { 23, 18, 16 };
+
+            for (int sceneIndex = 0; sceneIndex < sceneIds.Length; sceneIndex++)
+            {
+                for (int stepIndex = 0; stepIndex < steps.Length; stepIndex++)
+                {
+                    string sceneId = sceneIds[sceneIndex];
+                    string stepId = steps[stepIndex];
+                    string detailId = $"process-detail.{sceneId}.{stepId}";
+                    Assert.That(catalog.TryGet(sceneId, detailId, out ProcessDetailCatalogEntry entry), Is.True, detailId);
+
+                    GameObject prefab = entry.EditorPrefab;
+                    Assert.That(prefab, Is.Not.Null, detailId);
+                    ProcessDetailDeviceBinding binding = prefab.GetComponent<ProcessDetailDeviceBinding>();
+                    ProcessDetailStateVisualAdapter visualAdapter = prefab.GetComponent<ProcessDetailStateVisualAdapter>();
+                    MonoBehaviour dynamicAdapter =
+                        FindBehaviour(prefab, "SubstationProtectionProcessDetailDynamicAdapter");
+                    Assert.That(binding, Is.Not.Null, detailId);
+                    Assert.That(visualAdapter, Is.Not.Null, detailId);
+                    Assert.That(dynamicAdapter, Is.Not.Null, detailId);
+                    Assert.That(binding.ValidateBinding(entry).Success, Is.True, detailId);
+                    Assert.That(binding.DisplayAnchor.localPosition.x, Is.EqualTo(10000f).Within(0.001f), detailId);
+                    Assert.That(Vector3.Distance(binding.DisplayAnchor.position, binding.CameraPose.position), Is.GreaterThan(0.01f), detailId);
+                    Assert.That(Vector3.Distance(binding.DisplayAnchor.position, binding.CameraPose.position), Is.LessThanOrEqualTo(500f), detailId);
+                    Assert.That(entry.StateNodeId, Is.EqualTo(stepIndex == 0
+                        ? $"node.{technologies[sceneIndex]}-transformer"
+                        : stepIndex == 1
+                            ? $"unit.{technologies[sceneIndex]}-protection.control"
+                            : $"node.{technologies[sceneIndex]}-breaker"));
+
+                    SerializedProperty renderers = new SerializedObject(visualAdapter).FindProperty("_renderers");
+                    Assert.That(renderers, Is.Not.Null);
+                    Assert.That(renderers.arraySize, Is.EqualTo(expectedRendererCounts[stepIndex]), detailId);
+                    for (int rendererIndex = 0; rendererIndex < renderers.arraySize; rendererIndex++)
+                    {
+                        Renderer renderer = renderers.GetArrayElementAtIndex(rendererIndex).objectReferenceValue as Renderer;
+                        Assert.That(renderer, Is.Not.Null, $"{detailId} 的状态视觉渲染器[{rendererIndex}]不得为空。");
+                        Assert.That(renderer, Is.TypeOf<MeshRenderer>(), $"{detailId} 的状态视觉渲染器[{rendererIndex}]必须是 MeshRenderer。");
+                    }
+                    Transform nestedModel = binding.DisplayAnchor.GetChild(0);
+                    Object source = PrefabUtility.GetCorrespondingObjectFromSource(nestedModel.gameObject);
+                    Assert.That(AssetDatabase.GetAssetPath(source), Is.EqualTo(sourcePaths[stepIndex]), detailId);
+                }
+            }
+        }
+
+        [Test]
+        public void 开关站的母线保护和线路保护使用显式模型绑定和四态包装()
+        {
+            ProcessDetailCatalog catalog = AssetDatabase.LoadAssetAtPath<ProcessDetailCatalog>(CatalogPath);
+            Assert.That(catalog, Is.Not.Null);
+
+            string[] stepIds = { "busbar-protection", "line-protection" };
+            string[] expectedStateNodeIds = { "unit.switching-protection.control", "node.switching-breaker" };
+            string[] sourcePaths =
+            {
+                "Assets/Art/变电站关键环节/母线保护.fbx",
+                "Assets/Art/变电站关键环节/线路保护.fbx"
+            };
+            int[] expectedRendererCounts = { 18, 15 };
+
+            for (int index = 0; index < stepIds.Length; index++)
+            {
+                string detailId = $"process-detail.switching-station.{stepIds[index]}";
+                Assert.That(catalog.TryGet("switching-station", detailId, out ProcessDetailCatalogEntry entry), Is.True, detailId);
+                Assert.That(entry.StateNodeId, Is.EqualTo(expectedStateNodeIds[index]), detailId);
+                GameObject prefab = entry.EditorPrefab;
+                Assert.That(prefab, Is.Not.Null, detailId);
+                ProcessDetailDeviceBinding binding = prefab.GetComponent<ProcessDetailDeviceBinding>();
+                ProcessDetailStateVisualAdapter visualAdapter = prefab.GetComponent<ProcessDetailStateVisualAdapter>();
+                Assert.That(binding, Is.Not.Null, detailId);
+                Assert.That(visualAdapter, Is.Not.Null, detailId);
+                Assert.That(FindBehaviour(prefab, "SubstationProtectionProcessDetailDynamicAdapter"), Is.Not.Null, detailId);
+                Assert.That(binding.ValidateBinding(entry).Success, Is.True, detailId);
+                Assert.That(binding.DisplayAnchor.localPosition.x, Is.EqualTo(10000f).Within(0.001f), detailId);
+                Assert.That(Vector3.Distance(binding.DisplayAnchor.position, binding.CameraPose.position), Is.GreaterThan(0.01f), detailId);
+                Assert.That(Vector3.Distance(binding.DisplayAnchor.position, binding.CameraPose.position), Is.LessThanOrEqualTo(500f), detailId);
+
+                SerializedProperty renderers = new SerializedObject(visualAdapter).FindProperty("_renderers");
+                Assert.That(renderers, Is.Not.Null, detailId);
+                Assert.That(renderers.arraySize, Is.EqualTo(expectedRendererCounts[index]), detailId);
+                for (int rendererIndex = 0; rendererIndex < renderers.arraySize; rendererIndex++)
+                {
+                    Renderer renderer = renderers.GetArrayElementAtIndex(rendererIndex).objectReferenceValue as Renderer;
+                    Assert.That(renderer, Is.Not.Null, $"{detailId} 的状态视觉渲染器[{rendererIndex}]不得为空。");
+                    Assert.That(renderer, Is.TypeOf<MeshRenderer>(), $"{detailId} 的状态视觉渲染器[{rendererIndex}]必须是 MeshRenderer。");
+                }
+                Transform nestedModel = binding.DisplayAnchor.GetChild(0);
+                Object source = PrefabUtility.GetCorrespondingObjectFromSource(nestedModel.gameObject);
+                Assert.That(AssetDatabase.GetAssetPath(source), Is.EqualTo(sourcePaths[index]), detailId);
+            }
+        }
         [Test]
         public void 燃煤设备状态驱动全部受控特效且只有故障停播()
         {
@@ -525,6 +632,131 @@ namespace WebDLPro.Unity.Tests
             finally
             {
                 Object.DestroyImmediate(instance);
+            }
+        }
+
+        [Test]
+        public void 四个站类场景装配协调器加载器挂载点且十一项均可进入退出()
+        {
+            ProcessDetailCatalog catalog = AssetDatabase.LoadAssetAtPath<ProcessDetailCatalog>(CatalogPath);
+            Assert.That(catalog, Is.Not.Null);
+
+            string[] sceneIds = { "step-up-substation", "step-down-substation", "converter-station", "switching-station" };
+            string[] scenePaths =
+            {
+                "Assets/Scenes/Business/StepUpSubstation.unity",
+                "Assets/Scenes/Business/StepDownSubstation.unity",
+                "Assets/Scenes/Business/ConverterStation.unity",
+                "Assets/Scenes/Business/SwitchingStation.unity"
+            };
+            string[] processIds =
+            {
+                "step-up-substation-operation",
+                "step-down-substation-operation",
+                "converter-station-operation",
+                "switching-station-operation"
+            };
+            string[][] stepIdsByScene =
+            {
+                new[] { "transformer-protection", "busbar-protection", "line-protection" },
+                new[] { "transformer-protection", "busbar-protection", "line-protection" },
+                new[] { "transformer-protection", "busbar-protection", "line-protection" },
+                new[] { "busbar-protection", "line-protection" }
+            };
+
+            for (int sceneIndex = 0; sceneIndex < sceneIds.Length; sceneIndex++)
+            {
+                Scene scene = SceneManager.GetSceneByPath(scenePaths[sceneIndex]);
+                bool openedForTest = !scene.IsValid() || !scene.isLoaded;
+                if (openedForTest)
+                {
+                    scene = EditorSceneManager.OpenScene(scenePaths[sceneIndex], OpenSceneMode.Additive);
+                }
+
+                try
+                {
+                    GameObject runtimeRoot = null;
+                    GameObject[] roots = scene.GetRootGameObjects();
+                    for (int rootIndex = 0; rootIndex < roots.Length; rootIndex++)
+                    {
+                        if (roots[rootIndex].name == "PowerPlantRuntime")
+                        {
+                            runtimeRoot = roots[rootIndex];
+                            break;
+                        }
+                    }
+                    Assert.That(runtimeRoot, Is.Not.Null, scenePaths[sceneIndex]);
+                    ProcessDetailCoordinator coordinator = runtimeRoot.GetComponent<ProcessDetailCoordinator>();
+                    ProcessDetailAssetBundleLoader loader = runtimeRoot.GetComponent<ProcessDetailAssetBundleLoader>();
+                    Assert.That(coordinator, Is.Not.Null, scenePaths[sceneIndex]);
+                    Assert.That(loader, Is.Not.Null, scenePaths[sceneIndex]);
+
+                    SerializedObject serializedCoordinator = new SerializedObject(coordinator);
+                    Assert.That(
+                        serializedCoordinator.FindProperty("_catalog")?.objectReferenceValue,
+                        Is.EqualTo(catalog),
+                        scenePaths[sceneIndex]);
+                    Assert.That(
+                        serializedCoordinator.FindProperty("_resourceLoaderBehaviour")?.objectReferenceValue,
+                        Is.EqualTo(loader),
+                        scenePaths[sceneIndex]);
+
+                    Transform detailMount = serializedCoordinator.FindProperty("_detailMount")?.objectReferenceValue as Transform;
+                    Transform businessSceneRoot = serializedCoordinator.FindProperty("_businessSceneRoot")?.objectReferenceValue as Transform;
+                    Assert.That(detailMount, Is.Not.Null, scenePaths[sceneIndex]);
+                    Assert.That(businessSceneRoot, Is.Not.Null, scenePaths[sceneIndex]);
+                    Assert.That(detailMount.IsChildOf(businessSceneRoot), Is.False,
+                        $"第三层挂载点不能位于二层根节点内：{scenePaths[sceneIndex]}");
+
+                    MonoBehaviour cameraController =
+                        serializedCoordinator.FindProperty("_cameraControllerBehaviour")?.objectReferenceValue as MonoBehaviour;
+                    Assert.That(cameraController, Is.Not.Null, scenePaths[sceneIndex]);
+                    Assert.That(cameraController.GetComponent<Camera>(), Is.Not.Null, scenePaths[sceneIndex]);
+                    FieldInfo cameraField = cameraController.GetType().GetField(
+                        "_camera",
+                        BindingFlags.Instance | BindingFlags.NonPublic);
+                    Assert.That(cameraField, Is.Not.Null, "自由相机缺少可编辑模式验证所需的内部相机字段。 ");
+                    // EditMode 测试不会触发 MonoBehaviour.Awake；补齐私有缓存后执行与运行时相同的相机快照路径。
+                    cameraField.SetValue(cameraController, cameraController.GetComponent<Camera>());
+
+                    Assert.That(coordinator.Initialize().Success, Is.True, scenePaths[sceneIndex]);
+                    string[] stepIds = stepIdsByScene[sceneIndex];
+                    for (int stepIndex = 0; stepIndex < stepIds.Length; stepIndex++)
+                    {
+                        string processDetailId = $"process-detail.{sceneIds[sceneIndex]}.{stepIds[stepIndex]}";
+                        Assert.That(
+                            catalog.TryGet(sceneIds[sceneIndex], processDetailId, out ProcessDetailCatalogEntry entry),
+                            Is.True,
+                            processDetailId);
+
+                        string transitionId = $"transition.edit-mode.{sceneIds[sceneIndex]}.{stepIds[stepIndex]}";
+                        BusinessSceneCommandResult enterResult = default;
+                        Run(coordinator.EnterAsync(
+                            sceneIds[sceneIndex],
+                            processIds[sceneIndex],
+                            stepIds[stepIndex],
+                            processDetailId,
+                            transitionId,
+                            result => enterResult = result));
+                        Assert.That(enterResult.Success, Is.True,
+                            $"第三层进入失败：{processDetailId}，{enterResult.ErrorCode}，{enterResult.Message}");
+                        Assert.That(coordinator.IsActive, Is.True, processDetailId);
+                        Assert.That(coordinator.ActiveProcessDetailId, Is.EqualTo(entry.ProcessDetailId), processDetailId);
+
+                        BusinessSceneCommandResult exitResult = coordinator.Exit(
+                            sceneIds[sceneIndex], processDetailId, transitionId);
+                        Assert.That(exitResult.Success, Is.True,
+                            $"第三层退出失败：{processDetailId}，{exitResult.ErrorCode}，{exitResult.Message}");
+                        Assert.That(coordinator.IsActive, Is.False, processDetailId);
+                    }
+                }
+                finally
+                {
+                    if (openedForTest && scene.IsValid() && scene.isLoaded)
+                    {
+                        EditorSceneManager.CloseScene(scene, true);
+                    }
+                }
             }
         }
 

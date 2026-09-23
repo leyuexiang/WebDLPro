@@ -59,7 +59,7 @@ namespace WebDLPro.Unity.SceneRuntime
     }
 
     /// <summary>
-    /// Unity 侧十一个业务场景的正式目录。升压站、降压站为新增独立场景，保留原 substation 入口。
+    /// Unity 侧十三个业务场景的正式目录。升压站、降压站、换流站和开关站为新增独立场景，保留原 substation 入口。
     /// 所有条目必须完整、唯一、可用；文件存在性由编辑器发布校验补充。
     /// </summary>
     [CreateAssetMenu(fileName = "BusinessSceneCatalog", menuName = "WebDLPro/Business Scene Catalog")]
@@ -79,7 +79,9 @@ namespace WebDLPro.Unity.SceneRuntime
             "microgrid",
             "dispatch",
             "step-up-substation",
-            "step-down-substation"
+            "step-down-substation",
+            "converter-station",
+            "switching-station"
         };
 
         [SerializeField] private BusinessSceneCatalogEntry[] _entries = Array.Empty<BusinessSceneCatalogEntry>();
@@ -119,7 +121,7 @@ namespace WebDLPro.Unity.SceneRuntime
         }
 
         /// <summary>
-        /// 校验固定十一项、三类唯一标识、正式可用状态和场景路径；运行时校验不依赖 AssetDatabase，
+        /// 校验固定十三项、三类唯一标识、正式可用状态和场景路径；运行时校验不依赖 AssetDatabase，
         /// 文件存在性由编辑器发布校验补充，避免运行包引入编辑器程序集。
         /// </summary>
         public IReadOnlyList<BusinessSceneCatalogValidationIssue> ValidateForRuntime()
@@ -128,7 +130,7 @@ namespace WebDLPro.Unity.SceneRuntime
             BusinessSceneCatalogEntry[] entries = _entries ?? Array.Empty<BusinessSceneCatalogEntry>();
             if (entries.Length != RequiredSceneIds.Length)
             {
-                issues.Add(new BusinessSceneCatalogValidationIssue("scene-catalog.count", "场景目录必须且只能包含十一个业务场景。"));
+                issues.Add(new BusinessSceneCatalogValidationIssue("scene-catalog.count", "场景目录必须且只能包含十三个业务场景。"));
             }
 
             HashSet<string> sceneIds = new HashSet<string>(StringComparer.Ordinal);

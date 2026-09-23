@@ -22,7 +22,7 @@ namespace WebDLPro.Unity.Tests
         private const string OverviewCatalogAssetPath = "Assets/Configuration/OverviewSceneCatalog.asset";
         private const string BootstrapScenePath = "Assets/Scenes/Bootstrap.unity";
 
-        // 总览场景路径用于校验构建顺序、总览目录映射及九个建筑占位是否正确接线。
+        // 总览场景路径用于校验构建顺序、总览目录映射及十三个建筑占位是否正确接线。
         private const string OverviewScenePath = "Assets/Scenes/Overview/Overview.unity";
 
         // 合并外壳预制体与演示场景路径用于同时验证源预制体和场景实例的粒子排气配置。
@@ -33,7 +33,7 @@ namespace WebDLPro.Unity.Tests
         private static readonly string[] SceneIds =
         {
             "coal-power", "gas-power", "wind-power", "solar-power", "substation",
-            "distribution", "consumption", "microgrid", "dispatch", "step-up-substation", "step-down-substation"
+            "distribution", "consumption", "microgrid", "dispatch", "step-up-substation", "step-down-substation", "converter-station", "switching-station"
         };
 
         private static readonly string[] ScenePaths =
@@ -48,15 +48,17 @@ namespace WebDLPro.Unity.Tests
             "Assets/Scenes/Business/Microgrid.unity",
             "Assets/Scenes/Business/Dispatch.unity",
             "Assets/Scenes/Business/StepUpSubstation.unity",
-            "Assets/Scenes/Business/StepDownSubstation.unity"
+            "Assets/Scenes/Business/StepDownSubstation.unity",
+            "Assets/Scenes/Business/ConverterStation.unity",
+            "Assets/Scenes/Business/SwitchingStation.unity"
         };
 
         /// <summary>
-        /// 目录资产必须包含固定九项、唯一场景键和明确路径；七个空场景只支持幂等释放，
+        /// 目录资产必须包含固定十三项、唯一场景键和明确路径；五个空场景只支持幂等释放，
         /// 燃气和燃煤能力严格与当前适配器一致，后续新增场景能力时必须连同目录能力位一起修改。
         /// </summary>
         [Test]
-        public void 正式目录完整映射九个业务场景()
+        public void 正式目录完整映射十三个业务场景()
         {
             BusinessSceneCatalog catalog = AssetDatabase.LoadAssetAtPath<BusinessSceneCatalog>(CatalogAssetPath);
 
@@ -88,7 +90,7 @@ namespace WebDLPro.Unity.Tests
                           BusinessSceneCapability.MoveCameraToPose |
                           BusinessSceneCapability.ResetScene |
                           BusinessSceneCapability.Release
-                    : (SceneIds[index] == "step-up-substation" || SceneIds[index] == "step-down-substation")
+                    : (SceneIds[index] == "step-up-substation" || SceneIds[index] == "step-down-substation" || SceneIds[index] == "converter-station" || SceneIds[index] == "switching-station")
                         ? SubstationOverviewController.SupportedCapabilities
                         : BusinessSceneCapability.Release;
                 Assert.That(entry.DeclaredCapabilities, Is.EqualTo(expectedCapabilities));
@@ -97,11 +99,11 @@ namespace WebDLPro.Unity.Tests
         }
 
         /// <summary>
-        /// 构建第一项必须是轻量 Bootstrap，第二项是独立 Overview，后续九项必须与业务目录次序一致。
-        /// Overview 不计入固定九项业务目录，但必须进入编辑器构建场景清单。
+        /// 构建第一项必须是轻量 Bootstrap，第二项是独立 Overview，后续十三项必须与业务目录次序一致。
+        /// Overview 不计入固定十三项业务目录，但必须进入编辑器构建场景清单。
         /// </summary>
         [Test]
-        public void 构建顺序区分启动总览和九个业务场景()
+        public void 构建顺序区分启动总览和十三个业务场景()
         {
             EditorBuildSettingsScene[] buildScenes = EditorBuildSettings.scenes;
 
@@ -140,13 +142,13 @@ namespace WebDLPro.Unity.Tests
 
         /// <summary>旧测试名保留为兼容入口，实际断言由新的分层构建顺序测试覆盖。</summary>
         [Test]
-        public void 构建顺序以启动场景和九个业务场景组成()
+        public void 构建顺序以启动场景和十三个业务场景组成()
         {
-            构建顺序区分启动总览和九个业务场景();
+            构建顺序区分启动总览和十三个业务场景();
         }
 
         [Test]
-        public void 独立总览目录和九个内置建筑占位已接线()
+        public void 独立总览目录和十三个内置建筑占位已接线()
         {
             OverviewSceneCatalog catalog = AssetDatabase.LoadAssetAtPath<OverviewSceneCatalog>(OverviewCatalogAssetPath);
             Assert.That(catalog, Is.Not.Null);
@@ -197,6 +199,59 @@ namespace WebDLPro.Unity.Tests
                             "asset.coal-steam-turbine",
                             "asset.coal-generator",
                             "system.coal-handling-ash-plc"
+                        }
+                    },
+                    {
+                        "solar-power",
+                        new[]
+                        {
+                            "system.solar-inverter-control",
+                            "asset.solar-inverter"
+                        }
+                    },
+                    {
+                        "step-up-substation",
+                        new[]
+                        {
+                            "system.step-up-protection-control",
+                            "system.step-up-measurement-control",
+                            "asset.step-up-transformer",
+                            "asset.step-up-breaker",
+                            "asset.step-up-instrument-transformer"
+                        }
+                    },
+                    {
+                        "step-down-substation",
+                        new[]
+                        {
+                            "system.step-down-protection-control",
+                            "system.step-down-measurement-control",
+                            "asset.step-down-transformer",
+                            "asset.step-down-breaker",
+                            "asset.step-down-instrument-transformer"
+                        }
+                    },
+                    {
+                        "converter-station",
+                        new[]
+                        {
+                            "system.converter-valve-control",
+                            "system.converter-protection-control",
+                            "system.converter-measurement-control",
+                            "asset.converter-transformer",
+                            "asset.converter-valve",
+                            "asset.converter-breaker",
+                            "asset.converter-instrument-transformer"
+                        }
+                    },
+                    {
+                        "switching-station",
+                        new[]
+                        {
+                            "system.switching-protection-control",
+                            "system.switching-measurement-control",
+                            "asset.switching-breaker",
+                            "asset.switching-instrument-transformer"
                         }
                     }
                 };
@@ -504,7 +559,7 @@ namespace WebDLPro.Unity.Tests
                     }
 
                     if (SceneIds[index] == "step-up-substation" || SceneIds[index] == "step-down-substation" ||
-                        SceneIds[index] == "wind-power" || SceneIds[index] == "solar-power")
+                        SceneIds[index] == "converter-station" || SceneIds[index] == "switching-station" || SceneIds[index] == "solar-power")
                     {
                         Assert.That(ContainsRenderer(roots), Is.True, ScenePaths[index]);
                         Assert.That(ContainsCamera(roots), Is.True, ScenePaths[index]);
@@ -532,12 +587,12 @@ namespace WebDLPro.Unity.Tests
         }
 
         /// <summary>
-        /// 九个真实场景都必须能通过统一注册表解析，且控制器能力与正式目录完全一致。
+        /// 十三个真实场景都必须能通过统一注册表解析，且控制器能力与正式目录完全一致。
         /// 燃气和燃煤场景只调用各自适配器已定义的登记方法，不依据改名后的路径或显示名称推断身份；
-        /// 其余七个占位场景则验证“仅释放”能力既可被目录识别，又不会放行流程和聚焦命令。
+        /// 其余五个占位场景则验证“仅释放”能力既可被目录识别，又不会放行流程和聚焦命令。
         /// </summary>
         [Test]
-        public void 九个场景控制器与正式能力登记严格一致()
+        public void 十三个场景控制器与正式能力登记严格一致()
         {
             RegisterGasPowerAdapterFactory();
             RegisterCoalPowerAdapterFactory();
@@ -566,9 +621,11 @@ namespace WebDLPro.Unity.Tests
                     Assert.That(resolved, Is.True, error);
                     Assert.That(controller.SceneId, Is.EqualTo(entry.SceneId));
                     Assert.That(controller.Capabilities, Is.EqualTo(entry.DeclaredCapabilities));
-                    if (SceneIds[index] == "gas-power" || SceneIds[index] == "coal-power" || SceneIds[index] == "solar-power")
+                    if (SceneIds[index] == "gas-power" || SceneIds[index] == "coal-power" || SceneIds[index] == "solar-power" ||
+                        SceneIds[index] == "step-up-substation" || SceneIds[index] == "step-down-substation" ||
+                        SceneIds[index] == "converter-station" || SceneIds[index] == "switching-station")
                     {
-                        // 三个已开放关键环节目录的发电场景都必须实现第三层执行接口；
+                        // 已登记第三层目录的七个场景都必须实现第三层执行接口；
                         // 仅有清单和资源而缺少该接口时，打包后会在 Unity 桥接层返回 process-detail-unsupported。
                         Assert.That(controller, Is.AssignableTo<IBusinessSceneProcessDetailController>(), ScenePaths[index]);
                     }

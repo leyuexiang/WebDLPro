@@ -9,6 +9,7 @@ import type {
   ManifestTopologyPreviewVariant,
 } from './manifest-topology-preview-profile'
 import type { TopologyDataContext } from '@/modules/visual/topology/topology-runtime'
+import type { ProcessNodeId, RouteId } from '@/config/process/identifiers'
 import {
   createGasTopologyConnectedLineIndex,
   GAS_TOPOLOGY_SELECTION_COLOR,
@@ -18,15 +19,26 @@ import {
 
 interface Meta2dPointerEvent { readonly pen?: Pen }
 interface SourceLinePresentation { readonly color: string; readonly lineWidth: number }
+interface RuntimeBinding { readonly penId: string; readonly nodeId: ProcessNodeId; readonly sceneNodeId?: string }
 
 /**
  * 业务包装层只提供不可变清单和文案；公共画布负责唯一引擎实例、加载竞态、视口、提示与高亮。
- * 这种边界让风电和降压站复用完整运行时能力，同时避免公共层读取任何场景专属图元编号。
+ * 这种边界让风电和四个站类场景复用完整运行时能力，同时避免公共层读取任何场景专属图元编号。
  */
 const props = defineProps<{
   profile: ManifestTopologyPreviewProfile
   fullscreenTarget?: HTMLElement | null
   suspended?: boolean
+  selectedNodeIds?: readonly ProcessNodeId[]
+  selectedRouteIds?: readonly RouteId[]
+}>()
+
+const emit = defineEmits<{
+  selectNode: [nodeId: ProcessNodeId]
+  clearSelection: []
+  doubleClickNode: [nodeId: ProcessNodeId]
+  /** 父面板通过显式就绪事件更新重置入口，避免读取子组件暴露值的非响应快照。 */
+  readyChange: [ready: boolean]
 }>()
 
 const canvasHost = ref<HTMLElement | null>(null)
@@ -42,6 +54,18 @@ const selectedFilterIds = ref<ReadonlySet<string>>(props.profile.createDefaultSe
 const currentVariantId = ref(props.profile.defaultVariantId)
 /** 第三层上下文存在时隐藏第二层筛选轨；退出后恢复离开前的第二层完整文件。 */
 const activeDataContext = ref<TopologyDataContext | undefined>()
+/** 当前完整文件的显式业务绑定；切换第三层时替换，禁止跨文件复用旧图元编号。 */
+const currentRuntimeBindings = ref<readonly RuntimeBinding[]>(props.profile.runtimeBindings ?? [])
+const nodeIdByPenId = computed(() => new Map(currentRuntimeBindings.value.map((binding) => [binding.penId, binding.nodeId])))
+const penIdsByNodeId = computed(() => {
+  const index = new Map<ProcessNodeId, string[]>()
+  for (const binding of currentRuntimeBindings.value) {
+    const pens = index.get(binding.nodeId)
+    if (pens) pens.push(binding.penId)
+    else index.set(binding.nodeId, [binding.penId])
+  }
+  return index
+})
 const connectedLineIndex = ref<ReturnType<typeof createGasTopologyConnectedLineIndex>>(new Map())
 const statusText = computed(() => loadingState.value === 'loading'
   ? '正在加载拓扑图…'
@@ -89,7 +113,15 @@ async function setTopologyDataContext(context: TopologyDataContext | undefined):
   const controller = new AbortController()
   topologyRequestController = controller
   loadingState.value = 'loading'
+  emit('readyChange', false)
   activeDataContext.value = context
+  currentRuntimeBindings.value = context
+    ? context.bindings.map((binding) => ({
+      penId: binding.penId,
+      nodeId: binding.nodeId as ProcessNodeId,
+      ...(binding.sceneNodeId ? { sceneNodeId: binding.sceneNodeId } : {}),
+    }))
+    : (props.profile.runtimeBindings ?? [])
   try {
     if (context) {
       if (!props.profile.loadDataContext) throw new Error(`${props.profile.sceneLabel}未登记第三层拓扑加载器。`)
@@ -113,6 +145,7 @@ async function setTopologyDataContext(context: TopologyDataContext | undefined):
   } catch (error) {
     if (disposed || revision !== loadRevision || controller.signal.aborted) return
     loadingState.value = 'error'
+    emit('readyChange', false)
     errorMessage.value = error instanceof Error ? error.message : `${props.profile.sceneLabel}拓扑加载失败。`
   }
 }
@@ -122,6 +155,7 @@ defineExpose({
   ready: computed(() => loadingState.value === 'ready' && !props.suspended),
   resetView: fitTopologyToViewport,
   setTopologyDataContext,
+  setSelection: (nodeIds: readonly ProcessNodeId[], _routeIds: readonly RouteId[]) => applyRuntimeSelection(nodeIds),
 })
 
 function changeZoom(multiplier: number): void {
@@ -174,13 +208,28 @@ function applySelectionVisual(pens: readonly Pen[], render = true): void {
     }, { render: false, doEvent: false, history: false })
   }
   highlightedLineIds = nextHighlightedLineIds
-  if (activePens.length > 0) meta2d.active(activePens, false)
-  else meta2d.inactive()
-  if (render) meta2d.render()
+  // 兼容合作方旧版画布替身：缺少局部刷新方法时仍保留业务选择状态，不让加载流程回滚为错误态。
+  if (activePens.length > 0) meta2d.active?.(activePens, false)
+  else meta2d.inactive?.()
+  if (render) meta2d.render?.()
 }
 
 function handleCanvasClick(event?: Meta2dPointerEvent): void {
-  applySelectionVisual(event?.pen ? [event.pen] : [])
+  const nodeId = event?.pen?.id ? nodeIdByPenId.value.get(event.pen.id) : undefined
+  if (nodeId) {
+    applySelectionVisual([event!.pen!])
+    emit('selectNode', nodeId)
+    return
+  }
+  applySelectionVisual([])
+  emit('clearSelection')
+}
+
+/** 三维反向选择只命中当前第三层或第二层文件已登记的全部图元，不发送回 Unity，避免选择回环。 */
+function applyRuntimeSelection(nodeIds: readonly ProcessNodeId[], render = true): void {
+  if (!meta2d || loadingState.value !== 'ready' || props.suspended) return
+  const pens = nodeIds.flatMap((nodeId) => penIdsByNodeId.value.get(nodeId)?.flatMap((penId) => meta2d?.find(penId) ?? []) ?? [])
+  applySelectionVisual(pens, render)
 }
 
 /** 切换文件时清空旧文件局部状态并重建索引，二维组态引擎实例和监听器保持共用。 */
@@ -196,6 +245,8 @@ function commitTopologyVariant(
   if (imageReadyFrame !== undefined) cancelAnimationFrame(imageReadyFrame)
   imageReadyFrame = undefined
   currentVariantId.value = variant.id
+  // 第三层上下文已经在请求开始时写入当前绑定；只有普通第二层切换才恢复 profile 默认绑定。
+  if (activeDataContext.value?.contextId !== variant.id) currentRuntimeBindings.value = props.profile.runtimeBindings ?? []
   connectedLineIndex.value = createGasTopologyConnectedLineIndex(data.pens)
   const defaultLineColor = data.color ?? '#bdc7db'
   for (const pen of data.pens) {
@@ -209,6 +260,8 @@ function commitTopologyVariant(
   meta2d.open(data)
   meta2d.lock(LockState.DisableEdit)
   loadingState.value = 'ready'
+  emit('readyChange', true)
+  applyRuntimeSelection(props.selectedNodeIds ?? [], false)
   errorMessage.value = ''
   layerNotice.value = ''
   requestAnimationFrame(() => {
@@ -228,6 +281,7 @@ async function switchTopologyVariant(variant: ManifestTopologyPreviewVariant): P
   const controller = new AbortController()
   topologyRequestController = controller
   const hasCurrentCanvas = loadingState.value === 'ready'
+  emit('readyChange', false)
   if (hasCurrentCanvas) layerNotice.value = `正在切换到${props.profile.formatSelection(selectedFilterIds.value)}…`
   else loadingState.value = 'loading'
   try {
@@ -240,6 +294,7 @@ async function switchTopologyVariant(variant: ManifestTopologyPreviewVariant): P
     if (hasCurrentCanvas) layerNotice.value = message
     else {
       loadingState.value = 'error'
+      emit('readyChange', false)
       errorMessage.value = message
     }
   }
@@ -335,6 +390,8 @@ watch(() => props.suspended, (suspended) => {
   } else if (canvasHost.value && !disposed) {
     resizeObserver?.observe(canvasHost.value)
     scheduleCanvasResize()
+    // 运行时可能在拓扑面板隐藏期间更新选择；恢复后重新投影一次，避免只更新中央快照而不更新图元高亮。
+    applyRuntimeSelection(props.selectedNodeIds ?? [])
   }
 })
 
@@ -351,6 +408,8 @@ onBeforeUnmount(() => {
   meta2d?.destroy()
   meta2d = undefined
 })
+
+watch(() => props.selectedNodeIds, (nodeIds) => applyRuntimeSelection(nodeIds ?? []))
 </script>
 
 <template>

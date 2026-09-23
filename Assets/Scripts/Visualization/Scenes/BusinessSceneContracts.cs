@@ -4,7 +4,7 @@ using System.Collections;
 namespace WebDLPro.Unity.SceneRuntime
 {
     /// <summary>
-    /// 九个业务场景可声明的统一能力。能力清单用于在调用前明确拒绝不支持的动作，
+    /// 业务场景可声明的统一能力。能力清单用于在调用前明确拒绝不支持的动作，
     /// 不能把“未实现”当作成功，也不能从场景显示名称反推能力。
     /// </summary>
     [Flags]
@@ -94,6 +94,19 @@ namespace WebDLPro.Unity.SceneRuntime
             TransitionId = transitionId;
             IsRecovery = isRecovery;
         }
+    }
+
+    /// <summary>
+    /// 变电站等场景入口所需的节点交互与四态控制契约。
+    /// 接口位于场景运行程序集，具体实现可留在默认 Assembly-CSharp，避免场景入口反向引用具体控制器类型。
+    /// </summary>
+    public interface IBusinessSceneNodeInteractionController
+    {
+        bool SupportsNodeVisualState { get; }
+        bool TryFocusNode(string nodeId, bool isolate, out string message);
+        bool TryClearSelection(out string message);
+        BusinessSceneCommandResult UpdateNodeVisualState(string sceneNodeId, BusinessSceneNodeVisualState visualState);
+        BusinessSceneCommandResult ClearNodeVisualState(string sceneNodeId);
     }
 
     /// <summary>

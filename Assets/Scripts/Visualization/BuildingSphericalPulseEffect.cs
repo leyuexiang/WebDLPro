@@ -400,7 +400,14 @@ public sealed class BuildingSphericalPulseEffect : MonoBehaviour
         Collider effectCollider = effectObject.GetComponent<Collider>();
         if (effectCollider != null)
         {
-            Destroy(effectCollider);
+            if (Application.isPlaying)
+            {
+                Destroy(effectCollider);
+            }
+            else
+            {
+                DestroyImmediate(effectCollider);
+            }
         }
 
         MeshRenderer renderer = effectObject.GetComponent<MeshRenderer>();

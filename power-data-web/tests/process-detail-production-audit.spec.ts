@@ -14,11 +14,12 @@ describe('第三层生产隔离与独立拓扑审计', () => {
     expect(result.issues).toEqual([])
   })
 
-  it('不存在的拓扑根目录会逐项报告三份缺失文件', async () => {
+  it('不存在的拓扑根目录会逐项报告十四份缺失合同资源', async () => {
     // 直接验证共享合同的负向路径，避免测试修改项目中的正式拓扑文件。
     const issues = await validateProcessDetailTopologies('Z:/不存在的第三层拓扑目录')
 
-    expect(issues).toHaveLength(3)
-    expect(issues.every((issue) => issue.code === 'process-detail.topology-missing')).toBe(true)
+    expect(issues).toHaveLength(15)
+    expect(issues.filter((issue) => issue.code === 'process-detail.topology-missing')).toHaveLength(14)
+    expect(issues.filter((issue) => issue.code === 'process-detail.topology-binding-manifest-invalid')).toHaveLength(1)
   })
 })

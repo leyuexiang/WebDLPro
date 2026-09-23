@@ -44,4 +44,10 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Scenes/Business/StepDownSubstation.unity
     guid: a026c4018bf2db24dac33d0bdfd7f7fb
+  - enabled: 1
+    path: Assets/Scenes/Business/ConverterStation.unity
+    guid: 7bf0d527d51c4cf409529fe1969b82ba
+  - enabled: 1
+    path: Assets/Scenes/Business/SwitchingStation.unity
+    guid: ce34b46fd014ebc419c0a10a2094cb18
   m_configObjects: {}

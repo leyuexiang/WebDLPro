@@ -9,7 +9,7 @@ using UnityEngine;
 using WebDLPro.Unity.SceneRuntime;
 
 /// <summary>
-/// 为九个业务场景提供稳定、可重复的 WebGL 构建入口。
+/// 为正式业务场景目录提供稳定、可重复的 WebGL 构建入口。
 /// 开发构建与正式构建显式分离，避免正式包意外携带开发模式；旧命令行入口保留为开发构建兼容别名，
 /// 从而不要求既有自动化立即修改，同时禁止通过手动切换 Build Settings 来改变构建性质。
 /// </summary>
@@ -243,7 +243,7 @@ public static class PowerPlantWebGlBuild
 
             BuildPlayerOptions options = new BuildPlayerOptions
             {
-                // 主播放器只打入轻量 Bootstrap。九个业务场景由紧随其后的资产包构建写入同级 SceneBundles，
+                // 主播放器只打入轻量 Bootstrap。Overview 与业务场景由紧随其后的资产包构建写入同级 SceneBundles，
                 // 这样首屏不再把九个场景资源收敛进单一 WebGL 数据文件。
                 scenes = new[] { BootstrapScenePath },
                 locationPathName = outputPath,
@@ -335,7 +335,7 @@ public static class PowerPlantWebGlBuild
     }
 
     /// <summary>
-    /// 构建设置登记 Bootstrap、独立 Overview 和九个业务场景；业务目录校验仍只读取九个业务场景。
+    /// 构建设置登记 Bootstrap、独立 Overview 和完整业务场景目录；业务目录校验读取正式场景集合。
     /// 主播放器仍只嵌入 Bootstrap，Overview 与业务场景统一通过场景资源包按需加载。
     /// </summary>
     private static void ValidateBuildSettings()
@@ -346,7 +346,7 @@ public static class PowerPlantWebGlBuild
             !buildScenes[0].enabled || !string.Equals(buildScenes[0].path, BootstrapScenePath, StringComparison.Ordinal) ||
             !buildScenes[1].enabled || !string.Equals(buildScenes[1].path, OverviewSceneCatalog.OverviewScenePath, StringComparison.Ordinal))
         {
-            throw new BuildFailedException("构建设置必须依次登记 Bootstrap、Overview 和完整九个业务场景。");
+            throw new BuildFailedException("构建设置必须依次登记 Bootstrap、Overview 和完整业务场景目录。");
         }
 
         int enabledNonBootstrapSceneCount = buildScenes.Count(scene =>

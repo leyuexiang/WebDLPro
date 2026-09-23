@@ -123,8 +123,8 @@ namespace WebDLPro.Unity.SceneRuntime
     }
 
     /// <summary>
-    /// 第三层关键环节目录。目录允许任意业务场景登记零到多个环节；当前已登记燃气轮机正式项和
-    /// 燃煤汽轮机正式项，其他未交付场景保持空缺，不创建伪资源或占位动作。
+    /// 第三层关键环节目录。目录允许任意业务场景登记零到多个环节；当前已登记燃气轮机、燃煤汽轮机、
+    /// 光伏逆变器和四个站类的保护关键环节，其他未交付场景保持空缺，不创建伪资源或占位动作。
     /// </summary>
     [CreateAssetMenu(fileName = "ProcessDetailCatalog", menuName = "WebDLPro/Process Detail Catalog")]
     public sealed class ProcessDetailCatalog : ScriptableObject
@@ -153,7 +153,7 @@ namespace WebDLPro.Unity.SceneRuntime
         }
 
         /// <summary>
-        /// 目录校验只要求现有条目完整唯一，不要求九个业务场景都存在条目。
+        /// 目录校验只要求现有条目完整唯一，不要求正式业务场景都存在条目。
         /// 这样未来可按场景逐步增加正式资源，同时阻止重复资源、相机位或状态节点造成运行时歧义。
         /// </summary>
         public IReadOnlyList<BusinessSceneCatalogValidationIssue> ValidateForRuntime()

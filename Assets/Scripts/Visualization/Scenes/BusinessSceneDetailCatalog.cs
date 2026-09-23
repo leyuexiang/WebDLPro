@@ -31,7 +31,7 @@ namespace WebDLPro.Unity.SceneRuntime
     }
 
     /// <summary>
-    /// 九个业务场景的设备细节资源目录。厂区壳体仍由业务场景本体持有并常驻；
+    /// 业务场景的设备细节资源目录。厂区壳体仍由业务场景本体持有并常驻；
     /// 本目录只描述可独立加载和释放的设备细节资源，不承担壳体对象绑定。
     /// </summary>
     [CreateAssetMenu(fileName = "BusinessSceneDetailCatalog", menuName = "WebDLPro/Business Scene Detail Catalog")]
@@ -51,7 +51,7 @@ namespace WebDLPro.Unity.SceneRuntime
         }
 
         /// <summary>
-        /// 正式发布要求九个业务场景各有且仅有一个设备细节资源标识。
+        /// 正式发布要求正式业务场景各有且仅有一个设备细节资源标识。
         /// 资源标识必须显式配置、唯一且有界；未知、未解析或重复条目均阻止运行时接入。
         /// </summary>
         public IReadOnlyList<BusinessSceneCatalogValidationIssue> ValidateForRuntime()
@@ -63,7 +63,7 @@ namespace WebDLPro.Unity.SceneRuntime
             {
                 issues.Add(new BusinessSceneCatalogValidationIssue(
                     "scene-detail-catalog.count",
-                    "设备细节目录必须且只能包含九个业务场景。"));
+                    "设备细节目录必须覆盖正式业务场景目录中的全部场景。"));
             }
 
             HashSet<string> sceneIds = new HashSet<string>(StringComparer.Ordinal);

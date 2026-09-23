@@ -1,7 +1,8 @@
 import { LockState, type Meta2dData, type Pen } from '@meta2d/core'
 import type { TopologyDataContext } from '@/modules/visual/topology/topology-runtime'
+import { getTopologySharedPublicAssetUrl } from './topology-shared-assets'
 
-/** 关键环节源副本按共享文件路径缓存；九个逻辑上下文不会重复请求、解析同一份 JSON。 */
+/** 关键环节源副本按共享文件路径缓存；十一个逻辑上下文不会重复请求、解析同一份 JSON。 */
 const sourceDataByPath = new Map<string, Meta2dData>()
 
 /** 相对部署和绝对部署共用同一 URL 解析规则，不依赖开发服务器根路径。 */
@@ -56,6 +57,16 @@ function applyProtectionSelectionPolicy(pens: Pen[], context: TopologyDataContex
   }
 }
 
+/** 第三层源图的站点根路径必须转换为当前部署地址；仅接受已登记的公共资源目录。 */
+function localizeProtectionImages(pens: Pen[]): void {
+  const prefix = '/topology/shared/'
+  for (const pen of pens) {
+    if (!pen.image) continue
+    if (!pen.image.startsWith(prefix)) throw new Error(`保护拓扑图片地址未登记：${pen.id ?? '未知图元'}`)
+    pen.image = getTopologySharedPublicAssetUrl(pen.image.slice(prefix.length))
+  }
+}
+
 /** 加载并克隆单份保护拓扑，保证场景状态、引擎计算字段和选择效果互不污染。 */
 export async function loadProtectionProcessDetailTopologyData(
   context: TopologyDataContext,
@@ -77,6 +88,7 @@ export async function loadProtectionProcessDetailTopologyData(
     sourceDataByPath.set(context.topologyPath, structuredClone(source))
   }
   const data = structuredClone(source)
+  localizeProtectionImages(data.pens)
   removeProtectionTopologyRootCombines(data.pens)
   applyProtectionSelectionPolicy(data.pens, context)
   data.width = undefined

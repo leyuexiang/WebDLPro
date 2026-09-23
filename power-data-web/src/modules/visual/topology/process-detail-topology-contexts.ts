@@ -1,53 +1,112 @@
 import type { TopologyDataContext } from '@/modules/visual/topology/topology-runtime'
 
-/** 三个站类场景使用相同保护画面，但业务节点标识必须带场景前缀，保证状态缓存绝不串场。 */
+/** 四个变电站类场景使用相同保护画面；绑定仍按当前场景的业务节点和三维节点显式登记。 */
 const PROTECTION_SCENES = Object.freeze([
   'step-down-substation',
   'step-up-substation',
   'converter-station',
+  'switching-station',
 ] as const)
 
-/** 三份参考资料各落盘一次；九个逻辑上下文通过稳定编号复用同一只读文件。 */
+const PROTECTION_SCENE_TOPOLOGY_KEYS = Object.freeze({
+  'step-down-substation': Object.freeze(['transformer-protection', 'busbar-protection', 'line-protection']),
+  'step-up-substation': Object.freeze(['transformer-protection', 'busbar-protection', 'line-protection']),
+  'converter-station': Object.freeze(['transformer-protection', 'busbar-protection', 'line-protection']),
+  'switching-station': Object.freeze(['busbar-protection', 'line-protection']),
+} as const)
+
+type ProtectionDeviceRole = 'measurement' | 'protection' | 'instrumentTransformer' | 'breaker' | 'transformer'
+type ProtectionSceneNodeBinding = readonly [nodeId: string, sceneNodeId: string]
+type ProtectionSceneBindings = Partial<Record<ProtectionDeviceRole, ProtectionSceneNodeBinding>>
+
+/** 只有源图文字可以明确对应的设备才进入双向联动；合并单元和智能终端不猜测三维目标。 */
+const PROTECTION_SCENE_NODE_BINDINGS: Readonly<Record<(typeof PROTECTION_SCENES)[number], ProtectionSceneBindings>> = Object.freeze({
+  'step-down-substation': Object.freeze({
+    measurement: ['system.step-down-measurement-control', 'unit.step-down-measurement.control'] as const,
+    protection: ['system.step-down-protection-control', 'unit.step-down-protection.control'] as const,
+    instrumentTransformer: ['asset.step-down-instrument-transformer', 'node.step-down-instrument-transformer'] as const,
+    breaker: ['asset.step-down-breaker', 'node.step-down-breaker'] as const,
+    transformer: ['asset.step-down-transformer', 'node.step-down-transformer'] as const,
+  }),
+  'step-up-substation': Object.freeze({
+    measurement: ['system.step-up-measurement-control', 'unit.step-up-measurement.control'] as const,
+    protection: ['system.step-up-protection-control', 'unit.step-up-protection.control'] as const,
+    instrumentTransformer: ['asset.step-up-instrument-transformer', 'node.step-up-instrument-transformer'] as const,
+    breaker: ['asset.step-up-breaker', 'node.step-up-breaker'] as const,
+    transformer: ['asset.step-up-transformer', 'node.step-up-transformer'] as const,
+  }),
+  'converter-station': Object.freeze({
+    measurement: ['system.converter-measurement-control', 'unit.converter-measurement.control'] as const,
+    protection: ['system.converter-protection-control', 'unit.converter-protection.control'] as const,
+    instrumentTransformer: ['asset.converter-instrument-transformer', 'node.converter-instrument-transformer'] as const,
+    breaker: ['asset.converter-breaker', 'node.converter-breaker'] as const,
+    transformer: ['asset.converter-transformer', 'node.converter-transformer'] as const,
+  }),
+  'switching-station': Object.freeze({
+    measurement: ['system.switching-measurement-control', 'unit.switching-measurement.control'] as const,
+    protection: ['system.switching-protection-control', 'unit.switching-protection.control'] as const,
+    instrumentTransformer: ['asset.switching-instrument-transformer', 'node.switching-instrument-transformer'] as const,
+    breaker: ['asset.switching-breaker', 'node.switching-breaker'] as const,
+  }),
+} as const)
+
+/** 三份参考资料各落盘一次；十一个逻辑上下文通过稳定编号复用同一只读文件。 */
 const PROTECTION_TOPOLOGIES = Object.freeze([
   Object.freeze({
     key: 'transformer-protection',
     topologyPath: 'process-detail/protection/transformer-protection/topology.json',
-    sourceSha256: 'a6b41ef5c00d0a18498d40f06e5a3c91ae90bfcbdf19403b6e4a67b06e824647',
+    sourceSha256: 'cebf00fc7b375ff7bff26e29da3d722edc378f825d75813f384825b9a24f5431',
     expectedPenCount: 37,
-    devicePenIds: Object.freeze(['13641187', '3ca46467', '5c62b7c9', '638bfdc8', '4c977fd', '5ba41a5e', '2afc53b']),
+    devicePenBindings: Object.freeze([
+      ['13641187', 'measurement'], ['638bfdc8', 'protection'], ['4c977fd', 'instrumentTransformer'],
+      ['5ba41a5e', 'breaker'], ['2afc53b', 'transformer'],
+    ] as const),
   }),
   Object.freeze({
     key: 'busbar-protection',
     topologyPath: 'process-detail/protection/busbar-protection/topology.json',
-    sourceSha256: '1b9ad1dd05c718220c00414d1d030a8965e8738ef61b7c2cde1df5e4a59cdd93',
+    sourceSha256: '0b6ed18b48c7039cf3f0079642f1b9d2197c9a2890fd5a28d50839eca7161eb4',
     expectedPenCount: 35,
-    devicePenIds: Object.freeze(['764bd402', 'cb91449', '3e2176c6', '276dbcd0', '6c957795', '149e5ff']),
+    devicePenBindings: Object.freeze([
+      ['764bd402', 'measurement'], ['276dbcd0', 'protection'], ['6c957795', 'instrumentTransformer'],
+      ['149e5ff', 'breaker'],
+    ] as const),
   }),
   Object.freeze({
     key: 'line-protection',
     topologyPath: 'process-detail/protection/line-protection/topology.json',
-    sourceSha256: 'e9fcb283169bfa8e269c28c65e22747e38e8b338d4a5e2b2dc1f754f466d12c6',
+    sourceSha256: 'e635617e600c787442823d0887c79bc581bbb244a63a9dc1c51d732be6b2c08c',
     expectedPenCount: 34,
-    devicePenIds: Object.freeze(['c15baad', '692fe9ae', '16a5c2d1', 'b8f3ceb', 'a5f4bae', '31d8ffd']),
+    devicePenBindings: Object.freeze([
+      ['c15baad', 'measurement'], ['b8f3ceb', 'protection'], ['a5f4bae', 'instrumentTransformer'],
+      ['31d8ffd', 'breaker'],
+    ] as const),
   }),
 ] as const)
 
-/**
- * 预计算九个上下文和各自的状态节点绑定。相同图元编号只代表同一参考图中的位置，不能成为
- * 跨场景状态键，因此 nodeId 同时包含场景、保护类型和图元编号。
- */
+/** 预计算十一个上下文和各自的图元绑定；未确认语义的图元保持二维只读，不伪造三维目标。 */
 function createProtectionTopologyContexts(): readonly TopologyDataContext[] {
-  return PROTECTION_SCENES.flatMap((sceneId) => PROTECTION_TOPOLOGIES.map((topology) => Object.freeze({
-    contextId: `process-detail.${sceneId}.${topology.key}`,
-    renderer: 'manifest-json' as const,
-    topologyPath: topology.topologyPath,
-    sourceSha256: topology.sourceSha256,
-    expectedPenCount: topology.expectedPenCount,
-    bindings: Object.freeze(topology.devicePenIds.map((penId) => Object.freeze({
-      penId,
-      nodeId: `asset.${sceneId}.${topology.key}.${penId}`,
-    }))),
-  })))
+  return PROTECTION_SCENES.flatMap((sceneId) => {
+    const topologyKeys = PROTECTION_SCENE_TOPOLOGY_KEYS[sceneId]
+    return PROTECTION_TOPOLOGIES.filter((topology) => topologyKeys.includes(topology.key)).map((topology) => Object.freeze({
+      contextId: `process-detail.${sceneId}.${topology.key}`,
+      renderer: 'manifest-json' as const,
+      topologyPath: topology.topologyPath,
+      sourceSha256: topology.sourceSha256,
+      expectedPenCount: topology.expectedPenCount,
+      bindings: Object.freeze(topology.devicePenBindings.flatMap(([penId, role]) => {
+        const sceneBindings = PROTECTION_SCENE_NODE_BINDINGS[sceneId]
+        // 角色来自源 JSON 的可见文字：测控装置、保护装置、互感器、断路器、变压器；不按数组位置推断。
+        const target = sceneBindings[role as ProtectionDeviceRole]
+        return target ? [Object.freeze({
+          penId,
+          // 直接复用正式总览拓扑节点，保证第三层点击、中央选择状态和 Unity 三维节点使用同一主键。
+          nodeId: target[0],
+          sceneNodeId: target[1],
+        })] : []
+      })),
+    }))
+  })
 }
 
 /**

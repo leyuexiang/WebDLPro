@@ -245,6 +245,44 @@ const solarProcessDetails = Object.freeze([
 ])
 
 /**
+ * 四个变电站类场景复用三份正式保护拓扑；开关站按产品要求只开放母线保护和线路保护。
+ * 拓扑文件和 penId 绑定已存在于 process-detail-topology-contexts.ts；这里仅登记公开合同字段，Unity 资源仍需由对应场景目录确认。
+ */
+const substationProtectionStepDefinitions = Object.freeze({
+  'step-up-substation': Object.freeze([
+    ['transformer-protection', '变压保护', 'node.step-up-transformer'],
+    ['busbar-protection', '母线保护', 'unit.step-up-protection.control'],
+    ['line-protection', '线路保护', 'node.step-up-breaker'],
+  ]),
+  'step-down-substation': Object.freeze([
+    ['transformer-protection', '变压保护', 'node.step-down-transformer'],
+    ['busbar-protection', '母线保护', 'unit.step-down-protection.control'],
+    ['line-protection', '线路保护', 'node.step-down-breaker'],
+  ]),
+  'converter-station': Object.freeze([
+    ['transformer-protection', '变压保护', 'node.converter-transformer'],
+    ['busbar-protection', '母线保护', 'unit.converter-protection.control'],
+    ['line-protection', '线路保护', 'node.converter-breaker'],
+  ]),
+  'switching-station': Object.freeze([
+    ['busbar-protection', '母线保护', 'unit.switching-protection.control'],
+    ['line-protection', '线路保护', 'node.switching-breaker'],
+  ]),
+})
+const substationProtectionProcessDetails = Object.freeze(
+  Object.entries(substationProtectionStepDefinitions).flatMap(([sceneId, definitions]) => definitions.map(([stepId, _title, stateNodeId]) => Object.freeze({
+    sceneId,
+    processId: `${sceneId}-operation`,
+    stepId,
+    processDetailId: `process-detail.${sceneId}.${stepId}`,
+    resourceId: `process-detail-resource.${sceneId}.${stepId}`,
+    cameraPoseId: `camera-pose.${sceneId}.${stepId}`,
+    stateNodeId,
+    topologyDataContextId: `process-detail.${sceneId}.${stepId}`,
+  }))),
+)
+
+/**
  * 参数只允许可安全放入发布目录名的稳定片段，避免构建命令被误用为任意路径写入工具。
  * 未指定版本时使用本地时间生成唯一版本；目录已存在时立即失败而不覆盖已有测试包。
  */
@@ -968,7 +1006,7 @@ export async function createConfiguredPowerScenesManifest(releaseId, initialScen
    * 合作方当前只从 workflowActions（流程动作摘要）生成可绑定菜单，因此六个新增场景必须登记稳定导航动作。
    * 这些动作复用原子视图事务且 unityAction（Unity动作）固定为 none（无动作），不会伪造控制器未声明的工艺步骤。
    */
-  const addedSceneNavigations = [
+const addedSceneNavigations = [
     { sceneId: 'wind-power', title: '风力发电', actionId: 'action.wind-power.overview', actionTitle: '进入风力发电总览' },
     { sceneId: 'solar-power', title: '光伏发电', actionId: 'action.solar-power.overview', actionTitle: '进入光伏发电总览' },
     { sceneId: 'step-up-substation', title: '升压站', actionId: 'action.step-up-substation.overview', actionTitle: '进入升压站总览' },
@@ -976,6 +1014,53 @@ export async function createConfiguredPowerScenesManifest(releaseId, initialScen
     { sceneId: 'converter-station', title: '换流站', actionId: 'action.converter-station.overview', actionTitle: '进入换流站总览' },
     { sceneId: 'switching-station', title: '开关站', actionId: 'action.switching-station.overview', actionTitle: '进入开关站总览' },
   ]
+  // 四个变电业务场景使用已核验的 Unity sceneNodeId；拓扑节点显式携带反向映射，
+  // 不依赖标题、数组顺序或图元编号推断三维目标。
+  const substationTopologyNodes = {
+    'step-up-substation': [
+      ['system.step-up-protection-control', '升压站保护控制', 'unit.step-up-protection.control', 'plc', 25, 35],
+      ['system.step-up-measurement-control', '升压站测量控制', 'unit.step-up-measurement.control', 'instrument', 75, 35],
+      ['asset.step-up-transformer', '升压站主变压器', 'node.step-up-transformer', 'transformer', 20, 72],
+      ['asset.step-up-breaker', '升压站断路器', 'node.step-up-breaker', 'breaker', 50, 72],
+      ['asset.step-up-instrument-transformer', '升压站仪用变压器', 'node.step-up-instrument-transformer', 'transformer', 80, 72],
+    ],
+    'step-down-substation': [
+      ['system.step-down-protection-control', '降压站保护控制', 'unit.step-down-protection.control', 'plc', 20, 35],
+      ['system.step-down-measurement-control', '降压站测量控制', 'unit.step-down-measurement.control', 'instrument', 80, 35],
+      ['asset.step-down-transformer', '降压站主变压器', 'node.step-down-transformer', 'transformer', 15, 72],
+      ['asset.step-down-breaker', '降压站断路器', 'node.step-down-breaker', 'breaker', 50, 72],
+      ['asset.step-down-instrument-transformer', '降压站仪用变压器', 'node.step-down-instrument-transformer', 'transformer', 85, 72],
+    ],
+    'converter-station': [
+      ['system.converter-valve-control', '换流站阀组控制', 'unit.converter-valve-control.control', 'plc', 15, 30],
+      ['system.converter-protection-control', '换流站保护控制', 'unit.converter-protection.control', 'plc', 50, 30],
+      ['system.converter-measurement-control', '换流站测量控制', 'unit.converter-measurement.control', 'instrument', 85, 30],
+      ['asset.converter-transformer', '换流站变压器', 'node.converter-transformer', 'transformer', 10, 72],
+      ['asset.converter-valve', '换流站换流阀', 'node.converter-valve', 'valve', 37, 72],
+      ['asset.converter-breaker', '换流站断路器', 'node.converter-breaker', 'breaker', 63, 72],
+      ['asset.converter-instrument-transformer', '换流站仪用变压器', 'node.converter-instrument-transformer', 'transformer', 90, 72],
+    ],
+    'switching-station': [
+      ['system.switching-protection-control', '开关站保护控制', 'unit.switching-protection.control', 'plc', 25, 35],
+      ['system.switching-measurement-control', '开关站测量控制', 'unit.switching-measurement.control', 'instrument', 75, 35],
+      ['asset.switching-breaker', '开关站断路器', 'node.switching-breaker', 'breaker', 35, 72],
+      ['asset.switching-instrument-transformer', '开关站仪用变压器', 'node.switching-instrument-transformer', 'transformer', 65, 72],
+    ],
+  }
+  const stationTopologyBySceneId = new Map(Object.entries(substationTopologyNodes).map(([sceneId, definitions]) => [
+    sceneId,
+    {
+      topologyId: `topology.${sceneId}.overview`,
+      sceneId,
+      title: `${scenes.find((scene) => scene.sceneId === sceneId)?.title ?? sceneId}总览`,
+      configVersion: manifestVersion,
+      nodes: definitions.map(([nodeId, title, sceneNodeId, iconKey, x, y]) => ({
+        nodeId, title, sceneNodeId, iconKey, x, y,
+        deviceStatus: 'normal', doubleClickBehavior: 'emit-node', metricKeys: [],
+      })),
+      edges: [],
+    },
+  ]))
   const solarProcessDetailAction = {
     actionId: 'action.solar-power.inverter',
     title: '进入光伏逆变器关键环节',
@@ -988,6 +1073,26 @@ export async function createConfiguredPowerScenesManifest(releaseId, initialScen
     failurePolicy: 'keep-current-context',
     configVersion: manifestVersion,
   }
+  /**
+   * 四个变电站类场景公开保护关键环节；动作只携带稳定的环节编号，
+   * 资源、相机位、状态节点和拓扑上下文由同名 processDetails（关键环节目录）解析。
+   */
+  const protectionTitleByStepId = Object.freeze({
+    'transformer-protection': '变压保护',
+    'busbar-protection': '母线保护',
+    'line-protection': '线路保护',
+  })
+  const substationProtectionProcessDetailActions = substationProtectionProcessDetails.map((detail) => ({
+    actionId: `action.${detail.sceneId}.${detail.stepId}`,
+    title: `进入${scenes.find((scene) => scene.sceneId === detail.sceneId)?.title ?? detail.sceneId}${protectionTitleByStepId[detail.stepId] ?? detail.stepId}关键环节`,
+    targetSceneId: detail.sceneId,
+    targetViewMode: 'process-detail',
+    processDetailId: detail.processDetailId,
+    allowedParameters: [],
+    unityAction: { type: 'enterProcessDetail', processDetailId: detail.processDetailId },
+    failurePolicy: 'keep-current-context',
+    configVersion: manifestVersion,
+  }))
   const actions = [
     {
       actionId: 'action.scene.overview',
@@ -1009,13 +1114,14 @@ export async function createConfiguredPowerScenesManifest(releaseId, initialScen
       targetViewMode: 'business',
       targetTopologyId: `topology.${navigation.sceneId}.overview`,
       allowedParameters: [],
-      unityAction: { type: 'none' },
+      unityAction: { type: stationTopologyBySceneId.has(navigation.sceneId) ? 'resetScene' : 'none' },
       failurePolicy: 'keep-current-context',
       configVersion: manifestVersion,
     })),
     solarProcessDetailAction,
+    ...substationProtectionProcessDetailActions,
   ].map((action) => ({ ...action, configVersion: manifestVersion }))
-  const processDetails = [...gasManifest.processDetails, ...coalManifest.processDetails, ...solarProcessDetails]
+  const processDetails = [...gasManifest.processDetails, ...coalManifest.processDetails, ...solarProcessDetails, ...substationProtectionProcessDetails]
     .map((detail) => ({ ...detail }))
   for (const navigation of addedSceneNavigations) {
     const { sceneId } = navigation
@@ -1026,15 +1132,20 @@ export async function createConfiguredPowerScenesManifest(releaseId, initialScen
       scene.resourceVersion = `resource.${unityReleaseId}.${sceneId}`
       scene.defaultTopologyId = `topology.${sceneId}.overview`
       scene.topologyIds = [scene.defaultTopologyId]
-      // 光伏同时开放已核验的逆变器第三层；其余新增场景仍只有无三维副作用的总览导航。
+      // 光伏开放逆变器第三层；三个变电场景开放三项保护环节，开关站开放母线保护和线路保护。
+      const protectionActionIds = substationProtectionProcessDetailActions
+        .filter((action) => action.targetSceneId === sceneId)
+        .map((action) => action.actionId)
       scene.supportedActionIds = sceneId === 'solar-power'
         ? [navigation.actionId, solarProcessDetailAction.actionId]
-        : [navigation.actionId]
+        : [navigation.actionId, ...protectionActionIds]
     }
     const topologyId = `topology.${sceneId}.overview`
     const existingTopologyIndex = topologies.findIndex((item) => item.topologyId === topologyId)
     // 光伏上方已经登记两个已核验节点，不能被通用空占位逻辑覆盖。
-    if (sceneId !== 'solar-power') {
+    if (stationTopologyBySceneId.has(sceneId)) {
+      topologies[existingTopologyIndex >= 0 ? existingTopologyIndex : topologies.length] = stationTopologyBySceneId.get(sceneId)
+    } else if (sceneId !== 'solar-power') {
       const emptyTopology = { topologyId, sceneId, title: `${scene?.title ?? sceneId}总览`, configVersion: manifestVersion, nodes: [], edges: [] }
       if (existingTopologyIndex >= 0) topologies[existingTopologyIndex] = emptyTopology
       else topologies.push(emptyTopology)
@@ -1053,9 +1164,11 @@ export async function createConfiguredPowerScenesManifest(releaseId, initialScen
     const mapping = unitySceneMappings.find((item) => item.sceneId === sceneId)
     if (mapping) {
       mapping.mappingVersion = unitySceneMappingVersion
-      mapping.sceneNodeIds = sceneId === 'solar-power' ? [...verifiedSolarSceneNodeIdByTopologyNodeId.values()] : []
+      mapping.sceneNodeIds = sceneId === 'solar-power'
+        ? [...verifiedSolarSceneNodeIdByTopologyNodeId.values()]
+        : (stationTopologyBySceneId.get(sceneId)?.nodes ?? []).map((node) => node.sceneNodeId)
       mapping.routeIds = []
-    } else unitySceneMappings.push({ sceneId, mappingVersion: unitySceneMappingVersion, sceneNodeIds: sceneId === 'solar-power' ? [...verifiedSolarSceneNodeIdByTopologyNodeId.values()] : [], routeIds: [] })
+    } else unitySceneMappings.push({ sceneId, mappingVersion: unitySceneMappingVersion, sceneNodeIds: sceneId === 'solar-power' ? [...verifiedSolarSceneNodeIdByTopologyNodeId.values()] : (stationTopologyBySceneId.get(sceneId)?.nodes ?? []).map((node) => node.sceneNodeId), routeIds: [] })
   }
 
   return {
@@ -1073,7 +1186,7 @@ export async function createConfiguredPowerScenesManifest(releaseId, initialScen
 }
 
 /**
- * 内部自测宿主页覆盖所有对外可绑定动作：全局沙盘、六个业务总览和三项独立关键环节。
+ * 二十三项公开动作由全局、六个业务总览、四个变电场景保护环节和三个发电关键环节组成。
  * 页面中的状态按钮只通过第二版外层协议提交完整设备状态快照；它们不直连 Unity，也不伪造
  * 拓扑图元。每次提交同时携带燃气轮机和燃煤汽轮机两个 nodeId，确保切换场景或层级后仍能观察
  * 同一份权威状态在二维拓扑、沙盘和关键环节模型中的投影结果。
@@ -1090,7 +1203,7 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <!-- 使用空数据站点图标，避免本地联调浏览器自动请求不存在的 /favicon.ico 并产生与业务无关的 404。 -->
     <link rel="icon" href="data:," />
-    <title>燃气、燃煤双场景全链路自测包</title>
+    <title>燃气、燃煤、光伏三场景全链路自测包（含变电场景）</title>
     <style>
       html, body, #visualization-shell { inline-size: 100%; block-size: 100%; margin: 0; overflow: hidden; background: #061323; }
       #visualization-shell { display: block; border: 0; }
@@ -1098,7 +1211,7 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
        .test-controls__title { font-weight: 700; }
        .test-controls__hint { margin: 0; color: #bae6fd; }
        .test-controls__actions { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; padding-block-start: 6px; border-block-start: 1px solid rgb(103 232 249 / 25%); }
-       .test-controls__scene-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; padding-block-start: 6px; border-block-start: 1px solid rgb(103 232 249 / 25%); }
+       .test-controls__scene-actions, .test-controls__detail-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; padding-block-start: 6px; border-block-start: 1px solid rgb(103 232 249 / 25%); }
        .test-controls__playback { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
        .test-controls__states { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; padding-block-start: 6px; border-block-start: 1px solid rgb(103 232 249 / 25%); }
        .test-controls__state { display: grid; gap: 4px; min-inline-size: 0; }
@@ -1114,9 +1227,9 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
   <body>
     <!-- 仅承载嵌入壳；真实 Unity iframe 由壳内唯一宿主创建，外层测试页绝不直连 Unity。 -->
     <iframe id="visualization-shell" title="燃气发电场景与拓扑嵌入壳" allow="fullscreen"></iframe>
-    <section class="test-controls" aria-label="燃气燃煤光伏三场景外部消息测试操作">
-      <span class="test-controls__title">燃气、燃煤、光伏三场景全链路自测</span>
-      <p class="test-controls__hint">可往返验证沙盘、三套业务总览及各自关键环节；状态按钮用于观察绑定设备在正常/故障之间切换后的二维、三维效果。</p>
+    <section class="test-controls" aria-label="多场景外部消息测试操作">
+      <span class="test-controls__title">燃气、燃煤、光伏三场景全链路自测（含升压站、降压站、换流站、开关站）</span>
+      <p class="test-controls__hint">可通过公开 workflow.trigger（流程触发）验证 13 个场景和 23 个动作；状态按钮用于观察绑定设备在正常/故障之间切换后的二维、三维效果。</p>
       <div class="test-controls__actions" aria-label="视图链路操作">
         <button type="button" data-action-id="action.scene.overview" disabled>沙盘</button>
         <button type="button" data-action-id="action.gas-power.overview" disabled>燃气总览</button>
@@ -1132,6 +1245,19 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
         <button type="button" data-action-id="action.step-down-substation.overview" disabled>降压站场景</button>
         <button type="button" data-action-id="action.converter-station.overview" disabled>换流站场景</button>
         <button type="button" data-action-id="action.switching-station.overview" disabled>开关站场景</button>
+      </div>
+      <div class="test-controls__detail-actions" aria-label="变电场景关键环节跳转操作">
+        <button type="button" data-action-id="action.step-up-substation.transformer-protection" disabled>升压站变压保护</button>
+        <button type="button" data-action-id="action.step-up-substation.busbar-protection" disabled>升压站母线保护</button>
+        <button type="button" data-action-id="action.step-up-substation.line-protection" disabled>升压站线路保护</button>
+        <button type="button" data-action-id="action.step-down-substation.transformer-protection" disabled>降压站变压保护</button>
+        <button type="button" data-action-id="action.step-down-substation.busbar-protection" disabled>降压站母线保护</button>
+        <button type="button" data-action-id="action.step-down-substation.line-protection" disabled>降压站线路保护</button>
+        <button type="button" data-action-id="action.converter-station.transformer-protection" disabled>换流站变压保护</button>
+        <button type="button" data-action-id="action.converter-station.busbar-protection" disabled>换流站母线保护</button>
+        <button type="button" data-action-id="action.converter-station.line-protection" disabled>换流站线路保护</button>
+        <button type="button" data-action-id="action.switching-station.busbar-protection" disabled>开关站母线保护</button>
+        <button type="button" data-action-id="action.switching-station.line-protection" disabled>开关站线路保护</button>
       </div>
       <div class="test-controls__states" aria-label="关键设备状态切换">
         <div class="test-controls__state">
@@ -1176,9 +1302,26 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
         const deviceStateOutputs = new Map(Array.from(document.querySelectorAll('[data-device-state-output]'))
           .map((output) => [output.dataset.deviceStateOutput, output]));
         const commandButtons = [...actionButtons, ...deviceStateButtons];
-        // 仅用于校验新增场景返回的稳定视图；实际跳转与合作方一致，全部通过动作标识触发。
-        const allowedSceneIds = new Set(['wind-power', 'solar-power', 'step-up-substation', 'step-down-substation', 'converter-station', 'switching-station']);
-        // 页面只允许联合清单中已登记的十二项动作；固定闭集禁止页面输入拼接任意场景或内部 Unity 方法。
+         // 仅用于校验新增场景返回的稳定视图；实际跳转与合作方一致，全部通过动作标识触发。
+         const allowedSceneIds = new Set(['wind-power', 'solar-power', 'step-up-substation', 'step-down-substation', 'converter-station', 'switching-station']);
+         // 第三层稳定视图必须命中联合清单中的十四个关键环节，不能只校验燃气、燃煤和光伏旧入口。
+         const allowedProcessDetailIds = new Set([
+           'process-detail.gas-power.gas-turbine',
+           'process-detail.coal-power.steam-turbine',
+           'process-detail.solar-power.inverter',
+           'process-detail.step-up-substation.transformer-protection',
+           'process-detail.step-up-substation.busbar-protection',
+           'process-detail.step-up-substation.line-protection',
+           'process-detail.step-down-substation.transformer-protection',
+           'process-detail.step-down-substation.busbar-protection',
+           'process-detail.step-down-substation.line-protection',
+           'process-detail.converter-station.transformer-protection',
+           'process-detail.converter-station.busbar-protection',
+           'process-detail.converter-station.line-protection',
+           'process-detail.switching-station.busbar-protection',
+           'process-detail.switching-station.line-protection',
+         ]);
+        // 页面只允许联合清单中已登记的二十三项动作；固定闭集禁止页面输入拼接任意场景或内部 Unity 方法。
         const allowedActionIds = new Set([
           'action.scene.overview',
           'action.gas-power.overview',
@@ -1192,6 +1335,17 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
           'action.step-down-substation.overview',
           'action.converter-station.overview',
           'action.switching-station.overview',
+          'action.step-up-substation.transformer-protection',
+          'action.step-up-substation.busbar-protection',
+          'action.step-up-substation.line-protection',
+          'action.step-down-substation.transformer-protection',
+          'action.step-down-substation.busbar-protection',
+          'action.step-down-substation.line-protection',
+          'action.converter-station.transformer-protection',
+          'action.converter-station.busbar-protection',
+          'action.converter-station.line-protection',
+          'action.switching-station.busbar-protection',
+          'action.switching-station.line-protection',
         ]);
         const deviceStates = new Map([
           ['asset.gas-turbine', 'normal'],
@@ -1272,7 +1426,7 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
         }
 
         /**
-         * 仅向当前已协商的嵌入壳发送清单中登记的十二项动作之一，并携带最近稳定上下文版本。
+         * 仅向当前已协商的嵌入壳发送清单中登记的二十三项动作之一，并携带最近稳定上下文版本。
          * 版本不匹配由壳返回明确冲突，页面不会绕过事务直接切换拓扑或调用 Unity 方法。
          */
         function triggerWorkflow(actionId) {
@@ -1363,15 +1517,19 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
             renderDeviceStates();
             refreshPlaybackButtons();
             if (stableViewMode === 'process-detail') {
-              const validDetail = (message.payload.sceneId === 'gas-power' &&
-                message.payload.processDetailId === 'process-detail.gas-power.gas-turbine' ||
-                message.payload.sceneId === 'coal-power' &&
-                message.payload.processDetailId === 'process-detail.coal-power.steam-turbine' ||
-                message.payload.sceneId === 'solar-power' &&
-                message.payload.processDetailId === 'process-detail.solar-power.inverter') &&
-                message.payload.topologyId === undefined;
-              const detailLabel = message.payload.sceneId === 'gas-power' ? '燃气轮机'
-                : message.payload.sceneId === 'coal-power' ? '燃煤汽轮机' : '光伏逆变器';
+               const validDetail = allowedProcessDetailIds.has(message.payload.processDetailId) &&
+                 message.payload.processDetailId.startsWith('process-detail.' + message.payload.sceneId + '.') &&
+                 message.payload.topologyId === undefined;
+               const detailLabelBySceneId = {
+                 'gas-power': '燃气轮机',
+                 'coal-power': '燃煤汽轮机',
+                 'solar-power': '光伏逆变器',
+                 'step-up-substation': '升压站关键环节',
+                 'step-down-substation': '降压站关键环节',
+                 'converter-station': '换流站关键环节',
+                 'switching-station': '开关站关键环节',
+               };
+               const detailLabel = detailLabelBySceneId[message.payload.sceneId] ?? '关键环节';
               status.textContent = validDetail
                 // 第三层协议不携带第二层 topologyId，但前端会按目录中的 topologyDataContextId
                 // 在同一画布加载独立拓扑；自测文案必须与正式界面的双区提交结果一致。
@@ -1921,12 +2079,25 @@ function readGasUnityMappingSummary(manifest) {
  * 联调检查、交付边界和常见启动问题。构建过程、内部自测入口、测试证据及研发任务进度
  * 统一留在工程文档中，避免平台方把内部验证入口或研发状态误当成交付能力。
  */
-function createReadme(releaseConfiguration, sourceNodeCount, sourceEdgeCount) {
+function createReadme(releaseConfiguration, sourceNodeCount, sourceEdgeCount, manifest = null) {
   const sceneId = releaseConfiguration.sceneId ?? 'gas-power'
   const sceneTitle = sceneId === 'coal-power' ? '燃煤' : sceneId === 'solar-power' ? '光伏' : '燃气'
   const sceneTopologyId = `topology.${sceneId}.overview`
   const isLocalTest = releaseConfiguration.packageType === 'local-test'
   const isRuntimeSelfOrigin = releaseConfiguration.addressMode === 'runtime-self-origin'
+  /*
+   * 启动说明必须从同一份发布清单计算数量，不能继续写死旧的燃气三项关键环节。
+   * 这样四个变电场景新增节点或关键环节时，说明文件会随正式清单同步更新，避免
+   * 合作方按过期数字验收而误判发布包不完整。缺少清单参数时保留兼容默认值，供
+   * 仅调用此函数的历史脚本读取说明模板。
+   */
+  const substationSceneIds = new Set(['step-up-substation', 'step-down-substation', 'converter-station', 'switching-station'])
+  const workflowActionCount = manifest?.actions?.length ?? 23
+  const publishedSceneCount = manifest?.scenes?.filter((scene) => scene.supportedActionIds?.length > 0).length ?? 8
+  const substationProcessDetailCount = manifest?.processDetails?.filter((detail) => substationSceneIds.has(detail.sceneId)).length ?? 11
+  const substationSceneNodeCount = manifest?.unitySceneMappings
+    ?.filter((mapping) => substationSceneIds.has(mapping.sceneId))
+    .reduce((total, mapping) => total + mapping.sceneNodeIds.length, 0) ?? 21
   const packagePurpose = isLocalTest ? '本地测试' : releaseConfiguration.packageType === 'partner-integration' ? '合作方联调' : '正式发布'
   const publicEntryUrl = isLocalTest
     ? `${releaseConfiguration.publicOrigin}/`
@@ -1943,8 +2114,8 @@ function createReadme(releaseConfiguration, sourceNodeCount, sourceEdgeCount) {
     ? `
 ## 浏览器手动测试入口
 
-打开同目录的 \`self-test.html\`，不要只打开根入口。页面会先初始化全局沙盘，提供全局总览、燃气、燃煤、风电、光伏、升压站、降压站及三项关键环节共十个动作按钮。
-页面同时提供燃气轮机、燃煤汽轮机和光伏逆变器绑定设备的“正常/故障”切换；每次操作提交包含三个稳定节点的完整状态快照，然后可往返各场景和关键环节观察二维、三维状态投影。进入任一关键环节后，使用“播放”“停止”按钮验收当前模型动态。
+打开同目录的 \`self-test.html\`，不要只打开根入口。页面会先初始化全局沙盘，提供${publishedSceneCount}个已发布场景和${workflowActionCount}个流程动作按钮，覆盖燃气、燃煤、风电、光伏及四个变电场景的总览与关键环节。
+页面同时提供燃气轮机、燃煤汽轮机和光伏逆变器绑定设备的“正常/故障”切换；变电场景的完整正常、告警、故障、离线四态由平台按稳定 \`nodeId\`（节点标识）状态快照验收。进入任一关键环节后，使用“播放”“停止”按钮验收当前模型动态。
 加载失败测试应使用缺少第三层资源的专用内部构建；页面会显示受控错误码并保留上一稳定视图，不向正式协议注入模拟失败参数。
 `
     : ''
@@ -1954,7 +2125,7 @@ function createReadme(releaseConfiguration, sourceNodeCount, sourceEdgeCount) {
       ? `\n服务监听 \`${releaseConfiguration.listenHost}:${releaseConfiguration.port}\`；启动后终端会逐行打印可访问地址：回环地址用于本机验证，非内部 IPv4 地址用于同一局域网的其他电脑。请复制终端列出的实际地址，不要把 \`0.0.0.0\` 当作浏览器地址；地址变化不需要重新构建。直接打开根地址可以独立查看页面；嵌入平台时再附加 \'parentOrigin\'、\'instanceId\' 和 \'protocolVersion\' 查询参数。\n`
     : `\n服务监听 \`${releaseConfiguration.listenHost}:${releaseConfiguration.port}\`；浏览器和平台必须使用公开地址 \`${releaseConfiguration.publicOrigin}/\`，不得使用监听通配地址代替公开地址。\n`
 
-  return `# ${sceneTitle}发电场景与拓扑联调启动说明
+  return `# 电力场景与拓扑联调启动说明
 
 发布标识：${releaseConfiguration.releaseId}
 包类型：${packagePurpose}
@@ -2006,15 +2177,15 @@ ${localSelfTestGuidance}
 
 ## 联调检查
 
-- 页面显示${sceneTitle}发电三维模型。
+- 页面初始显示${sceneTitle}发电三维模型；包内同时登记升压站、降压站、换流站和开关站四个变电三维场景。
 - 页面显示${sceneTitle}总拓扑图，共 ${sourceNodeCount} 个节点、${sourceEdgeCount} 条连线。
 - 页面只有一个三维实例和一个拓扑画布。
-- 燃气轮机、燃煤汽轮机与光伏逆变器关键环节均使用独立模型，并与各自独立二维拓扑保持双区展示；第三层不携带第二层 \`topologyId\`，返回后恢复进入前的业务拓扑、筛选、选择和状态。
-- 燃气轮机四态只更新视觉，动态播放许可由独立 Unity 交互控制；燃煤汽轮机当前未登记播放目标，协议壳不得伪造播放能力或额外网页按钮。
+- ${workflowActionCount} 个流程动作均登记稳定目标场景和关键环节标识；第三层不携带第二层 \`topologyId\`，返回后恢复进入前的业务拓扑、筛选、选择和状态。
+- 四个变电场景共登记 ${substationProcessDetailCount} 个关键环节和 ${substationSceneNodeCount} 个 Unity 场景节点，关键环节资源、命名镜头和状态节点均从发布清单读取。
 - 单击已映射的拓扑节点，三维模型聚焦并显示描边。
 - 单击拓扑空白区域，取消二维选中和三维交互描边。
 - 支持三维全屏、拓扑全屏，以及拓扑缩放、平移和重置。
-- ${sourceNodeCount} 个总览源节点都可上报稳定 \`nodeId\`；燃气轮机与燃煤汽轮机第三层均使用固定关键环节、资源、相机位和状态节点编号。
+- 总览拓扑源节点均可上报稳定 \`nodeId\`；平台只按清单中的显式 \`sceneNodeId\` 建立二维—三维绑定，不按名称或坐标猜测映射。
 ${manifestGuidance}
 
 ## 联调范围
@@ -2022,7 +2193,7 @@ ${manifestGuidance}
 - 本地测试包打开根地址后自动进入${sceneTitle}总览（${sceneTopologyId}）；合作方联调包可脱离平台直接打开查看，嵌入平台后再由平台在握手后发送初始化命令。
 - 外层和 Unity 均使用第二版协议；第一版父页面不能与本包完成握手。
 - 本包只携带不可变结构清单；平台读取 \`nodeId\` 后在平台内部维护真实设备映射，并按 \`nodeId\` 推送完整节点状态快照。
-- ${sourceNodeCount} 个节点均可上报节点双击事件，但当前只有 3 个节点具备已核验三维映射；其余节点只更新二维状态。
+- ${workflowActionCount} 个流程动作和 ${substationProcessDetailCount} 个变电关键环节均已进入发布清单；四个变电场景的 ${substationSceneNodeCount} 个场景节点支持显式绑定、聚焦、清除选择和四态协议联动。
 - 平台只使用根地址并传入父来源、实例标识和协议版本，不得修改包内摘要脚本和 Unity 压缩资源。
 
 ## 启动问题
@@ -2132,15 +2303,16 @@ async function main() {
     await writeFile(path.join(stagingDirectory, 'self-test.html'), createSelfTestPage(manifest.manifestVersion, releaseSceneId), 'utf8')
   }
   await writeFile(path.join(stagingDirectory, 'server.mjs'), createStaticServer(releaseConfiguration.packageType), 'utf8')
-  await writeFile(path.join(stagingDirectory, 'README.md'), createReadme(releaseConfiguration, sourceTopology.nodes.length, sourceTopology.edges.length), 'utf8')
+  // 启动说明直接读取本次生成的完整清单，确保动作、关键环节和四个变电场景节点数量与交付文件一致。
+  await writeFile(path.join(stagingDirectory, 'README.md'), createReadme(releaseConfiguration, sourceTopology.nodes.length, sourceTopology.edges.length, manifest), 'utf8')
   await writeFile(path.join(stagingDirectory, 'release-manifest.json'), `${JSON.stringify({
     releaseId,
     sceneId: releaseSceneId,
     packageType: releaseConfiguration.packageType,
     deploymentMode: releaseConfiguration.packageType === 'local-test' ? 'local-loopback' : 'independent-service-iframe',
     platformArtifactPatchingAllowed: false,
-    // 发布范围按最终清单声明三套已接入总览，以及燃机、汽轮机和逆变器三项关键环节。
-    scope: 'gas-coal-solar-overviews-with-three-verified-process-details',
+    // 发布范围按最终清单声明已发布总览及四个变电场景的十一项关键环节，避免继续沿用旧三项关键环节摘要。
+    scope: 'published-overviews-with-four-substation-scenes-and-eleven-process-details',
     unityReleaseId,
     runtimeIdentity: {
       buildId: unityReleaseId,

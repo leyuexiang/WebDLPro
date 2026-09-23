@@ -17,12 +17,12 @@ MonoBehaviour:
     _unitySceneKey: coal-power
     _scenePath: Assets/Scenes/Business/CoalPower.unity
     _availability: 1
-    _declaredCapabilities: 2031
+    _declaredCapabilities: 2029
   - _sceneId: gas-power
     _unitySceneKey: gas-power
     _scenePath: Assets/Scenes/Business/GasPower.unity
     _availability: 1
-    _declaredCapabilities: 2031
+    _declaredCapabilities: 2029
   - _sceneId: wind-power
     _unitySceneKey: wind-power
     _scenePath: Assets/Scenes/Business/WindPower.unity
@@ -62,9 +62,23 @@ MonoBehaviour:
     _unitySceneKey: step-up-substation
     _scenePath: Assets/Scenes/Business/StepUpSubstation.unity
     _availability: 1
-    _declaredCapabilities: 97
+    # 四个独立变电站已显式绑定 PowerPlantProcessController；877 包含聚焦、清除选择和四态设置/清除能力。
+    _declaredCapabilities: 877
   - _sceneId: step-down-substation
     _unitySceneKey: step-down-substation
     _scenePath: Assets/Scenes/Business/StepDownSubstation.unity
     _availability: 1
-    _declaredCapabilities: 97
+    # 能力声明必须与 SubstationOverviewController.SupportedCapabilities 一致，避免运行时拒绝控制器初始化。
+    _declaredCapabilities: 877
+  - _sceneId: converter-station
+    _unitySceneKey: converter-station
+    _scenePath: Assets/Scenes/Business/ConverterStation.unity
+    _availability: 1
+    # 换流站复用同一控制器适配，不再保留旧的最小浏览能力声明。
+    _declaredCapabilities: 877
+  - _sceneId: switching-station
+    _unitySceneKey: switching-station
+    _scenePath: Assets/Scenes/Business/SwitchingStation.unity
+    _availability: 1
+    # 开关站同样开放节点聚焦、选择清除及正常/告警/故障/离线四态。
+    _declaredCapabilities: 877
