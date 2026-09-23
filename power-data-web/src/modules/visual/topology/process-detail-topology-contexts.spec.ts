@@ -16,6 +16,8 @@ describe('第三层关键环节拓扑数据上下文', () => {
       ['process-detail.step-down-substation.transformer-protection', ['process-detail/protection/transformer-protection/topology.json', 37, 'cebf00fc7b375ff7bff26e29da3d722edc378f825d75813f384825b9a24f5431']],
       ['process-detail.step-down-substation.busbar-protection', ['process-detail/protection/busbar-protection/topology.json', 35, '0b6ed18b48c7039cf3f0079642f1b9d2197c9a2890fd5a28d50839eca7161eb4']],
       ['process-detail.step-down-substation.line-protection', ['process-detail/protection/line-protection/topology.json', 34, 'e635617e600c787442823d0887c79bc581bbb244a63a9dc1c51d732be6b2c08c']],
+      ['process-detail.wind-power.wind-turbine', ['process-detail/wind-power/wind-turbine/topology.json', 40, '246826daf501f12ca1ff88b28179976bf2bcff8837ce50767ba0e7c17fb9525c']],
+      ['process-detail.wind-power.gearbox', ['process-detail/wind-power/gearbox/topology.json', 15, 'bb6ed25e5f473e9276ac9370aaea19fa825ec49467f331e913d4ecd05ed4185a']],
     ])
 
     for (const context of PROCESS_DETAIL_TOPOLOGY_DATA_CONTEXTS.filter((item) => expected.has(item.contextId))) {
@@ -33,7 +35,7 @@ describe('第三层关键环节拓扑数据上下文', () => {
   })
 
   it('四个站类场景共用三份源文件，但十一个上下文和图元绑定完全独立', () => {
-    const protectionContexts = PROCESS_DETAIL_TOPOLOGY_DATA_CONTEXTS.filter((context) => context.renderer === 'manifest-json')
+    const protectionContexts = PROCESS_DETAIL_TOPOLOGY_DATA_CONTEXTS.filter((context) => context.contextId.includes('substation') || context.contextId.includes('converter-station') || context.contextId.includes('switching-station'))
     expect(protectionContexts).toHaveLength(11)
     expect(new Set(protectionContexts.map((context) => context.contextId)).size).toBe(11)
     expect(new Set(protectionContexts.map((context) => context.topologyPath)).size).toBe(3)

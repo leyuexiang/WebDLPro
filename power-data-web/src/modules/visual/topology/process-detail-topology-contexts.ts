@@ -117,6 +117,22 @@ function createProtectionTopologyContexts(): readonly TopologyDataContext[] {
  */
 const PROCESS_DETAIL_TOPOLOGY_CONTEXTS: readonly TopologyDataContext[] = Object.freeze([
   Object.freeze({
+    contextId: 'process-detail.wind-power.wind-turbine',
+    renderer: 'manifest-json',
+    topologyPath: 'process-detail/wind-power/wind-turbine/topology.json',
+    sourceSha256: '246826daf501f12ca1ff88b28179976bf2bcff8837ce50767ba0e7c17fb9525c',
+    expectedPenCount: 40,
+    bindings: Object.freeze([]),
+  }),
+  Object.freeze({
+    contextId: 'process-detail.wind-power.gearbox',
+    renderer: 'manifest-json',
+    topologyPath: 'process-detail/wind-power/gearbox/topology.json',
+    sourceSha256: 'bb6ed25e5f473e9276ac9370aaea19fa825ec49467f331e913d4ecd05ed4185a',
+    expectedPenCount: 15,
+    bindings: Object.freeze([]),
+  }),
+  Object.freeze({
     contextId: 'process-detail.gas-power.gas-turbine',
     renderer: 'gas-v3',
     // 该路径相对于 shell/topology 根目录，由构建后的资源 URL 工具拼接，不包含预览目录前缀。
