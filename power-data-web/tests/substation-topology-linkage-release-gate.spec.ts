@@ -7,6 +7,10 @@ import {
   getProcessDetailTopologyDataContext,
   PROCESS_DETAIL_TOPOLOGY_DATA_CONTEXTS,
 } from '../src/modules/visual/topology/process-detail-topology-contexts'
+import { STEP_UP_SUBSTATION_TOPOLOGY_RUNTIME_BINDINGS } from '../src/modules/visual/topology-preview/step-up-substation-topology-runtime-bindings'
+import { STEP_DOWN_SUBSTATION_TOPOLOGY_RUNTIME_BINDINGS } from '../src/modules/visual/topology-preview/step-down-substation-topology-runtime-bindings'
+import { CONVERTER_STATION_TOPOLOGY_RUNTIME_BINDINGS } from '../src/modules/visual/topology-preview/converter-station-topology-runtime-bindings'
+import { SWITCHING_STATION_TOPOLOGY_RUNTIME_BINDINGS } from '../src/modules/visual/topology-preview/switching-station-topology-runtime-bindings'
 
 const SUBSTATION_SCENE_IDS = [
   'step-up-substation',
@@ -89,5 +93,22 @@ describe('变电第三层拓扑双向联动发布门禁', () => {
     expect(canvasSource).toContain('applyRuntimeSelection')
     expect(canvasSource).toContain('applySelectionVisual')
     expect(canvasSource).toContain('sceneNodeId')
+  })
+
+  it('第二层图元业务节点编号必须与发布清单一致，不能混用 Unity 节点编号', async () => {
+    const manifest = await createConfiguredPowerScenesManifest('substation-topology-binding-id-gate')
+    const expectedByScene = new Map(manifest.topologies
+      .filter((topology) => SUBSTATION_SCENE_IDS.includes(topology.sceneId as typeof SUBSTATION_SCENE_IDS[number]))
+      .map((topology) => [topology.sceneId, new Set(topology.nodes.map((node) => String(node.nodeId)))]))
+    const bindingsByScene = [
+      ['step-up-substation', STEP_UP_SUBSTATION_TOPOLOGY_RUNTIME_BINDINGS],
+      ['step-down-substation', STEP_DOWN_SUBSTATION_TOPOLOGY_RUNTIME_BINDINGS],
+      ['converter-station', CONVERTER_STATION_TOPOLOGY_RUNTIME_BINDINGS],
+      ['switching-station', SWITCHING_STATION_TOPOLOGY_RUNTIME_BINDINGS],
+    ] as const
+    for (const [sceneId, bindings] of bindingsByScene) {
+      const expectedNodeIds = expectedByScene.get(sceneId)!
+      expect(bindings.every((binding) => expectedNodeIds.has(String(binding.nodeId)))).toBe(true)
+    }
   })
 })
