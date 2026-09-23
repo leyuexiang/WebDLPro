@@ -34,6 +34,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '风电拓扑图 JSON 预览' },
   },
   {
+    path: '/wind-process-detail-topology-preview',
+    name: 'wind-process-detail-topology-preview',
+    component: () => import('@/modules/visual/topology-preview/WindProcessDetailTopologyPreview.vue'),
+    meta: { title: '风电关键环节拓扑预览' },
+  },
+  {
     path: '/solar-topology-json-preview',
     name: 'solar-topology-json-preview',
     component: () => import('@/modules/visual/topology-preview/SolarTopologyJsonPreview.vue'),

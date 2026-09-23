@@ -1,6 +1,7 @@
 import type { ManifestTopologyPreviewProfile } from './manifest-topology-preview-profile'
 import { loadWindTopologyPreviewData } from './wind-topology-preview-data'
 import { getWindTopologyTooltipContent } from './wind-topology-tooltip'
+import { loadWindProcessDetailTopologyData } from './wind-process-detail-topology-data'
 import {
   createDefaultWindTopologyFilterSelection,
   formatWindTopologyFilterSelection,
@@ -28,5 +29,6 @@ export const WIND_TOPOLOGY_PREVIEW_PROFILE: ManifestTopologyPreviewProfile = Obj
     selected as ReadonlySet<WindTopologyFilterId>,
   ),
   loadData: (variantId: string, signal?: AbortSignal) => loadWindTopologyPreviewData(variantId as never, signal),
+  loadDataContext: loadWindProcessDetailTopologyData,
   getTooltipContent: getWindTopologyTooltipContent,
 })

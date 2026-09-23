@@ -31,6 +31,8 @@ const props = defineProps<{
   suspended?: boolean
   selectedNodeIds?: readonly ProcessNodeId[]
   selectedRouteIds?: readonly RouteId[]
+  /** 独立预览入口可指定首屏第三层文件，避免画布先提交默认第二层总览。 */
+  initialDataContext?: TopologyDataContext
 }>()
 
 const emit = defineEmits<{
@@ -374,8 +376,12 @@ onMounted(async () => {
   meta2d.on<Meta2dPointerEvent>('click', handleCanvasClick)
   resizeObserver = new ResizeObserver(scheduleCanvasResize)
   resizeObserver.observe(host)
-  const initialVariant = props.profile.resolveVariant(selectedFilterIds.value)
-  if (initialVariant) await switchTopologyVariant(initialVariant)
+  if (props.initialDataContext) {
+    await setTopologyDataContext(props.initialDataContext)
+  } else {
+    const initialVariant = props.profile.resolveVariant(selectedFilterIds.value)
+    if (initialVariant) await switchTopologyVariant(initialVariant)
+  }
 })
 
 /** 隐藏态不持续观察或安排重绘；恢复只重算尺寸，保留当前文件、筛选与唯一画布实例。 */
