@@ -1,0 +1,21 @@
+{
+  "name": "WebDLPro.Unity.EditModeTests",
+  "rootNamespace": "WebDLPro.Unity.Tests",
+  "references": [
+    "WebDLPro.Unity.Runtime"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false,
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ]
+}
