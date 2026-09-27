@@ -1,6 +1,7 @@
 import type { Meta2dData, Pen } from '@meta2d/core'
 import { getTopologySharedPublicAssetUrl } from './topology-shared-assets'
 import { getStepUpSubstationTopologyResourceManifest } from './step-up-substation-topology-manifest'
+import { flattenSubstationTopologyCombines } from './substation-topology-combine-flattener'
 import { applyStepUpSubstationTopologySelectionPolicy } from './step-up-substation-topology-selection'
 import {
   STEP_UP_SUBSTATION_TOPOLOGY_VARIANT_BY_ID,
@@ -109,7 +110,8 @@ export async function loadStepUpSubstationTopologyPreviewData(
 
   const data = cloneTopologyData(sourceData)
   for (const pen of data.pens) localizePenImage(pen, variantId)
-  // 升压站各变体的父子关系仅用于局部标题和背景；保留原层级，选择策略会完全禁用其命中。
+  // 每种筛选文件都拆开全部组合，避免父组合截获图元点击。
+  flattenSubstationTopologyCombines(data.pens, `升压站/${variantId}`)
   applyStepUpSubstationTopologySelectionPolicy(data.pens, variantId)
   // 取消旧编辑器纸张尺寸，让公共画布按原始图元边界适配；不修改坐标、层级或连线路径。
   data.width = undefined

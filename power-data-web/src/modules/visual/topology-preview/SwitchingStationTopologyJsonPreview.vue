@@ -7,7 +7,7 @@ import type { TopologyDataContext } from '@/modules/visual/topology/topology-run
 
 /** 正式面板提供全屏祖先和暂停信号；独立路由省略两项即可复用同一画布。 */
 const props = defineProps<{ fullscreenTarget?: HTMLElement | null; suspended?: boolean; selectedNodeIds?: readonly ProcessNodeId[]; selectedRouteIds?: readonly RouteId[] }>()
-const emit = defineEmits<{ selectNode: [nodeId: ProcessNodeId]; clearSelection: []; readyChange: [ready: boolean] }>()
+const emit = defineEmits<{ selectNode: [nodeId: ProcessNodeId | undefined]; clearSelection: []; readyChange: [ready: boolean] }>()
 
 const preview = ref<InstanceType<typeof ManifestTopologyJsonPreview> | null>(null)
 

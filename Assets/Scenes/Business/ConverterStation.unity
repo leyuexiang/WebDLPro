@@ -1178,7 +1178,7 @@ MonoBehaviour:
     - {fileID: 2821806609326625534}
     - {fileID: 4517208510033999381}
     - {fileID: 5213427194630524151}
-    _topologyOnlySelection: 1
+    _topologyOnlySelection: 0
     _focusCameraPose: {fileID: 7306233}
   - _id: unit.converter-measurement.control
     _targets:

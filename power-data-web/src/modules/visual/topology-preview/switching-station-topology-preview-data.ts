@@ -1,9 +1,9 @@
 import type { Meta2dData, Pen } from '@meta2d/core'
 import { getTopologySharedPublicAssetUrl } from './topology-shared-assets'
 import { getSwitchingStationTopologyResourceManifest } from './switching-station-topology-manifest'
+import { flattenSubstationTopologyCombines } from './substation-topology-combine-flattener'
 import {
   applySwitchingStationTopologySelectionPolicy,
-  removeSwitchingStationFullTopologyRootCombine,
 } from './switching-station-topology-selection'
 import {
   SWITCHING_STATION_TOPOLOGY_VARIANT_BY_ID,
@@ -112,8 +112,8 @@ export async function loadSwitchingStationTopologyPreviewData(
 
   const data = cloneTopologyData(sourceData)
   for (const pen of data.pens) localizePenImage(pen, variantId)
-  // 三层完整图先删除覆盖全图的顶层组合，避免点击任意子图元时选中整张拓扑。
-  removeSwitchingStationFullTopologyRootCombine(data.pens, variantId)
+  // 每种筛选文件都拆开全部组合，避免父组合截获图元点击。
+  flattenSubstationTopologyCombines(data.pens, `开关站/${variantId}`)
   applySwitchingStationTopologySelectionPolicy(data.pens, variantId)
   // 取消旧编辑器纸张尺寸，让公共画布按原始图元边界适配；不修改坐标、层级或连线路径。
   data.width = undefined

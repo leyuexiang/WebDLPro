@@ -12,6 +12,7 @@ import {
   STEP_UP_SUBSTATION_TOPOLOGY_SELECTABLE_LOCK,
 } from './step-up-substation-topology-selection'
 import { STEP_UP_SUBSTATION_TOPOLOGY_VARIANTS } from './step-up-substation-topology-variant-manifest'
+import { getSubstationTopologySelectablePenIds } from './substation-topology-node-selection'
 
 const topologyRoot = resolve(process.cwd(), 'public/topology/step-up-substation-json-preview')
 const originalFetch = globalThis.fetch
@@ -36,8 +37,10 @@ describe('升压站拓扑独立数据与公共资源', () => {
     for (const variant of STEP_UP_SUBSTATION_TOPOLOGY_VARIANTS) {
       const source = JSON.parse(readFileSync(resolve(topologyRoot, variant.topologyPath), 'utf8')) as Meta2dData
       const data = await loadStepUpSubstationTopologyPreviewData(variant.id)
-      // 升压站只有局部标题/背景组合，不存在需要展平的全图选择组合，运行时应完整保留源图元。
-      expect(data.pens).toHaveLength(variant.expectedPenCount)
+      const sourceCombineCount = source.pens.filter((pen) => pen.name === 'combine').length
+      expect(data.pens).toHaveLength(variant.expectedPenCount - sourceCombineCount)
+      expect(data.pens.some((pen) => pen.name === 'combine')).toBe(false)
+      expect(data.pens.every((pen) => !pen.parentId)).toBe(true)
       expect(data.scale).toBe(source.scale)
       expect(data.background).toBe(source.background)
       expect(data.width).toBeUndefined()
@@ -71,12 +74,12 @@ describe('升压站拓扑独立数据与公共资源', () => {
     }
   })
 
-  it('所有变体的设备与工艺节点均可独立选择，父组合只包含不可命中的局部背景', async () => {
+  it('所有筛选文件拆除全部组合，设备与工艺节点仍按清单开放选择', async () => {
     installTopologyFetch()
     for (const variant of STEP_UP_SUBSTATION_TOPOLOGY_VARIANTS) {
       const data = await loadStepUpSubstationTopologyPreviewData(variant.id)
       const manifest = getStepUpSubstationTopologyResourceManifest(variant.id)
-      const selectableIds = new Set([...manifest.devicePenIds, ...manifest.processNodePenIds])
+      const selectableIds = getSubstationTopologySelectablePenIds(data.pens, manifest)
       const pensById = new Map(data.pens.map((pen) => [pen.id, pen]))
 
       for (const penId of selectableIds) {

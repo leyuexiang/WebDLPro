@@ -12,6 +12,7 @@ import {
   SWITCHING_STATION_TOPOLOGY_SELECTABLE_LOCK,
 } from './switching-station-topology-selection'
 import { SWITCHING_STATION_TOPOLOGY_VARIANTS } from './switching-station-topology-variant-manifest'
+import { getSubstationTopologySelectablePenIds } from './substation-topology-node-selection'
 
 const topologyRoot = resolve(process.cwd(), 'public/topology/switching-station-json-preview')
 const originalFetch = globalThis.fetch
@@ -36,8 +37,10 @@ describe('开关站拓扑独立数据与公共资源', () => {
     for (const variant of SWITCHING_STATION_TOPOLOGY_VARIANTS) {
       const source = JSON.parse(readFileSync(resolve(topologyRoot, variant.topologyPath), 'utf8')) as Meta2dData
       const data = await loadSwitchingStationTopologyPreviewData(variant.id)
-      // 三层完整图在通过源数据数量校验后会移除一个覆盖全图的顶层组合。
-      expect(data.pens).toHaveLength(variant.expectedPenCount - (variant.id === 'network-business-key-process' ? 1 : 0))
+      const sourceCombineCount = source.pens.filter((pen) => pen.name === 'combine').length
+      expect(data.pens).toHaveLength(variant.expectedPenCount - sourceCombineCount)
+      expect(data.pens.some((pen) => pen.name === 'combine')).toBe(false)
+      expect(data.pens.every((pen) => !pen.parentId)).toBe(true)
       expect(data.scale).toBe(source.scale)
       expect(data.background).toBe(source.background)
       expect(data.width).toBeUndefined()
@@ -81,7 +84,7 @@ describe('开关站拓扑独立数据与公共资源', () => {
     const sourceRoot = source.pens.find((pen) => pen.name === 'combine' && !pen.parentId)!
 
     expect(loadedById.has(sourceRoot.id!)).toBe(false)
-    for (const sourcePen of source.pens.filter((pen) => pen.parentId === sourceRoot.id)) {
+    for (const sourcePen of source.pens.filter((pen) => pen.parentId === sourceRoot.id && pen.name !== 'combine')) {
       const loadedPen = loadedById.get(sourcePen.id!)!
       // 完整图的直接子图元包含设备、连线、背景和嵌套标题组，展平后均不得改变视觉位置。
       expect(loadedPen.parentId).toBeUndefined()
@@ -92,7 +95,7 @@ describe('开关站拓扑独立数据与公共资源', () => {
     }
 
     const manifest = getSwitchingStationTopologyResourceManifest(variantId)
-    const selectableIds = new Set([...manifest.devicePenIds, ...manifest.processNodePenIds])
+    const selectableIds = getSubstationTopologySelectablePenIds(data.pens, manifest)
     const backgroundPens = data.pens.filter((pen) => !selectableIds.has(pen.id!))
     expect(backgroundPens.every((pen) => pen.locked === SWITCHING_STATION_TOPOLOGY_BACKGROUND_LOCK)).toBe(true)
   })

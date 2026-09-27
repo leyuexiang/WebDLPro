@@ -29,7 +29,8 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  selectNode: [nodeId: ProcessNodeId]
+  /** 未登记业务编号的二维图元仍提交同一选择事件，以便统一清理三维聚焦。 */
+  selectNode: [nodeId: ProcessNodeId | undefined]
   /** 面板只透传空白取消意图，不在展示层自行修改选择快照。 */
   clearSelection: []
   /** 双击只转发稳定二维节点标识；正式设备事件由上层运行时按清单明确映射。 */

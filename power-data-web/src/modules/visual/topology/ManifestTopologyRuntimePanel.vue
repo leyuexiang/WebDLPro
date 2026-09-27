@@ -105,11 +105,23 @@ function getTopologyRuntime(): TopologyRuntime | undefined {
  * 单击先经唯一协调器提交选择，再同步当前活动画布；切换中、非活动拓扑和重复选择都会被拒绝或忽略。
  * 路由只从当前拓扑的已声明连线收集，复杂度为当前边数；二维选择提交后才异步请求已协商的三维聚焦。
  */
-function handleSelectNode(processNodeId: string): void {
+function handleSelectNode(processNodeId: string | undefined): void {
   const runtime = topologyRuntime
   const activeTopology = runtime?.getActiveTopology()
   const facade = visualizationCoordinatorFacade
   if (!runtime || !activeTopology || !facade) return
+
+  if (processNodeId === undefined) {
+    const snapshot = facade.getSnapshot()
+    const context = snapshot.stableContext
+    // 无业务编号的图元已经由画布本地选中；只沿统一聚焦协调器清除三维残留，不回写空二维选择。
+    if (snapshot.runtimeStatus !== 'ready' || !context || !('topologyId' in context) || context.sceneId !== activeTopology.sceneId || context.topologyId !== activeTopology.topologyId) return
+    void topologySelectionFocusCoordinator.requestFocus({
+      source: 'topology',
+      selectionId: createTopologySelectionId(),
+    })
+    return
+  }
 
   const node = activeTopology.topology.nodes.find((item) => String(item.nodeId) === processNodeId)
   if (!node) return
