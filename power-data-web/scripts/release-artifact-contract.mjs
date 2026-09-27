@@ -30,7 +30,7 @@ const requiredUnityEventCapabilities = Object.freeze([
   'ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'selectionCleared', 'disposed',
 ])
 /**
- * 当前合作方以动作摘要生成全部可绑定入口，因此二十三项公开动作属于发布契约本身，不能只做两份清单的相对一致性检查。
+ * 当前合作方以动作摘要生成全部可绑定入口，因此二十五项公开动作属于发布契约本身，不能只做两份清单的相对一致性检查。
  * 目标、视图和三维动作类型一并固定，防止生成器与摘要同时回退，或把普通场景导航误写成未实现的流程能力。
  */
 const requiredPublishedActionContracts = Object.freeze([
@@ -40,6 +40,8 @@ const requiredPublishedActionContracts = Object.freeze([
   { actionId: 'action.coal-power.overview', targetSceneId: 'coal-power', targetViewMode: 'business', targetTopologyId: 'topology.coal-power.overview', unityActionType: 'resetScene' },
   { actionId: 'action.coal-power.steam-turbine', targetSceneId: 'coal-power', targetViewMode: 'process-detail', processDetailId: 'process-detail.coal-power.steam-turbine', unityActionType: 'enterProcessDetail' },
   { actionId: 'action.wind-power.overview', targetSceneId: 'wind-power', targetViewMode: 'business', targetTopologyId: 'topology.wind-power.overview', unityActionType: 'none' },
+  { actionId: 'action.wind-power.wind-turbine', targetSceneId: 'wind-power', targetViewMode: 'process-detail', processDetailId: 'process-detail.wind-power.wind-turbine', unityActionType: 'enterProcessDetail' },
+  { actionId: 'action.wind-power.gearbox', targetSceneId: 'wind-power', targetViewMode: 'process-detail', processDetailId: 'process-detail.wind-power.gearbox', unityActionType: 'enterProcessDetail' },
   { actionId: 'action.solar-power.overview', targetSceneId: 'solar-power', targetViewMode: 'business', targetTopologyId: 'topology.solar-power.overview', unityActionType: 'none' },
   { actionId: 'action.solar-power.inverter', targetSceneId: 'solar-power', targetViewMode: 'process-detail', processDetailId: 'process-detail.solar-power.inverter', unityActionType: 'enterProcessDetail' },
   { actionId: 'action.step-up-substation.overview', targetSceneId: 'step-up-substation', targetViewMode: 'business', targetTopologyId: 'topology.step-up-substation.overview', unityActionType: 'resetScene' },
@@ -58,10 +60,7 @@ const requiredPublishedActionContracts = Object.freeze([
   { actionId: 'action.switching-station.busbar-protection', targetSceneId: 'switching-station', targetViewMode: 'process-detail', processDetailId: 'process-detail.switching-station.busbar-protection', unityActionType: 'enterProcessDetail' },
   { actionId: 'action.switching-station.line-protection', targetSceneId: 'switching-station', targetViewMode: 'process-detail', processDetailId: 'process-detail.switching-station.line-protection', unityActionType: 'enterProcessDetail' },
 ])
-const navigationOnlySceneIds = Object.freeze([
-  // 风电当前只交付总览导航；开关站已交付母线保护和线路保护。
-  'wind-power',
-])
+const navigationOnlySceneIds = Object.freeze([])
 const deviceIdentifierSuffixes = new Set(['id', 'ids'])
 const deviceMappingSuffixes = new Set(['mapping', 'mappings'])
 const bindingMetadataSuffixes = new Set(['count', 'revision'])
@@ -256,7 +255,7 @@ export async function validateReleaseArtifact(rootDirectory) {
 
   /**
    * 构建工具会把 public/topology 原样复制到 shell/topology。门禁直接检查最终目录，确保清单登记的
-   * 三项第三层上下文都有完整、未篡改且不夹带资源副本的独立二维拓扑，而非只相信源码审计结果。
+   * 十六项第三层上下文都有完整、未篡改且不夹带资源副本的独立二维拓扑，而非只相信源码审计结果。
    */
   const processDetailTopologyIssues = await validateProcessDetailTopologies(path.join(rootDirectory, 'shell', 'topology'))
   issues.push(...processDetailTopologyIssues.map(formatProcessDetailTopologyIssue))
@@ -367,7 +366,7 @@ export async function validateReleaseArtifact(rootDirectory) {
     const requiredActionIds = new Set(requiredPublishedActionContracts.map((contract) => contract.actionId))
     if (publishedActions.length !== requiredPublishedActionContracts.length || actionById.size !== requiredPublishedActionContracts.length ||
         [...actionById.keys()].some((actionId) => !requiredActionIds.has(actionId)) || hasInvalidPublishedAction) {
-       issues.push('结构清单必须完整发布当前二十三项公开动作及其固定目标，禁止两份清单同时回退或伪造三维流程能力。')
+       issues.push('结构清单必须完整发布当前二十五项公开动作及其固定目标，禁止两份清单同时回退或伪造三维流程能力。')
     }
 
     /**
@@ -418,9 +417,17 @@ export async function validateReleaseArtifact(rootDirectory) {
     if (hasInvalidNavigationScene || processDetails.some((detail) => navigationOnlySceneIds.includes(detail?.sceneId))) {
       issues.push('风电只能发布无三维流程副作用的总览导航；开关站已发布母线保护和线路保护，不能按导航-only场景拒绝其第三层目录。')
     }
+    const windTurbineDetail = processDetails.find((detail) => detail?.processDetailId === 'process-detail.wind-power.wind-turbine')
+    const windGearboxDetail = processDetails.find((detail) => detail?.processDetailId === 'process-detail.wind-power.gearbox')
     const gasTurbineDetail = processDetails.find((detail) => detail?.processDetailId === 'process-detail.gas-power.gas-turbine')
     const coalSteamTurbineDetail = processDetails.find((detail) => detail?.processDetailId === 'process-detail.coal-power.steam-turbine')
     const solarInverterDetail = processDetails.find((detail) => detail?.processDetailId === 'process-detail.solar-power.inverter')
+    const windTurbineAction = Array.isArray(topologyManifest.actions)
+      ? topologyManifest.actions.find((action) => action?.actionId === 'action.wind-power.wind-turbine')
+      : undefined
+    const windGearboxAction = Array.isArray(topologyManifest.actions)
+      ? topologyManifest.actions.find((action) => action?.actionId === 'action.wind-power.gearbox')
+      : undefined
     const gasTurbineAction = Array.isArray(topologyManifest.actions)
       ? topologyManifest.actions.find((action) => action?.actionId === 'action.gas-power.gas-turbine')
       : undefined
@@ -436,7 +443,19 @@ export async function validateReleaseArtifact(rootDirectory) {
     const coalMapping = Array.isArray(topologyManifest.unitySceneMappings)
       ? topologyManifest.unitySceneMappings.find((mapping) => mapping?.sceneId === 'coal-power')
       : undefined
-    if (processDetails.length !== 14 || !gasTurbineDetail ||
+    if (processDetails.length !== 16 || !windTurbineDetail ||
+        windTurbineDetail.sceneId !== 'wind-power' || windTurbineDetail.processId !== 'wind-power-generation' ||
+        windTurbineDetail.stepId !== 'wind-turbine' ||
+        windTurbineDetail.resourceId !== 'process-detail-resource.wind-power.wind-turbine' ||
+        windTurbineDetail.cameraPoseId !== 'camera-pose.wind-power.wind-turbine' ||
+        windTurbineDetail.stateNodeId !== 'node.wind-turbine' ||
+        windTurbineDetail.topologyDataContextId !== 'process-detail.wind-power.wind-turbine' || !windGearboxDetail ||
+        windGearboxDetail.sceneId !== 'wind-power' || windGearboxDetail.processId !== 'wind-power-generation' ||
+        windGearboxDetail.stepId !== 'gearbox' ||
+        windGearboxDetail.resourceId !== 'process-detail-resource.wind-power.gearbox' ||
+        windGearboxDetail.cameraPoseId !== 'camera-pose.wind-power.gearbox' ||
+        windGearboxDetail.stateNodeId !== 'node.wind-gearbox' ||
+        windGearboxDetail.topologyDataContextId !== 'process-detail.wind-power.gearbox' || !gasTurbineDetail ||
         gasTurbineDetail.sceneId !== 'gas-power' || gasTurbineDetail.processId !== 'gas-power-generation' ||
         gasTurbineDetail.stepId !== 'gas-turbine' ||
         gasTurbineDetail.resourceId !== 'process-detail-resource.gas-power.gas-turbine' ||
@@ -455,7 +474,7 @@ export async function validateReleaseArtifact(rootDirectory) {
         solarInverterDetail.cameraPoseId !== 'camera-pose.solar-power.inverter' ||
         solarInverterDetail.stateNodeId !== 'node.solar-inverter' ||
         solarInverterDetail.topologyDataContextId !== 'process-detail.solar-power.inverter') {
-      issues.push('结构清单必须发布三项既有第三层目录、三个变电场景各三项保护关键环节及开关站两项保护关键环节，共十四项。')
+      issues.push('结构清单必须发布风电两项控制模拟、既有三项第三层目录、三个变电场景各三项保护关键环节及开关站两项保护关键环节，共十六项。')
     }
     const expectedSubstationDetails = [
       ['step-up-substation', 'transformer-protection', 'node.step-up-transformer'],
@@ -480,6 +499,16 @@ export async function validateReleaseArtifact(rootDirectory) {
     })
     if (hasInvalidSubstationDetail) {
       issues.push('四个变电站类场景的十一项保护关键环节必须同时声明资源、相机位、状态节点和拓扑上下文。')
+    }
+    if (!windTurbineAction || windTurbineAction.targetViewMode !== 'process-detail' ||
+        windTurbineAction.processDetailId !== 'process-detail.wind-power.wind-turbine' ||
+        Object.prototype.hasOwnProperty.call(windTurbineAction, 'targetTopologyId') ||
+        windTurbineAction.unityAction?.type !== 'enterProcessDetail' ||
+        !windGearboxAction || windGearboxAction.targetViewMode !== 'process-detail' ||
+        windGearboxAction.processDetailId !== 'process-detail.wind-power.gearbox' ||
+        Object.prototype.hasOwnProperty.call(windGearboxAction, 'targetTopologyId') ||
+        windGearboxAction.unityAction?.type !== 'enterProcessDetail') {
+      issues.push('风电必须发布风机控制模拟和齿轮箱控制模拟两个并列第三层动作；偏航系统控制模拟尚未具备Prefab，不得发布占位动作。')
     }
     if (!gasTurbineAction || gasTurbineAction.targetViewMode !== 'process-detail' ||
         gasTurbineAction.processDetailId !== 'process-detail.gas-power.gas-turbine' ||

@@ -229,6 +229,33 @@ const coalProcessDetails = Object.freeze([
   }),
 ])
 
+/**
+ * 风电当前已完成两个并列的第三层控制模拟：风机和齿轮箱。
+ * 偏航系统控制模拟尚未提供 Prefab，因此不创建目录占位、不发布动作。
+ */
+const windProcessDetails = Object.freeze([
+  Object.freeze({
+    sceneId: 'wind-power',
+    processId: 'wind-power-generation',
+    stepId: 'wind-turbine',
+    processDetailId: 'process-detail.wind-power.wind-turbine',
+    resourceId: 'process-detail-resource.wind-power.wind-turbine',
+    cameraPoseId: 'camera-pose.wind-power.wind-turbine',
+    stateNodeId: 'node.wind-turbine',
+    topologyDataContextId: 'process-detail.wind-power.wind-turbine',
+  }),
+  Object.freeze({
+    sceneId: 'wind-power',
+    processId: 'wind-power-generation',
+    stepId: 'gearbox',
+    processDetailId: 'process-detail.wind-power.gearbox',
+    resourceId: 'process-detail-resource.wind-power.gearbox',
+    cameraPoseId: 'camera-pose.wind-power.gearbox',
+    stateNodeId: 'node.wind-gearbox',
+    topologyDataContextId: 'process-detail.wind-power.gearbox',
+  }),
+])
+
 /** 光伏逆变器已具备正式预制体、相机位、故障状态节点和独立二维数据，按稳定编号登记第三层目录。 */
 const solarProcessDetails = Object.freeze([
   Object.freeze({
@@ -971,7 +998,7 @@ export async function createCoalPowerManifest(releaseId) {
  * 生成同时承载燃气、燃煤真实配置的原子结构清单。
  *
  * 两个独立清单生成器继续保留为场景专项回归夹具；正式发布改用本函数一次装配两张真实总览拓扑、
- * 七个受控导航动作、三项已核验第三层动作和十八组三维映射。initialSceneId（初始场景标识）只决定当前入口使用的运行时别名，
+ * 七个受控导航动作、五项已核验第三层动作和二十组三维映射。initialSceneId（初始场景标识）只决定当前入口使用的运行时别名，
  * 不再裁剪另一场景内容，因此同一 Unity 实例可在燃气、燃煤之间往返并保持双向选中。
  */
 export async function createConfiguredPowerScenesManifest(releaseId, initialSceneId = 'gas-power') {
@@ -1093,6 +1120,17 @@ const addedSceneNavigations = [
     failurePolicy: 'keep-current-context',
     configVersion: manifestVersion,
   }))
+  const windProcessDetailActions = windProcessDetails.map((detail) => ({
+    actionId: `action.${detail.sceneId}.${detail.stepId}`,
+    title: detail.stepId === 'wind-turbine' ? '进入风机控制模拟' : '进入齿轮箱控制模拟',
+    targetSceneId: detail.sceneId,
+    targetViewMode: 'process-detail',
+    processDetailId: detail.processDetailId,
+    allowedParameters: [],
+    unityAction: { type: 'enterProcessDetail', processDetailId: detail.processDetailId },
+    failurePolicy: 'keep-current-context',
+    configVersion: manifestVersion,
+  }))
   const actions = [
     {
       actionId: 'action.scene.overview',
@@ -1118,10 +1156,11 @@ const addedSceneNavigations = [
       failurePolicy: 'keep-current-context',
       configVersion: manifestVersion,
     })),
+    ...windProcessDetailActions,
     solarProcessDetailAction,
     ...substationProtectionProcessDetailActions,
   ].map((action) => ({ ...action, configVersion: manifestVersion }))
-  const processDetails = [...gasManifest.processDetails, ...coalManifest.processDetails, ...solarProcessDetails, ...substationProtectionProcessDetails]
+  const processDetails = [...gasManifest.processDetails, ...coalManifest.processDetails, ...windProcessDetails, ...solarProcessDetails, ...substationProtectionProcessDetails]
     .map((detail) => ({ ...detail }))
   for (const navigation of addedSceneNavigations) {
     const { sceneId } = navigation
@@ -1132,13 +1171,15 @@ const addedSceneNavigations = [
       scene.resourceVersion = `resource.${unityReleaseId}.${sceneId}`
       scene.defaultTopologyId = `topology.${sceneId}.overview`
       scene.topologyIds = [scene.defaultTopologyId]
-      // 光伏开放逆变器第三层；三个变电场景开放三项保护环节，开关站开放母线保护和线路保护。
+      // 风电开放两个并列控制模拟，光伏开放逆变器，变电场景开放保护关键环节。
       const protectionActionIds = substationProtectionProcessDetailActions
         .filter((action) => action.targetSceneId === sceneId)
         .map((action) => action.actionId)
-      scene.supportedActionIds = sceneId === 'solar-power'
-        ? [navigation.actionId, solarProcessDetailAction.actionId]
-        : [navigation.actionId, ...protectionActionIds]
+      scene.supportedActionIds = sceneId === 'wind-power'
+        ? [navigation.actionId, ...windProcessDetailActions.map((action) => action.actionId)]
+        : sceneId === 'solar-power'
+          ? [navigation.actionId, solarProcessDetailAction.actionId]
+          : [navigation.actionId, ...protectionActionIds]
     }
     const topologyId = `topology.${sceneId}.overview`
     const existingTopologyIndex = topologies.findIndex((item) => item.topologyId === topologyId)
@@ -1159,16 +1200,18 @@ const addedSceneNavigations = [
     if (!coalMapping) throw new Error('燃煤 Unity 映射缺失，无法生成联合清单。')
     return { ...coalMapping }
   })
-  // 光伏发布两个已核验三维节点；四个场景均不登记未实现的工艺步骤，避免能力清单与控制器不一致。
+  // 风电发布两个已核验第三层节点；偏航系统尚无 Prefab，不登记未实现能力。
   for (const sceneId of ['wind-power', 'solar-power', 'step-up-substation', 'step-down-substation', 'converter-station', 'switching-station']) {
     const mapping = unitySceneMappings.find((item) => item.sceneId === sceneId)
     if (mapping) {
       mapping.mappingVersion = unitySceneMappingVersion
-      mapping.sceneNodeIds = sceneId === 'solar-power'
-        ? [...verifiedSolarSceneNodeIdByTopologyNodeId.values()]
-        : (stationTopologyBySceneId.get(sceneId)?.nodes ?? []).map((node) => node.sceneNodeId)
+      mapping.sceneNodeIds = sceneId === 'wind-power'
+        ? ['node.wind-turbine', 'node.wind-gearbox']
+        : sceneId === 'solar-power'
+          ? [...verifiedSolarSceneNodeIdByTopologyNodeId.values()]
+          : (stationTopologyBySceneId.get(sceneId)?.nodes ?? []).map((node) => node.sceneNodeId)
       mapping.routeIds = []
-    } else unitySceneMappings.push({ sceneId, mappingVersion: unitySceneMappingVersion, sceneNodeIds: sceneId === 'solar-power' ? [...verifiedSolarSceneNodeIdByTopologyNodeId.values()] : (stationTopologyBySceneId.get(sceneId)?.nodes ?? []).map((node) => node.sceneNodeId), routeIds: [] })
+    } else unitySceneMappings.push({ sceneId, mappingVersion: unitySceneMappingVersion, sceneNodeIds: sceneId === 'wind-power' ? ['node.wind-turbine', 'node.wind-gearbox'] : sceneId === 'solar-power' ? [...verifiedSolarSceneNodeIdByTopologyNodeId.values()] : (stationTopologyBySceneId.get(sceneId)?.nodes ?? []).map((node) => node.sceneNodeId), routeIds: [] })
   }
 
   return {
@@ -1186,7 +1229,7 @@ const addedSceneNavigations = [
 }
 
 /**
- * 二十三项公开动作由全局、六个业务总览、四个变电场景保护环节和三个发电关键环节组成。
+ * 二十五项公开动作由全局、六个业务总览、两个风电控制模拟、四个变电场景保护环节和三个发电关键环节组成。
  * 页面中的状态按钮只通过第二版外层协议提交完整设备状态快照；它们不直连 Unity，也不伪造
  * 拓扑图元。每次提交同时携带燃气轮机和燃煤汽轮机两个 nodeId，确保切换场景或层级后仍能观察
  * 同一份权威状态在二维拓扑、沙盘和关键环节模型中的投影结果。
@@ -1304,8 +1347,10 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
         const commandButtons = [...actionButtons, ...deviceStateButtons];
          // 仅用于校验新增场景返回的稳定视图；实际跳转与合作方一致，全部通过动作标识触发。
          const allowedSceneIds = new Set(['wind-power', 'solar-power', 'step-up-substation', 'step-down-substation', 'converter-station', 'switching-station']);
-         // 第三层稳定视图必须命中联合清单中的十四个关键环节，不能只校验燃气、燃煤和光伏旧入口。
+         // 第三层稳定视图必须命中联合清单中的十六个关键环节；风电当前开放风机和齿轮箱两个并列控制模拟。
          const allowedProcessDetailIds = new Set([
+           'process-detail.wind-power.wind-turbine',
+           'process-detail.wind-power.gearbox',
            'process-detail.gas-power.gas-turbine',
            'process-detail.coal-power.steam-turbine',
            'process-detail.solar-power.inverter',
@@ -1321,7 +1366,7 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
            'process-detail.switching-station.busbar-protection',
            'process-detail.switching-station.line-protection',
          ]);
-        // 页面只允许联合清单中已登记的二十三项动作；固定闭集禁止页面输入拼接任意场景或内部 Unity 方法。
+        // 页面只允许联合清单中已登记的二十五项动作；固定闭集禁止页面输入拼接任意场景或内部 Unity 方法。
         const allowedActionIds = new Set([
           'action.scene.overview',
           'action.gas-power.overview',
@@ -1329,6 +1374,8 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
           'action.coal-power.overview',
           'action.coal-power.steam-turbine',
           'action.wind-power.overview',
+          'action.wind-power.wind-turbine',
+          'action.wind-power.gearbox',
           'action.solar-power.overview',
           'action.solar-power.inverter',
           'action.step-up-substation.overview',
@@ -1426,7 +1473,7 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
         }
 
         /**
-         * 仅向当前已协商的嵌入壳发送清单中登记的二十三项动作之一，并携带最近稳定上下文版本。
+         * 仅向当前已协商的嵌入壳发送清单中登记的二十五项动作之一，并携带最近稳定上下文版本。
          * 版本不匹配由壳返回明确冲突，页面不会绕过事务直接切换拓扑或调用 Unity 方法。
          */
         function triggerWorkflow(actionId) {
@@ -2092,7 +2139,7 @@ function createReadme(releaseConfiguration, sourceNodeCount, sourceEdgeCount, ma
    * 仅调用此函数的历史脚本读取说明模板。
    */
   const substationSceneIds = new Set(['step-up-substation', 'step-down-substation', 'converter-station', 'switching-station'])
-  const workflowActionCount = manifest?.actions?.length ?? 23
+  const workflowActionCount = manifest?.actions?.length ?? 25
   const publishedSceneCount = manifest?.scenes?.filter((scene) => scene.supportedActionIds?.length > 0).length ?? 8
   const substationProcessDetailCount = manifest?.processDetails?.filter((detail) => substationSceneIds.has(detail.sceneId)).length ?? 11
   const substationSceneNodeCount = manifest?.unitySceneMappings

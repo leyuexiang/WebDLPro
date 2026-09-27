@@ -195,3 +195,29 @@ MonoBehaviour:
     _availability: 1
     _editorPrefab: {fileID: 8926689273709824047, guid: ef6743025b33f754891603cca5777ebd,
       type: 3}
+  - _sceneId: wind-power
+    _processId: wind-power-generation
+    _stepId: gearbox
+    _processDetailId: process-detail.wind-power.gearbox
+    _resourceId: process-detail-resource.wind-power.gearbox
+    _cameraPoseId: camera-pose.wind-power.gearbox
+    _stateNodeIds:
+    - node.wind-gearbox
+    _dynamicTargetIds:
+    - node.wind-gearbox
+    _availability: 1
+    _editorPrefab: {fileID: 9218331250252884034, guid: 4c8bc2cae860ae647bbc8aca5aa59d53,
+      type: 3}
+  - _sceneId: wind-power
+    _processId: wind-power-generation
+    _stepId: wind-turbine
+    _processDetailId: process-detail.wind-power.wind-turbine
+    _resourceId: process-detail-resource.wind-power.wind-turbine
+    _cameraPoseId: camera-pose.wind-power.wind-turbine
+    _stateNodeIds:
+    - node.wind-turbine
+    _dynamicTargetIds:
+    - node.wind-turbine
+    _availability: 1
+    _editorPrefab: {fileID: 5009747703228781346, guid: d0c2932d87fac754bac3a01f04860bf8,
+      type: 3}

@@ -53,7 +53,7 @@ function readManifestBaseTitle(title: string): string {
 }
 
 describe('燃气、燃煤与光伏联合场景清单', () => {
-  it('在同一原子清单中装配三场景总览和十四项已核验第三层', async () => {
+  it('在同一原子清单中装配三场景总览和十六项已核验第三层', async () => {
     const manifest = await createConfiguredPowerScenesManifest('dual-selection-contract', 'coal-power')
 
     expect(validateSceneTopologyManifest(manifest)).toEqual([])
@@ -63,7 +63,7 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
     expect(manifest.actions.filter((action) => action.targetSceneId === 'gas-power')).toHaveLength(2)
     expect(manifest.actions.filter((action) => action.targetSceneId === 'coal-power')).toHaveLength(2)
     expect(manifest.actions.filter((action) => action.targetSceneId === 'solar-power')).toHaveLength(2)
-    expect(manifest.actions).toHaveLength(23)
+    expect(manifest.actions).toHaveLength(25)
     expect(manifest.actions.find((action) => action.actionId === 'action.scene.overview')).toEqual({
       actionId: 'action.scene.overview',
       title: '返回全局总览',
@@ -76,7 +76,7 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
     })
     // 新版产品范围取消流程子图和下钻；联合清单必须发布空的下钻集合，避免旧入口被协议直接调用。
     expect(manifest.drilldowns).toEqual([])
-    expect(manifest.processDetails.slice(0, 3)).toEqual([{
+    expect(manifest.processDetails.filter((detail) => ['gas-power', 'coal-power', 'wind-power'].includes(detail.sceneId))).toEqual([{
       sceneId: 'gas-power',
       processId: 'gas-power-generation',
       stepId: 'gas-turbine',
@@ -95,18 +95,29 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
       stateNodeId: 'node.coal-steam-turbine',
       topologyDataContextId: 'process-detail.coal-power.steam-turbine',
     }, {
-      sceneId: 'solar-power',
-      processId: 'solar-power-generation',
-      stepId: 'inverter',
-      processDetailId: 'process-detail.solar-power.inverter',
-      resourceId: 'process-detail-resource.solar-power.inverter',
-      cameraPoseId: 'camera-pose.solar-power.inverter',
-      stateNodeId: 'node.solar-inverter',
-      topologyDataContextId: 'process-detail.solar-power.inverter',
+      sceneId: 'wind-power',
+      processId: 'wind-power-generation',
+      stepId: 'wind-turbine',
+      processDetailId: 'process-detail.wind-power.wind-turbine',
+      resourceId: 'process-detail-resource.wind-power.wind-turbine',
+      cameraPoseId: 'camera-pose.wind-power.wind-turbine',
+      stateNodeId: 'node.wind-turbine',
+      topologyDataContextId: 'process-detail.wind-power.wind-turbine',
+    }, {
+      sceneId: 'wind-power',
+      processId: 'wind-power-generation',
+      stepId: 'gearbox',
+      processDetailId: 'process-detail.wind-power.gearbox',
+      resourceId: 'process-detail-resource.wind-power.gearbox',
+      cameraPoseId: 'camera-pose.wind-power.gearbox',
+      stateNodeId: 'node.wind-gearbox',
+      topologyDataContextId: 'process-detail.wind-power.gearbox',
     }])
     expect(manifest.processDetails.filter((detail) => detail.sceneId === 'step-up-substation')).toHaveLength(3)
     expect(manifest.processDetails.filter((detail) => detail.sceneId === 'step-down-substation')).toHaveLength(3)
     expect(manifest.processDetails.filter((detail) => detail.sceneId === 'converter-station')).toHaveLength(3)
+    expect(manifest.processDetails).toHaveLength(16)
+    expect(manifest.processDetails.filter((detail) => detail.sceneId === 'wind-power')).toHaveLength(2)
     expect(manifest.processDetails.filter((detail) => detail.sceneId === 'switching-station')).toHaveLength(2)
 
     const gasOverview = manifest.topologies.find((topology) => topology.topologyId === 'topology.gas-power.overview')
@@ -222,12 +233,16 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
         'action.solar-power.inverter',
       ])
       /**
-       * 合作方菜单只消费动作清单；开关站已登记总览、母线保护和线路保护，风电仅登记总览导航，另外三个变电场景各登记三项保护关键环节。
+       * 合作方菜单只消费动作清单；风电已登记总览、风机和齿轮箱两个并列控制模拟，开关站登记总览、母线保护和线路保护，另外三个变电场景各登记三项保护关键环节。
        * processSteps（流程步骤）字段必须不存在，防止导航兼容层被误解为控制器已实现的工艺能力。
        */
       for (const sceneId of ['wind-power']) {
         const actionId = `action.${sceneId}.overview`
-        expect(manifest.scenes.find((scene) => scene.sceneId === sceneId)?.supportedActionIds).toEqual([actionId])
+        expect(manifest.scenes.find((scene) => scene.sceneId === sceneId)?.supportedActionIds).toEqual([
+          actionId,
+          'action.wind-power.wind-turbine',
+          'action.wind-power.gearbox',
+        ])
         expect(manifest.unitySceneMappings.find((mapping) => mapping.sceneId === sceneId)).not.toHaveProperty('processSteps')
         expect(manifest.actions.find((action) => action.actionId === actionId)).toEqual(expect.objectContaining({
           targetSceneId: sceneId,

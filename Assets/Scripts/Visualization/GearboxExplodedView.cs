@@ -155,6 +155,12 @@ public sealed class GearboxExplodedView : MonoBehaviour
     public void SetTargetCamera(Camera camera) { _targetCamera = camera; }
     public void SetLabelsVisible(bool visible) { _showLabels = visible; }
 
+    /// <summary>第三层状态适配器使用的播放开关；不改变当前拆解进度或基础材质。</summary>
+    public void SetPlayback(bool playing)
+    {
+        enabled = playing;
+    }
+
     private void CachePartRenderers()
     {
         _partRenderers = new MeshRenderer[_parts.Length];

@@ -61,6 +61,8 @@ describe('燃气与燃煤拓扑无下钻发布契约', () => {
       'action.step-down-substation.overview',
       'action.converter-station.overview',
       'action.switching-station.overview',
+      'action.wind-power.wind-turbine',
+      'action.wind-power.gearbox',
       'action.solar-power.inverter',
       'action.step-up-substation.transformer-protection',
       'action.step-up-substation.busbar-protection',
@@ -75,9 +77,13 @@ describe('燃气与燃煤拓扑无下钻发布契约', () => {
       'action.switching-station.line-protection',
     ])
 
-    // 风电只增加无副作用导航动作；四个变电站类场景的第三层能力通过独立动作和目录发布。
+    // 风电登记总览及两个并列控制模拟；四个变电站类场景的第三层能力通过独立动作和目录发布。
     for (const sceneId of ['wind-power']) {
-      expect(manifest.scenes.find((scene) => scene.sceneId === sceneId)?.supportedActionIds).toEqual([`action.${sceneId}.overview`])
+      expect(manifest.scenes.find((scene) => scene.sceneId === sceneId)?.supportedActionIds).toEqual([
+        `action.${sceneId}.overview`,
+        'action.wind-power.wind-turbine',
+        'action.wind-power.gearbox',
+      ])
       expect(manifest.unitySceneMappings.find((mapping) => mapping.sceneId === sceneId)).not.toHaveProperty('processSteps')
     }
     // 光伏额外开放已核验的逆变器第三层，但仍不把关键环节伪装成第二层流程步骤。
@@ -91,6 +97,7 @@ describe('燃气与燃煤拓扑无下钻发布契约', () => {
       'action.switching-station.busbar-protection',
       'action.switching-station.line-protection',
     ])
+    expect(manifest.processDetails.filter((detail) => detail.sceneId === 'wind-power')).toHaveLength(2)
     expect(manifest.processDetails.filter((detail) => detail.sceneId === 'switching-station')).toHaveLength(2)
     expect(manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'switching-station')).not.toHaveProperty('processSteps')
 

@@ -152,15 +152,22 @@ export async function auditProcessDetailProduction(releaseId = 'process-detail-s
   const gasDetails = manifest.processDetails.filter((detail) => detail.sceneId === 'gas-power')
   const coalDetails = manifest.processDetails.filter((detail) => detail.sceneId === 'coal-power')
   const solarDetails = manifest.processDetails.filter((detail) => detail.sceneId === 'solar-power')
+  const windDetails = manifest.processDetails.filter((detail) => detail.sceneId === 'wind-power')
   const gasDetailAction = manifest.actions.find((action) => action.actionId === 'action.gas-power.gas-turbine')
   const coalDetailAction = manifest.actions.find((action) => action.actionId === 'action.coal-power.steam-turbine')
   const solarDetailAction = manifest.actions.find((action) => action.actionId === 'action.solar-power.inverter')
+  const windTurbineDetailAction = manifest.actions.find((action) => action.actionId === 'action.wind-power.wind-turbine')
+  const windGearboxDetailAction = manifest.actions.find((action) => action.actionId === 'action.wind-power.gearbox')
   const gasMapping = manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'gas-power')
   const coalMapping = manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'coal-power')
   const solarMapping = manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'solar-power')
+  const windMapping = manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'wind-power')
   if (gasDetails.length !== 1 || gasDetails[0]?.processDetailId !== 'process-detail.gas-power.gas-turbine' ||
       coalDetails.length !== 1 || coalDetails[0]?.processDetailId !== 'process-detail.coal-power.steam-turbine' ||
-      solarDetails.length !== 1 || solarDetails[0]?.processDetailId !== 'process-detail.solar-power.inverter') {
+      solarDetails.length !== 1 || solarDetails[0]?.processDetailId !== 'process-detail.solar-power.inverter' ||
+      windDetails.length !== 2 ||
+      !windDetails.some((detail) => detail.processDetailId === 'process-detail.wind-power.wind-turbine') ||
+      !windDetails.some((detail) => detail.processDetailId === 'process-detail.wind-power.gearbox')) {
     issues.push({ code: 'process-detail.catalog-not-approved', file: 'power-data-web/scripts/build-gas-power-smoke-release.mjs' })
   }
   if (!gasDetailAction || gasDetailAction.targetViewMode !== 'process-detail' ||
@@ -171,8 +178,21 @@ export async function auditProcessDetailProduction(releaseId = 'process-detail-s
       coalDetailAction.unityAction?.type !== 'enterProcessDetail' ||
       !solarDetailAction || solarDetailAction.targetViewMode !== 'process-detail' ||
       Object.prototype.hasOwnProperty.call(solarDetailAction, 'targetTopologyId') ||
-      solarDetailAction.unityAction?.type !== 'enterProcessDetail') {
+      solarDetailAction.unityAction?.type !== 'enterProcessDetail' ||
+      !windTurbineDetailAction || windTurbineDetailAction.targetViewMode !== 'process-detail' ||
+      Object.prototype.hasOwnProperty.call(windTurbineDetailAction, 'targetTopologyId') ||
+      windTurbineDetailAction.processDetailId !== 'process-detail.wind-power.wind-turbine' ||
+      windTurbineDetailAction.unityAction?.type !== 'enterProcessDetail' ||
+      !windGearboxDetailAction || windGearboxDetailAction.targetViewMode !== 'process-detail' ||
+      Object.prototype.hasOwnProperty.call(windGearboxDetailAction, 'targetTopologyId') ||
+      windGearboxDetailAction.processDetailId !== 'process-detail.wind-power.gearbox' ||
+      windGearboxDetailAction.unityAction?.type !== 'enterProcessDetail') {
     issues.push({ code: 'process-detail.action-uses-legacy-path', file: 'power-data-web/scripts/build-gas-power-smoke-release.mjs' })
+  }
+  if (!windMapping || windMapping.sceneNodeIds?.length !== 2 ||
+      !windMapping.sceneNodeIds?.includes('node.wind-turbine') ||
+      !windMapping.sceneNodeIds?.includes('node.wind-gearbox')) {
+    issues.push({ code: 'process-detail.wind-mapping-not-approved', file: 'power-data-web/scripts/build-gas-power-smoke-release.mjs' })
   }
 
   /**

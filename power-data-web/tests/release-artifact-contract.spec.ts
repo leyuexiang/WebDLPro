@@ -12,7 +12,7 @@ import {
 const webProjectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 /**
- * 生成发布门禁需要的最小联合结构清单。夹具保留当前二十三项公开动作和八个动作目标场景，
+ * 生成发布门禁需要的最小联合结构清单。夹具保留当前二十五项公开动作和八个动作目标场景，
  * 使正向用例本身不能再把“只有燃气、燃煤动作”的旧清单当成合格发布基线。
  */
 function createTopologyManifest() {
@@ -49,7 +49,9 @@ function createTopologyManifest() {
           ? [`action.${sceneId}.overview`, ...['transformer-protection', 'busbar-protection', 'line-protection'].map((stepId) => `action.${sceneId}.${stepId}`)]
           : sceneId === 'switching-station'
             ? [`action.${sceneId}.overview`, 'action.switching-station.busbar-protection', 'action.switching-station.line-protection']
-            : [`action.${sceneId}.overview`],
+            : sceneId === 'wind-power'
+              ? ['action.wind-power.overview', 'action.wind-power.wind-turbine', 'action.wind-power.gearbox']
+              : [`action.${sceneId}.overview`],
     }))],
     topologies: [{
       topologyId: 'topology.gas-power.overview',
@@ -123,6 +125,26 @@ function createTopologyManifest() {
       unityAction: { type: 'enterProcessDetail', processDetailId: 'process-detail.coal-power.steam-turbine' },
       failurePolicy: 'keep-current-context',
       configVersion: manifestVersion,
+    }, {
+      actionId: 'action.wind-power.wind-turbine',
+      title: '进入风机控制模拟',
+      targetSceneId: 'wind-power',
+      targetViewMode: 'process-detail',
+      processDetailId: 'process-detail.wind-power.wind-turbine',
+      allowedParameters: [],
+      unityAction: { type: 'enterProcessDetail', processDetailId: 'process-detail.wind-power.wind-turbine' },
+      failurePolicy: 'keep-current-context',
+      configVersion: manifestVersion,
+    }, {
+      actionId: 'action.wind-power.gearbox',
+      title: '进入齿轮箱控制模拟',
+      targetSceneId: 'wind-power',
+      targetViewMode: 'process-detail',
+      processDetailId: 'process-detail.wind-power.gearbox',
+      allowedParameters: [],
+      unityAction: { type: 'enterProcessDetail', processDetailId: 'process-detail.wind-power.gearbox' },
+      failurePolicy: 'keep-current-context',
+      configVersion: manifestVersion,
     }, ...navigationScenes.map(([sceneId, title]) => ({
       actionId: `action.${sceneId}.overview`,
       title: `进入${title}总览`,
@@ -191,6 +213,24 @@ function createTopologyManifest() {
       cameraPoseId: 'camera-pose.solar-power.inverter',
       stateNodeId: 'node.solar-inverter',
       topologyDataContextId: 'process-detail.solar-power.inverter',
+    }, {
+      sceneId: 'wind-power',
+      processId: 'wind-power-generation',
+      stepId: 'wind-turbine',
+      processDetailId: 'process-detail.wind-power.wind-turbine',
+      resourceId: 'process-detail-resource.wind-power.wind-turbine',
+      cameraPoseId: 'camera-pose.wind-power.wind-turbine',
+      stateNodeId: 'node.wind-turbine',
+      topologyDataContextId: 'process-detail.wind-power.wind-turbine',
+    }, {
+      sceneId: 'wind-power',
+      processId: 'wind-power-generation',
+      stepId: 'gearbox',
+      processDetailId: 'process-detail.wind-power.gearbox',
+      resourceId: 'process-detail-resource.wind-power.gearbox',
+      cameraPoseId: 'camera-pose.wind-power.gearbox',
+      stateNodeId: 'node.wind-gearbox',
+      topologyDataContextId: 'process-detail.wind-power.gearbox',
     }, ...['step-up-substation', 'step-down-substation', 'converter-station'].flatMap((sceneId) => {
       const nodePrefix = sceneId === 'converter-station' ? 'converter' : sceneId === 'step-up-substation' ? 'step-up' : 'step-down'
       return [
@@ -233,7 +273,7 @@ function createTopologyManifest() {
     }, ...navigationScenes.map(([sceneId]) => ({
       sceneId,
       mappingVersion: `mapping.${sceneId}.1`,
-      sceneNodeIds: [],
+      sceneNodeIds: sceneId === 'wind-power' ? ['node.wind-turbine', 'node.wind-gearbox'] : [],
       routeIds: [],
     }))],
   }
@@ -267,7 +307,7 @@ function createReleaseManifest() {
       unityLargeResourcePaths: ['unity/Build/', 'unity/SceneBundles/', 'unity/ProcessDetailBundles/'],
     },
     excludedCapabilities: ['route-mapping', 'other-eight-scene-content'],
-    // 合作方动作菜单读取该摘要；从当前十四项第三层结构生成相同公开投影，避免测试夹具手工维护时再次漏项。
+    // 合作方动作菜单读取该摘要；从当前十六项第三层结构生成相同公开投影，避免测试夹具手工维护时再次漏项。
     workflowActions: createTopologyManifest().actions.map((action) => ({
       actionId: action.actionId,
       title: action.title,
@@ -461,7 +501,7 @@ describe('发布产物输出标准', () => {
       await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
 
       expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
-        expect.stringContaining('完整发布当前二十三项公开动作'),
+        expect.stringContaining('完整发布当前二十五项公开动作'),
       ]))
     } finally {
       rmSync(root, { recursive: true, force: true })
@@ -505,7 +545,7 @@ describe('发布产物输出标准', () => {
       await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
 
       expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
-        expect.stringContaining('完整发布当前二十三项公开动作'),
+        expect.stringContaining('完整发布当前二十五项公开动作'),
       ]))
     } finally {
       rmSync(root, { recursive: true, force: true })

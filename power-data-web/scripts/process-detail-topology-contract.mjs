@@ -42,10 +42,24 @@ const protectionTopologyContracts = Object.freeze(
 )
 
 /**
- * 三项第三层拓扑的不可变发布合同。散列锁定经过验收的原始文件，图元数量用于提供更直观的
+ * 十六项第三层上下文复用五份不可变拓扑合同。散列锁定经过验收的原始文件，图元数量用于提供更直观的
  * 结构诊断，显式绑定图元则保证二维状态投影不会在文件仍可解析时静默失效。
  */
 export const processDetailTopologyContracts = Object.freeze([
+  Object.freeze({
+    contextId: 'process-detail.wind-power.wind-turbine',
+    topologyPath: 'process-detail/wind-power/wind-turbine/topology.json',
+    sourceSha256: '246826daf501f12ca1ff88b28179976bf2bcff8837ce50767ba0e7c17fb9525c',
+    expectedPenCount: 40,
+    bindingPenIds: Object.freeze([]),
+  }),
+  Object.freeze({
+    contextId: 'process-detail.wind-power.gearbox',
+    topologyPath: 'process-detail/wind-power/gearbox/topology.json',
+    sourceSha256: 'bb6ed25e5f473e9276ac9370aaea19fa825ec49467f331e913d4ecd05ed4185a',
+    expectedPenCount: 15,
+    bindingPenIds: Object.freeze([]),
+  }),
   Object.freeze({
     contextId: 'process-detail.gas-power.gas-turbine',
     topologyPath: 'process-detail/gas-power/gas-turbine/topology.json',

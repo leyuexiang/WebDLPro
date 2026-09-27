@@ -3125,6 +3125,8 @@ GameObject:
   - component: {fileID: 1839891601}
   - component: {fileID: 1839891600}
   - component: {fileID: 1839891603}
+  - component: {fileID: 1839891605}
+  - component: {fileID: 1839891604}
   m_Layer: 0
   m_Name: PowerPlantRuntime
   m_TagString: Untagged
@@ -3316,6 +3318,39 @@ MonoBehaviour:
   _sceneRoot: {fileID: 1270758495}
   _cameraController: {fileID: 1035941946}
   _namedCameraPoseRegistry: {fileID: 1839891600}
+  _processController: {fileID: 0}
+  _processDetailCoordinatorBehaviour: {fileID: 1839891604}
+--- !u!114 &1839891604
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1839891599}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 14711de44a15af8488840fd7e83169bd, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _sceneId: wind-power
+  _catalog: {fileID: 11400000, guid: c5e4c155da978bc479cf0f3e7468cc62, type: 2}
+  _resourceLoaderBehaviour: {fileID: 1839891605}
+  _detailMount: {fileID: 1691505829}
+  _businessSceneRoot: {fileID: 1270758495}
+  _secondLayerInteractionController: {fileID: 1839891601}
+  _cameraControllerBehaviour: {fileID: 1035941946}
+--- !u!114 &1839891605
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1839891599}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 081854311b8b75244bb0faaeb6f2065e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!1001 &1941803572
 PrefabInstance:
   m_ObjectHideFlags: 0
