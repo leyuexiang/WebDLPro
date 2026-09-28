@@ -16,6 +16,26 @@ namespace WebDLPro.Unity.SceneRuntime
         private const float MinimumRemoteDisplayDistance = 1000f;
         private const float MaximumCameraDistanceFromDisplay = 500f;
 
+        /// <summary>
+        /// 单次准备事务对其加载运行时拥有独占清理责任。取消只设置标记；协程恢复后由原事务释放迟到结果，
+        /// 避免外部命令回调在异步加载尚未结束时抢先销毁同一资源。
+        /// </summary>
+        private sealed class PrepareOperation
+        {
+            public int Generation { get; }
+            public string TransitionId { get; }
+            public ProcessDetailResourceRuntime Runtime { get; }
+            public bool CancellationRequested { get; set; }
+            public bool Completed { get; set; }
+
+            public PrepareOperation(int generation, string transitionId, ProcessDetailResourceRuntime runtime)
+            {
+                Generation = generation;
+                TransitionId = transitionId;
+                Runtime = runtime;
+            }
+        }
+
         [Header("第三层目录与加载器")]
         [SerializeField] private string _sceneId;
         [SerializeField] private ProcessDetailCatalog _catalog;
@@ -47,6 +67,7 @@ namespace WebDLPro.Unity.SceneRuntime
         private bool _prepareInProgress;
         private bool _released;
         private int _generation;
+        private PrepareOperation _prepareOperation;
         private readonly Queue<string> _observedEnterTransitionOrder = new Queue<string>();
         private readonly HashSet<string> _observedEnterTransitionIds = new HashSet<string>(StringComparer.Ordinal);
         private readonly Queue<string> _processedExitTransitionOrder = new Queue<string>();
@@ -141,12 +162,35 @@ namespace WebDLPro.Unity.SceneRuntime
                 yield break;
             }
 
-            CancelPreparedInternal();
+            // 新事务先取代旧事务，再逐帧等待旧加载枚举器完成自身清理。循环而不是单次判断，
+            // 可处理多个新请求在同一旧事务结束帧同时恢复的情况，始终保证只有最后一个请求获得加载权。
+            while (_prepareOperation != null && !_prepareOperation.Completed)
+            {
+                _prepareOperation.CancellationRequested = true;
+                _generation++;
+                PrepareOperation supersededOperation = _prepareOperation;
+                while (!supersededOperation.Completed)
+                {
+                    yield return null;
+                }
+
+                if (_released)
+                {
+                    completed?.Invoke(BusinessSceneCommandResult.Failed(
+                        "process-detail-coordinator-released",
+                        "关键环节协调器已经释放。"));
+                    yield break;
+                }
+            }
+
+            ReleasePreparedCandidateInternal();
             int prepareGeneration = ++_generation;
             _prepareInProgress = true;
             _pendingEnterTransitionId = transitionId;
             RememberTransition(transitionId, _observedEnterTransitionOrder, _observedEnterTransitionIds);
             ProcessDetailResourceRuntime candidateRuntime = new ProcessDetailResourceRuntime(_sceneId);
+            PrepareOperation operation = new PrepareOperation(prepareGeneration, transitionId, candidateRuntime);
+            _prepareOperation = operation;
             _preparedRuntime = candidateRuntime;
             BusinessSceneCameraPoseSnapshot candidateReturnPose = IsActive
                 ? _returnCameraPose
@@ -168,7 +212,7 @@ namespace WebDLPro.Unity.SceneRuntime
                     (loading as IDisposable)?.Dispose();
                 }
 
-                if (!IsCurrentPreparingTransaction(prepareGeneration, transitionId, candidateRuntime))
+                if (!IsCurrentPreparingTransaction(operation))
                 {
                     completed?.Invoke(BusinessSceneCommandResult.Failed("process-detail-prepare-superseded", "关键环节准备已被新事务取代。"));
                     yield break;
@@ -203,7 +247,7 @@ namespace WebDLPro.Unity.SceneRuntime
                 }
 
                 BusinessSceneCommandResult replayResult = instance.PrepareForActivation(_latestVisualStates);
-                if (!replayResult.Success || !IsCurrentPreparingTransaction(prepareGeneration, transitionId, candidateRuntime))
+                if (!replayResult.Success || !IsCurrentPreparingTransaction(operation))
                 {
                     instance.ReleaseInstance();
                     completed?.Invoke(replayResult.Success
@@ -223,15 +267,24 @@ namespace WebDLPro.Unity.SceneRuntime
             }
             finally
             {
-                if (!preparedSuccessfully && ReferenceEquals(_preparedRuntime, candidateRuntime))
+                operation.Completed = true;
+                if (!preparedSuccessfully)
                 {
                     candidateRuntime.Dispose();
-                    _preparedRuntime = null;
-                    _preparedInstance = null;
-                    _preparedEntry = null;
-                    _preparedTransitionId = string.Empty;
+                }
+
+                if (ReferenceEquals(_prepareOperation, operation))
+                {
+                    _prepareOperation = null;
                     _prepareInProgress = false;
                     _pendingEnterTransitionId = string.Empty;
+                    if (!preparedSuccessfully && ReferenceEquals(_preparedRuntime, candidateRuntime))
+                    {
+                        _preparedRuntime = null;
+                        _preparedInstance = null;
+                        _preparedEntry = null;
+                        _preparedTransitionId = string.Empty;
+                    }
                 }
             }
         }
@@ -558,20 +611,34 @@ namespace WebDLPro.Unity.SceneRuntime
                    _catalog.TryGet(sceneId, processDetailId, out _);
         }
 
-        private bool IsCurrentPreparingTransaction(
-            int generation,
-            string transitionId,
-            ProcessDetailResourceRuntime candidateRuntime)
+        private bool IsCurrentPreparingTransaction(PrepareOperation operation)
         {
-            return generation == _generation && _prepareInProgress &&
-                   ReferenceEquals(_preparedRuntime, candidateRuntime) &&
-                   string.Equals(_pendingEnterTransitionId, transitionId, StringComparison.Ordinal);
+            return operation != null && !operation.CancellationRequested &&
+                   operation.Generation == _generation && _prepareInProgress &&
+                   ReferenceEquals(_prepareOperation, operation) &&
+                   ReferenceEquals(_preparedRuntime, operation.Runtime) &&
+                   string.Equals(_pendingEnterTransitionId, operation.TransitionId, StringComparison.Ordinal);
         }
 
-        /// <summary>释放候选槽并提升代际；活动槽、二层资源和相机均不受影响。</summary>
+        /// <summary>
+        /// 取消加载中事务时只撤销其提交权，由原协程在恢复后清理迟到句柄；
+        /// 已完成加载的候选没有异步持有者，可以立即按原有路径释放。
+        /// </summary>
         private void CancelPreparedInternal()
         {
             _generation++;
+            if (_prepareOperation != null && !_prepareOperation.Completed)
+            {
+                _prepareOperation.CancellationRequested = true;
+                return;
+            }
+
+            ReleasePreparedCandidateInternal();
+        }
+
+        /// <summary>释放已完成加载的候选槽；加载中的运行时只能由对应 PrepareOperation 释放。</summary>
+        private void ReleasePreparedCandidateInternal()
+        {
             _preparedInstance?.StopForRelease();
             _preparedInstance?.ReleaseInstance();
             _preparedRuntime?.Dispose();

@@ -17,6 +17,8 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
 {
     private const int MaxTrackedSceneRequests = 64;
     private const int MaxTrackedFocusSelections = 64;
+    private const int MaxQueuedInboundCommands = 128;
+    private const int MaxInboundCommandsPerFrame = 8;
     // 与前端设备状态缓存默认上限一致；容量固定后，每次查找和更新均为常数时间且不会无界保留节点标识。
     private const int MaxTrackedNodeVisualStates = 500;
     // JavaScript 可无损表达的最大整数；来源修订号超过该边界会在浏览器与 C# 之间产生精度歧义，必须拒绝。
@@ -90,6 +92,22 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
     // 水位只属于当前活动控制器。只有壳会话内快照序号可阻止异步迟到状态覆盖，平台字段仅供诊断。
     private readonly Dictionary<string, NodeVisualStateWatermark> _nodeVisualStateWatermarks =
         new Dictionary<string, NodeVisualStateWatermark>(StringComparer.Ordinal);
+    // 浏览器 postMessage 最终会通过 .jslib 的 SendMessage 同步进入 ReceiveFromParent。
+    // 该回调栈内只允许完成协议解析和入队，场景切换、实例化、销毁及资源释放统一延迟到 Unity 自身帧执行，
+    // 避免 Chrome WebGL 在外部回调与 PlayerLoop（播放器主循环）交错时发生递归重入。
+    private readonly Queue<QueuedInboundCommand> _queuedInboundCommands = new Queue<QueuedInboundCommand>();
+
+    private readonly struct QueuedInboundCommand
+    {
+        public BridgeMessage Message { get; }
+        public string RawJson { get; }
+
+        public QueuedInboundCommand(BridgeMessage message, string rawJson)
+        {
+            Message = message;
+            RawJson = rawJson;
+        }
+    }
 
 #if UNITY_WEBGL && !UNITY_EDITOR
     /// <summary>初始化浏览器消息监听器，并让其在 Unity 可接收消息后发送 ready。</summary>
@@ -369,6 +387,24 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         EnsureBrowserBridgeInitialized();
     }
 
+    private void Update()
+    {
+        int processedCount = 0;
+        while (processedCount < MaxInboundCommandsPerFrame && _queuedInboundCommands.Count > 0)
+        {
+            QueuedInboundCommand command = _queuedInboundCommands.Dequeue();
+            ExecuteQueuedInboundCommand(command);
+            processedCount++;
+
+            // 场景和关键环节生命周期命令每帧最多执行一个。普通状态命令仍可批量处理，
+            // 既避免资源加载/取消/卸载在同一帧连续重入，也不会降低高频设备状态同步吞吐量。
+            if (RequiresFrameBoundary(command.Message.type))
+            {
+                break;
+            }
+        }
+    }
+
     /// <summary>
     /// WebGL 首个场景完成加载后的桥接兜底入口。
     ///
@@ -431,7 +467,7 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
 
     /// <summary>
     /// 由 .jslib 的 SendMessage 调用。方法名不可修改，否则浏览器桥接层无法将消息送入 Unity。
-    /// 先校验协议与实例标识，再根据类型执行业务操作，避免外部页面的无关消息影响场景。
+    /// 先校验协议与实例标识，再写入有界帧队列；不得在浏览器回调栈内直接改变 Unity 场景或资源状态。
     /// </summary>
     public void ReceiveFromParent(string messageJson)
     {
@@ -493,7 +529,24 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
             Debug.LogWarning("[UnityIframeBridge] 已拒绝不符合协议或实例标识的消息。");
             return;
         }
-        if (message.type == "setProcessDetailPlayback" && !HasJsonField(messageJson, "playing"))
+
+        if (_queuedInboundCommands.Count >= MaxQueuedInboundCommands)
+        {
+            SendCommandResult(message, false, "runtime-command-capacity", "Unity 待处理命令已达到安全上限，请稍后重试。");
+            return;
+        }
+
+        _queuedInboundCommands.Enqueue(new QueuedInboundCommand(message, messageJson));
+    }
+
+    /// <summary>
+    /// 只在 Unity 自身 Update 帧内执行已验证命令。原始 JSON 仅用于确认必须显式出现的布尔字段，
+    /// 不会写入日志或跨事务保存，命令执行结束后即可由队列释放引用。
+    /// </summary>
+    private void ExecuteQueuedInboundCommand(QueuedInboundCommand command)
+    {
+        BridgeMessage message = command.Message;
+        if (message.type == "setProcessDetailPlayback" && !HasJsonField(command.RawJson, "playing"))
         {
             SendCommandResult(message, false, "process-detail-playback-payload-invalid", "关键环节播放命令必须显式提供播放开关。");
             return;
@@ -579,6 +632,27 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
             default:
                 SendCommandResult(message, false, "unsupported-command", $"不支持的命令：{message.type}");
                 break;
+        }
+    }
+
+    /// <summary>
+    /// 这些命令可能启动或终止场景、协程、实例和资源租约。执行后必须把后续生命周期命令留到下一帧，
+    /// 防止同一帧内出现“准备后立即取消”或“退出后立即重新加载”的资源所有权交叉。
+    /// </summary>
+    private static bool RequiresFrameBoundary(string commandType)
+    {
+        switch (commandType)
+        {
+            case "switchScene":
+            case "prepareProcessDetail":
+            case "commitProcessDetail":
+            case "abortProcessDetail":
+            case "enterProcessDetail":
+            case "exitProcessDetail":
+            case "dispose":
+                return true;
+            default:
+                return false;
         }
     }
 

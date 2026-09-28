@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import TopologyPanel from './TopologyPanel.vue'
 import { toTopologyKey } from '@/config/process/identifiers'
 import type { TopologyDefinition } from '@/config/process/types'
+import { getProcessDetailTopologyDataContext } from '../topology/process-detail-topology-contexts'
 
 const engine = vi.hoisted(() => ({ fit: vi.fn(), open: vi.fn(), destroy: vi.fn() }))
 vi.mock('@meta2d/core', () => ({
@@ -17,7 +18,10 @@ vi.mock('@meta2d/core', () => ({
   },
 }))
 vi.mock('../topology-preview/solar-topology-preview-data', () => ({ loadSolarTopologyPreviewData: async () => ({ pens: [] }) }))
-vi.mock('../topology-preview/wind-topology-preview-data', () => ({ loadWindTopologyPreviewData: async () => ({ pens: [] }) }))
+vi.mock('../topology-preview/wind-topology-preview-data', () => ({ loadWindTopologyPreviewData: async () => ({ pens: [], source: 'overview' }) }))
+vi.mock('../topology-preview/wind-process-detail-topology-data', () => ({
+  loadWindProcessDetailTopologyData: async (context: { contextId: string }) => ({ pens: [], source: context.contextId }),
+}))
 vi.mock('../topology-preview/step-up-substation-topology-preview-data', () => ({
   loadStepUpSubstationTopologyPreviewData: async () => ({ pens: [] }),
 }))
@@ -95,6 +99,40 @@ afterEach(() => { dispose?.(); dispose = undefined; vi.unstubAllGlobals() })
 async function settle() {
   for (let i = 0; i < 8; i++) { const pending = [...frames.values()]; frames.clear(); pending.forEach((callback) => callback(0)); await nextTick() }
 }
+
+describe('风电正式面板第三层拓扑', () => {
+  it('风机、齿轮箱和总览在同一画布切换，暂停期间只恢复最后的上下文', async () => {
+    const root = element('root')
+    const state = reactive({ suspended: false })
+    let panel: InstanceType<typeof TopologyPanel> | null = null
+    const topology = { topologyKey: toTopologyKey('topology.wind-power.overview'), title: '风电', configVersion: 'test', nodes: [], edges: [] } as TopologyDefinition
+    const app = renderer.createApp({ render: () => h(TopologyPanel, {
+      ref: (value: unknown) => { panel = value as InstanceType<typeof TopologyPanel> },
+      topology, selectedNodeIds: [], selectedRouteIds: [], suspended: state.suspended,
+    }) })
+    app.mount(root); dispose = () => app.unmount()
+    await settle()
+    const controller = panel!.getCanvasController()!
+    expect(engine.open.mock.lastCall?.[0].source).toBe('overview')
+    for (const detail of ['wind-turbine', 'gearbox', 'wind-turbine']) {
+      const context = getProcessDetailTopologyDataContext(`process-detail.wind-power.${detail}`)!
+      controller.setTopologyDataContext!(context)
+      await settle()
+      expect(engine.open.mock.lastCall?.[0].source).toBe(context.contextId)
+    }
+    state.suspended = true; await settle()
+    const opened = engine.open.mock.calls.length
+    controller.setTopologyDataContext!(getProcessDetailTopologyDataContext('process-detail.wind-power.gearbox'))
+    await settle()
+    expect(engine.open).toHaveBeenCalledTimes(opened)
+    state.suspended = false; await settle()
+    expect(engine.open.mock.lastCall?.[0].source).toBe('process-detail.wind-power.gearbox')
+    controller.setTopologyDataContext!(undefined)
+    await settle()
+    expect(engine.open.mock.lastCall?.[0].source).toBe('overview')
+    expect(engine.destroy).not.toHaveBeenCalled()
+  })
+})
 
 describe.each(['wind-power', 'solar-power', 'step-up-substation', 'step-down-substation', 'converter-station', 'switching-station'])('%s 正式面板重置', (scene) => {
   it('空业务清单不妨碍真实数据重置，暂停时仍禁止操作，且不重新加载图元', async () => {

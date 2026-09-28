@@ -1714,9 +1714,6 @@ namespace Locus
                         return await tcs.Task.ConfigureAwait(false);
                     }
 
-                    case "managed_editor_close":
-                        return await HandleManagedEditorClose(reqId).ConfigureAwait(false);
-
                     case "exit_play_mode":
                     {
                         if (!_isPlaying)
@@ -1830,9 +1827,6 @@ namespace Locus
 
                     case "invoke_named_cached":
                         return await HandleInvokeNamedCached(reqId, msg.message).ConfigureAwait(false);
-
-                    case "asset_api":
-                        return await HandleAssetApi(reqId, msg.message).ConfigureAwait(false);
 
                     case "property_tree_read":
                     case "view_binding_read":
@@ -2031,8 +2025,6 @@ namespace Locus
                                     session_id = EnsureEditorSessionId(),
                                     domain_generation = _compileDomainGeneration,
                                     converged_serial = SessionState.GetInt(SessionKey_ConvergedSerial, 0),
-                                    is_compiling = EditorApplication.isCompiling,
-                                    is_updating = EditorApplication.isUpdating,
                                 };
                                 tcs.SetResult(OkResponse(reqId, JsonUtility.ToJson(payload)));
                             }

@@ -46,6 +46,18 @@ public sealed class PowerPlantFreeCameraController : MonoBehaviour, IBusinessSce
     [Tooltip("流程步骤切换或拓扑节点选择后镜头移动至目标取景位置所用的非缩放时间。")]
     [SerializeField, Min(0f)] private float _focusDuration = 0.45f;
 
+    [Header("风机 / 齿轮箱详情操作（不影响业务总览）")]
+    [SerializeField, Min(0.01f)] private float _detailOrbitSensitivity = 0.075f;
+    [Tooltip("滚轮一格约 120 输入单位，每格改变约 3.5% 的观察距离。")]
+    [SerializeField, Range(0.005f, 0.1f)] private float _detailZoomFractionPerNotch = 0.035f;
+    [SerializeField, Min(0.01f)] private float _detailZoomSmoothTime = 0.12f;
+    [SerializeField, Range(0.01f, 1f)] private float _detailMovementMultiplier = 0.15f;
+
+    private GearboxOrbitCamera _detailOrbit;
+    private bool _isDetailZooming;
+    private float _detailZoomTargetDistance;
+    private float _detailZoomVelocity;
+
     private float _yaw;
     private float _pitch;
     private float _panStartDistanceSquared;
@@ -129,7 +141,14 @@ public sealed class PowerPlantFreeCameraController : MonoBehaviour, IBusinessSce
         bool hasScrollInput = Mathf.Abs(scrollDelta) > 0.01f;
         Vector3 localMove = keyboard != null ? ReadMoveInput(keyboard) : Vector3.zero;
         bool hasMoveInput = localMove.sqrMagnitude > 0.0001f;
+        // 详情标识牌/滑块上的操作不穿透到右键环绕或滚轮；其他场景保持原输入逻辑。
+        if (_detailOrbit != null && UnityEngine.EventSystems.EventSystem.current != null &&
+            UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject())
+        {
+            hasLookInput = hasScrollInput = hasPanInput = false;
+        }
         bool hasManualInput = hasPanInput || hasLookInput || hasScrollInput || hasMoveInput;
+        if (hasPanInput || hasLookInput || hasMoveInput) StopDetailZoom();
 
         // 聚焦期间只要用户开始操作相机，就立刻让出控制权；左键普通点击不算相机输入，仍可正常触发节点选中。
         if (hasManualInput)
@@ -142,27 +161,34 @@ public sealed class PowerPlantFreeCameraController : MonoBehaviour, IBusinessSce
             return;
         }
 
+        float movementMultiplier = _sceneMovementMultiplier * (_detailOrbit != null ? _detailMovementMultiplier : 1f);
         if (hasPanInput)
         {
-            MoveByPointerDrag(lookDelta, _sceneMovementMultiplier);
+            MoveByPointerDrag(lookDelta, movementMultiplier);
         }
 
         if (hasLookInput)
         {
-            _yaw += lookDelta.x * _lookSensitivity;
-            float verticalSign = _invertLookY ? 1f : -1f;
-            _pitch = Mathf.Clamp(_pitch + lookDelta.y * _lookSensitivity * verticalSign, _minPitch, _maxPitch);
-            transform.rotation = Quaternion.Euler(_pitch, _yaw, 0f);
+            if (_detailOrbit != null) OrbitAroundDetailCore(lookDelta);
+            else
+            {
+                _yaw += lookDelta.x * _lookSensitivity;
+                float verticalSign = _invertLookY ? 1f : -1f;
+                _pitch = Mathf.Clamp(_pitch + lookDelta.y * _lookSensitivity * verticalSign, _minPitch, _maxPitch);
+                transform.rotation = Quaternion.Euler(_pitch, _yaw, 0f);
+            }
         }
 
         if (hasScrollInput)
         {
-            MoveAlongCameraCenter(scrollDelta, _sceneMovementMultiplier);
+            if (_detailOrbit != null) QueueDetailZoom(scrollDelta);
+            else MoveAlongCameraCenter(scrollDelta, _sceneMovementMultiplier);
         }
+        if (_isDetailZooming) UpdateDetailZoom(Time.unscaledDeltaTime);
 
         if (hasMoveInput)
         {
-            float speed = _moveSpeed * _sceneMovementMultiplier *
+            float speed = _moveSpeed * movementMultiplier *
                 (IsShiftPressed(keyboard) ? _shiftMultiplier : 1f);
             Vector3 forward = Vector3.ProjectOnPlane(transform.forward, Vector3.up).normalized;
             Vector3 right = Vector3.ProjectOnPlane(transform.right, Vector3.up).normalized;
@@ -182,6 +208,8 @@ public sealed class PowerPlantFreeCameraController : MonoBehaviour, IBusinessSce
     /// </summary>
     public void ResetToInitialTransform()
     {
+        _detailOrbit = null;
+        StopDetailZoom();
         _focusStartPosition = transform.position;
         _focusStartRotation = transform.rotation;
         _focusTargetPosition = _initialPosition;
@@ -207,6 +235,11 @@ public sealed class PowerPlantFreeCameraController : MonoBehaviour, IBusinessSce
             return;
         }
 
+        // 只在进入/复位第三层显式镜头时绑定；不启用第二个相机控制器，也不依赖 Camera.main。
+        ProcessDetailDeviceBinding binding = targetPose.GetComponentInParent<ProcessDetailDeviceBinding>(true);
+        _detailOrbit = binding != null && binding.CameraPose == targetPose
+            ? binding.GetComponentInChildren<GearboxOrbitCamera>(true) : null;
+        if (_detailOrbit != null && _detailOrbit.Target == null) _detailOrbit = null;
         MoveToPose(targetPose.position, targetPose.rotation);
     }
 
@@ -232,6 +265,8 @@ public sealed class PowerPlantFreeCameraController : MonoBehaviour, IBusinessSce
             return;
         }
 
+        _detailOrbit = null;
+        StopDetailZoom();
         _camera ??= GetComponent<Camera>();
         _camera.orthographic = snapshot.Orthographic;
         _camera.fieldOfView = snapshot.FieldOfView;
@@ -244,6 +279,7 @@ public sealed class PowerPlantFreeCameraController : MonoBehaviour, IBusinessSce
     /// </summary>
     public void MoveToPose(Vector3 targetPosition, Quaternion targetRotation)
     {
+        StopDetailZoom();
         _focusStartPosition = transform.position;
         _focusStartRotation = transform.rotation;
         _focusTargetPosition = targetPosition;
@@ -265,6 +301,7 @@ public sealed class PowerPlantFreeCameraController : MonoBehaviour, IBusinessSce
     /// </summary>
     public void FocusBounds(Bounds bounds)
     {
+        StopDetailZoom();
         _camera ??= GetComponent<Camera>();
         float verticalHalfFieldOfView = _camera.fieldOfView * Mathf.Deg2Rad * 0.5f;
         float horizontalHalfFieldOfView = Mathf.Atan(Mathf.Tan(verticalHalfFieldOfView) * _camera.aspect);
@@ -351,6 +388,59 @@ public sealed class PowerPlantFreeCameraController : MonoBehaviour, IBusinessSce
 
         // transform.forward 始终对应相机视口中心方向；滚轮向上为靠近画面中心，向下为远离。
         transform.position += transform.forward * moveDistance;
+    }
+
+    private void OrbitAroundDetailCore(Vector2 pointerDelta)
+    {
+        Vector3 center = _detailOrbit.OrbitCenter;
+        Vector3 offset = transform.position - center;
+        if (offset.sqrMagnitude < 0.0001f) return;
+        Quaternion radialRotation = Quaternion.LookRotation(-offset, Vector3.up);
+        Vector3 angles = radialRotation.eulerAngles;
+        float pitch = Mathf.Clamp(NormalizePitch(angles.x) + pointerDelta.y *
+            _detailOrbitSensitivity * (_invertLookY ? 1f : -1f), _minPitch, _maxPitch);
+        Quaternion nextRadialRotation = Quaternion.Euler(pitch, angles.y + pointerDelta.x * _detailOrbitSensitivity, 0f);
+        Quaternion delta = nextRadialRotation * Quaternion.Inverse(radialRotation);
+        // 同步旋转位置和朝向，保持核心在画面中的构图位置；首次拖动不强制跳到 LookAt。
+        transform.SetPositionAndRotation(center + delta * offset, delta * transform.rotation);
+        SyncLookAngles();
+    }
+
+    private void QueueDetailZoom(float scrollDelta)
+    {
+        float distance = Vector3.Distance(transform.position, _detailOrbit.OrbitCenter);
+        if (distance < 0.001f) return;
+        float start = _isDetailZooming ? _detailZoomTargetDistance : distance;
+        float notches = Mathf.Clamp(scrollDelta / 120f, -2f, 2f);
+        float requested = start * Mathf.Exp(-notches * _detailZoomFractionPerNotch);
+        // 镜头处于进入补间或零件聚焦范围外时不瞬移到边界，只允许逐步朝合法范围靠近。
+        float min = Mathf.Min(distance, _detailOrbit.MinimumDistance);
+        float max = Mathf.Max(distance, _detailOrbit.MaximumDistance);
+        _detailZoomTargetDistance = Mathf.Clamp(requested, min, max);
+        _isDetailZooming = true;
+    }
+
+    private void UpdateDetailZoom(float deltaTime)
+    {
+        if (_detailOrbit == null) { StopDetailZoom(); return; }
+        Vector3 center = _detailOrbit.OrbitCenter;
+        Vector3 offset = transform.position - center;
+        float distance = offset.magnitude;
+        if (distance < 0.001f) { StopDetailZoom(); return; }
+        float next = Mathf.SmoothDamp(distance, _detailZoomTargetDistance, ref _detailZoomVelocity,
+            _detailZoomSmoothTime, Mathf.Infinity, deltaTime);
+        if (Mathf.Abs(next - _detailZoomTargetDistance) < 0.001f)
+        {
+            next = _detailZoomTargetDistance;
+            StopDetailZoom();
+        }
+        transform.position = center + offset * (next / distance);
+    }
+
+    private void StopDetailZoom()
+    {
+        _isDetailZooming = false;
+        _detailZoomVelocity = 0f;
     }
 
     private void SyncLookAngles()

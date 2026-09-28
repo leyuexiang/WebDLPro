@@ -4,7 +4,7 @@ import { toSceneId, toSceneNodeId } from '../src/config/scene-topology/identifie
 import { TopologyRegistry } from '../src/config/scene-topology/topology-registry'
 import { validateSceneTopologyManifest } from '../src/config/scene-topology/validator'
 import { LOCAL_PROCESS_CONFIG_VERSION } from '../src/config/process/config-version'
-import { createConfiguredPowerScenesManifest } from '../scripts/build-gas-power-smoke-release.mjs'
+import { createConfiguredPowerScenesManifest, createSelfTestPage } from '../scripts/build-gas-power-smoke-release.mjs'
 import { coalPowerEdgeColors } from '../scripts/coal-power-topology.mjs'
 
 /** 七个已交付场景只允许使用资料和 Unity 属性面板已经核验的三十九对映射，测试不得按名称自动扩充。 */
@@ -53,6 +53,16 @@ function readManifestBaseTitle(title: string): string {
 }
 
 describe('燃气、燃煤与光伏联合场景清单', () => {
+  it('本地自测可见按钮恰好覆盖全部公开动作，包含风机和齿轮箱关键环节', async () => {
+    const manifest = await createConfiguredPowerScenesManifest('self-test-complete-action-coverage')
+    const page = createSelfTestPage(manifest.manifestVersion)
+    // 只读取真实按钮的动作属性，不能让脚本白名单中的标识掩盖页面缺少入口的问题。
+    // 数组精确相等同时阻止漏项、多项和重复项，预期集合来自本次正式联合清单。
+    const visibleActionIds = Array.from(page.matchAll(/<button\b[^>]*\bdata-action-id="([^"]+)"/g), (match) => match[1])
+    expect(visibleActionIds.sort()).toEqual(manifest.actions.map((action) => action.actionId).sort())
+    expect(page).toContain('覆盖当前发布清单的全部公开动作')
+  })
+
   it('在同一原子清单中装配三场景总览和十六项已核验第三层', async () => {
     const manifest = await createConfiguredPowerScenesManifest('dual-selection-contract', 'coal-power')
 

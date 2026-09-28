@@ -56,6 +56,66 @@ namespace WebDLPro.Unity.Tests
             }
         }
 
+        /// <summary>
+        /// 为协调器并发测试提供最小运行时依赖。加载、相机快照和交互门集中在同一测试组件中，
+        /// 避免测试通过场景搜索或真实资源包引入额外时序；所有加载仍显式跨越一帧，便于交错推进两个事务。
+        /// </summary>
+        private sealed class CoordinatorTestHost : MonoBehaviour, IProcessDetailResourceLoader,
+            IBusinessSceneCameraSnapshotController, IBusinessSceneInteractionGate
+        {
+            private readonly Queue<Func<ProcessDetailLoadResult>> _results =
+                new Queue<Func<ProcessDetailLoadResult>>();
+
+            public int LoadCallCount { get; private set; }
+            public bool InteractionsBlocked { get; private set; }
+
+            public void Enqueue(Func<ProcessDetailLoadResult> resultFactory)
+            {
+                _results.Enqueue(resultFactory);
+            }
+
+            public IEnumerator LoadAsync(
+                ProcessDetailCatalogEntry entry,
+                Action<ProcessDetailLoadResult> completed)
+            {
+                LoadCallCount++;
+                yield return null;
+                completed(_results.Dequeue().Invoke());
+            }
+
+            public BusinessSceneCameraPoseSnapshot CaptureCurrentPose()
+            {
+                return new BusinessSceneCameraPoseSnapshot(
+                    transform.position,
+                    transform.rotation,
+                    60f,
+                    5f,
+                    false);
+            }
+
+            public void MoveToSnapshot(BusinessSceneCameraPoseSnapshot snapshot)
+            {
+                transform.SetPositionAndRotation(snapshot.Position, snapshot.Rotation);
+            }
+
+            public void MoveToPose(Transform targetPose)
+            {
+                if (targetPose != null)
+                {
+                    transform.SetPositionAndRotation(targetPose.position, targetPose.rotation);
+                }
+            }
+
+            public void ResetToInitialTransform()
+            {
+            }
+
+            public void SetInteractionsBlocked(bool blocked)
+            {
+                InteractionsBlocked = blocked;
+            }
+        }
+
         [Test]
         public void 关键环节目录允许零到多项并支持跨场景登记()
         {
@@ -241,6 +301,107 @@ namespace WebDLPro.Unity.Tests
         }
 
         [Test]
+        public void 新准备事务必须等待旧加载安全收尾且两个资源租约只释放一次()
+        {
+            GameObject runtimeRoot = new GameObject("ProcessDetailSingleFlightRuntime");
+            GameObject businessRoot = new GameObject("ProcessDetailSingleFlightBusinessRoot");
+            GameObject detailMount = new GameObject("ProcessDetailSingleFlightMount");
+            ProcessDetailCatalog catalog = ScriptableObject.CreateInstance<ProcessDetailCatalog>();
+            TrackingLease firstLease = new TrackingLease();
+            TrackingLease secondLease = new TrackingLease();
+            GameObject firstLateRoot = null;
+            GameObject secondLateRoot = null;
+            try
+            {
+                ProcessDetailCatalogEntry entry = CreateEntry();
+                catalog.SetEntriesForEditor(new[] { entry });
+                CoordinatorTestHost host = runtimeRoot.AddComponent<CoordinatorTestHost>();
+                ProcessDetailCoordinator coordinator = runtimeRoot.AddComponent<ProcessDetailCoordinator>();
+                coordinator.ConfigureForEditor(
+                    "gas-power",
+                    catalog,
+                    host,
+                    detailMount.transform,
+                    businessRoot.transform,
+                    host,
+                    host);
+                Assert.That(coordinator.Initialize().Success, Is.True);
+
+                host.Enqueue(() => ProcessDetailLoadResult.Completed(
+                    new ProcessDetailLoadHandle(
+                        firstLateRoot = new GameObject("FirstLateProcessDetailRoot"),
+                        firstLease)));
+                host.Enqueue(() => ProcessDetailLoadResult.Completed(
+                    new ProcessDetailLoadHandle(
+                        secondLateRoot = new GameObject("SecondLateProcessDetailRoot"),
+                        secondLease)));
+
+                BusinessSceneCommandResult firstResult = default;
+                IEnumerator firstPrepare = coordinator.PrepareAsync(
+                    "gas-power",
+                    "gas-power-generation",
+                    "gas-turbine",
+                    entry.ProcessDetailId,
+                    "transition.process-detail.single-flight.first",
+                    result => firstResult = result);
+                Assert.That(firstPrepare.MoveNext(), Is.True, "首个准备事务必须进入加载等待点。");
+                Assert.That(host.LoadCallCount, Is.EqualTo(1));
+
+                BusinessSceneCommandResult secondResult = default;
+                IEnumerator secondPrepare = coordinator.PrepareAsync(
+                    "gas-power",
+                    "gas-power-generation",
+                    "gas-turbine",
+                    entry.ProcessDetailId,
+                    "transition.process-detail.single-flight.second",
+                    result => secondResult = result);
+                Assert.That(secondPrepare.MoveNext(), Is.True, "新事务应等待旧事务安全退出，而不是同步启动第二个加载。");
+                Assert.That(
+                    host.LoadCallCount,
+                    Is.EqualTo(1),
+                    "任意时刻最多只能存在一个关键环节资源加载任务。");
+
+                Run(firstPrepare);
+                Assert.That(firstResult.Success, Is.False);
+                Assert.That(firstResult.ErrorCode, Is.EqualTo("process-detail-prepare-superseded"));
+                Assert.That(firstLateRoot == null, Is.True, "被取代事务的迟到实例必须销毁。");
+                Assert.That(firstLease.DisposeCount, Is.EqualTo(1));
+
+                Assert.That(secondPrepare.MoveNext(), Is.True, "旧事务结束后最新事务必须获得唯一加载权。");
+                Assert.That(host.LoadCallCount, Is.EqualTo(2));
+                Assert.That(
+                    coordinator.AbortPrepared(
+                        "gas-power",
+                        entry.ProcessDetailId,
+                        "transition.process-detail.single-flight.second").Success,
+                    Is.True);
+                Run(secondPrepare);
+
+                Assert.That(secondResult.Success, Is.False);
+                Assert.That(secondResult.ErrorCode, Is.EqualTo("process-detail-prepare-superseded"));
+                Assert.That(secondLateRoot == null, Is.True, "取消后的迟到实例必须销毁。");
+                Assert.That(secondLease.DisposeCount, Is.EqualTo(1));
+                Assert.That(coordinator.HasPreparedProcessDetail, Is.False);
+                Assert.That(coordinator.IsActive, Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(runtimeRoot);
+                Object.DestroyImmediate(businessRoot);
+                Object.DestroyImmediate(detailMount);
+                Object.DestroyImmediate(catalog);
+                if (firstLateRoot != null)
+                {
+                    Object.DestroyImmediate(firstLateRoot);
+                }
+                if (secondLateRoot != null)
+                {
+                    Object.DestroyImmediate(secondLateRoot);
+                }
+            }
+        }
+
+        [Test]
         public void 连续五十轮进入返回不存在重复实例或资源句柄()
         {
             ProcessDetailResourceRuntime runtime = new ProcessDetailResourceRuntime("gas-power");
@@ -287,7 +448,10 @@ namespace WebDLPro.Unity.Tests
             Assert.That(catalog, Is.Not.Null);
             Assert.That(prefab, Is.Not.Null);
             Assert.That(catalog.ValidateForRuntime(), Is.Empty);
-            Assert.That(catalog.Entries.Count, Is.EqualTo(14), "当前应登记燃气轮机、燃煤汽轮机、光伏逆变器、三个站类的九项保护关键环节以及开关站的母线保护和线路保护。");
+            Assert.That(
+                catalog.Entries.Count,
+                Is.EqualTo(16),
+                "当前应登记燃气轮机、燃煤汽轮机、风机、齿轮箱、光伏逆变器、三个站类的九项保护关键环节以及开关站的母线保护和线路保护。");
 
             Assert.That(
                 catalog.TryGet("gas-power", "process-detail.gas-power.gas-turbine", out ProcessDetailCatalogEntry entry),
@@ -319,11 +483,12 @@ namespace WebDLPro.Unity.Tests
                 visualRenderers.Add(renderer);
             }
 
-            MonoBehaviour animationController = FindBehaviour(prefab, "WaiKeHeBingAnimationController");
-            MonoBehaviour volumeController = FindBehaviour(prefab, "WaiKeHeBingGasVolumeController");
-            AssertSerializedRenderersExcluded(animationController, "_rightShellRenderers", visualRenderers);
-            AssertSerializedRendererExcluded(volumeController, "_blueVolumeRenderer", visualRenderers);
-            AssertSerializedRendererExcluded(volumeController, "_redVolumeRenderer", visualRenderers);
+            // 当前燃机包装已由单一主控制器统一管理壳体动画和红蓝流体体积，
+            // 测试直接验证生产控制器的显式引用，避免继续依赖已拆分移除的旧适配组件。
+            MonoBehaviour masterController = FindBehaviour(prefab, "WaiKeHeBingMasterController");
+            AssertSerializedRenderersExcluded(masterController, "_rightShellRenderers", visualRenderers);
+            AssertSerializedRendererExcluded(masterController, "_blueVolumeRenderer", visualRenderers);
+            AssertSerializedRendererExcluded(masterController, "_redVolumeRenderer", visualRenderers);
         }
 
         [Test]
@@ -353,7 +518,9 @@ namespace WebDLPro.Unity.Tests
             ProcessDetailStateVisualAdapter visualAdapter = prefab.GetComponent<ProcessDetailStateVisualAdapter>();
             Assert.That(visualAdapter, Is.Not.Null);
             SerializedObject serializedVisualAdapter = new SerializedObject(visualAdapter);
-            Assert.That(serializedVisualAdapter.FindProperty("_enableStateVisuals")?.boolValue, Is.True);
+            // 燃煤包装的状态反馈由蒸汽、阀门、轴能量和控制线路动态适配器统一表达，
+            // 不再对整机网格叠加通用四态材质，避免透明外壳与流体效果被重复染色。
+            Assert.That(serializedVisualAdapter.FindProperty("_enableStateVisuals")?.boolValue, Is.False);
             Assert.That(serializedVisualAdapter.FindProperty("_enableFaultVisual")?.boolValue, Is.False);
 
             MonoBehaviour dynamicAdapter = FindBehaviour(prefab, "CoalSteamTurbineProcessDetailDynamicAdapter");
@@ -364,7 +531,12 @@ namespace WebDLPro.Unity.Tests
             Transform nestedModel = prefab.transform.Find("DisplayAnchor/RanMeiManager");
             Assert.That(nestedModel, Is.Not.Null);
             GameObject nestedSource = PrefabUtility.GetCorrespondingObjectFromSource(nestedModel.gameObject);
-            Assert.That(AssetDatabase.GetAssetPath(nestedSource), Is.EqualTo("Assets/Prefabs/RanMeiManager.prefab"));
+            // RanMeiManager 当前作为“燃煤燃气轮机关键环节”组合预制体中的命名实例交付，
+            // 组合预制体是正式资源边界，测试同时保留层级名称校验以防错误模型被替换。
+            Assert.That(nestedModel.name, Is.EqualTo("RanMeiManager"));
+            Assert.That(
+                AssetDatabase.GetAssetPath(nestedSource),
+                Is.EqualTo("Assets/Prefabs/燃煤燃气轮机关键环节.prefab"));
 
             MonoBehaviour effectsController = FindBehaviour(prefab, "CoalPowerSteamEffectsController");
             SerializedObject serializedEffects = new SerializedObject(effectsController);
@@ -430,8 +602,7 @@ namespace WebDLPro.Unity.Tests
                         Assert.That(renderer, Is.TypeOf<MeshRenderer>(), $"{detailId} 的状态视觉渲染器[{rendererIndex}]必须是 MeshRenderer。");
                     }
                     Transform nestedModel = binding.DisplayAnchor.GetChild(0);
-                    Object source = PrefabUtility.GetCorrespondingObjectFromSource(nestedModel.gameObject);
-                    Assert.That(AssetDatabase.GetAssetPath(source), Is.EqualTo(sourcePaths[stepIndex]), detailId);
+                    AssertNestedModelAssetPath(nestedModel, sourcePaths[stepIndex], detailId);
                 }
             }
         }
@@ -449,7 +620,7 @@ namespace WebDLPro.Unity.Tests
                 "Assets/Art/变电站关键环节/母线保护.fbx",
                 "Assets/Art/变电站关键环节/线路保护.fbx"
             };
-            int[] expectedRendererCounts = { 18, 15 };
+            int[] expectedRendererCounts = { 18, 16 };
 
             for (int index = 0; index < stepIds.Length; index++)
             {
@@ -478,12 +649,11 @@ namespace WebDLPro.Unity.Tests
                     Assert.That(renderer, Is.TypeOf<MeshRenderer>(), $"{detailId} 的状态视觉渲染器[{rendererIndex}]必须是 MeshRenderer。");
                 }
                 Transform nestedModel = binding.DisplayAnchor.GetChild(0);
-                Object source = PrefabUtility.GetCorrespondingObjectFromSource(nestedModel.gameObject);
-                Assert.That(AssetDatabase.GetAssetPath(source), Is.EqualTo(sourcePaths[index]), detailId);
+                AssertNestedModelAssetPath(nestedModel, sourcePaths[index], detailId);
             }
         }
         [Test]
-        public void 燃煤设备状态驱动全部受控特效且只有故障停播()
+        public void 燃煤设备状态驱动全部受控特效且故障进入惯性停机()
         {
             GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(CoalPrefabPath);
             ProcessDetailCatalog catalog = AssetDatabase.LoadAssetAtPath<ProcessDetailCatalog>(CatalogPath);
@@ -498,9 +668,9 @@ namespace WebDLPro.Unity.Tests
                 Assert.That(binding.ValidateBinding(coalEntry).Success, Is.True);
 
                 Assert.That(binding.PrepareForActivation(true, BusinessSceneNodeVisualState.Fault).Success, Is.True);
-                AssertCombinedCoalPlaybackAllowed(instance, false);
+                AssertCombinedCoalFaultCoasting(instance);
                 instance.SetActive(true);
-                AssertCombinedCoalPlaybackAllowed(instance, false);
+                AssertCombinedCoalFaultCoasting(instance);
                 Assert.That(binding.ApplyVisualState(BusinessSceneNodeVisualState.Alarm).Success, Is.True);
                 AssertCombinedCoalPlaybackAllowed(instance, true);
                 Assert.That(binding.ApplyVisualState(BusinessSceneNodeVisualState.Offline).Success, Is.True);
@@ -875,6 +1045,59 @@ namespace WebDLPro.Unity.Tests
             Assert.That(field, Is.Not.Null, "CoalPowerShaftRotationController 缺少动态播放状态字段。");
             Assert.That(field.GetValue(shaftController), Is.EqualTo(expected), "燃煤轴旋转播放许可错误。");
             Assert.That(shaftController.enabled, Is.EqualTo(expected), "燃煤轴旋转组件启用状态错误。");
+        }
+
+        /// <summary>
+        /// 故障状态立即关闭组合特效，但轴按产品约定进入延迟减速阶段；此时旋转许可暂时保留，
+        /// 并由控制器内部的惯性标志阻止 OnEnable 将故障准备状态重置为普通播放。
+        /// </summary>
+        private static void AssertCombinedCoalFaultCoasting(GameObject root)
+        {
+            MonoBehaviour effectsController = FindBehaviour(root, "CoalPowerSteamEffectsController");
+            FieldInfo effectsField = effectsController.GetType().GetField(
+                "_allEffectsEnabled",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(effectsField, Is.Not.Null, "CoalPowerSteamEffectsController 缺少动态播放状态字段。");
+            Assert.That(effectsField.GetValue(effectsController), Is.EqualTo(false), "燃煤故障时组合特效必须立即停止。");
+
+            MonoBehaviour shaftController = FindBehaviour(root, "CoalPowerShaftRotationController");
+            FieldInfo animationField = shaftController.GetType().GetField(
+                "_animationEnabled",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            FieldInfo coastingField = shaftController.GetType().GetField(
+                "_coasting",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(animationField, Is.Not.Null, "CoalPowerShaftRotationController 缺少动态播放状态字段。");
+            Assert.That(coastingField, Is.Not.Null, "CoalPowerShaftRotationController 缺少惯性停机状态字段。");
+            Assert.That(animationField.GetValue(shaftController), Is.EqualTo(true), "燃煤轴故障惯性阶段必须保留旋转许可。");
+            Assert.That(coastingField.GetValue(shaftController), Is.EqualTo(true), "燃煤轴故障时必须进入惯性停机阶段。");
+            Assert.That(shaftController.enabled, Is.True, "燃煤轴故障惯性阶段必须保持组件启用。");
+        }
+
+        /// <summary>
+        /// 变电保护模型允许为了制作包装而解包根预制体，因此不能依赖根对象仍保留 Prefab 来源关系；
+        /// 通过实际渲染网格的共享 Mesh 反查 FBX，既验证生产模型来源，也兼容解包后的显式组件绑定。
+        /// </summary>
+        private static void AssertNestedModelAssetPath(
+            Transform nestedModel,
+            string expectedAssetPath,
+            string context)
+        {
+            Assert.That(nestedModel, Is.Not.Null, context);
+            MeshFilter[] meshFilters = nestedModel.GetComponentsInChildren<MeshFilter>(true);
+            Assert.That(meshFilters, Is.Not.Empty, $"{context} 必须包含来自正式 FBX 的网格。");
+
+            HashSet<string> meshAssetPaths = new HashSet<string>(StringComparer.Ordinal);
+            for (int index = 0; index < meshFilters.Length; index++)
+            {
+                Mesh sharedMesh = meshFilters[index].sharedMesh;
+                if (sharedMesh != null)
+                {
+                    meshAssetPaths.Add(AssetDatabase.GetAssetPath(sharedMesh));
+                }
+            }
+
+            Assert.That(meshAssetPaths, Does.Contain(expectedAssetPath), context);
         }
 
         private static MonoBehaviour FindBehaviour(GameObject root, string typeName)

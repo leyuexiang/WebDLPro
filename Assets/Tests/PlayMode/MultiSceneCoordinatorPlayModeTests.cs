@@ -181,6 +181,10 @@ namespace WebDLPro.Unity.Tests
 
             const string requestId = "request.bridge.init.minimal-payload";
             InvokeBridgeMethod("ReceiveFromParent", CreateBridgeCommandMessage("init", "{}", requestId));
+            Assert.That(
+                HasNotice("ack", requestId, string.Empty),
+                Is.False,
+                "浏览器 SendMessage 回调只允许入队；协议命令必须在后续 Unity 帧中执行，避免重入 PlayerLoop。");
             yield return WaitForCompletion(
                 () => HasNotice("ack", requestId, string.Empty),
                 "初始化确认未在时限内回传。");

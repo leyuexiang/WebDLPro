@@ -1272,7 +1272,7 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
     <iframe id="visualization-shell" title="燃气发电场景与拓扑嵌入壳" allow="fullscreen"></iframe>
     <section class="test-controls" aria-label="多场景外部消息测试操作">
       <span class="test-controls__title">燃气、燃煤、光伏三场景全链路自测（含升压站、降压站、换流站、开关站）</span>
-      <p class="test-controls__hint">可通过公开 workflow.trigger（流程触发）验证 13 个场景和 23 个动作；状态按钮用于观察绑定设备在正常/故障之间切换后的二维、三维效果。</p>
+      <p class="test-controls__hint">通过公开 workflow.trigger（流程触发）覆盖当前发布清单的全部公开动作；状态按钮用于观察绑定设备在正常/故障之间切换后的二维、三维效果。</p>
       <div class="test-controls__actions" aria-label="视图链路操作">
         <button type="button" data-action-id="action.scene.overview" disabled>沙盘</button>
         <button type="button" data-action-id="action.gas-power.overview" disabled>燃气总览</button>
@@ -1282,6 +1282,9 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
       </div>
       <div class="test-controls__scene-actions" aria-label="新增场景跳转操作">
         <button type="button" data-action-id="action.wind-power.overview" disabled>风电场景</button>
+        <!-- 两项风电关键环节复用公共动作处理器，确保可见入口与正式清单同步且无需内部视图捷径。 -->
+        <button type="button" data-action-id="action.wind-power.wind-turbine" disabled>风机关键</button>
+        <button type="button" data-action-id="action.wind-power.gearbox" disabled>齿轮箱关键</button>
         <button type="button" data-action-id="action.solar-power.overview" disabled>光伏场景</button>
         <button type="button" data-action-id="action.solar-power.inverter" disabled>光伏关键</button>
         <button type="button" data-action-id="action.step-up-substation.overview" disabled>升压站场景</button>

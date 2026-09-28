@@ -44,6 +44,10 @@ public sealed class GearboxOrbitCamera : MonoBehaviour
 
     public bool OrbitEnabled { get; private set; }
     public Transform Target => _target;
+    // 第三层由业务相机独占 Transform；即使本组件被禁用，仍复用源模型显式登记的核心与距离边界。
+    public Vector3 OrbitCenter => _target != null ? _target.TransformPoint(_targetLocalOffset) : transform.position;
+    public float MinimumDistance => _minDistance;
+    public float MaximumDistance => _maxDistance;
 
     public void Configure(Transform target, Vector3 localOffset, float distance)
     {

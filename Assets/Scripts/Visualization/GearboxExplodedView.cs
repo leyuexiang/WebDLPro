@@ -22,6 +22,10 @@ public sealed class GearboxExplodedView : MonoBehaviour
         [Min(0), Tooltip("外围到内部的展开阶段，同阶段零件同时移动。")]
         public int stage;
         public Mesh wireframeMesh;
+        [Tooltip("点击此零件的标识牌时，镜头平滑聚焦到该零件。")]
+        public bool focusCameraOnClick;
+        [Tooltip("目标位于画面外时，仍在屏幕边缘显示标识牌和方向箭头。")]
+        public bool showOffscreenIndicator;
         [HideInInspector] public Vector3 assembledPosition;
     }
 
@@ -66,6 +70,7 @@ public sealed class GearboxExplodedView : MonoBehaviour
         public RectTransform reticle;
         public RectTransform statusBar;
         public TextMeshProUGUI status;
+        public TextMeshProUGUI offscreenArrow;
         public int state = -1;
         public RectTransform dot;
         public CanvasGroup group;
@@ -98,6 +103,17 @@ public sealed class GearboxExplodedView : MonoBehaviour
     private int _lastSequenceStatus = -1;
     private static readonly int IntensityId = Shader.PropertyToID("_Intensity");
     private static readonly int ScanColorId = Shader.PropertyToID("_Color");
+    private bool _isCameraFocusing;
+    private float _cameraFocusElapsed;
+    private const float CameraFocusDuration = 0.45f;
+    private Vector3 _cameraFocusStartPosition;
+    private Vector3 _cameraFocusTargetPosition;
+    private Quaternion _cameraFocusStartRotation;
+    private Quaternion _cameraFocusTargetRotation;
+    private int _cameraFocusedPart = -1;
+    private bool _hasCameraReturnPose;
+    private Vector3 _cameraReturnPosition;
+    private Quaternion _cameraReturnRotation;
 
     private int _selectedPart = -1;
     public int SelectedPart => _selectedPart;
@@ -139,6 +155,7 @@ public sealed class GearboxExplodedView : MonoBehaviour
             ApplyPose();
         }
         if (_slider != null) _slider.SetValueWithoutNotify(_progress);
+        UpdateCameraFocus();
     }
 
     public void Expand() { _goal = 1f; }
@@ -334,19 +351,33 @@ public sealed class GearboxExplodedView : MonoBehaviour
             Callout callout = _callouts[i];
             if (part.target == null) { callout.group.alpha = 0f; continue; }
             Vector3 projected = _screenPoints[i];
-            bool visible = part.target.gameObject.activeInHierarchy && projected.z > _targetCamera.nearClipPlane && pixels.Contains(projected);
+            bool visible = part.target.gameObject.activeInHierarchy && projected.z > _targetCamera.nearClipPlane &&
+                (pixels.Contains(projected) || part.showOffscreenIndicator);
             float partProgress = GetPartProgress(i);
             float alpha = _showLabels ? Mathf.InverseLerp(0.03f, 0.4f, partProgress) : 0f;
             callout.group.alpha = visible ? alpha : 0f;
             callout.group.blocksRaycasts = visible && alpha > .5f;
-            int state = _selectedPart == i ? 2 : partProgress >= 1f ? 1 : 0;
+            int state = _cameraFocusedPart == i ? 3 : _selectedPart == i ? 2 : partProgress >= 1f ? 1 : 0;
             if (callout.state != state)
             {
                 callout.state = state;
-                callout.status.text = state == 2 ? "SELECTED / 已选中" : state == 1 ? "LINKED / 已展开" : "SCANNING / 展开中";
+                callout.status.text = state == 3 ? "CLICK AGAIN / 点击返回" : state == 2 ? "SELECTED / 已选中" : state == 1 ? "LINKED / 已展开" : "SCANNING / 展开中";
             }
             if (!visible || alpha <= 0f) continue;
             Vector2 point = new Vector2(projected.x, projected.y) / scale;
+            if (!pixels.Contains(projected) && part.showOffscreenIndicator)
+            {
+                float margin = 18f;
+                point.x = Mathf.Clamp(point.x, left + margin, right - margin);
+                point.y = Mathf.Clamp(point.y, bottom + margin, bottom + height - margin);
+            }
+            bool offscreen = !pixels.Contains(projected) && part.showOffscreenIndicator;
+            callout.offscreenArrow.gameObject.SetActive(offscreen);
+            if (offscreen)
+            {
+                callout.offscreenArrow.text = projected.y < pixels.yMin ? "▼" : projected.y > pixels.yMax ? "▲" : projected.x < pixels.xMin ? "◀" : "▶";
+                callout.offscreenArrow.rectTransform.anchoredPosition = point + new Vector2(0f, 18f);
+            }
             bool rightSide = _autoArrangeLabels ? _layoutRight[i] : part.rightSide;
             int row = _autoArrangeLabels ? _layoutRows[i] : part.row;
             float x = rightSide ? right - width * 0.5f - 20f : left + width * 0.5f + 20f;
@@ -450,6 +481,11 @@ public sealed class GearboxExplodedView : MonoBehaviour
             dot.sizeDelta = new Vector2(4f, 4f);
             RectTransform pulse = ImageRect("Signal", group, new Color(.7f, 1f, 1f, 1f));
             pulse.sizeDelta = new Vector2(4, 4);
+            TextMeshProUGUI offscreenArrow = Text("Offscreen Direction", group, "▼", 26f);
+            offscreenArrow.rectTransform.anchorMin = offscreenArrow.rectTransform.anchorMax = Vector2.zero;
+            offscreenArrow.rectTransform.sizeDelta = new Vector2(36f, 36f);
+            offscreenArrow.color = _accentColor;
+            offscreenArrow.gameObject.SetActive(false);
             RectTransform reticle = TechRect("Lock Reticle", group, true);
             reticle.sizeDelta = new Vector2(23, 23);
             RectTransform panel = TechRect("Plate", group);
@@ -463,7 +499,7 @@ public sealed class GearboxExplodedView : MonoBehaviour
             select.transition = Selectable.Transition.None;
             select.navigation = new Navigation { mode = Navigation.Mode.None };
             int partIndex = i;
-            select.onClick.AddListener(() => SelectPart(_selectedPart == partIndex ? -1 : partIndex));
+            select.onClick.AddListener(() => HandlePartClick(partIndex));
             RectTransform badge = ImageRect("Number Badge", panel, Tint(.15f));
             badge.anchorMin = badge.anchorMax = new Vector2(0, .5f);
             badge.anchoredPosition = new Vector2(28, 0);
@@ -485,7 +521,8 @@ public sealed class GearboxExplodedView : MonoBehaviour
             bar.offsetMin = new Vector2(58, 3);
             bar.offsetMax = new Vector2(-18, 5);
             _callouts[i] = new Callout { panel = panel, line = line, secondLine = secondLine, glow = glow, secondGlow = secondGlow,
-                elbow = elbow, pulse = pulse, reticle = reticle, status = status, statusBar = bar, dot = dot, group = canvasGroup };
+                elbow = elbow, pulse = pulse, reticle = reticle, status = status, offscreenArrow = offscreenArrow,
+                statusBar = bar, dot = dot, group = canvasGroup };
         }
         if (EventSystem.current == null && FindObjectOfType<EventSystem>() == null)
         {
@@ -508,6 +545,114 @@ public sealed class GearboxExplodedView : MonoBehaviour
                 foreach (MeshRenderer renderer in renderers)
                     if (renderer != null) Destroy(renderer.gameObject);
         if (_canvas != null) Destroy(_canvas.gameObject);
+    }
+
+    private void HandlePartClick(int partIndex)
+    {
+        Part part = _parts[partIndex];
+        if (part.focusCameraOnClick && _cameraFocusedPart == partIndex && _hasCameraReturnPose)
+        {
+            SelectPart(-1);
+            ReturnCamera();
+            return;
+        }
+
+        SelectPart(_selectedPart == partIndex ? -1 : partIndex);
+        if (part.focusCameraOnClick) FocusCameraOnPart(part.target, partIndex);
+    }
+
+    private void FocusCameraOnPart(Transform target, int partIndex)
+    {
+        if (target == null) return;
+
+        Camera camera = _targetCamera != null ? _targetCamera : Camera.main;
+        if (camera == null) return;
+
+        if (!_hasCameraReturnPose)
+        {
+            _cameraReturnPosition = camera.transform.position;
+            _cameraReturnRotation = camera.transform.rotation;
+            _hasCameraReturnPose = true;
+        }
+        _cameraFocusedPart = partIndex;
+
+        Bounds bounds = GetTargetBounds(target);
+        PowerPlantFreeCameraController freeCamera = camera.GetComponent<PowerPlantFreeCameraController>();
+        if (freeCamera != null)
+        {
+            freeCamera.FocusBounds(bounds);
+            return;
+        }
+
+        Vector3 horizontalDirection = Vector3.ProjectOnPlane(camera.transform.position - bounds.center, Vector3.up);
+        if (horizontalDirection.sqrMagnitude < 0.0001f)
+            horizontalDirection = -Vector3.ProjectOnPlane(camera.transform.forward, Vector3.up);
+        horizontalDirection.Normalize();
+
+        float verticalHalfFov = camera.fieldOfView * Mathf.Deg2Rad * 0.5f;
+        float horizontalHalfFov = Mathf.Atan(Mathf.Tan(verticalHalfFov) * camera.aspect);
+        float distance = Mathf.Max(18f, bounds.extents.magnitude / Mathf.Sin(Mathf.Min(verticalHalfFov, horizontalHalfFov)) * 1.25f);
+        float pitch = 28f * Mathf.Deg2Rad;
+        Vector3 position = bounds.center + horizontalDirection * (Mathf.Cos(pitch) * distance) + Vector3.up * (Mathf.Sin(pitch) * distance);
+        _cameraFocusStartPosition = camera.transform.position;
+        _cameraFocusStartRotation = camera.transform.rotation;
+        _cameraFocusTargetPosition = position;
+        _cameraFocusTargetRotation = Quaternion.LookRotation(bounds.center - position, Vector3.up);
+        _cameraFocusElapsed = 0f;
+        _isCameraFocusing = true;
+    }
+
+    private void ReturnCamera()
+    {
+        Camera camera = _targetCamera != null ? _targetCamera : Camera.main;
+        if (camera == null || !_hasCameraReturnPose) return;
+
+        PowerPlantFreeCameraController freeCamera = camera.GetComponent<PowerPlantFreeCameraController>();
+        if (freeCamera != null)
+        {
+            freeCamera.MoveToPose(_cameraReturnPosition, _cameraReturnRotation);
+        }
+        else
+        {
+            _cameraFocusStartPosition = camera.transform.position;
+            _cameraFocusStartRotation = camera.transform.rotation;
+            _cameraFocusTargetPosition = _cameraReturnPosition;
+            _cameraFocusTargetRotation = _cameraReturnRotation;
+            _cameraFocusElapsed = 0f;
+            _isCameraFocusing = true;
+        }
+
+        _cameraFocusedPart = -1;
+        _hasCameraReturnPose = false;
+    }
+
+    private void UpdateCameraFocus()
+    {
+        if (!_isCameraFocusing) return;
+        Camera camera = _targetCamera != null ? _targetCamera : Camera.main;
+        if (camera == null)
+        {
+            _isCameraFocusing = false;
+            return;
+        }
+
+        _cameraFocusElapsed += Time.unscaledDeltaTime;
+        float normalizedTime = Mathf.Clamp01(_cameraFocusElapsed / CameraFocusDuration);
+        float easedTime = normalizedTime * normalizedTime * (3f - 2f * normalizedTime);
+        camera.transform.SetPositionAndRotation(
+            Vector3.Lerp(_cameraFocusStartPosition, _cameraFocusTargetPosition, easedTime),
+            Quaternion.Slerp(_cameraFocusStartRotation, _cameraFocusTargetRotation, easedTime));
+        if (normalizedTime >= 1f) _isCameraFocusing = false;
+    }
+
+    private static Bounds GetTargetBounds(Transform target)
+    {
+        Renderer[] renderers = target.GetComponentsInChildren<Renderer>(true);
+        if (renderers.Length == 0) return new Bounds(target.position, Vector3.one);
+
+        Bounds bounds = renderers[0].bounds;
+        for (int i = 1; i < renderers.Length; i++) bounds.Encapsulate(renderers[i].bounds);
+        return bounds;
     }
 
     private void CreateControls()

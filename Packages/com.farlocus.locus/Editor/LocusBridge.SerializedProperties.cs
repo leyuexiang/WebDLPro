@@ -14,7 +14,6 @@ namespace Locus
     {
         public sealed class SerializedPropertySnapshot
         {
-            public string restoreState;
             public string propertyPath;
             public string semanticPath;
             public string nodeKind;
@@ -86,7 +85,6 @@ namespace Locus
 
         public sealed class SerializedPropertyBindingTarget
         {
-            public string globalObjectId;
             public string kind;
             public string guid;
             public string path;
@@ -253,17 +251,14 @@ namespace Locus
             SerializedProperty prop,
             int maxDepth = 4,
             int maxArrayItems = 64,
-            bool dynamicSchema = false,
-            bool includeRestoreState = true)
+            bool dynamicSchema = false)
         {
             if (prop == null)
                 return null;
 
             maxDepth = Math.Max(0, maxDepth);
             maxArrayItems = Math.Max(0, maxArrayItems);
-            var snapshot = SnapshotSerializedProperty(prop.Copy(), 0, maxDepth, maxArrayItems, dynamicSchema);
-            if (includeRestoreState) snapshot.restoreState = Locus.Json.LocusJson.SerializeData(CapturePropertyRestoreState(prop));
-            return snapshot;
+            return SnapshotSerializedProperty(prop.Copy(), 0, maxDepth, maxArrayItems, dynamicSchema);
         }
 
         public static SerializedPropertySnapshot SnapshotSerializedObject(
@@ -346,7 +341,7 @@ namespace Locus
 
         public static string SerializedPropertySnapshotToJson(SerializedPropertySnapshot snapshot)
         {
-            return Locus.Json.LocusJson.SerializeData(snapshot);
+            return ToJsonValue(snapshot, 0, SnapshotJsonDepthLimit, true);
         }
 
         public static bool IsSerializedPropertyWritable(SerializedProperty prop)
@@ -365,8 +360,6 @@ namespace Locus
                 case SerializedPropertyType.String:
                 case SerializedPropertyType.Enum:
                 case SerializedPropertyType.ObjectReference:
-                case SerializedPropertyType.ExposedReference:
-                case SerializedPropertyType.Hash128:
                 case SerializedPropertyType.LayerMask:
                 case SerializedPropertyType.ArraySize:
                 case SerializedPropertyType.Vector2:
@@ -400,13 +393,11 @@ namespace Locus
                 case SerializedPropertyType.Integer:
                 case SerializedPropertyType.ArraySize:
                 case SerializedPropertyType.LayerMask:
-                    if (prop.type == "ulong") return prop.ulongValue.ToString(CultureInfo.InvariantCulture);
-                    if (prop.type == "long") return prop.longValue.ToString(CultureInfo.InvariantCulture);
-                    return prop.longValue;
+                    return prop.intValue;
                 case SerializedPropertyType.Boolean:
                     return prop.boolValue;
                 case SerializedPropertyType.Float:
-                    return prop.doubleValue;
+                    return prop.floatValue;
                 case SerializedPropertyType.String:
                     return prop.stringValue;
                 case SerializedPropertyType.Enum:
@@ -421,10 +412,6 @@ namespace Locus
                     return prop.objectReferenceValue != null
                         ? SerializedObjectReferencePath(prop.objectReferenceValue)
                         : "";
-                case SerializedPropertyType.ExposedReference:
-                    return prop.exposedReferenceValue != null ? SerializedObjectReferencePath(prop.exposedReferenceValue) : "";
-                case SerializedPropertyType.Hash128:
-                    return prop.hash128Value.ToString();
                 case SerializedPropertyType.Vector2:
                     return VectorValue(prop.vector2Value);
                 case SerializedPropertyType.Vector3:
@@ -507,11 +494,11 @@ namespace Locus
                 case SerializedPropertyType.Integer:
                 case SerializedPropertyType.ArraySize:
                 case SerializedPropertyType.LayerMask:
-                    return Convert.ToString(SerializedPropertyValue(prop), CultureInfo.InvariantCulture);
+                    return prop.intValue.ToString(CultureInfo.InvariantCulture);
                 case SerializedPropertyType.Boolean:
                     return prop.boolValue ? "true" : "false";
                 case SerializedPropertyType.Float:
-                    return prop.doubleValue.ToString("R", CultureInfo.InvariantCulture);
+                    return prop.floatValue.ToString(CultureInfo.InvariantCulture);
                 case SerializedPropertyType.String:
                     return prop.stringValue ?? "";
                 case SerializedPropertyType.Enum:
@@ -520,10 +507,6 @@ namespace Locus
                     if (prop.objectReferenceValue == null)
                         return "None";
                     return SerializedObjectReferenceDisplay(prop.objectReferenceValue);
-                case SerializedPropertyType.ExposedReference:
-                    return prop.exposedReferenceValue == null ? "None" : SerializedObjectReferenceDisplay(prop.exposedReferenceValue);
-                case SerializedPropertyType.Hash128:
-                    return prop.hash128Value.ToString();
                 case SerializedPropertyType.Vector2:
                     return FormatVector(prop.vector2Value);
                 case SerializedPropertyType.Vector3:
@@ -573,8 +556,6 @@ namespace Locus
         {
             if (prop == null)
                 throw new Exception("SerializedProperty is required");
-            if (!prop.editable || prop.propertyPath == "m_Script")
-                throw new InvalidOperationException("SerializedProperty is read only: " + prop.propertyPath);
             string json = string.IsNullOrWhiteSpace(valueJson) ? "null" : valueJson.Trim();
             SerializedPropertySnapshot restoreSnapshot;
             if (TryParseRestoreSnapshotCommand(json, out restoreSnapshot))
@@ -596,13 +577,13 @@ namespace Locus
                 case SerializedPropertyType.Integer:
                 case SerializedPropertyType.ArraySize:
                 case SerializedPropertyType.LayerMask:
-                    SetPropertyIntegerValue(prop, json);
+                    prop.intValue = ParseIntJson(json);
                     break;
                 case SerializedPropertyType.Boolean:
                     prop.boolValue = ParseBoolJson(json);
                     break;
                 case SerializedPropertyType.Float:
-                    prop.doubleValue = double.Parse(TrimJsonString(json), CultureInfo.InvariantCulture);
+                    prop.floatValue = ParseFloatJson(json);
                     break;
                 case SerializedPropertyType.String:
                     prop.stringValue = ParseStringJson(json);
@@ -611,13 +592,8 @@ namespace Locus
                     SetEnumValue(prop, json);
                     break;
                 case SerializedPropertyType.ObjectReference:
-                    prop.objectReferenceValue = ResolvePropertyReferenceValue(prop, json);
-                    break;
-                case SerializedPropertyType.ExposedReference:
-                    prop.exposedReferenceValue = ResolvePropertyReferenceValue(prop, json);
-                    break;
-                case SerializedPropertyType.Hash128:
-                    prop.hash128Value = Hash128.Parse(ParseStringJson(json));
+                    string assetPath = ParseStringJson(json);
+                    prop.objectReferenceValue = ResolveSerializedObjectReference(prop, assetPath);
                     break;
                 case SerializedPropertyType.Vector2:
                     Vector2Json v2 = DeserializeJson<Vector2Json>(json);
@@ -895,13 +871,6 @@ namespace Locus
             if (snapshot == null)
                 throw new Exception("SerializedProperty snapshot is required");
 
-            if (!string.IsNullOrEmpty(snapshot.restoreState)) {
-                RestorePropertyState(prop, DeserializeJson<PropertyRestoreNode>(snapshot.restoreState),
-                    ExistingManagedPropertyReferences(prop.serializedObject), new HashSet<long>());
-                return;
-            }
-            if (snapshot.childrenTruncated) throw new InvalidOperationException("A truncated display snapshot cannot be restored.");
-
             if (snapshot.isArray && prop.isArray && prop.propertyType == SerializedPropertyType.Generic)
             {
                 int targetSize = Math.Max(0, snapshot.arraySize);
@@ -960,7 +929,6 @@ namespace Locus
 
         private static string SerializedPropertySnapshotValueJson(SerializedPropertySnapshot snapshot)
         {
-            if (snapshot.value != null) return Locus.Json.LocusJson.SerializeData(snapshot.value);
             string valueType = FirstNonEmpty(snapshot.valueType, snapshot.type);
             switch (valueType)
             {
@@ -1039,9 +1007,7 @@ namespace Locus
             FieldInfo fieldInfo = dynamicSchema ? null : ResolveSerializedPropertyFieldInfo(prop);
             bool isEnum = prop.propertyType == SerializedPropertyType.Enum;
             bool isManagedReference = prop.propertyType == SerializedPropertyType.ManagedReference;
-            bool isObjectReference = prop.propertyType == SerializedPropertyType.ObjectReference || prop.propertyType == SerializedPropertyType.ExposedReference;
-            Type referenceFieldType = prop.propertyType == SerializedPropertyType.ExposedReference && fieldType != null && fieldType.IsGenericType
-                ? fieldType.GetGenericArguments()[0] : fieldType;
+            bool isObjectReference = prop.propertyType == SerializedPropertyType.ObjectReference;
             var snapshot = new SerializedPropertySnapshot
             {
                 propertyPath = prop.propertyPath,
@@ -1057,10 +1023,7 @@ namespace Locus
                 name = prop.name,
                 prefabOverride = prop.prefabOverride,
                 type = prop.propertyType.ToString(),
-                valueType = prop.propertyType == SerializedPropertyType.Integer && prop.type == "long" ? "Long"
-                    : prop.propertyType == SerializedPropertyType.Integer && prop.type == "ulong" ? "UnsignedLong"
-                    : prop.propertyType == SerializedPropertyType.Float && prop.type == "double" ? "Double"
-                    : prop.propertyType == SerializedPropertyType.ExposedReference ? "ObjectReference" : prop.propertyType.ToString(),
+                valueType = prop.propertyType.ToString(),
                 fieldTypeFullName = FieldTypeFullName(fieldType),
                 fieldTypeAssembly = FieldTypeAssembly(fieldType),
                 value = SerializedPropertyValue(prop, !dynamicSchema),
@@ -1097,10 +1060,10 @@ namespace Locus
                 minLines = SerializedFieldMinLines(fieldInfo),
                 maxLines = SerializedFieldMaxLines(fieldInfo),
                 referenceTypeFullName = !dynamicSchema && isObjectReference
-                    ? FieldTypeFullName(referenceFieldType)
+                    ? FieldTypeFullName(fieldType)
                     : "",
                 referenceTypeAssembly = !dynamicSchema && isObjectReference
-                    ? FieldTypeAssembly(referenceFieldType)
+                    ? FieldTypeAssembly(fieldType)
                     : "",
                 attributes = SerializedFieldAttributes(fieldInfo)
             };
@@ -1124,8 +1087,6 @@ namespace Locus
         {
             switch (propertyType)
             {
-                case SerializedPropertyType.Hash128:
-                case SerializedPropertyType.ExposedReference:
                 case SerializedPropertyType.Vector2:
                 case SerializedPropertyType.Vector3:
                 case SerializedPropertyType.Vector4:
@@ -1162,7 +1123,7 @@ namespace Locus
         private static SerializedPropertyBindingTarget SerializedObjectReferenceTarget(
             SerializedProperty prop)
         {
-            UnityEngine.Object referenced = prop == null ? null : prop.propertyType == SerializedPropertyType.ExposedReference ? prop.exposedReferenceValue : prop.objectReferenceValue;
+            UnityEngine.Object referenced = prop != null ? prop.objectReferenceValue : null;
             UnityEngine.Object owner = prop != null && prop.serializedObject != null
                 ? prop.serializedObject.targetObject
                 : null;
@@ -1367,7 +1328,7 @@ namespace Locus
             }
         }
 
-        private static SerializedManagedReferenceTypeOption[] ManagedReferenceTypeOptionsUncached(SerializedProperty prop)
+        private static SerializedManagedReferenceTypeOption[] ManagedReferenceTypeOptions(SerializedProperty prop)
         {
             Type fieldType = ResolveManagedReferenceTypeName(prop.managedReferenceFieldTypename);
             if (fieldType == null)
@@ -1447,7 +1408,7 @@ namespace Locus
             return false;
         }
 
-        private static Type ResolveManagedReferenceTypeNameUncached(string typeName)
+        private static Type ResolveManagedReferenceTypeName(string typeName)
         {
             typeName = (typeName ?? "").Trim();
             if (string.IsNullOrEmpty(typeName))
@@ -1952,7 +1913,7 @@ namespace Locus
             return null;
         }
 
-        private static FieldInfo SerializedMemberFieldUncached(Type ownerType, string memberName)
+        private static FieldInfo SerializedMemberField(Type ownerType, string memberName)
         {
             for (Type current = ownerType; current != null; current = current.BaseType)
             {

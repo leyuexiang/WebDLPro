@@ -55,8 +55,6 @@ namespace Locus
 
             public readonly CancellationTokenSource Cancellation = new CancellationTokenSource();
             public readonly TaskCompletionSource<string> Completion = LocusAsync.CreateTcs<string>();
-            public volatile ScriptGlobals Globals;
-            public volatile string TimeoutError;
 
             public AsyncSnippetExecution()
             {
@@ -1463,8 +1461,7 @@ namespace Locus
                     return;
                 }
 
-                var synchronizationContext = new ExecuteCodeSynchronizationContext();
-                synchronizationContext.Run(() => RunAsyncSnippetOnMainThread(snippet, execution, requestState));
+                RunAsyncSnippetOnMainThread(snippet, execution, requestState);
             });
 
             _ = MonitorAsyncSnippetInactivityAsync(execution);
@@ -1486,10 +1483,11 @@ namespace Locus
                     if (execution.IdleSeconds < ExecuteTimeoutMs / 1000.0)
                         continue;
 
-                    execution.TimeoutError = "execution timed out after " + (ExecuteTimeoutMs / 1000)
-                        + " seconds without print/progress output";
                     execution.Cancel();
-                    execution.Completion.TrySetResult(ExecuteCodeErrorWithOutput(execution.TimeoutError, execution.Globals));
+                    execution.Completion.TrySetResult(
+                        "__ERROR__: execution timed out after " +
+                        (ExecuteTimeoutMs / 1000) +
+                        " seconds without print/progress output");
                     return;
                 }
             }
@@ -1515,9 +1513,7 @@ namespace Locus
                     requestState.ThrowIfCancellationRequested();
 
                 globals = new ScriptGlobals(execution.TouchActivity);
-                execution.Globals = globals;
                 ctx = new ExecuteCodeContext(execution.Cancellation, execution.TouchActivity, requestState);
-                ctx.InitializeProfilerOutput(globals.print);
 
                 object returnValue = await snippet.Executor(globals, ctx, execution.Cancellation.Token);
 
@@ -1538,19 +1534,16 @@ namespace Locus
             }
             catch (OperationCanceledException)
             {
-                execution.Completion.TrySetResult(ExecuteCodeErrorWithOutput(execution.TimeoutError ?? "execution canceled", globals));
+                execution.Completion.TrySetResult("__ERROR__: execution canceled");
             }
             catch (Exception ex)
             {
-                execution.Completion.TrySetResult(ExecuteCodeErrorWithOutput("runtime error: " + ex, globals));
+                execution.Completion.TrySetResult("__ERROR__: runtime error: " + ex);
             }
             finally
             {
                 if (ctx != null)
-                {
-                    ctx.DisposeProfiler();
                     ctx.ClearProgress();
-                }
 
                 if (requestState != null)
                     requestState.ClearExecution(execution);
@@ -1558,13 +1551,6 @@ namespace Locus
                 execution.Dispose();
                 EndAsyncExecuteRuntime();
             }
-        }
-
-        private static string ExecuteCodeErrorWithOutput(string error, ScriptGlobals globals)
-        {
-            string output = globals == null ? "" : globals.GetOutput();
-            return "__ERROR__: " + error
-                + (string.IsNullOrEmpty(output) ? "" : "\n\nOutput before error:\n" + output.TrimEnd());
         }
 
         private static void PumpExecuteCodeAsyncRuntime()
@@ -1576,9 +1562,7 @@ namespace Locus
 
         private static void BeginAsyncExecuteRuntime()
         {
-            // Editor callbacks already run while paused; changing the game's
-            // background policy is unnecessary for this invocation's queue.
-            if (_activeAsyncExecuteCount == 0 && !(EditorApplication.isPlaying && EditorApplication.isPaused))
+            if (_activeAsyncExecuteCount == 0)
             {
                 try
                 {
@@ -1643,10 +1627,6 @@ namespace Locus
         private static void RequestAsyncExecuteEditorPump()
         {
             if (_activeAsyncExecuteCount <= 0)
-                return;
-            // Paused snippets only need our Editor queue. Do not request a game
-            // PlayerLoop tick to make their ordinary Task continuations run.
-            if (EditorApplication.isPlaying && EditorApplication.isPaused)
                 return;
 
             try
@@ -2080,7 +2060,6 @@ namespace Locus
         private sealed class ExecuteCodeWaitState
         {
             private readonly ExecuteCodeContext _context;
-            private readonly ExecuteCodeSynchronizationContext _synchronizationContext;
             private readonly int _targetTick;
             private readonly double _targetTime;
             private readonly Func<bool> _predicate;
@@ -2095,7 +2074,6 @@ namespace Locus
                 Func<bool> predicate)
             {
                 _context = context;
-                _synchronizationContext = SynchronizationContext.Current as ExecuteCodeSynchronizationContext;
                 Continuation = continuation;
                 _targetTick = targetTick;
                 _targetTime = targetTime;
@@ -2123,10 +2101,7 @@ namespace Locus
             {
                 if (_context != null)
                     _context.ClearAwaiting();
-                if (_synchronizationContext != null)
-                    _synchronizationContext.Run(Continuation);
-                else
-                    Continuation();
+                Continuation();
             }
         }
     }
