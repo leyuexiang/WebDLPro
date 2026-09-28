@@ -11,6 +11,7 @@ using WebDLPro.Unity.SceneRuntime;
 public sealed class SolarPowerBusinessSceneControllerAdapter : IBusinessSceneController, IBusinessSceneProcessDetailController, IBusinessSceneNamedCameraPoseController, IBusinessSceneCameraResetController
 {
     private const string SolarPowerSceneId = "solar-power";
+    private const string SolarInverterStateNodeId = "node.solar-inverter";
     private readonly PowerPlantProcessController _controller;
     private readonly ProcessDetailCoordinator _processDetailCoordinator;
     private readonly BusinessSceneNamedCameraPoseRegistry _cameraPoseRegistry;
@@ -297,9 +298,23 @@ public sealed class SolarPowerBusinessSceneControllerAdapter : IBusinessSceneCon
     public BusinessSceneCommandResult SetProcessDetailPlayback(string sceneId, string processDetailId, bool playing)
     {
         if (!TryUseController(out BusinessSceneCommandResult unavailable)) return unavailable;
-        return _processDetailCoordinator != null
-            ? _processDetailCoordinator.SetPlayback(sceneId, processDetailId, playing)
-            : BusinessSceneCommandResult.Failed("process-detail-unsupported", "光伏场景未装配第三层关键环节协调器。");
+        if (_processDetailCoordinator == null)
+        {
+            return BusinessSceneCommandResult.Failed(
+                "process-detail-unsupported",
+                "光伏场景未装配第三层关键环节协调器。");
+        }
+
+        BusinessSceneCommandResult playbackResult =
+            _processDetailCoordinator.SetPlayback(sceneId, processDetailId, playing);
+        if (!playbackResult.Success || playing)
+        {
+            return playbackResult;
+        }
+
+        // 光伏关键环节的停止按钮代表逆变器故障：同一稳定节点同时驱动光伏场景设备、
+        // 汇流箱与逆变器组合效果，以及第三层模型的故障变色和出电线路停流。
+        return UpdateNodeVisualState(SolarInverterStateNodeId, BusinessSceneNodeVisualState.Fault);
     }
 
     public BusinessSceneCommandResult SetRouteFlow(string routeId, bool enabled, float speedMultiplier) =>

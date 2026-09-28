@@ -7,7 +7,7 @@ using UnityEngine.SceneManagement;
 using WebDLPro.Unity.SceneRuntime;
 
 /// <summary>
-/// 由光伏场景中选中的“逆变器关键环节”模型生成第三层包装 Prefab，
+/// 使用“逆变器关键环节9.28”模型生成第三层包装 Prefab，
 /// 增量登记目录，并为光伏业务场景装配通用关键环节协调器。
 /// </summary>
 public static class SolarInverterProcessDetailPrefabBuilder
@@ -16,26 +16,29 @@ public static class SolarInverterProcessDetailPrefabBuilder
     public const string OutputPrefabPath = OutputFolderPath + "/SolarInverterProcessDetail.prefab";
     public const string CatalogAssetPath = "Assets/Configuration/ProcessDetailCatalog.asset";
     public const string SolarPowerScenePath = "Assets/Scenes/Business/SolarPower.unity";
+    public const string SourceModelAssetPath =
+        "Assets/Art/光伏场景/关键环节/逆变器关键环节/逆变器关键环节9.28.fbx";
+    public const string SourceModelName = "逆变器关键环节9.28";
 
     private const string VisualStateConfigPath = "Assets/Configuration/PowerPlantVisualStateConfig.asset";
     private const string ProcessDetailId = "process-detail.solar-power.inverter";
     private const string ResourceId = "process-detail-resource.solar-power.inverter";
     private const string CameraPoseId = "camera-pose.solar-power.inverter";
     private const string StateNodeId = "node.solar-inverter";
-    private const string TargetMaterialName = "材质.002";
     private static readonly Vector3 RemoteDisplayPosition = new Vector3(10000f, 0f, 0f);
 
-    [MenuItem("Tools/WebDLPro/关键环节/从选中节点生成光伏逆变器第三层资源")]
-    public static void CreateOrUpdateFromSelection()
+    [MenuItem("Tools/WebDLPro/关键环节/从9.28模型生成光伏逆变器第三层资源")]
+    public static void CreateOrUpdateFromModel()
     {
-        GameObject source = Selection.activeGameObject;
-        if (source == null || !string.Equals(source.name, "逆变器关键环节", StringComparison.Ordinal))
+        GameObject source = AssetDatabase.LoadAssetAtPath<GameObject>(SourceModelAssetPath);
+        if (source == null || !string.Equals(source.name, SourceModelName, StringComparison.Ordinal))
         {
-            throw new InvalidOperationException("请在光伏场景中选中根节点“逆变器关键环节”。");
+            throw new InvalidOperationException($"未找到光伏关键环节模型：{SourceModelAssetPath}。");
         }
-        if (!string.Equals(source.scene.path, SolarPowerScenePath, StringComparison.Ordinal))
+        Scene scene = EditorSceneManager.GetSceneByPath(SolarPowerScenePath);
+        if (!scene.IsValid() || !scene.isLoaded)
         {
-            throw new InvalidOperationException("选中的逆变器关键环节不属于正式光伏业务场景。");
+            throw new InvalidOperationException("请先打开正式光伏业务场景，再生成逆变器第三层资源。");
         }
 
         PowerPlantVisualStateConfig visualConfig =
@@ -48,7 +51,7 @@ public static class SolarInverterProcessDetailPrefabBuilder
         EnsureFolder(OutputFolderPath);
         GameObject wrapperPrefab = CreateWrapperPrefab(source, visualConfig.FaultColor);
         ProcessDetailCatalog catalog = CreateOrUpdateCatalog(wrapperPrefab);
-        ConfigureSolarPowerScene(catalog, source.scene);
+        ConfigureSolarPowerScene(catalog, scene);
 
         IReadOnlyList<BusinessSceneCatalogValidationIssue> issues = catalog.ValidateForRuntime();
         if (issues.Count > 0)
@@ -57,7 +60,7 @@ public static class SolarInverterProcessDetailPrefabBuilder
         }
 
         AssetDatabase.SaveAssets();
-        EditorSceneManager.SaveScene(source.scene);
+        EditorSceneManager.SaveScene(scene);
         AssetDatabase.Refresh();
         Selection.activeObject = wrapperPrefab;
         Debug.Log($"[ProcessDetailBuilder] 已生成光伏逆变器第三层资源：{OutputPrefabPath}");
@@ -80,17 +83,24 @@ public static class SolarInverterProcessDetailPrefabBuilder
             model.transform.localScale = Vector3.one;
             model.SetActive(true);
 
-            Renderer[] wires = ResolveRenderers(model.transform, "电线1", "电线2", "电线3");
-            Renderer[] inverters = ResolveRenderers(model.transform, "逆变器", "逆变器.001", "逆变器.002");
-            ValidateBindings(wires, inverters);
+            Renderer[] wires = ResolveRenderers(
+                model.transform,
+                "电线",
+                "电线.001",
+                "电线.002",
+                "电线.003",
+                "电线.004",
+                "电线.005");
+            Renderer[] faultEquipment = ResolveRenderers(model.transform, "逆变器.001", "汇流箱");
+            ValidateBindings(wires, faultEquipment);
 
             SolarInverterProcessDetailDynamicAdapter dynamicAdapter =
                 host.AddComponent<SolarInverterProcessDetailDynamicAdapter>();
-            dynamicAdapter.ConfigureForEditor(wires);
+            dynamicAdapter.ConfigureForEditor(wires, faultColor);
 
             SolarInverterFaultVisualAdapter visualAdapter =
                 host.AddComponent<SolarInverterFaultVisualAdapter>();
-            visualAdapter.ConfigureForEditor(inverters, TargetMaterialName, faultColor);
+            visualAdapter.ConfigureForEditor(faultEquipment, faultColor);
 
             Transform cameraPose = ProcessDetailCameraPosePreservation.CreateCameraPose(
                 host.transform,
@@ -143,18 +153,22 @@ public static class SolarInverterProcessDetailPrefabBuilder
 
     private static void ValidateBindings(Renderer[] wires, Renderer[] inverters)
     {
-        int flowSpeedId = Shader.PropertyToID("_FlowSpeed");
+        int baseColorId = Shader.PropertyToID("_BaseColor");
+        int alternateBaseColorId = Shader.PropertyToID("_BASE_COLOR");
+        // 新 FBX 的线材质未必沿用旧版流动 Shader；故障变色是必需效果，流速停止则由运行时按属性可用性追加。
         for (int index = 0; index < wires.Length; index++)
         {
-            bool found = false;
+            bool foundColor = false;
             Material[] materials = wires[index].sharedMaterials;
             for (int materialIndex = 0; materialIndex < materials.Length; materialIndex++)
             {
-                found |= materials[materialIndex] != null && materials[materialIndex].HasProperty(flowSpeedId);
+                Material material = materials[materialIndex];
+                foundColor |= material != null &&
+                    (material.HasProperty(baseColorId) || material.HasProperty(alternateBaseColorId));
             }
-            if (!found)
+            if (!foundColor)
             {
-                throw new InvalidOperationException($"电线 {wires[index].name} 没有 _FlowSpeed 材质槽。");
+                throw new InvalidOperationException($"电线 {wires[index].name} 没有可用于故障变色的材质属性。");
             }
         }
 
@@ -164,12 +178,13 @@ public static class SolarInverterProcessDetailPrefabBuilder
             Material[] materials = inverters[index].sharedMaterials;
             for (int materialIndex = 0; materialIndex < materials.Length; materialIndex++)
             {
-                found |= materials[materialIndex] != null &&
-                    string.Equals(materials[materialIndex].name, TargetMaterialName, StringComparison.Ordinal);
+                Material material = materials[materialIndex];
+                found |= material != null &&
+                    (material.HasProperty(baseColorId) || material.HasProperty(alternateBaseColorId));
             }
             if (!found)
             {
-                throw new InvalidOperationException($"逆变器 {inverters[index].name} 缺少 {TargetMaterialName} 材质槽。");
+                throw new InvalidOperationException($"故障设备 {inverters[index].name} 没有支持底色属性的材质槽。");
             }
         }
     }
@@ -231,6 +246,22 @@ public static class SolarInverterProcessDetailPrefabBuilder
             throw new InvalidOperationException("光伏场景缺少流程控制器或自由相机控制器。");
         }
 
+        Transform inverterEquipmentRoot = businessRoot.transform.Find("Equipment/逆变器控制");
+        if (inverterEquipmentRoot == null)
+        {
+            throw new InvalidOperationException("光伏场景缺少逆变器设备根节点：SceneRoot/Equipment/逆变器控制。");
+        }
+        GameObject[] visualStateTargets = ResolveSceneObjects(
+            inverterEquipmentRoot,
+            "汇流箱＋逆变器",
+            "汇流箱＋逆变器.001",
+            "汇流箱＋逆变器.002",
+            "汇流箱＋逆变器.003",
+            "汇流箱＋逆变器.004",
+            "汇流箱＋逆变器.005");
+        processController.ConfigureVisualStateBindingsForEditor(visualStateTargets);
+        EditorUtility.SetDirty(processController);
+
         ProcessDetailAssetBundleLoader loader =
             runtimeRoot.GetComponent<ProcessDetailAssetBundleLoader>() ??
             runtimeRoot.AddComponent<ProcessDetailAssetBundleLoader>();
@@ -259,6 +290,21 @@ public static class SolarInverterProcessDetailPrefabBuilder
         EditorUtility.SetDirty(loader);
         EditorUtility.SetDirty(coordinator);
         EditorSceneManager.MarkSceneDirty(scene);
+    }
+
+    private static GameObject[] ResolveSceneObjects(Transform root, params string[] childNames)
+    {
+        GameObject[] result = new GameObject[childNames.Length];
+        for (int index = 0; index < childNames.Length; index++)
+        {
+            Transform child = root.Find(childNames[index]);
+            if (child == null)
+            {
+                throw new InvalidOperationException($"光伏场景缺少显式设备目标：{childNames[index]}。");
+            }
+            result[index] = child.gameObject;
+        }
+        return result;
     }
 
     private static GameObject FindRoot(Scene scene, string rootName)

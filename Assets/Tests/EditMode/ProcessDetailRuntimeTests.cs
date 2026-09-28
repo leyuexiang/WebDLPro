@@ -686,8 +686,12 @@ namespace WebDLPro.Unity.Tests
             }
         }
 
+        /// <summary>
+        /// 验证 9.28 版模型故障只影响一台逆变器和汇流箱，六条出电电线变色并按材质能力停流，
+        /// 并在恢复为非故障状态后还原运行时覆盖与流速。
+        /// </summary>
         [Test]
-        public void 光伏逆变器包装仅在故障时停流并将材质002变红()
+        public void 光伏逆变器包装仅在故障时停流并将指定设备和电线变红()
         {
             ProcessDetailCatalog catalog = AssetDatabase.LoadAssetAtPath<ProcessDetailCatalog>(CatalogPath);
             GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(SolarPrefabPath);
@@ -704,66 +708,187 @@ namespace WebDLPro.Unity.Tests
                 Assert.That(binding, Is.Not.Null);
                 Assert.That(binding.ValidateBinding(entry).Success, Is.True);
 
+                Transform modelRoot = instance.transform.Find("DisplayAnchor/逆变器关键环节9.28");
+                Assert.That(modelRoot, Is.Not.Null, "第三层必须加载 9.28 版逆变器关键环节模型。");
                 Renderer[] wires =
                 {
-                    instance.transform.Find("DisplayAnchor/逆变器关键环节/电线1").GetComponent<Renderer>(),
-                    instance.transform.Find("DisplayAnchor/逆变器关键环节/电线2").GetComponent<Renderer>(),
-                    instance.transform.Find("DisplayAnchor/逆变器关键环节/电线3").GetComponent<Renderer>()
+                    modelRoot.Find("电线").GetComponent<Renderer>(),
+                    modelRoot.Find("电线.001").GetComponent<Renderer>(),
+                    modelRoot.Find("电线.002").GetComponent<Renderer>(),
+                    modelRoot.Find("电线.003").GetComponent<Renderer>(),
+                    modelRoot.Find("电线.004").GetComponent<Renderer>(),
+                    modelRoot.Find("电线.005").GetComponent<Renderer>()
                 };
-                Renderer[] inverters =
+                Renderer selectedInverter = modelRoot.Find("逆变器.001").GetComponent<Renderer>();
+                Renderer combiner = modelRoot.Find("汇流箱").GetComponent<Renderer>();
+                int selectedInverterMaterialIndex = FindColorMaterialIndex(selectedInverter);
+                int combinerMaterialIndex = FindColorMaterialIndex(combiner);
+                int selectedInverterColorPropertyId = FindColorPropertyId(selectedInverter.sharedMaterials[selectedInverterMaterialIndex]);
+                int combinerColorPropertyId = FindColorPropertyId(combiner.sharedMaterials[combinerMaterialIndex]);
+                Renderer[] unaffectedInverters =
                 {
-                    instance.transform.Find("DisplayAnchor/逆变器关键环节/逆变器").GetComponent<Renderer>(),
-                    instance.transform.Find("DisplayAnchor/逆变器关键环节/逆变器.001").GetComponent<Renderer>(),
-                    instance.transform.Find("DisplayAnchor/逆变器关键环节/逆变器.002").GetComponent<Renderer>()
+                    modelRoot.Find("逆变器.002").GetComponent<Renderer>(),
+                    modelRoot.Find("逆变器（反向）").GetComponent<Renderer>()
                 };
                 int flowSpeedId = Shader.PropertyToID("_FlowSpeed");
-                int baseColorId = Shader.PropertyToID("_BaseColor");
                 MaterialPropertyBlock propertyBlock = new MaterialPropertyBlock();
-                Color[] baselineColors = new Color[inverters.Length];
-                for (int index = 0; index < inverters.Length; index++)
+                Color selectedInverterBaseline = selectedInverter.sharedMaterials[selectedInverterMaterialIndex].GetColor(selectedInverterColorPropertyId);
+                Color combinerBaseline = combiner.sharedMaterials[combinerMaterialIndex].GetColor(combinerColorPropertyId);
+                int[] wireColorPropertyIds = new int[wires.Length];
+                int[] wireColorMaterialIndices = new int[wires.Length];
+                Color[] baselineWireColors = new Color[wires.Length];
+                int[] flowMaterialIndices = new int[wires.Length];
+                float[] baselineFlowSpeeds = new float[wires.Length];
+                for (int index = 0; index < wires.Length; index++)
                 {
-                    baselineColors[index] = inverters[index].sharedMaterials[1].GetColor(baseColorId);
+                    wireColorMaterialIndices[index] = FindColorMaterialIndex(wires[index]);
+                    wireColorPropertyIds[index] = FindColorPropertyId(wires[index].sharedMaterials[wireColorMaterialIndices[index]]);
+                    baselineWireColors[index] = wires[index].sharedMaterials[wireColorMaterialIndices[index]].GetColor(wireColorPropertyIds[index]);
+                    flowMaterialIndices[index] = TryFindMaterialIndex(wires[index], flowSpeedId);
+                    baselineFlowSpeeds[index] = flowMaterialIndices[index] >= 0
+                        ? wires[index].sharedMaterials[flowMaterialIndices[index]].GetFloat(flowSpeedId)
+                        : 0f;
                 }
+                Color[] unaffectedBaselines =
+                {
+                    GetBaselineColor(unaffectedInverters[0]),
+                    GetBaselineColor(unaffectedInverters[1])
+                };
 
                 Assert.That(binding.PrepareForActivation(true, BusinessSceneNodeVisualState.Fault).Success, Is.True);
                 for (int index = 0; index < wires.Length; index++)
                 {
                     propertyBlock.Clear();
-                    wires[index].GetPropertyBlock(propertyBlock, 0);
-                    Assert.That(propertyBlock.GetFloat(flowSpeedId), Is.Zero, $"电线{index + 1}故障时必须停流。");
+                    wires[index].GetPropertyBlock(propertyBlock, wireColorMaterialIndices[index]);
+                    Color wireFaultColor = propertyBlock.GetColor(wireColorPropertyIds[index]);
+                    Assert.That(wireFaultColor.r, Is.GreaterThan(0.9f), $"电线{index + 1}故障时必须变红。");
+                    Assert.That(wireFaultColor.g, Is.LessThan(0.1f), $"电线{index + 1}故障时必须变红。");
+                    if (flowMaterialIndices[index] >= 0)
+                    {
+                        propertyBlock.Clear();
+                        wires[index].GetPropertyBlock(propertyBlock, flowMaterialIndices[index]);
+                        Assert.That(propertyBlock.GetFloat(flowSpeedId), Is.Zero, $"电线{index + 1}故障时必须停流。");
+                    }
                 }
-                for (int index = 0; index < inverters.Length; index++)
+                Renderer[] failedEquipment = { selectedInverter, combiner };
+                for (int index = 0; index < failedEquipment.Length; index++)
                 {
                     propertyBlock.Clear();
-                    inverters[index].GetPropertyBlock(propertyBlock, 1);
-                    Color faultColor = propertyBlock.GetColor(baseColorId);
+                    failedEquipment[index].GetPropertyBlock(
+                        propertyBlock,
+                        index == 0 ? selectedInverterMaterialIndex : combinerMaterialIndex);
+                    Color faultColor = propertyBlock.GetColor(
+                        index == 0 ? selectedInverterColorPropertyId : combinerColorPropertyId);
                     Assert.That(faultColor.r, Is.GreaterThan(0.9f));
                     Assert.That(faultColor.g, Is.LessThan(0.1f));
                     Assert.That(faultColor.b, Is.LessThan(0.1f));
+                }
+                for (int index = 0; index < unaffectedInverters.Length; index++)
+                {
+                    propertyBlock.Clear();
+                    int materialIndex = FindColorMaterialIndex(unaffectedInverters[index]);
+                    int colorPropertyId = FindColorPropertyId(unaffectedInverters[index].sharedMaterials[materialIndex]);
+                    unaffectedInverters[index].GetPropertyBlock(propertyBlock, materialIndex);
+                    Assert.That(propertyBlock.HasColor(colorPropertyId), Is.False, "单点故障不得把其它逆变器染红。");
                 }
 
                 Assert.That(binding.ApplyVisualState(BusinessSceneNodeVisualState.Alarm).Success, Is.True);
                 for (int index = 0; index < wires.Length; index++)
                 {
                     propertyBlock.Clear();
-                    wires[index].GetPropertyBlock(propertyBlock, 0);
-                    Assert.That(propertyBlock.GetFloat(flowSpeedId), Is.EqualTo(1f).Within(0.0001f));
+                    wires[index].GetPropertyBlock(propertyBlock, wireColorMaterialIndices[index]);
+                    Color restoredWireColor = propertyBlock.GetColor(wireColorPropertyIds[index]);
+                    Assert.That(restoredWireColor, Is.EqualTo(baselineWireColors[index]));
+                    if (flowMaterialIndices[index] >= 0)
+                    {
+                        propertyBlock.Clear();
+                        wires[index].GetPropertyBlock(propertyBlock, flowMaterialIndices[index]);
+                        Assert.That(propertyBlock.GetFloat(flowSpeedId), Is.EqualTo(baselineFlowSpeeds[index]).Within(0.0001f));
+                    }
                 }
-                for (int index = 0; index < inverters.Length; index++)
+                for (int index = 0; index < failedEquipment.Length; index++)
                 {
                     propertyBlock.Clear();
-                    inverters[index].GetPropertyBlock(propertyBlock, 1);
-                    Color restoredColor = propertyBlock.GetColor(baseColorId);
-                    Assert.That(restoredColor.r, Is.EqualTo(baselineColors[index].r).Within(0.0001f));
-                    Assert.That(restoredColor.g, Is.EqualTo(baselineColors[index].g).Within(0.0001f));
-                    Assert.That(restoredColor.b, Is.EqualTo(baselineColors[index].b).Within(0.0001f));
-                    Assert.That(restoredColor.a, Is.EqualTo(baselineColors[index].a).Within(0.0001f));
+                    failedEquipment[index].GetPropertyBlock(
+                        propertyBlock,
+                        index == 0 ? selectedInverterMaterialIndex : combinerMaterialIndex);
+                    int colorPropertyId = index == 0
+                        ? selectedInverterColorPropertyId
+                        : combinerColorPropertyId;
+                    Color restoredColor = propertyBlock.GetColor(colorPropertyId);
+                    Color baseline = index == 0 ? selectedInverterBaseline : combinerBaseline;
+                    Assert.That(restoredColor.r, Is.EqualTo(baseline.r).Within(0.0001f));
+                    Assert.That(restoredColor.g, Is.EqualTo(baseline.g).Within(0.0001f));
+                    Assert.That(restoredColor.b, Is.EqualTo(baseline.b).Within(0.0001f));
+                    Assert.That(restoredColor.a, Is.EqualTo(baseline.a).Within(0.0001f));
+                }
+                for (int index = 0; index < unaffectedInverters.Length; index++)
+                {
+                    int materialIndex = FindColorMaterialIndex(unaffectedInverters[index]);
+                    int colorPropertyId = FindColorPropertyId(unaffectedInverters[index].sharedMaterials[materialIndex]);
+                    Assert.That(unaffectedInverters[index].sharedMaterials[materialIndex].GetColor(colorPropertyId), Is.EqualTo(unaffectedBaselines[index]));
                 }
             }
             finally
             {
                 Object.DestroyImmediate(instance);
             }
+        }
+
+        /// <summary>查找首个提供基础色属性的线材质槽，兼容新版 FBX 的材质命名变化。</summary>
+        private static int FindColorMaterialIndex(Renderer renderer)
+        {
+            Material[] materials = renderer.sharedMaterials;
+            int baseColorPropertyId = Shader.PropertyToID("_BaseColor");
+            int alternateColorPropertyId = Shader.PropertyToID("_BASE_COLOR");
+            for (int index = 0; index < materials.Length; index++)
+            {
+                Material material = materials[index];
+                if (material != null &&
+                    (material.HasProperty(baseColorPropertyId) || material.HasProperty(alternateColorPropertyId)))
+                {
+                    return index;
+                }
+            }
+            Assert.Fail($"模型 {renderer.name} 缺少故障变色材质槽。");
+            return -1;
+        }
+
+        /// <summary>查找可选流速材质槽；新 FBX 没有流动 Shader 时，线路仍由故障颜色反馈。</summary>
+        private static int TryFindMaterialIndex(Renderer renderer, int propertyId)
+        {
+            Material[] materials = renderer.sharedMaterials;
+            for (int index = 0; index < materials.Length; index++)
+            {
+                if (materials[index] != null && materials[index].HasProperty(propertyId))
+                {
+                    return index;
+                }
+            }
+            return -1;
+        }
+
+        /// <summary>识别光伏 FBX 实际导入的 URP 或物理材质底色属性。</summary>
+        private static int FindColorPropertyId(Material material)
+        {
+            int baseColorPropertyId = Shader.PropertyToID("_BaseColor");
+            if (material != null && material.HasProperty(baseColorPropertyId))
+            {
+                return baseColorPropertyId;
+            }
+
+            int alternateColorPropertyId = Shader.PropertyToID("_BASE_COLOR");
+            Assert.That(material != null && material.HasProperty(alternateColorPropertyId), Is.True,
+                $"材质 {material?.name ?? "<null>"} 不支持故障底色属性。");
+            return alternateColorPropertyId;
+        }
+
+        /// <summary>捕获单台未故障逆变器的原始颜色，供状态恢复断言复用。</summary>
+        private static Color GetBaselineColor(Renderer renderer)
+        {
+            int materialIndex = FindColorMaterialIndex(renderer);
+            int colorPropertyId = FindColorPropertyId(renderer.sharedMaterials[materialIndex]);
+            return renderer.sharedMaterials[materialIndex].GetColor(colorPropertyId);
         }
 
         [Test]

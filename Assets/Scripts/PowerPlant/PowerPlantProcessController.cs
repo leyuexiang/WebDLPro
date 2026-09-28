@@ -299,6 +299,25 @@ public sealed class PowerPlantProcessController : MonoBehaviour, IBusinessSceneI
     }
 
 #if UNITY_EDITOR
+    /// <summary>仅供光伏场景生成器写入现场设备四态目标，不按名称参与运行时绑定。</summary>
+    public void ConfigureVisualStateBindingsForEditor(GameObject[] targets)
+    {
+        if (Application.isPlaying)
+        {
+            throw new InvalidOperationException("运行时不能修改设备四态目标配置。");
+        }
+        if (targets == null || targets.Length == 0)
+        {
+            throw new ArgumentException("设备四态目标不能为空。", nameof(targets));
+        }
+
+        _visualStateBindings = new[]
+        {
+            new SceneNodeVisualStateBinding("node.solar-inverter", targets)
+        };
+        _visualStateColorPropertyNames = new[] { "_BaseColor", "_BASE_COLOR" };
+    }
+
     /// <summary>仅供编辑器生成器和编辑模式测试绑定场景内优先点击消费者。</summary>
     public void ConfigurePriorityPointerConsumerForEditor(MonoBehaviour pointerConsumerBehaviour)
     {

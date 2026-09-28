@@ -4,23 +4,21 @@ using UnityEngine.Scripting;
 using WebDLPro.Unity.SceneRuntime;
 
 /// <summary>
-/// 光伏逆变器故障视觉适配器。仅改变显式绑定 Renderer 的“材质.002”槽，
-/// 故障时覆盖为红色，其他状态及清除状态均恢复进入环节前的原始颜色。
+/// 光伏逆变器故障视觉适配器。仅处理显式绑定设备 Renderer 中支持底色属性的材质槽，
+/// 故障时临时覆盖为红色，其他状态及清除状态均恢复进入环节前的原始颜色。
 /// </summary>
 [Preserve]
 [DisallowMultipleComponent]
 public sealed class SolarInverterFaultVisualAdapter : MonoBehaviour, IProcessDetailVisualStateTarget
 {
-    [SerializeField] private Renderer[] _inverterRenderers = Array.Empty<Renderer>();
-    [SerializeField] private string _targetMaterialName = "材质.002";
+    [SerializeField] private Renderer[] _equipmentRenderers = Array.Empty<Renderer>();
     [SerializeField, ColorUsage(true, true)] private Color _faultColor = Color.red;
 
     private static readonly int BaseColorPropertyId = Shader.PropertyToID("_BaseColor");
     private static readonly int AlternateBaseColorPropertyId = Shader.PropertyToID("_BASE_COLOR");
 
-    private int[] _materialIndices;
-    private int[] _colorPropertyIds;
-    private Color[] _baselineColors;
+    private int[][] _colorPropertyIds;
+    private Color[][] _baselineColors;
     private MaterialPropertyBlock _propertyBlock;
     private bool _initialized;
     private bool _released;
@@ -35,11 +33,11 @@ public sealed class SolarInverterFaultVisualAdapter : MonoBehaviour, IProcessDet
         if (visualState == BusinessSceneNodeVisualState.Fault)
         {
             ApplyFaultColor();
-            return BusinessSceneCommandResult.Completed("逆变器材质.002已切换为故障红色。");
+            return BusinessSceneCommandResult.Completed("逆变器及汇流箱设备已切换为故障红色。");
         }
 
         RestoreBaseline();
-        return BusinessSceneCommandResult.Completed("逆变器保持默认材质状态。");
+        return BusinessSceneCommandResult.Completed("逆变器及汇流箱设备已恢复默认材质状态。");
     }
 
     public BusinessSceneCommandResult ClearVisualState()
@@ -50,7 +48,7 @@ public sealed class SolarInverterFaultVisualAdapter : MonoBehaviour, IProcessDet
         }
 
         RestoreBaseline();
-        return BusinessSceneCommandResult.Completed("逆变器故障视觉已清除。");
+        return BusinessSceneCommandResult.Completed("逆变器及汇流箱故障视觉已清除。");
     }
 
     public void Release()
@@ -65,7 +63,6 @@ public sealed class SolarInverterFaultVisualAdapter : MonoBehaviour, IProcessDet
             RestoreBaseline();
         }
         _released = true;
-        _materialIndices = null;
         _colorPropertyIds = null;
         _baselineColors = null;
         _propertyBlock?.Clear();
@@ -83,19 +80,18 @@ public sealed class SolarInverterFaultVisualAdapter : MonoBehaviour, IProcessDet
         {
             return true;
         }
-        if (_inverterRenderers == null || _inverterRenderers.Length == 0 || string.IsNullOrWhiteSpace(_targetMaterialName))
+        if (_equipmentRenderers == null || _equipmentRenderers.Length == 0)
         {
-            error = "逆变器故障视觉缺少渲染器或目标材质名称。";
+            error = "逆变器故障视觉没有显式绑定设备渲染器。";
             return false;
         }
 
         _propertyBlock = new MaterialPropertyBlock();
-        _materialIndices = new int[_inverterRenderers.Length];
-        _colorPropertyIds = new int[_inverterRenderers.Length];
-        _baselineColors = new Color[_inverterRenderers.Length];
-        for (int rendererIndex = 0; rendererIndex < _inverterRenderers.Length; rendererIndex++)
+        _colorPropertyIds = new int[_equipmentRenderers.Length][];
+        _baselineColors = new Color[_equipmentRenderers.Length][];
+        for (int rendererIndex = 0; rendererIndex < _equipmentRenderers.Length; rendererIndex++)
         {
-            Renderer renderer = _inverterRenderers[rendererIndex];
+            Renderer renderer = _equipmentRenderers[rendererIndex];
             if (renderer == null)
             {
                 error = "逆变器故障视觉渲染器包含空引用。";
@@ -103,78 +99,84 @@ public sealed class SolarInverterFaultVisualAdapter : MonoBehaviour, IProcessDet
             }
 
             Material[] materials = renderer.sharedMaterials;
-            int targetIndex = FindTargetMaterialIndex(materials);
-            if (targetIndex < 0)
+            _colorPropertyIds[rendererIndex] = new int[materials.Length];
+            _baselineColors[rendererIndex] = new Color[materials.Length];
+            int supportedSlotCount = 0;
+            for (int materialIndex = 0; materialIndex < materials.Length; materialIndex++)
             {
-                error = $"逆变器 {renderer.name} 未找到目标材质槽 {_targetMaterialName}。";
-                return false;
+                Material material = materials[materialIndex];
+                int colorPropertyId = ResolveColorPropertyId(material);
+                if (colorPropertyId == 0)
+                {
+                    continue;
+                }
+
+                supportedSlotCount++;
+                _colorPropertyIds[rendererIndex][materialIndex] = colorPropertyId;
+                _propertyBlock.Clear();
+                renderer.GetPropertyBlock(_propertyBlock, materialIndex);
+                _baselineColors[rendererIndex][materialIndex] = _propertyBlock.HasColor(colorPropertyId)
+                    ? _propertyBlock.GetColor(colorPropertyId)
+                    : material.GetColor(colorPropertyId);
             }
 
-            Material targetMaterial = materials[targetIndex];
-            int colorPropertyId = ResolveColorPropertyId(targetMaterial);
-            if (colorPropertyId == 0)
+            if (supportedSlotCount == 0)
             {
-                error = $"逆变器材质 {targetMaterial.name} 不支持基础色属性。";
+                error = $"设备 {renderer.name} 没有支持底色属性的材质槽。";
                 return false;
             }
-
-            _materialIndices[rendererIndex] = targetIndex;
-            _colorPropertyIds[rendererIndex] = colorPropertyId;
-            _propertyBlock.Clear();
-            renderer.GetPropertyBlock(_propertyBlock, targetIndex);
-            _baselineColors[rendererIndex] = _propertyBlock.HasColor(colorPropertyId)
-                ? _propertyBlock.GetColor(colorPropertyId)
-                : targetMaterial.GetColor(colorPropertyId);
         }
 
         _initialized = true;
         return true;
     }
 
-    private int FindTargetMaterialIndex(Material[] materials)
-    {
-        for (int materialIndex = 0; materials != null && materialIndex < materials.Length; materialIndex++)
-        {
-            Material material = materials[materialIndex];
-            if (material != null && string.Equals(material.name, _targetMaterialName, StringComparison.Ordinal))
-            {
-                return materialIndex;
-            }
-        }
-        return -1;
-    }
-
     private void ApplyFaultColor()
     {
-        for (int rendererIndex = 0; rendererIndex < _inverterRenderers.Length; rendererIndex++)
+        for (int rendererIndex = 0; rendererIndex < _equipmentRenderers.Length; rendererIndex++)
         {
-            Renderer renderer = _inverterRenderers[rendererIndex];
-            int materialIndex = _materialIndices[rendererIndex];
-            int propertyId = _colorPropertyIds[rendererIndex];
-            Color color = _faultColor;
-            color.a = _baselineColors[rendererIndex].a;
-            _propertyBlock.Clear();
-            renderer.GetPropertyBlock(_propertyBlock, materialIndex);
-            _propertyBlock.SetColor(propertyId, color);
-            renderer.SetPropertyBlock(_propertyBlock, materialIndex);
+            Renderer renderer = _equipmentRenderers[rendererIndex];
+            for (int materialIndex = 0; materialIndex < _colorPropertyIds[rendererIndex].Length; materialIndex++)
+            {
+                int colorPropertyId = _colorPropertyIds[rendererIndex][materialIndex];
+                if (colorPropertyId == 0)
+                {
+                    continue;
+                }
+
+                Color color = _faultColor;
+                color.a = _baselineColors[rendererIndex][materialIndex].a;
+                _propertyBlock.Clear();
+                renderer.GetPropertyBlock(_propertyBlock, materialIndex);
+                _propertyBlock.SetColor(colorPropertyId, color);
+                renderer.SetPropertyBlock(_propertyBlock, materialIndex);
+            }
         }
     }
 
     private void RestoreBaseline()
     {
-        for (int rendererIndex = 0; rendererIndex < _inverterRenderers.Length; rendererIndex++)
+        for (int rendererIndex = 0; rendererIndex < _equipmentRenderers.Length; rendererIndex++)
         {
-            Renderer renderer = _inverterRenderers[rendererIndex];
+            Renderer renderer = _equipmentRenderers[rendererIndex];
             if (renderer == null)
             {
                 continue;
             }
 
-            int materialIndex = _materialIndices[rendererIndex];
-            _propertyBlock.Clear();
-            renderer.GetPropertyBlock(_propertyBlock, materialIndex);
-            _propertyBlock.SetColor(_colorPropertyIds[rendererIndex], _baselineColors[rendererIndex]);
-            renderer.SetPropertyBlock(_propertyBlock, materialIndex);
+            for (int materialIndex = 0; materialIndex < _colorPropertyIds[rendererIndex].Length; materialIndex++)
+            {
+                int colorPropertyId = _colorPropertyIds[rendererIndex][materialIndex];
+                if (colorPropertyId == 0)
+                {
+                    continue;
+                }
+
+                _propertyBlock.Clear();
+                renderer.GetPropertyBlock(_propertyBlock, materialIndex);
+                _propertyBlock.SetColor(colorPropertyId, _baselineColors[rendererIndex][materialIndex]);
+                renderer.SetPropertyBlock(_propertyBlock, materialIndex);
+            }
         }
     }
 
@@ -192,15 +194,11 @@ public sealed class SolarInverterFaultVisualAdapter : MonoBehaviour, IProcessDet
     }
 
 #if UNITY_EDITOR
-    public void ConfigureForEditor(
-        Renderer[] inverterRenderers,
-        string targetMaterialName,
-        Color faultColor)
+    /// <summary>编辑器生成器显式绑定目标设备渲染器和故障色，不依赖 FBX 材质槽排序。</summary>
+    public void ConfigureForEditor(Renderer[] equipmentRenderers, Color faultColor)
     {
-        _inverterRenderers = inverterRenderers ?? Array.Empty<Renderer>();
-        _targetMaterialName = targetMaterialName;
+        _equipmentRenderers = equipmentRenderers ?? Array.Empty<Renderer>();
         _faultColor = faultColor;
-        _materialIndices = null;
         _colorPropertyIds = null;
         _baselineColors = null;
         _initialized = false;

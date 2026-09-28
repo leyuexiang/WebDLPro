@@ -81,19 +81,19 @@ const hostBridgeStartup = deploymentConfiguration.configuration
  * 也会因 window.parent 不是当前窗口而跳过，继续等待平台发送 system.init。
  */
 const directAccessMode = new URLSearchParams(window.location.search).get('directAccess') === '1' && window.parent === window
-/** 独立服务入口把初始场景作为受控查询参数传入；只接受当前已发布的燃气、燃煤场景。 */
+/** 独立服务入口的业务场景参数只选择运行时登记；它不决定首屏，未匹配时使用燃气登记。 */
 const directAccessQuery = new URLSearchParams(window.location.search)
 const requestedInitialSceneId = directAccessQuery.get('sceneId')
-const directAccessSceneId = requestedInitialSceneId === 'coal-power' ? 'coal-power' : 'gas-power'
-/** 直接访问固定进入所选场景总览，禁止查询参数绕过正式清单动作白名单直接选择任意拓扑。 */
-const directAccessTopologyId = `topology.${directAccessSceneId}.overview`
+const directAccessSceneId = requestedInitialSceneId === 'coal-power' || requestedInitialSceneId === 'solar-power'
+  ? requestedInitialSceneId : 'gas-power'
+/** 根入口直达模式固定从全局沙盘开始，不附加业务拓扑。 */
 /**
  * 本地工艺配置只负责为当前发布场景申请对应的 Unity 单实例运行时。
  * 二维节点、连线、场景总览和二维—三维映射始终来自完成双重校验的正式场景清单，
  * 不会把燃气标题或本地占位图元作为燃煤场景的回退内容。
  */
 const sceneBaseline = computed(() => localProcessConfigLoader.load(
-  directAccessSceneId === 'coal-power' ? 'coal-overview' : 'gas-overview',
+  directAccessSceneId === 'coal-power' ? 'coal-overview' : directAccessSceneId === 'solar-power' ? 'solar-overview' : 'gas-overview',
 ))
 let removeDirectAccessBootstrapListener: (() => void) | undefined
 const hostBridge = hostBridgeStartup?.status === 'ready'
@@ -507,8 +507,7 @@ function installDirectAccessBootstrap(): void {
       type: 'system.init',
       timestamp: Date.now(),
       payload: {
-        sceneId: directAccessSceneId,
-        topologyId: directAccessTopologyId,
+        sceneId: 'overview',
       },
     }, context.parentOrigin)
     removeDirectAccessBootstrapListener?.()

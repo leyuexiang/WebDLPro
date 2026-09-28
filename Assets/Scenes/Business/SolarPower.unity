@@ -2367,7 +2367,12 @@ MonoBehaviour:
   _visualStateBindings:
   - _sceneNodeId: node.solar-inverter
     _targets:
-    - {fileID: 1551369}
+    - {fileID: 6158057367285539144}
+    - {fileID: 837375675310339366}
+    - {fileID: 7458054808220936011}
+    - {fileID: 6113834715247671719}
+    - {fileID: 3929384031424414668}
+    - {fileID: 1126687356508540958}
 --- !u!4 &837712448
 Transform:
   m_ObjectHideFlags: 0
@@ -3761,6 +3766,10 @@ MonoBehaviour:
   _focusDistancePadding: 1.25
   _focusMinimumDistance: 18
   _focusDuration: 0.45
+  _detailOrbitSensitivity: 0.075
+  _detailZoomFractionPerNotch: 0.035
+  _detailZoomSmoothTime: 0.12
+  _detailMovementMultiplier: 0.15
 --- !u!20 &1855399967
 Camera:
   m_ObjectHideFlags: 0

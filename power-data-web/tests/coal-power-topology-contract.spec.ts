@@ -299,15 +299,15 @@ describe('燃煤发电拓扑发布契约', () => {
     expect(coalResult.bundle?.runtime?.resourceDigest).toBe(gasResult.bundle?.runtime?.resourceDigest)
   })
 
-  it('燃煤根入口固定向嵌入壳传递燃煤场景与总览拓扑', () => {
+  it('燃煤根入口保留运行时选择但固定从全局沙盘初始化', () => {
     const localPage = createHostPage('coal-local-entry-contract', 'local-test', 'coal-power')
     const partnerPage = createHostPage('coal-partner-entry-contract', 'partner-integration', 'coal-power')
 
-    expect(localPage).toContain("sceneId: 'coal-power'")
-    expect(localPage).toContain("topologyId: 'topology.coal-power.overview'")
+    expect(localPage).toContain("sceneId: 'overview'")
+    expect(localPage).not.toContain("topologyId: 'topology.coal-power.overview'")
     expect(localPage).toContain("shellUrl.searchParams.set('sceneId', 'coal-power')")
     expect(localPage).toContain("shellUrl.searchParams.set('topologyId', 'topology.coal-power.overview')")
-    // 合作方带自有桥接参数时仍由发布包覆盖场景键，不能因查询字符串存在而回退到燃气基线。
+    // 合作方根入口仍保留发布场景查询参数以选择运行时登记，但协议壳直达首屏由 overview 负责。
     expect(partnerPage).toContain("shellUrl.searchParams.set('sceneId', 'coal-power')")
     expect(partnerPage).toContain("shellUrl.searchParams.set('topologyId', 'topology.coal-power.overview')")
   })

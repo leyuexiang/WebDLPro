@@ -1676,7 +1676,7 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
  *
  * 平台内嵌时该页面只在同一浏览器导航中进入协议壳，保证协议壳的 parent（直接父窗口）就是平台。
  * 直接打开根地址且没有查询参数时，入口补齐当前服务来源和 directAccess（直接访问）标记；壳只在顶层窗口
- * 通过同一套 system.ready → system.init（系统就绪→系统初始化）握手显示燃气总览，不改变平台嵌入路径。
+ * 通过同一套 system.ready → system.init（系统就绪→系统初始化）握手显示全局沙盘，不改变平台嵌入路径。
  */
 function createIndependentServiceEntryPage(sceneId = 'gas-power') {
   const sceneTitle = sceneId === 'coal-power' ? '燃煤' : sceneId === 'solar-power' ? '光伏' : '燃气'
@@ -1703,7 +1703,7 @@ function createIndependentServiceEntryPage(sceneId = 'gas-power') {
           shellUrl.searchParams.set('protocolVersion', '${expectedUnityProtocolVersion}');
           shellUrl.searchParams.set('directAccess', '1');
         }
-        // 场景与总览参数由发布包固定，即使平台附带自身桥接参数也不能把燃煤壳退回燃气运行时登记。
+        // 业务场景参数只用于选择发布清单对应的 Unity 运行时登记，不决定首屏视图。
         shellUrl.searchParams.set('sceneId', '${sceneId}');
         shellUrl.searchParams.set('topologyId', 'topology.${sceneId}.overview');
         window.location.replace(shellUrl.toString());
@@ -1717,7 +1717,7 @@ function createIndependentServiceEntryPage(sceneId = 'gas-power') {
 /**
  * 生成发布根入口。
  *
- * 本地测试包需要在没有合作方父页面时自动完成燃气初始化，因此保留同源宿主和唯一壳嵌入框架。
+ * 本地测试包需要在没有合作方父页面时自动初始化全局沙盘，因此保留同源宿主和唯一壳嵌入框架。
  * 合作方联调包和正式包则必须让平台成为协议壳的直接父页面，不能由我方根页面代替平台发送初始化命令。
  */
 export function createHostPage(manifestVersion, packageType = 'local-test', sceneId = 'gas-power') {
@@ -1729,7 +1729,7 @@ export function createHostPage(manifestVersion, packageType = 'local-test', scen
   const sceneInstanceId = `${sceneId}-platform-host`
   const sceneTopologyId = `topology.${sceneId}.overview`
   const sceneInitMessageId = `${sceneId}-platform-init-`
-  const initializeFunctionName = sceneId === 'coal-power' ? 'initializeCoalPower' : sceneId === 'solar-power' ? 'initializeSolarPower' : 'initializeGasPower'
+  const initializeFunctionName = 'initializeOverview'
 
   return `<!doctype html>
 <html lang="zh-CN">
@@ -1772,8 +1772,7 @@ export function createHostPage(manifestVersion, packageType = 'local-test', scen
             type: 'system.init',
             timestamp: Date.now(),
             payload: {
-              sceneId: '${sceneId}',
-              topologyId: '${sceneTopologyId}',
+              sceneId: 'overview',
               expectedManifestVersion: '${manifestVersion}',
             },
           }, shellOrigin);
@@ -1795,7 +1794,7 @@ export function createHostPage(manifestVersion, packageType = 'local-test', scen
         shellUrl.searchParams.set('parentOrigin', shellOrigin);
         shellUrl.searchParams.set('instanceId', instanceId);
         shellUrl.searchParams.set('protocolVersion', String(version));
-        // 本地宿主虽然由父窗口发送初始化命令，壳仍需提前选择与发布场景一致的运行时登记。
+        // 本地宿主固定从沙盘开始；业务场景参数只用于选择发布清单对应的 Unity 运行时登记。
         shellUrl.searchParams.set('sceneId', '${sceneId}');
         shellUrl.searchParams.set('topologyId', '${sceneTopologyId}');
         shell.src = shellUrl.toString();
@@ -2132,7 +2131,6 @@ function readGasUnityMappingSummary(manifest) {
 function createReadme(releaseConfiguration, sourceNodeCount, sourceEdgeCount, manifest = null) {
   const sceneId = releaseConfiguration.sceneId ?? 'gas-power'
   const sceneTitle = sceneId === 'coal-power' ? '燃煤' : sceneId === 'solar-power' ? '光伏' : '燃气'
-  const sceneTopologyId = `topology.${sceneId}.overview`
   const isLocalTest = releaseConfiguration.packageType === 'local-test'
   const isRuntimeSelfOrigin = releaseConfiguration.addressMode === 'runtime-self-origin'
   /*
@@ -2211,7 +2209,7 @@ ${localSelfTestGuidance}
 \`\`\`
 
 平台外层内嵌框架必须允许全屏，否则三维和拓扑的全屏按钮只能受限于平台容器。
-平台必须先注册跨窗口消息监听，再设置内嵌框架地址；收到 \`system.ready\`（系统就绪）后，使用其会话标识发送 \`system.init\`（系统初始化）。运行时同源模式不要求平台提前知道我方服务器 IP，平台只需把实际 iframe 父页面来源填入 \`parentOrigin\`。
+平台必须先注册跨窗口消息监听，再设置内嵌框架地址；收到 \`system.ready\`（系统就绪）后，使用其会话标识发送 \`system.init\`（系统初始化），初始 \`sceneId\` 固定为 \`overview\`，且不传 \`topologyId\`。后续通过清单登记的流程动作进入各业务场景。运行时同源模式不要求平台提前知道我方服务器 IP，平台只需把实际 iframe 父页面来源填入 \`parentOrigin\`。
 
 ## 加载表现
 
@@ -2227,8 +2225,8 @@ ${localSelfTestGuidance}
 
 ## 联调检查
 
-- 页面初始显示${sceneTitle}发电三维模型；包内同时登记升压站、降压站、换流站和开关站四个变电三维场景。
-- 页面显示${sceneTitle}总拓扑图，共 ${sourceNodeCount} 个节点、${sourceEdgeCount} 条连线。
+- 首屏显示全局沙盘（\`sceneId: 'overview'\`），无二维业务拓扑；通过公开动作可进入${sceneTitle}及其他已发布业务场景。
+- 进入${sceneTitle}后显示对应总拓扑图，共 ${sourceNodeCount} 个节点、${sourceEdgeCount} 条连线；包内同时登记升压站、降压站、换流站和开关站四个变电三维场景。
 - 页面只有一个三维实例和一个拓扑画布。
 - ${workflowActionCount} 个流程动作均登记稳定目标场景和关键环节标识；第三层不携带第二层 \`topologyId\`，返回后恢复进入前的业务拓扑、筛选、选择和状态。
 - 四个变电场景共登记 ${substationProcessDetailCount} 个关键环节和 ${substationSceneNodeCount} 个 Unity 场景节点，关键环节资源、命名镜头和状态节点均从发布清单读取。
@@ -2240,7 +2238,7 @@ ${manifestGuidance}
 
 ## 联调范围
 
-- 本地测试包打开根地址后自动进入${sceneTitle}总览（${sceneTopologyId}）；合作方联调包可脱离平台直接打开查看，嵌入平台后再由平台在握手后发送初始化命令。
+- 本地测试包打开根地址后自动进入全局沙盘；合作方联调包可脱离平台直接打开查看沙盘，嵌入平台后由平台在握手后发送沙盘初始化命令。\`--scene\` 仅决定运行时登记与来源拓扑摘要，不改变首屏。
 - 外层和 Unity 均使用第二版协议；第一版父页面不能与本包完成握手。
 - 本包只携带不可变结构清单；平台读取 \`nodeId\` 后在平台内部维护真实设备映射，并按 \`nodeId\` 推送完整节点状态快照。
 - ${workflowActionCount} 个流程动作和 ${substationProcessDetailCount} 个变电关键环节均已进入发布清单；四个变电场景的 ${substationSceneNodeCount} 个场景节点支持显式绑定、聚焦、清除选择和四态协议联动。
@@ -2295,7 +2293,7 @@ async function main() {
   const unityResourceDigest = await calculateDirectoryResourceDigest(unitySourceDirectory)
   await mkdir(manifestArtifactDirectory, { recursive: true })
 
-  // 正式包携带燃气、燃煤和光伏真实配置；--scene 只决定根入口初始视图。
+  // 正式包携带燃气、燃煤和光伏真实配置；--scene 只决定运行时登记与来源拓扑摘要，不改变沙盘首屏。
   const manifest = await createConfiguredPowerScenesManifest(releaseId, releaseSceneId)
   const selectedUnityRuntimeKey = getUnityRuntimeKey(releaseSceneId)
   const sourceTopology = manifest.topologies.find((topology) => topology.topologyId === `topology.${releaseSceneId}.overview`)
@@ -2349,8 +2347,8 @@ async function main() {
   // 根入口交付给平台，绝不混入内部测试按钮；自测页仅在内部验证构建显式启用时生成。
   await writeFile(path.join(stagingDirectory, 'index.html'), createHostPage(manifest.manifestVersion, releaseConfiguration.packageType, releaseSceneId), 'utf8')
   if (includeSelfTest) {
-    // 本地自测页使用联合清单，因此无论入口初始场景为何，都能在同一个 Unity 实例内往返燃气、燃煤与光伏。
-    await writeFile(path.join(stagingDirectory, 'self-test.html'), createSelfTestPage(manifest.manifestVersion, releaseSceneId), 'utf8')
+    // 本地自测页使用联合清单并固定从沙盘开始，入口场景选择不影响自测导航覆盖。
+    await writeFile(path.join(stagingDirectory, 'self-test.html'), createSelfTestPage(manifest.manifestVersion), 'utf8')
   }
   await writeFile(path.join(stagingDirectory, 'server.mjs'), createStaticServer(releaseConfiguration.packageType), 'utf8')
   // 启动说明直接读取本次生成的完整清单，确保动作、关键环节和四个变电场景节点数量与交付文件一致。

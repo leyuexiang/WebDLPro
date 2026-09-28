@@ -63,6 +63,14 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
     expect(page).toContain('覆盖当前发布清单的全部公开动作')
   })
 
+  it('光伏发布场景只选择运行时登记，自测页仍从沙盘开始', async () => {
+    const manifest = await createConfiguredPowerScenesManifest('solar-runtime-selection-contract', 'solar-power')
+    expect(manifest.unityRuntimeKey).toBe('solar-plant-release')
+    expect(manifest.actions.find((action) => action.actionId === 'action.solar-power.overview')?.targetSceneId).toBe('solar-power')
+    expect(createSelfTestPage(manifest.manifestVersion)).toContain("sceneId: 'overview'")
+    expect(() => createSelfTestPage(manifest.manifestVersion, 'invalid-scene')).toThrow('只能是 gas-power 或 coal-power')
+  })
+
   it('在同一原子清单中装配三场景总览和十六项已核验第三层', async () => {
     const manifest = await createConfiguredPowerScenesManifest('dual-selection-contract', 'coal-power')
 
@@ -217,7 +225,7 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
     expect(publishedMappedNodes).toHaveLength(verifiedMappings.length)
   })
 
-  it('初始场景只改变运行时入口别名而不裁剪另一场景内容', async () => {
+  it('发布场景选择只改变运行时入口别名而不裁剪另一场景内容', async () => {
     const [gasInitial, coalInitial, solarInitial] = await Promise.all([
       createConfiguredPowerScenesManifest('dual-selection-initial-gas', 'gas-power'),
       createConfiguredPowerScenesManifest('dual-selection-initial-coal', 'coal-power'),
