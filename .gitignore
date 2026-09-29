@@ -83,3 +83,145 @@ InitTestScene*.unity*
 
 # 本地报价单，不纳入版本控制。
 /电力工艺导航项目报价单_30天简化交付版.html
+
+# Codely / 团结AI（TJGenerators）在本机自动下载、生成的工具文件：CLI 扩展、桥接包缓存、
+# 上下文索引等均由工具按需重建，属于机器特定的可再生内容；入库会让其他开发机携带无用内容。
+/.codely-cli/
+/.codely.packages/
+# Codely 在项目根自动生成的上下文忽略配置与本机 AI 会话记忆文件，仅对本机 Codely 生效，
+# 其他成员无需读取。
+/.codelyignore
+/CODELY.md
+# AI 工具验证产生的截图/录屏输出目录，可重新生成。
+/screenshots/
+# 团结AI 生成工具的产物历史目录（Assets/TJGenerators/History），仅本机排障参考；
+# 真正需要入库的生成资产应放入业务目录并正常提交。
+/[Aa]ssets/TJGenerators/
+/[Aa]ssets/TJGenerators.meta
+# 桥接包以本地 file: 引用安装时的兜底目录，同样是工具自管内容，禁止入库。
+/[Pp]ackages/cn.tuanjie.codely.bridge/
+/[Pp]ackages/cn.tuanjie.codely.bridge.meta
+/[Pp]ackages/cn.tuanjie.ai.generators/
+/[Pp]ackages/cn.tuanjie.ai.generators.meta
+# 注意：Codely 运行时会临时向 Packages/manifest.json、packages-lock.json 注入两个本地包引用
+# （cn.tuanjie.codely.bridge、cn.tuanjie.ai.generators）。这两个文件必须保持入库（不能 ignore），
+# 本机通过 git update-index --skip-worktree 隐藏注入改动以免误提交；仓库版本不含这些条目，
+# 未使用团结AI的成员可正常解析工程。若需正式修改这两个文件：
+#   git update-index --no-skip-worktree Packages/manifest.json Packages/packages-lock.json
+#   （编辑提交前先删除其中两行 cn.tuanjie.* 注入条目，提交后可再恢复 skip-worktree）
+Assets/Art/WindPowerS/风机场景021/风机场景021/高压线塔002.fbx
+Assets/Art/WindPowerS/风机场景021/风机场景021/高压电塔001.fbx.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/高压电塔001.fbx
+Assets/Art/WindPowerS/风机场景021/风机场景021/集控室.fbx.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/集控室.fbx
+Assets/Art/WindPowerS/风机场景021/风机场景021/草地.fbx.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/草地.fbx
+Assets/Art/WindPowerS/风机场景021/风机场景021/电线006.fbx.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/电线006.fbx
+Assets/Art/WindPowerS/风机场景021/风机场景021/电线005.fbx.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/电线005.fbx
+Assets/Art/WindPowerS/风机场景021/风机场景021/电线004.fbx.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/电线004.fbx
+Assets/Art/WindPowerS/风机场景021/风机场景021/电线003.fbx.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/电线003.fbx
+Assets/Art/WindPowerS/风机场景021/风机场景021/电线002.fbx.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/电线002.fbx
+Assets/Art/WindPowerS/风机场景021/风机场景021/电线001.fbx.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/电线001.fbx
+Assets/Art/WindPowerS/风机场景021/风机场景021/电气控制室.fbx.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/电气控制室.fbx
+Assets/Art/WindPowerS/风机场景021/风机场景021/气象仪.fbx.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/气象仪.fbx
+Assets/Art/WindPowerS/风机场景021/风机场景021/控制柜.fbx.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/控制柜.fbx
+Assets/Art/WindPowerS/风机场景021/风机场景021/就地升压箱.fbx.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/就地升压箱.fbx
+Assets/Art/WindPowerS/风机场景021/风机场景021/塔架.fbx.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/塔架.fbx
+Assets/Art/WindPowerS/风机场景021/风机场景021/地形.fbx.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/地形.fbx
+Assets/Art/WindPowerS/风机场景021/风机场景021/地形.fbm/zhaoxuan_msi_1.jpg.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/地形.fbm/zhaoxuan_msi_1.jpg
+Assets/Art/WindPowerS/风机场景021/风机场景021/地形.fbm/shgl003.jpg.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/地形.fbm/shgl003.jpg
+Assets/Art/WindPowerS/风机场景021/风机场景021/地形.fbm/SC176.jpg.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/地形.fbm/SC176.jpg
+Assets/Art/WindPowerS/风机场景021/风机场景021/地形.fbm/3d66Model-13933239-files-21.jpg.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/地形.fbm/3d66Model-13933239-files-21.jpg
+Assets/Art/WindPowerS/风机场景021/风机场景021/地形.fbm/3d66Model-1060569-files-8.jpg.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/地形.fbm/3d66Model-1060569-files-8.jpg
+Assets/Art/WindPowerS/风机场景021/风机场景021/地形.fbm/3d66Model-1060569-files-7.jpg.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/地形.fbm/3d66Model-1060569-files-7.jpg
+Assets/Art/WindPowerS/风机场景021/风机场景021/地形.fbm/3d66Model-1060569-files-3.jpg.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/地形.fbm/3d66Model-1060569-files-3.jpg
+Assets/Art/WindPowerS/风机场景021/风机场景021/地形.fbm.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/叶片008.fbx.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/叶片008.fbx
+Assets/Art/WindPowerS/风机场景021/风机场景021/叶片008.controller.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/叶片008.controller
+Assets/Art/WindPowerS/风机场景021/风机场景021/叶片007.fbx.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/叶片007.fbx
+Assets/Art/WindPowerS/风机场景021/风机场景021/叶片007.controller.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/叶片007.controller
+Assets/Art/WindPowerS/风机场景021/风机场景021/叶片006.fbx.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/叶片006.fbx
+Assets/Art/WindPowerS/风机场景021/风机场景021/叶片006.controller.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/叶片006.controller
+Assets/Art/WindPowerS/风机场景021/风机场景021/叶片005.fbx.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/叶片005.fbx
+Assets/Art/WindPowerS/风机场景021/风机场景021/叶片005.controller.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/叶片005.controller
+Assets/Art/WindPowerS/风机场景021/风机场景021/叶片004.fbx.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/叶片004.fbx
+Assets/Art/WindPowerS/风机场景021/风机场景021/叶片004.controller.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/叶片004.controller
+Assets/Art/WindPowerS/风机场景021/风机场景021/叶片003.fbx.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/叶片003.fbx
+Assets/Art/WindPowerS/风机场景021/风机场景021/叶片003.controller.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/叶片003.controller
+Assets/Art/WindPowerS/风机场景021/风机场景021/叶片002.fbx.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/叶片002.fbx
+Assets/Art/WindPowerS/风机场景021/风机场景021/叶片002.controller.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/叶片002.controller
+Assets/Art/WindPowerS/风机场景021/风机场景021/叶片001.fbx.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/叶片001.fbx
+Assets/Art/WindPowerS/风机场景021/风机场景021/叶片001.controller.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/叶片001.controller
+Assets/Art/WindPowerS/风机场景021/风机场景021/升压站003.fbx.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/升压站003.fbx
+Assets/Art/WindPowerS/风机场景021/风机场景021/升压站002.fbx.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/升压站002.fbx
+Assets/Art/WindPowerS/风机场景021/风机场景021/升压站001.fbx.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/升压站001.fbx
+Assets/Art/WindPowerS/风机场景021/风机场景021/储能箱.fbx.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/储能箱.fbx
+Assets/Art/WindPowerS/风机场景021/风机场景021/交换机.fbx.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/交换机.fbx
+Assets/Art/WindPowerS/风机场景021/风机场景021/SCADA主站.fbx.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/SCADA主站.fbx
+Assets/Art/WindPowerS/风机场景021/风机场景021.meta
+Assets/Art/WindPowerS/风机场景021.meta
+Assets/Scenes/Business/WindPower.unity
+Assets/Scenes/Business/WindPower.unity
+Assets/Scenes/Business/WindPower.unity
+Assets/Art/WindPowerS.meta
+Assets/Art/WindPowerS/风机场景021/风机场景021/高压线塔002.fbx.meta
+Assets/Scenes/Business/WindPower.unity
+ProjectSettings/ProjectVersion.txt
+
+# —— WindPower 场景忽略机制说明 ——
+# .gitignore 只对未跟踪文件生效：上方逐条列出的 WindPowerS 美术资源是未跟踪文件，条目有效；
+# 但 Assets/Scenes/Business/WindPower.unity 与 ProjectSettings/ProjectVersion.txt 是已跟踪文件，
+# 写入 .gitignore 不会隐藏其改动。
+# WindPower 本地 WIP（场景 + 能力配套）由 skip-worktree 完整保护，当前保护清单：
+#   Assets/Scenes/Business/WindPower.unity                    （场景本体，含节点/四态/绑定）
+#   Assets/Configuration/BusinessSceneCatalog.asset           （wind-power 声明能力 1121→1901）
+#   Assets/Tests/EditMode/BusinessSceneBootstrapAssetTests.cs （wind 加入真实场景/1901 能力分支）
+#   Assets/Tests/EditMode/PowerPlantSelectionFocusTests.cs    （镜头高亮数量定稿 9/3/1/3）
+#   Packages/manifest.json、Packages/packages-lock.json       （Codely 注入条目，见上方说明）
+# 这些 wind 配套文件必须与场景原子提交：单独提交目录或测试而场景未上传，会导致
+# 其他成员仓库"声明≠运行时"（他们本地 wind 场景运行时仍为 1121）。
+# 未来正式发布 wind 场景时执行：
+#   git update-index --no-skip-worktree Assets/Scenes/Business/WindPower.unity Assets/Configuration/BusinessSceneCatalog.asset Assets/Tests/EditMode/BusinessSceneBootstrapAssetTests.cs Assets/Tests/EditMode/PowerPlantSelectionFocusTests.cs
+#   （移除 WindPowerS 美术的忽略条目后一并暂存提交；若远端有他人更新需先备份本地改动）
+# ProjectVersion.txt 的本地版本改动（编辑器版本差异）同理需要 skip-worktree 才能隐藏。
