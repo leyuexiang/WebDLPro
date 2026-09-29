@@ -888,6 +888,10 @@ MonoBehaviour:
   _focusDistancePadding: 1.25
   _focusMinimumDistance: 18
   _focusDuration: 0.45
+  _detailOrbitSensitivity: 0.075
+  _detailZoomFractionPerNotch: 0.035
+  _detailZoomSmoothTime: 0.12
+  _detailMovementMultiplier: 0.15
 --- !u!1001 &363281504
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -7294,7 +7298,6 @@ MonoBehaviour:
   - _cameraPoseId: coal-power.camera.grid-output
     _targetPose: {fileID: 1301386642}
     _highlightTargets:
-    - {fileID: 0}
     - {fileID: 670015122366473568}
 --- !u!114 &2140000106
 MonoBehaviour:

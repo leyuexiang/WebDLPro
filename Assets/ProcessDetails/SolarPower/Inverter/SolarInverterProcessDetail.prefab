@@ -43,6 +43,7 @@ GameObject:
   - component: {fileID: 4976151270577238236}
   - component: {fileID: 8774422867353162749}
   - component: {fileID: 6206689335776757401}
+  - component: {fileID: 3972517415409844900}
   m_Layer: 0
   m_Name: "\u7535\u7EBF.002"
   m_TagString: Untagged
@@ -115,6 +116,34 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
+--- !u!114 &3972517415409844900
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1300021344888180862}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8ee55ce866128014f9ff31041f26e67d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _circuitMeshFilter: {fileID: 8774422867353162749}
+  _circuitRenderer: {fileID: 6206689335776757401}
+  _flowMesh: {fileID: 4300000, guid: 7bca59e73eacccf44bc0c8a5b42decb5, type: 2}
+  _flowMaterial: {fileID: 2100000, guid: b8c9dd1efadf4c5bbd53417972d82ef9, type: 2}
+  _glowMaterial: {fileID: 2100000, guid: d30daabc53277ab42b06b626be0f8ba0, type: 2}
+  _baseGlowColor: {r: 0.011294119, g: 0.12282354, b: 0.18, a: 0.18}
+  _flowColor: {r: 0.0627451, g: 0.68235296, b: 1, a: 1}
+  _headColor: {r: 0.39078432, g: 0.79352945, b: 1, a: 1}
+  _opacity: 0.85
+  _flowSpeed: -0.75
+  _pulseSpacing: 5
+  _tailLength: 1.3
+  _headLength: 0.16
+  _surfaceOffset: 0.028
+  _lineWidth: 0.09
+  _glowWidthMultiplier: 1.3
 --- !u!1 &1369534832993946024
 GameObject:
   m_ObjectHideFlags: 0
@@ -292,6 +321,7 @@ GameObject:
   - component: {fileID: 1585928548681305661}
   - component: {fileID: 86366668968266347}
   - component: {fileID: 2631220692885956300}
+  - component: {fileID: 7237635595671474635}
   m_Layer: 0
   m_Name: "\u7535\u7EBF.001"
   m_TagString: Untagged
@@ -364,6 +394,34 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
+--- !u!114 &7237635595671474635
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1854322423410222668}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8ee55ce866128014f9ff31041f26e67d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _circuitMeshFilter: {fileID: 86366668968266347}
+  _circuitRenderer: {fileID: 2631220692885956300}
+  _flowMesh: {fileID: 4300000, guid: 939856626eca4ea42a27c8a0c6c0a5d1, type: 2}
+  _flowMaterial: {fileID: 2100000, guid: b8c9dd1efadf4c5bbd53417972d82ef9, type: 2}
+  _glowMaterial: {fileID: 2100000, guid: d30daabc53277ab42b06b626be0f8ba0, type: 2}
+  _baseGlowColor: {r: 0.011294119, g: 0.12282354, b: 0.18, a: 0.18}
+  _flowColor: {r: 0.0627451, g: 0.68235296, b: 1, a: 1}
+  _headColor: {r: 0.39078432, g: 0.79352945, b: 1, a: 1}
+  _opacity: 0.85
+  _flowSpeed: -0.75
+  _pulseSpacing: 5
+  _tailLength: 1.3
+  _headLength: 0.16
+  _surfaceOffset: 0.028
+  _lineWidth: 0.09
+  _glowWidthMultiplier: 1.3
 --- !u!1 &2011337460695159078
 GameObject:
   m_ObjectHideFlags: 0
@@ -458,6 +516,7 @@ GameObject:
   - component: {fileID: 2393936228801349721}
   - component: {fileID: 3161392947192504433}
   - component: {fileID: 6541827873572884618}
+  - component: {fileID: 6134953308463086723}
   m_Layer: 0
   m_Name: "\u7535\u7EBF.005"
   m_TagString: Untagged
@@ -530,6 +589,34 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
+--- !u!114 &6134953308463086723
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2360434542678445718}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8ee55ce866128014f9ff31041f26e67d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _circuitMeshFilter: {fileID: 3161392947192504433}
+  _circuitRenderer: {fileID: 6541827873572884618}
+  _flowMesh: {fileID: 4300000, guid: 46a1fe2f1eef6ad45bbb198598aad1f4, type: 2}
+  _flowMaterial: {fileID: 2100000, guid: b8c9dd1efadf4c5bbd53417972d82ef9, type: 2}
+  _glowMaterial: {fileID: 2100000, guid: d30daabc53277ab42b06b626be0f8ba0, type: 2}
+  _baseGlowColor: {r: 0.011294119, g: 0.12282354, b: 0.18, a: 0.18}
+  _flowColor: {r: 0.0627451, g: 0.68235296, b: 1, a: 1}
+  _headColor: {r: 0.39078432, g: 0.79352945, b: 1, a: 1}
+  _opacity: 0.85
+  _flowSpeed: -0.75
+  _pulseSpacing: 5
+  _tailLength: 1.3
+  _headLength: 0.16
+  _surfaceOffset: 0.028
+  _lineWidth: 0.09
+  _glowWidthMultiplier: 1.3
 --- !u!1 &2370085946064649966
 GameObject:
   m_ObjectHideFlags: 0
@@ -907,6 +994,7 @@ GameObject:
   - component: {fileID: 2527582817418554310}
   - component: {fileID: 6551955861884866324}
   - component: {fileID: 4483336695694417378}
+  - component: {fileID: 1405097355380904944}
   m_Layer: 0
   m_Name: "\u7535\u7EBF.004"
   m_TagString: Untagged
@@ -979,6 +1067,34 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
+--- !u!114 &1405097355380904944
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5191203985132711643}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8ee55ce866128014f9ff31041f26e67d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _circuitMeshFilter: {fileID: 6551955861884866324}
+  _circuitRenderer: {fileID: 4483336695694417378}
+  _flowMesh: {fileID: 4300000, guid: 898d1b33aee22cd488160523208100be, type: 2}
+  _flowMaterial: {fileID: 2100000, guid: b8c9dd1efadf4c5bbd53417972d82ef9, type: 2}
+  _glowMaterial: {fileID: 2100000, guid: d30daabc53277ab42b06b626be0f8ba0, type: 2}
+  _baseGlowColor: {r: 0.011294119, g: 0.12282354, b: 0.18, a: 0.18}
+  _flowColor: {r: 0.0627451, g: 0.68235296, b: 1, a: 1}
+  _headColor: {r: 0.39078432, g: 0.79352945, b: 1, a: 1}
+  _opacity: 0.85
+  _flowSpeed: -0.75
+  _pulseSpacing: 5
+  _tailLength: 1.3
+  _headLength: 0.16
+  _surfaceOffset: 0.028
+  _lineWidth: 0.09
+  _glowWidthMultiplier: 1.3
 --- !u!1 &5617771883254390857
 GameObject:
   m_ObjectHideFlags: 0
@@ -998,7 +1114,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!4 &464526648568536956
 Transform:
   m_ObjectHideFlags: 0
@@ -1035,6 +1151,7 @@ MonoBehaviour:
   - {fileID: 8172907940460976523}
   - {fileID: 4483336695694417378}
   - {fileID: 6541827873572884618}
+  - {fileID: 8208383033368689896}
   _faultColor: {r: 1, g: 0, b: 0.03137255, a: 1}
 --- !u!114 &8413585938139575438
 MonoBehaviour:
@@ -1049,7 +1166,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   _equipmentRenderers:
-  - {fileID: 6311374103940199582}
+  - {fileID: 158547905646043488}
+  - {fileID: 2631220692885956300}
   - {fileID: 1932534893358894276}
   _faultColor: {r: 1, g: 0, b: 0.03137255, a: 1}
 --- !u!114 &3718659102528688925
@@ -1358,6 +1476,7 @@ GameObject:
   - component: {fileID: 5050749225749627644}
   - component: {fileID: 8619404306248793705}
   - component: {fileID: 8172907940460976523}
+  - component: {fileID: 3200930412266002383}
   m_Layer: 0
   m_Name: "\u7535\u7EBF.003"
   m_TagString: Untagged
@@ -1430,6 +1549,34 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
+--- !u!114 &3200930412266002383
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6026309005109839918}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8ee55ce866128014f9ff31041f26e67d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _circuitMeshFilter: {fileID: 8619404306248793705}
+  _circuitRenderer: {fileID: 8172907940460976523}
+  _flowMesh: {fileID: 4300000, guid: 2f257d74c65b45442aaf40f762fbd7b2, type: 2}
+  _flowMaterial: {fileID: 2100000, guid: b8c9dd1efadf4c5bbd53417972d82ef9, type: 2}
+  _glowMaterial: {fileID: 2100000, guid: d30daabc53277ab42b06b626be0f8ba0, type: 2}
+  _baseGlowColor: {r: 0.011294119, g: 0.12282354, b: 0.18, a: 0.18}
+  _flowColor: {r: 0.0627451, g: 0.68235296, b: 1, a: 1}
+  _headColor: {r: 0.39078432, g: 0.79352945, b: 1, a: 1}
+  _opacity: 0.85
+  _flowSpeed: -0.75
+  _pulseSpacing: 5
+  _tailLength: 1.3
+  _headLength: 0.16
+  _surfaceOffset: 0.028
+  _lineWidth: 0.09
+  _glowWidthMultiplier: 1.3
 --- !u!1 &6461860046167884805
 GameObject:
   m_ObjectHideFlags: 0
@@ -1942,6 +2089,7 @@ GameObject:
   - component: {fileID: 2694352181279958361}
   - component: {fileID: 2143282018766645544}
   - component: {fileID: 8208383033368689896}
+  - component: {fileID: 7365815245267431232}
   m_Layer: 0
   m_Name: "\u63A7\u5236\u7EBF"
   m_TagString: Untagged
@@ -2014,6 +2162,34 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
+--- !u!114 &7365815245267431232
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7637426991071453685}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8ee55ce866128014f9ff31041f26e67d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _circuitMeshFilter: {fileID: 2143282018766645544}
+  _circuitRenderer: {fileID: 8208383033368689896}
+  _flowMesh: {fileID: 4300000, guid: 4eba1e607889f404496d8183c7f49174, type: 2}
+  _flowMaterial: {fileID: 2100000, guid: b8c9dd1efadf4c5bbd53417972d82ef9, type: 2}
+  _glowMaterial: {fileID: 2100000, guid: d30daabc53277ab42b06b626be0f8ba0, type: 2}
+  _baseGlowColor: {r: 0.10235295, g: 0.14894119, b: 0, a: 0.18}
+  _flowColor: {r: 0.5686275, g: 0.827451, b: 0, a: 1}
+  _headColor: {r: 0.71960783, g: 0.88784313, b: 0.35, a: 1}
+  _opacity: 0.85
+  _flowSpeed: 0.88
+  _pulseSpacing: 5
+  _tailLength: 1.3
+  _headLength: 0.16
+  _surfaceOffset: 0.028
+  _lineWidth: 0.09
+  _glowWidthMultiplier: 1.3
 --- !u!1 &7648748983992495336
 GameObject:
   m_ObjectHideFlags: 0
@@ -2591,6 +2767,7 @@ GameObject:
   - component: {fileID: 7021006496684857138}
   - component: {fileID: 3590347298535753021}
   - component: {fileID: 7598607970733937259}
+  - component: {fileID: 4901849008278399520}
   m_Layer: 0
   m_Name: "\u7535\u7EBF"
   m_TagString: Untagged
@@ -2663,3 +2840,31 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
+--- !u!114 &4901849008278399520
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9205022317056701555}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8ee55ce866128014f9ff31041f26e67d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _circuitMeshFilter: {fileID: 3590347298535753021}
+  _circuitRenderer: {fileID: 7598607970733937259}
+  _flowMesh: {fileID: 4300000, guid: 650085ab327589348b8d5f4b47bf1dec, type: 2}
+  _flowMaterial: {fileID: 2100000, guid: b8c9dd1efadf4c5bbd53417972d82ef9, type: 2}
+  _glowMaterial: {fileID: 2100000, guid: d30daabc53277ab42b06b626be0f8ba0, type: 2}
+  _baseGlowColor: {r: 0.011294119, g: 0.12282354, b: 0.18, a: 0.18}
+  _flowColor: {r: 0.0627451, g: 0.68235296, b: 1, a: 1}
+  _headColor: {r: 0.39078432, g: 0.79352945, b: 1, a: 1}
+  _opacity: 0.85
+  _flowSpeed: -0.75
+  _pulseSpacing: 5
+  _tailLength: 1.3
+  _headLength: 0.16
+  _surfaceOffset: 0.028
+  _lineWidth: 0.09
+  _glowWidthMultiplier: 1.3

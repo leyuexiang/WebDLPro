@@ -247,6 +247,8 @@ describe('燃气总览发布契约', () => {
     expect(selfTestPage).toContain("['asset.gas-turbine', 'normal']")
     expect(selfTestPage).toContain("['asset.coal-steam-turbine', 'normal']")
     expect(selfTestPage).toContain("['asset.solar-inverter', 'normal']")
+    // 光伏故障切换必须显示逆变器名称，避免自测页把正确的光伏回执误报成燃煤设备。
+    expect(selfTestPage).toContain("pendingDeviceState.nodeId === 'asset.solar-inverter' ? '光伏逆变器'")
     expect(selfTestPage).not.toContain('燃气轮机动态已停止。')
     expect(selfTestPage).not.toContain('燃气轮机动态已开始播放。')
     expect(selfTestPage).toContain('状态按钮用于观察绑定设备在正常/故障之间切换后的二维、三维效果')

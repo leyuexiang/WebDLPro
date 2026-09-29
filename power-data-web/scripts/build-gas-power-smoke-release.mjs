@@ -1614,7 +1614,11 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
                 deviceStates.set(pendingDeviceState.nodeId, pendingDeviceState.previousStatus);
                 renderDeviceStates();
               } else {
-                status.textContent = (pendingDeviceState.nodeId === 'asset.gas-turbine' ? '燃气轮机' : '燃煤汽轮机') + '绑定设备已切换为' + (pendingDeviceState.deviceStatus === 'fault' ? '故障' : '正常') + '，可切换场景继续观察效果。';
+                // 按三种受控节点分别输出对应设备名称，避免光伏逆变器状态回执被错误标成燃煤汽轮机。
+                const deviceLabel = pendingDeviceState.nodeId === 'asset.gas-turbine' ? '燃气轮机'
+                  : pendingDeviceState.nodeId === 'asset.coal-steam-turbine' ? '燃煤汽轮机'
+                    : pendingDeviceState.nodeId === 'asset.solar-inverter' ? '光伏逆变器' : '关键设备';
+                status.textContent = deviceLabel + '绑定设备已切换为' + (pendingDeviceState.deviceStatus === 'fault' ? '故障' : '正常') + '，可切换场景继续观察效果。';
               }
             }
             if (message.payload?.success !== true) {

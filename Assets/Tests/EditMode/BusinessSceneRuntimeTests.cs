@@ -1136,7 +1136,9 @@ namespace WebDLPro.Unity.Tests
             Assert.That(bundleBuildScriptSource, Does.Contain("BuildAssetBundles"));
             Assert.That(bundleBuildScriptSource, Does.Contain("scene-catalog.json"));
             Assert.That(bundleBuildScriptSource, Does.Contain("scene-content-summary.json"));
-            Assert.That(bundleBuildScriptSource, Does.Contain("SharedBundleName"));
+            Assert.That(bundleBuildScriptSource, Does.Contain("SceneBundleDependencyPlanner.CreateSharedBundlePlans"));
+            Assert.That(bundleBuildScriptSource, Does.Contain("CollectRuntimeDependencyPathsWithCache"));
+            Assert.That(bundleBuildScriptSource, Does.Contain("ProcessDetailCatalogAssetPath"));
             Assert.That(bundleBuildScriptSource, Does.Contain("schemaVersion = 2"));
             Assert.That(bundleBuildScriptSource, Does.Contain("sizeBytes = new FileInfo(bundlePath).Length"));
             Assert.That(bundleBuildScriptSource, Does.Contain("contentVersion = ComputeSceneContentVersion(sceneBundles)"));

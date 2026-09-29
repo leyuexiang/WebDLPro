@@ -91,12 +91,20 @@ public static class SolarInverterProcessDetailPrefabBuilder
                 "电线.003",
                 "电线.004",
                 "电线.005");
-            Renderer[] faultEquipment = ResolveRenderers(model.transform, "逆变器.001", "汇流箱");
+            Renderer reverseInverter = ResolveRenderers(model.transform, "逆变器（反向）")[0];
+            Renderer controlLine = ResolveRenderers(model.transform, "控制线")[0];
+            Renderer combinerBox = ResolveRenderers(model.transform, "汇流箱")[0];
+            Renderer[] faultEquipment = { reverseInverter, wires[1], combinerBox };
+            Renderer[] flowLines = new Renderer[wires.Length + 1];
+            Array.Copy(wires, flowLines, wires.Length);
+            flowLines[wires.Length] = controlLine;
             ValidateBindings(wires, faultEquipment);
+            // 全部六条电线和控制线统一停流；故障红色只绑定反向逆变器、电线.001和汇流箱。
+            SolarInverterWireFlowPrefabBuilder.ConfigureWireFlowEffects(flowLines);
 
             SolarInverterProcessDetailDynamicAdapter dynamicAdapter =
                 host.AddComponent<SolarInverterProcessDetailDynamicAdapter>();
-            dynamicAdapter.ConfigureForEditor(wires, faultColor);
+            dynamicAdapter.ConfigureForEditor(flowLines, faultColor);
 
             SolarInverterFaultVisualAdapter visualAdapter =
                 host.AddComponent<SolarInverterFaultVisualAdapter>();

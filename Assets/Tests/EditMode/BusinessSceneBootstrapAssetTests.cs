@@ -119,6 +119,92 @@ namespace WebDLPro.Unity.Tests
             }
         }
 
+        /// <summary>
+        /// 关键环节目录只在编辑器中保存预制体引用；WebGL 主场景包不应沿该编辑器字段递归收集所有关键环节模型。
+        /// 测试调用与正式构建共用的依赖收集入口，并保留真实场景对目录资产本身的引用，防止优化误删运行时所需元数据。
+        /// </summary>
+        [Test]
+        public void WebGL场景依赖排除仅由编辑器关键环节预制体带入的资源()
+        {
+            ProcessDetailCatalog catalog = AssetDatabase.LoadAssetAtPath<ProcessDetailCatalog>("Assets/Configuration/ProcessDetailCatalog.asset");
+            Assert.That(catalog, Is.Not.Null, "未找到关键环节目录，无法验证编辑器预制体不会污染主场景包。");
+
+            Type buildType = FindLoadedType("PowerPlantSceneBundleBuild");
+            Assert.That(buildType, Is.Not.Null, "未加载场景资源包构建器。");
+            MethodInfo collectMethod = buildType.GetMethod("CollectRuntimeDependencyPaths", BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.That(collectMethod, Is.Not.Null, "场景资源包构建器缺少可复用的运行时依赖收集入口。");
+
+            string[] configuredScenePaths =
+            {
+                "Assets/Scenes/Business/CoalPower.unity",
+                "Assets/Scenes/Business/GasPower.unity",
+                "Assets/Scenes/Business/WindPower.unity",
+                "Assets/Scenes/Business/SolarPower.unity",
+                "Assets/Scenes/Business/StepUpSubstation.unity",
+                "Assets/Scenes/Business/StepDownSubstation.unity",
+                "Assets/Scenes/Business/ConverterStation.unity",
+                "Assets/Scenes/Business/SwitchingStation.unity"
+            };
+            bool validatedCatalogReference = false;
+
+            for (int sceneIndex = 0; sceneIndex < configuredScenePaths.Length; sceneIndex++)
+            {
+                string scenePath = configuredScenePaths[sceneIndex];
+                Assert.That(AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath), Is.Not.Null, scenePath);
+
+                HashSet<string> directDependencies = new HashSet<string>(AssetDatabase.GetDependencies(scenePath, false), StringComparer.Ordinal);
+                string[] runtimeDependencies = collectMethod.Invoke(null, new object[] { scenePath }) as string[];
+                Assert.That(runtimeDependencies, Is.Not.Null, $"无法取得 {scenePath} 的运行时依赖。");
+
+                if (!directDependencies.Contains("Assets/Configuration/ProcessDetailCatalog.asset"))
+                {
+                    continue;
+                }
+
+                validatedCatalogReference = true;
+                CollectionAssert.Contains(runtimeDependencies, "Assets/Configuration/ProcessDetailCatalog.asset");
+
+                for (int entryIndex = 0; entryIndex < catalog.Entries.Count; entryIndex++)
+                {
+                    ProcessDetailCatalogEntry entry = catalog.Entries[entryIndex];
+                    if (entry == null || entry.EditorPrefab == null)
+                    {
+                        continue;
+                    }
+
+                    string editorPrefabPath = AssetDatabase.GetAssetPath(entry.EditorPrefab);
+                    if (string.IsNullOrWhiteSpace(editorPrefabPath) || directDependencies.Contains(editorPrefabPath))
+                    {
+                        // 若场景本身直接使用该预制体，它属于真实运行时场景内容，不能被此过滤规则误删。
+                        continue;
+                    }
+
+                    CollectionAssert.DoesNotContain(
+                        runtimeDependencies,
+                        editorPrefabPath,
+                        $"{scenePath} 不应因 ProcessDetailCatalog 的编辑器字段而打包 {editorPrefabPath}。");
+                }
+            }
+
+            Assert.That(validatedCatalogReference, Is.True, "未找到带关键环节目录引用的正式业务场景，测试未覆盖目标路径。");
+        }
+
+        /// <summary>按稳定类型名搜索 Unity 编辑器预定义程序集，避免测试程序集反向引用 Assembly-CSharp-Editor。</summary>
+        private static Type FindLoadedType(string typeName)
+        {
+            Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
+            for (int assemblyIndex = 0; assemblyIndex < assemblies.Length; assemblyIndex++)
+            {
+                Type type = assemblies[assemblyIndex].GetType(typeName, false);
+                if (type != null)
+                {
+                    return type;
+                }
+            }
+
+            return null;
+        }
+
         private static string ToPascalCase(string sceneId)
         {
             string[] words = sceneId.Split('-');

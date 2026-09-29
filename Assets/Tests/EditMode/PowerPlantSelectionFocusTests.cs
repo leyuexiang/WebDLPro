@@ -96,6 +96,71 @@ namespace WebDLPro.Unity.Tests
             }
         }
 
+        /// <summary>
+        /// 燃煤镜头注册表会在任意步骤目标为空时整体拒绝命名镜头命令；此检查锁定六个步骤的稳定 ID、相机点和高亮目标引用，
+        /// 避免单个场景对象被删除后留下空序列化槽，导致所有燃煤关键环节按钮点击均无效。
+        /// </summary>
+        [Test]
+        public void 燃煤六个关键环节的命名镜头和高亮目标均有效()
+        {
+            const string scenePath = "Assets/Scenes/Business/CoalPower.unity";
+            Scene coalScene = SceneManager.GetSceneByPath(scenePath);
+            bool openedForTest = !coalScene.IsValid() || !coalScene.isLoaded;
+            if (openedForTest)
+            {
+                coalScene = EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Additive);
+            }
+
+            try
+            {
+                BusinessSceneNamedCameraPoseRegistry registry = null;
+                GameObject[] roots = coalScene.GetRootGameObjects();
+                for (int rootIndex = 0; rootIndex < roots.Length && registry == null; rootIndex++)
+                {
+                    registry = roots[rootIndex].GetComponentInChildren<BusinessSceneNamedCameraPoseRegistry>(true);
+                }
+
+                Assert.That(registry, Is.Not.Null, "燃煤场景缺少命名镜头注册表。");
+                SerializedProperty poses = new SerializedObject(registry).FindProperty("_cameraPoses");
+                Assert.That(poses, Is.Not.Null);
+                Assert.That(poses.arraySize, Is.EqualTo(6), "燃煤场景必须登记六个关键环节命名镜头。");
+
+                string[] expectedIds =
+                {
+                    "coal-power.camera.coal-conveying",
+                    "coal-power.camera.coal-mill",
+                    "coal-power.camera.boiler",
+                    "coal-power.camera.steam-turbine",
+                    "coal-power.camera.generator",
+                    "coal-power.camera.grid-output"
+                };
+
+                for (int poseIndex = 0; poseIndex < poses.arraySize; poseIndex++)
+                {
+                    SerializedProperty pose = poses.GetArrayElementAtIndex(poseIndex);
+                    string expectedId = expectedIds[poseIndex];
+                    Assert.That(pose.FindPropertyRelative("_cameraPoseId").stringValue, Is.EqualTo(expectedId));
+                    Assert.That(pose.FindPropertyRelative("_targetPose").objectReferenceValue, Is.Not.Null,
+                        $"镜头 {expectedId} 缺少相机目标点。");
+
+                    SerializedProperty targets = pose.FindPropertyRelative("_highlightTargets");
+                    Assert.That(targets.arraySize, Is.GreaterThan(0), $"镜头 {expectedId} 至少需要一个高亮目标。");
+                    for (int targetIndex = 0; targetIndex < targets.arraySize; targetIndex++)
+                    {
+                        Assert.That(targets.GetArrayElementAtIndex(targetIndex).objectReferenceValue, Is.Not.Null,
+                            $"镜头 {expectedId} 的第 {targetIndex + 1} 个高亮目标为空。");
+                    }
+                }
+            }
+            finally
+            {
+                if (openedForTest)
+                {
+                    EditorSceneManager.CloseScene(coalScene, true);
+                }
+            }
+        }
+
         [Test]
         public void 风电四个关键步骤的命名镜头和高亮模型显式绑定()
         {
@@ -156,6 +221,9 @@ namespace WebDLPro.Unity.Tests
             }
         }
 
+        /// <summary>
+        /// 锁定光伏四个步骤按工艺顺序绑定到对应的场景镜头点与高亮模型；任一镜头点为空会使注册表整体失效，导致全部步骤点击无效。
+        /// </summary>
         [Test]
         public void 光伏四个关键步骤的命名镜头和高亮模型显式绑定()
         {
@@ -188,6 +256,13 @@ namespace WebDLPro.Unity.Tests
                     "solar-power.camera.energy-storage",
                     "solar-power.camera.grid-output"
                 };
+                string[] expectedCameraPosePaths =
+                {
+                    "步骤镜头占位点/镜头点-光伏阵列",
+                    "步骤镜头占位点/镜头点-汇流逆变",
+                    "步骤镜头占位点/镜头点-储能箱",
+                    "步骤镜头占位点/镜头点-升压并网"
+                };
                 string[][] expectedTargets =
                 {
                     new[] { "SceneRoot/Equipment/光伏板" },
@@ -208,8 +283,11 @@ namespace WebDLPro.Unity.Tests
                 {
                     SerializedProperty pose = poses.GetArrayElementAtIndex(poseIndex);
                     Assert.That(pose.FindPropertyRelative("_cameraPoseId").stringValue, Is.EqualTo(expectedIds[poseIndex]));
-                    Assert.That(pose.FindPropertyRelative("_targetPose").objectReferenceValue, Is.Not.Null,
+                    Transform targetPose = pose.FindPropertyRelative("_targetPose").objectReferenceValue as Transform;
+                    Assert.That(targetPose, Is.Not.Null,
                         $"镜头 {expectedIds[poseIndex]} 缺少相机目标点。");
+                    Assert.That(GetSceneHierarchyPath(targetPose), Is.EqualTo(expectedCameraPosePaths[poseIndex]),
+                        $"镜头 {expectedIds[poseIndex]} 必须绑定对应工艺环节的场景镜头点。");
 
                     SerializedProperty targets = pose.FindPropertyRelative("_highlightTargets");
                     Assert.That(targets.arraySize, Is.EqualTo(expectedTargets[poseIndex].Length),

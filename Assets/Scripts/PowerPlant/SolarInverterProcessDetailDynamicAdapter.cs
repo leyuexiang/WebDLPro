@@ -4,8 +4,8 @@ using UnityEngine.Scripting;
 using WebDLPro.Unity.SceneRuntime;
 
 /// <summary>
-/// 光伏逆变器第三层动态适配器。故障时将显式绑定的输出线临时染红，并停止材质支持的流动；
-/// 正常、告警、离线及清除状态时恢复进入环节前的颜色和流速。
+/// 光伏逆变器第三层动态适配器。统一控制六条电线和控制线的流光播放状态；
+/// 故障红色只由 SolarInverterFaultVisualAdapter 处理。
 /// </summary>
 [Preserve]
 [DisallowMultipleComponent]
@@ -15,15 +15,14 @@ public sealed class SolarInverterProcessDetailDynamicAdapter : ProcessDetailDyna
     [SerializeField, ColorUsage(true, true)] private Color _faultColor = Color.red;
 
     private static readonly int FlowSpeedPropertyId = Shader.PropertyToID("_FlowSpeed");
-    private static readonly int BaseColorPropertyId = Shader.PropertyToID("_BaseColor");
-    private static readonly int AlternateBaseColorPropertyId = Shader.PropertyToID("_BASE_COLOR");
+
+    private readonly System.Collections.Generic.List<ControlCircuitElectronFlowEffect> _flowEffects =
+        new System.Collections.Generic.List<ControlCircuitElectronFlowEffect>();
 
     private MaterialPropertyBlock _propertyBlock;
     private Material[][] _materialsByRenderer;
     private float[][] _baselineSpeeds;
     private bool[][] _hasFlowSpeed;
-    private int[][] _colorPropertyIds;
-    private Color[][] _baselineColors;
     private bool _initialized;
 
     protected override void ApplyPlayback(bool playing, bool faultStop)
@@ -33,38 +32,28 @@ public sealed class SolarInverterProcessDetailDynamicAdapter : ProcessDetailDyna
             return;
         }
 
+        bool shouldPlay = playing && !faultStop;
+        for (int effectIndex = 0; effectIndex < _flowEffects.Count; effectIndex++)
+        {
+            _flowEffects[effectIndex].SetPlayback(shouldPlay);
+        }
+
         for (int rendererIndex = 0; rendererIndex < _wireRenderers.Length; rendererIndex++)
         {
             Renderer renderer = _wireRenderers[rendererIndex];
             Material[] materials = _materialsByRenderer[rendererIndex];
             for (int materialIndex = 0; materialIndex < materials.Length; materialIndex++)
             {
-                if (materials[materialIndex] == null)
-                {
-                    continue;
-                }
-
-                bool hasFlowSpeed = _hasFlowSpeed[rendererIndex][materialIndex];
-                int colorPropertyId = _colorPropertyIds[rendererIndex][materialIndex];
-                if (!hasFlowSpeed && colorPropertyId == 0)
+                if (materials[materialIndex] == null || !_hasFlowSpeed[rendererIndex][materialIndex])
                 {
                     continue;
                 }
 
                 _propertyBlock.Clear();
                 renderer.GetPropertyBlock(_propertyBlock, materialIndex);
-                if (hasFlowSpeed)
-                {
-                    _propertyBlock.SetFloat(
-                        FlowSpeedPropertyId,
-                        faultStop ? 0f : _baselineSpeeds[rendererIndex][materialIndex]);
-                }
-                if (colorPropertyId != 0)
-                {
-                    Color color = faultStop ? _faultColor : _baselineColors[rendererIndex][materialIndex];
-                    color.a = _baselineColors[rendererIndex][materialIndex].a;
-                    _propertyBlock.SetColor(colorPropertyId, color);
-                }
+                _propertyBlock.SetFloat(
+                    FlowSpeedPropertyId,
+                    shouldPlay ? _baselineSpeeds[rendererIndex][materialIndex] : 0f);
                 renderer.SetPropertyBlock(_propertyBlock, materialIndex);
             }
         }
@@ -76,8 +65,6 @@ public sealed class SolarInverterProcessDetailDynamicAdapter : ProcessDetailDyna
         _baselineSpeeds = null;
         _materialsByRenderer = null;
         _hasFlowSpeed = null;
-        _colorPropertyIds = null;
-        _baselineColors = null;
         _propertyBlock?.Clear();
         _initialized = false;
     }
@@ -95,11 +82,21 @@ public sealed class SolarInverterProcessDetailDynamicAdapter : ProcessDetailDyna
         }
 
         _propertyBlock = new MaterialPropertyBlock();
+        _flowEffects.Clear();
+        bool[] hasFlowEffectByRenderer = new bool[_wireRenderers.Length];
+        for (int index = 0; index < _wireRenderers.Length; index++)
+        {
+            if (_wireRenderers[index] == null) continue;
+            ControlCircuitElectronFlowEffect effect = _wireRenderers[index].GetComponent<ControlCircuitElectronFlowEffect>();
+            if (effect != null)
+            {
+                hasFlowEffectByRenderer[index] = true;
+                if (!_flowEffects.Contains(effect)) _flowEffects.Add(effect);
+            }
+        }
         _baselineSpeeds = new float[_wireRenderers.Length][];
         _materialsByRenderer = new Material[_wireRenderers.Length][];
         _hasFlowSpeed = new bool[_wireRenderers.Length][];
-        _colorPropertyIds = new int[_wireRenderers.Length][];
-        _baselineColors = new Color[_wireRenderers.Length][];
         for (int rendererIndex = 0; rendererIndex < _wireRenderers.Length; rendererIndex++)
         {
             Renderer renderer = _wireRenderers[rendererIndex];
@@ -113,8 +110,6 @@ public sealed class SolarInverterProcessDetailDynamicAdapter : ProcessDetailDyna
             _materialsByRenderer[rendererIndex] = materials;
             _baselineSpeeds[rendererIndex] = new float[materials.Length];
             _hasFlowSpeed[rendererIndex] = new bool[materials.Length];
-            _colorPropertyIds[rendererIndex] = new int[materials.Length];
-            _baselineColors[rendererIndex] = new Color[materials.Length];
             bool hasEffectSlot = false;
             for (int materialIndex = 0; materialIndex < materials.Length; materialIndex++)
             {
@@ -135,22 +130,12 @@ public sealed class SolarInverterProcessDetailDynamicAdapter : ProcessDetailDyna
                         : material.GetFloat(FlowSpeedPropertyId);
                 }
 
-                int colorPropertyId = ResolveColorPropertyId(material);
-                if (colorPropertyId != 0)
-                {
-                    hasEffectSlot = true;
-                    _colorPropertyIds[rendererIndex][materialIndex] = colorPropertyId;
-                    _propertyBlock.Clear();
-                    renderer.GetPropertyBlock(_propertyBlock, materialIndex);
-                    _baselineColors[rendererIndex][materialIndex] = _propertyBlock.HasColor(colorPropertyId)
-                        ? _propertyBlock.GetColor(colorPropertyId)
-                        : material.GetColor(colorPropertyId);
-                }
             }
 
-            if (!hasEffectSlot)
+            // 叠加流光组件通过自身的 LineRenderer 材质控制动画，原线路材质不需要暴露 _FlowSpeed。
+            if (!hasEffectSlot && !hasFlowEffectByRenderer[rendererIndex])
             {
-                Debug.LogError($"[{nameof(SolarInverterProcessDetailDynamicAdapter)}] {renderer.name} 没有可用于停流或故障变色的材质属性。", renderer);
+                Debug.LogError($"[{nameof(SolarInverterProcessDetailDynamicAdapter)}] {renderer.name} 没有可用于流光控制的组件或材质属性。", renderer);
                 return false;
             }
         }
@@ -177,35 +162,17 @@ public sealed class SolarInverterProcessDetailDynamicAdapter : ProcessDetailDyna
             Material[] materials = _materialsByRenderer[rendererIndex];
             for (int materialIndex = 0; materialIndex < materials.Length; materialIndex++)
             {
-                if (materials[materialIndex] == null ||
-                    (!_hasFlowSpeed[rendererIndex][materialIndex] && _colorPropertyIds[rendererIndex][materialIndex] == 0))
+                if (materials[materialIndex] == null || !_hasFlowSpeed[rendererIndex][materialIndex])
                 {
                     continue;
                 }
 
                 _propertyBlock.Clear();
                 renderer.GetPropertyBlock(_propertyBlock, materialIndex);
-                if (_hasFlowSpeed[rendererIndex][materialIndex])
-                {
-                    _propertyBlock.SetFloat(FlowSpeedPropertyId, _baselineSpeeds[rendererIndex][materialIndex]);
-                }
-                int colorPropertyId = _colorPropertyIds[rendererIndex][materialIndex];
-                if (colorPropertyId != 0)
-                {
-                    _propertyBlock.SetColor(colorPropertyId, _baselineColors[rendererIndex][materialIndex]);
-                }
+                _propertyBlock.SetFloat(FlowSpeedPropertyId, _baselineSpeeds[rendererIndex][materialIndex]);
                 renderer.SetPropertyBlock(_propertyBlock, materialIndex);
             }
         }
-    }
-
-    private static int ResolveColorPropertyId(Material material)
-    {
-        if (material.HasProperty(BaseColorPropertyId))
-        {
-            return BaseColorPropertyId;
-        }
-        return material.HasProperty(AlternateBaseColorPropertyId) ? AlternateBaseColorPropertyId : 0;
     }
 
 #if UNITY_EDITOR
@@ -216,8 +183,6 @@ public sealed class SolarInverterProcessDetailDynamicAdapter : ProcessDetailDyna
         _baselineSpeeds = null;
         _materialsByRenderer = null;
         _hasFlowSpeed = null;
-        _colorPropertyIds = null;
-        _baselineColors = null;
         _initialized = false;
         ResetPlaybackStateForEditor();
     }

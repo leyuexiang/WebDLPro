@@ -20,7 +20,7 @@ public static class PowerPlantSceneBundleBuild
     public const string ContentSummaryFileName = "scene-content-summary.json";
     private const string CatalogAssetPath = "Assets/Configuration/BusinessSceneCatalog.asset";
     private const string OverviewCatalogAssetPath = "Assets/Configuration/OverviewSceneCatalog.asset";
-    private const string SharedBundleName = "scene-shared";
+    private const string ProcessDetailCatalogAssetPath = "Assets/Configuration/ProcessDetailCatalog.asset";
 
     /// <summary>
     /// 为指定发布目录创建不可依赖编辑器状态的场景资源产物。
@@ -60,13 +60,14 @@ public static class PowerPlantSceneBundleBuild
         Directory.CreateDirectory(bundleOutputDirectory);
 
         Dictionary<string, HashSet<string>> sceneIdsByDependencyPath = CollectSceneDependencyUsage(inputs);
-        List<string> sharedDependencyPaths = sceneIdsByDependencyPath
-            .Where(pair => pair.Value.Count > 1 && IsBundleEligibleAsset(pair.Key))
-            .Select(pair => pair.Key)
+        IReadOnlyList<SceneBundleDependencyPlan> sharedBundlePlans =
+            SceneBundleDependencyPlanner.CreateSharedBundlePlans(sceneIdsByDependencyPath);
+        List<string> sharedDependencyPaths = sharedBundlePlans
+            .SelectMany(plan => plan.AssetPaths)
             .OrderBy(path => path, StringComparer.Ordinal)
             .ToList();
 
-        List<AssetBundleBuild> builds = CreateBundleBuilds(inputs, sharedDependencyPaths);
+        List<AssetBundleBuild> builds = CreateBundleBuilds(inputs, sharedBundlePlans);
         AssetBundleManifest manifest = BuildPipeline.BuildAssetBundles(
             bundleOutputDirectory,
             builds.ToArray(),
@@ -133,25 +134,25 @@ public static class PowerPlantSceneBundleBuild
     }
 
     /// <summary>
-    /// 读取 Unity 的递归依赖关系并只保留可实际写入资产包的 Assets 路径。
-    /// C# 脚本由播放器编译结果提供，目录和内置资源也不应被塞入业务包，避免无效条目或重复打包。
+    /// 逐层读取运行时场景依赖并只保留可实际写入资产包的 Assets 路径。
+    /// ProcessDetailCatalog 的预制体字段只在 UNITY_EDITOR 下存在；扫描时保留目录本身供运行时读取，
+    /// 但不沿该目录展开编辑器预制体，否则所有关键环节模型会被错误打入总览场景包。
     /// </summary>
     private static Dictionary<string, HashSet<string>> CollectSceneDependencyUsage(IReadOnlyList<SceneBuildInput> inputs)
     {
         Dictionary<string, HashSet<string>> sceneIdsByDependencyPath = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        Dictionary<string, string[]> directDependencyPathsByAssetPath = new Dictionary<string, string[]>(StringComparer.Ordinal);
+        Dictionary<string, DependencyAssetClassification> classificationByAssetPath = new Dictionary<string, DependencyAssetClassification>(StringComparer.Ordinal);
         for (int index = 0; index < inputs.Count; index++)
         {
             SceneBuildInput input = inputs[index];
-            string[] dependencies = AssetDatabase.GetDependencies(input.ScenePath, true);
-            List<string> eligibleDependencyPaths = new List<string>(dependencies.Length);
-            for (int dependencyIndex = 0; dependencyIndex < dependencies.Length; dependencyIndex++)
+            string[] eligibleDependencyPaths = CollectRuntimeDependencyPathsWithCache(
+                input.ScenePath,
+                directDependencyPathsByAssetPath,
+                classificationByAssetPath);
+            for (int dependencyIndex = 0; dependencyIndex < eligibleDependencyPaths.Length; dependencyIndex++)
             {
-                string dependencyPath = dependencies[dependencyIndex];
-                if (string.Equals(dependencyPath, input.ScenePath, StringComparison.Ordinal) || !IsBundleEligibleAsset(dependencyPath))
-                {
-                    continue;
-                }
-                eligibleDependencyPaths.Add(dependencyPath);
+                string dependencyPath = eligibleDependencyPaths[dependencyIndex];
                 if (!sceneIdsByDependencyPath.TryGetValue(dependencyPath, out HashSet<string> sceneIds))
                 {
                     sceneIds = new HashSet<string>(StringComparer.Ordinal);
@@ -159,26 +160,28 @@ public static class PowerPlantSceneBundleBuild
                 }
                 sceneIds.Add(input.SceneId);
             }
-            // 依赖扫描是编辑器数据库查询中的主要开销。每个场景只查询一次并缓存排序结果，
-            // 后续共享依赖统计和内容摘要复用同一份数据，避免发布构建重复遍历完整资源图。
-            input.SetDependencyPaths(eligibleDependencyPaths.OrderBy(path => path, StringComparer.Ordinal).ToArray());
+            // 依赖路径已经在图遍历阶段排序，后续共享统计和内容摘要可直接复用，避免重复查询编辑器数据库。
+            input.SetDependencyPaths(eligibleDependencyPaths);
         }
         return sceneIdsByDependencyPath;
     }
 
     /// <summary>
-    /// 显式声明共享包、独立总览包和正式业务场景包。非共享依赖由 Unity 随所属场景包收集；
-    /// 共享依赖被单独声明后，Unity 清单会把它们列为各场景包的依赖，避免同一资源复制多份。
+    /// 显式声明按精确消费者集合划分的共享包、独立总览包和正式业务场景包。
+    /// Unity 清单只会让实际使用该组资源的场景包依赖它，避免轻量场景牵连无关的大型资源组。
     /// </summary>
-    private static List<AssetBundleBuild> CreateBundleBuilds(IReadOnlyList<SceneBuildInput> inputs, List<string> sharedDependencyPaths)
+    private static List<AssetBundleBuild> CreateBundleBuilds(
+        IReadOnlyList<SceneBuildInput> inputs,
+        IReadOnlyList<SceneBundleDependencyPlan> sharedBundlePlans)
     {
-        List<AssetBundleBuild> builds = new List<AssetBundleBuild>(inputs.Count + 1);
-        if (sharedDependencyPaths.Count > 0)
+        List<AssetBundleBuild> builds = new List<AssetBundleBuild>(inputs.Count + sharedBundlePlans.Count);
+        for (int index = 0; index < sharedBundlePlans.Count; index++)
         {
+            SceneBundleDependencyPlan plan = sharedBundlePlans[index];
             builds.Add(new AssetBundleBuild
             {
-                assetBundleName = SharedBundleName,
-                assetNames = sharedDependencyPaths.ToArray()
+                assetBundleName = plan.BundleName,
+                assetNames = plan.AssetPaths.ToArray()
             });
         }
 
@@ -192,6 +195,83 @@ public static class PowerPlantSceneBundleBuild
             });
         }
         return builds;
+    }
+
+    /// <summary>
+    /// 供编辑器资产回归测试验证正式收集逻辑的单场景入口。生产构建使用带缓存版本，避免不同场景重复查询同一依赖图。
+    /// </summary>
+    private static string[] CollectRuntimeDependencyPaths(string scenePath)
+    {
+        return CollectRuntimeDependencyPathsWithCache(
+            scenePath,
+            new Dictionary<string, string[]>(StringComparer.Ordinal),
+            new Dictionary<string, DependencyAssetClassification>(StringComparer.Ordinal));
+    }
+
+    /// <summary>
+    /// 使用显式栈遍历场景的直接资源引用，并缓存每个资源的一层依赖查询。
+    /// 遇到关键环节目录时只保留目录资产本身；其 EditorPrefab 字段仅服务编辑器回退加载，播放器通过独立关键环节包按需取资源。
+    /// </summary>
+    private static string[] CollectRuntimeDependencyPathsWithCache(
+        string scenePath,
+        IDictionary<string, string[]> directDependencyPathsByAssetPath,
+        IDictionary<string, DependencyAssetClassification> classificationByAssetPath)
+    {
+        if (string.IsNullOrWhiteSpace(scenePath))
+        {
+            throw new ArgumentException("场景依赖扫描缺少场景路径。", nameof(scenePath));
+        }
+
+        Stack<string> pendingAssetPaths = new Stack<string>();
+        HashSet<string> visitedAssetPaths = new HashSet<string>(StringComparer.Ordinal);
+        HashSet<string> runtimeDependencyPaths = new HashSet<string>(StringComparer.Ordinal);
+        pendingAssetPaths.Push(scenePath);
+
+        while (pendingAssetPaths.Count > 0)
+        {
+            string assetPath = pendingAssetPaths.Pop();
+            if (!visitedAssetPaths.Add(assetPath))
+            {
+                continue;
+            }
+
+            bool isSceneRoot = string.Equals(assetPath, scenePath, StringComparison.Ordinal);
+            DependencyAssetClassification classification = ClassifyDependencyAsset(assetPath, classificationByAssetPath);
+            if (!isSceneRoot && !classification.CanExpandDependencies)
+            {
+                // 场景资产、脚本和目录不是资源包内容，也不应作为递归入口展开其他场景或编辑器元数据。
+                continue;
+            }
+
+            if (classification.IsBundleEligible)
+            {
+                runtimeDependencyPaths.Add(assetPath);
+            }
+
+            if (string.Equals(assetPath, ProcessDetailCatalogAssetPath, StringComparison.Ordinal))
+            {
+                // 该目录的运行时字段只含稳定标识和相机参数；继续展开只会读到 UNITY_EDITOR 专用的预制体引用。
+                continue;
+            }
+
+            if (!directDependencyPathsByAssetPath.TryGetValue(assetPath, out string[] directDependencies))
+            {
+                string[] queriedDependencies = AssetDatabase.GetDependencies(assetPath, false);
+                directDependencies = queriedDependencies ?? Array.Empty<string>();
+                directDependencyPathsByAssetPath.Add(assetPath, directDependencies);
+            }
+
+            for (int dependencyIndex = 0; dependencyIndex < directDependencies.Length; dependencyIndex++)
+            {
+                string dependencyPath = directDependencies[dependencyIndex];
+                if (!string.IsNullOrWhiteSpace(dependencyPath))
+                {
+                    pendingAssetPaths.Push(dependencyPath);
+                }
+            }
+        }
+
+        return runtimeDependencyPaths.OrderBy(path => path, StringComparer.Ordinal).ToArray();
     }
 
     /// <summary>
@@ -400,14 +480,25 @@ public static class PowerPlantSceneBundleBuild
         }
     }
 
-    private static bool IsBundleEligibleAsset(string assetPath)
+    private static DependencyAssetClassification ClassifyDependencyAsset(
+        string assetPath,
+        IDictionary<string, DependencyAssetClassification> classificationByAssetPath)
     {
-        if (string.IsNullOrWhiteSpace(assetPath) || !assetPath.StartsWith("Assets/", StringComparison.Ordinal))
+        if (classificationByAssetPath.TryGetValue(assetPath, out DependencyAssetClassification cachedClassification))
         {
-            return false;
+            return cachedClassification;
         }
+
+        bool belongsToProjectAssetTree = assetPath.StartsWith("Assets/", StringComparison.Ordinal);
+        bool belongsToTraversableAssetTree = belongsToProjectAssetTree || assetPath.StartsWith("Packages/", StringComparison.Ordinal);
         UnityEngine.Object asset = AssetDatabase.LoadMainAssetAtPath(assetPath);
-        return asset != null && !(asset is MonoScript) && !(asset is SceneAsset) && !(asset is DefaultAsset);
+        bool isExpandableUnityAsset = belongsToTraversableAssetTree && asset != null &&
+            !(asset is MonoScript) && !(asset is SceneAsset) && !(asset is DefaultAsset);
+        DependencyAssetClassification classification = new DependencyAssetClassification(
+            belongsToProjectAssetTree && isExpandableUnityAsset,
+            isExpandableUnityAsset);
+        classificationByAssetPath.Add(assetPath, classification);
+        return classification;
     }
 
     private static string CreateSceneBundleName(string sceneId)
@@ -460,6 +551,22 @@ public static class PowerPlantSceneBundleBuild
         public void SetDependencyPaths(string[] dependencyPaths)
         {
             DependencyPaths = dependencyPaths ?? Array.Empty<string>();
+        }
+    }
+
+    /// <summary>
+    /// 把“可写入本项目资产包”和“需要继续遍历其子依赖”分开判断：Packages 下资产参与运行时依赖遍历，
+    /// 但只有 Assets 下资源会被本项目构建器显式分配到共享包或场景包。
+    /// </summary>
+    private readonly struct DependencyAssetClassification
+    {
+        public bool IsBundleEligible { get; }
+        public bool CanExpandDependencies { get; }
+
+        public DependencyAssetClassification(bool isBundleEligible, bool canExpandDependencies)
+        {
+            IsBundleEligible = isBundleEligible;
+            CanExpandDependencies = canExpandDependencies;
         }
     }
 

@@ -849,7 +849,7 @@ GameObject:
   m_Component:
   - component: {fileID: 265354865}
   m_Layer: 0
-  m_Name: "\u955C\u5934\u70B9-\u7BB1\u5F0F\u5347\u538B"
+  m_Name: "\u955C\u5934\u70B9-\u50A8\u80FD\u7BB1"
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -2196,7 +2196,7 @@ MonoBehaviour:
     - {fileID: 3929384031424414668}
     - {fileID: 1126687356508540958}
   - _cameraPoseId: solar-power.camera.energy-storage
-    _targetPose: {fileID: 0}
+    _targetPose: {fileID: 265354865}
     _highlightTargets:
     - {fileID: 8055377139651443297}
   - _cameraPoseId: solar-power.camera.grid-output
