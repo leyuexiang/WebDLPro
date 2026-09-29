@@ -70,7 +70,17 @@ namespace WebDLPro.Unity.SceneRuntime
                 return DetailCoordinator.ResetActiveCameraPose();
             }
             camera.ResetToInitialTransform();
-            return BusinessSceneCommandResult.Completed("已恢复变电站总览镜头。");
+            // 二层相机复位必须与燃气适配器语义一致：镜头复位后恢复总览显隐与材质，
+            // 清除节点聚焦或命名镜头步骤产生的临时半透明上下文，并保留当前设备四态效果。
+            // 未绑定流程控制器的纯浏览场景只复位镜头，不额外触碰模型视觉。
+            if (ProcessController == null)
+            {
+                return BusinessSceneCommandResult.Completed("已恢复变电站总览镜头。");
+            }
+            bool visualResetSucceeded = ProcessController.TryResetOverviewVisualsPreservingDeviceStates(out string visualMessage);
+            return visualResetSucceeded
+                ? BusinessSceneCommandResult.Completed($"已恢复变电站总览镜头。{visualMessage}")
+                : BusinessSceneCommandResult.Failed("camera-visual-reset-failed", visualMessage);
         }
 
         public BusinessSceneCommandResult MoveCameraToPose(string cameraPoseId)

@@ -373,7 +373,11 @@ function handleCanvasKeydown(event: KeyboardEvent): void {
 function fitTopologyToViewport(): void {
   if (!meta2d || loadingState.value !== 'ready' || suspended || !readUsableTopologyViewportSize(canvasHost.value)) return
   activeTooltipPen.value = null
-  meta2d.fitView(true, [20, 24, 20, 24])
+  // 四边距为 [上, 右, 下, 左]：仅右侧为避让悬浮筛选轨预留，其余方向贴边填满画布。
+  meta2d.fitView(true, [0, 24, 0, 0])
+  // fitView 内部 centerView 会忽略不对称边距并强制居中，右侧预留被平摊成左右留白；
+  // 这里按当前缩放把内容向左平移半个右侧预留量，保证右侧净空避让筛选轨、左侧贴边。
+  meta2d.translate(-12 / (meta2d.store.data.scale || 1), 0)
 }
 
 /** 公共重置只恢复当前文件视图，不改变层级、中央状态或业务选择。 */

@@ -100,7 +100,11 @@ function fitTopologyToViewport(): void {
   if (!meta2d || disposed || props.suspended || loadingState.value !== 'ready') return
   if (!canvasHost.value?.clientWidth || !canvasHost.value?.clientHeight) return
   clearTopologyTooltip()
-  meta2d.fitView(true, [28, 36, 28, 36])
+  // 四边距为 [上, 右, 下, 左]：仅右侧为避让悬浮筛选轨预留，其余方向贴边填满画布。
+  meta2d.fitView(true, [0, 24, 0, 0])
+  // fitView 内部 centerView 会忽略不对称边距并强制把内容居中，右侧预留被平摊成左右两侧留白，
+  // 导致右侧仍压住悬浮筛选轨、左侧出现缝隙；这里按当前缩放把内容向左平移半个右侧预留量补回。
+  meta2d.translate(-12 / (meta2d.store.data.scale || 1), 0)
   syncZoomPercent()
 }
 

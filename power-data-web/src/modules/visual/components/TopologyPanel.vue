@@ -200,22 +200,22 @@ defineExpose({ getCanvasController })
 
 /** 展示模型只从当前拓扑计算，切换场景或拓扑时无需复制组件或维护燃气专用条件分支。 */
 const presentation = computed(() => createTopologyPanelPresentation(props.topology))
-/** 外部数据画布依据真实加载状态解锁；其他空场景仍禁用，不能以空业务绑定判断画布为空。 */
+/*
+ * 业务决定（2026-09-29）：重置按钮入口暂时隐藏，重置逻辑以注释完整保留，恢复时取消下方注释并
+ * 放开模板中 topology-panel__reset 按钮注释即可；契约测试已同步为“注释保留”断言。
+ * 外部数据画布依据真实加载状态解锁；其他空场景仍禁用，不能以空业务绑定判断画布为空。
 const resetDisabled = computed(() => Boolean(props.suspended) || (usesNarrowJsonOverviewCanvas.value
   ? !narrowCanvasReady.value
   : usesSolarOverviewCanvas.value
-    // 真实光伏画布提供 ready；兼容测试替身未实现该只读字段时沿用公共控制器能力。
     ? topologyCanvas.value?.ready === false
     : presentation.value.isEmpty))
-
-/**
  * 公共重置入口只调用受控画布端口，不直接接触 Meta2D（网页二维组态引擎）或具体拓扑实现。
  * 因此燃气、燃煤和后续新增拓扑都复用同一套“适应画布并居中”逻辑；空态和暂停态不发无效命令。
- */
 function resetTopologyView(): void {
   if (resetDisabled.value) return
   stableCanvasController.resetView()
 }
+*/
 
 /** 拓扑键切换会替换窄画布实例；替换完成前必须保持重置入口禁用。 */
 function handleNarrowCanvasReady(ready: boolean): void {
@@ -260,7 +260,9 @@ watch(() => String(props.topology.topologyKey), () => {
 
 <template>
   <section ref="panelRoot" class="topology-panel" :aria-label="presentation.title">
-    <!-- 公共层统一提供视图重置按钮，避免每个拓扑包装组件重复实现或遗漏该能力。 -->
+    <!--
+      业务决定（2026-09-29）：重置按钮入口暂时隐藏，公共层代码与样式以注释完整保留，恢复时取消本注释即可。
+      契约测试 topology-suspension-contract.spec.ts 已同步为“注释保留”断言。
     <button
       type="button"
       class="topology-panel__reset"
@@ -271,6 +273,7 @@ watch(() => String(props.topology.topologyKey), () => {
     >
       重置
     </button>
+    -->
     <div class="topology-panel__content">
     <!--
       公共面板默认只承载画布；唯一通用操作是上方的视图重置按钮，不为具体业务拓扑复制操作栏。
@@ -390,13 +393,14 @@ watch(() => String(props.topology.topologyKey), () => {
   position: relative;
   min-block-size: 0;
   overflow: hidden;
-  padding: var(--space-4);
-  border: 1px solid #0e7490;
-  border-radius: var(--radius-md);
+  /* 画布必须完整占满面板区域，不留装饰性内边距与边框缝隙；面板底色由内部画布舞台统一呈现。 */
+  padding: 0;
+  border: 0;
+  border-radius: 0;
   background:
     linear-gradient(135deg, rgba(8, 47, 73, 0.96), rgba(3, 17, 29, 0.98)),
     #03111d;
-  box-shadow: 0 12px 28px rgba(2, 8, 23, 0.2);
+  box-shadow: none;
   color: #e2f7ff;
 }
 

@@ -27,10 +27,10 @@ describe('拓扑画布暂停契约', () => {
     expect(panelSource).toContain('controller.resetView()')
   })
 
-  it('公共面板保留统一重置按钮并复用同一受控端口', () => {
-    // 按钮必须属于公共面板而非某一拓扑包装组件，后续新增拓扑无需再次补入口。
-    expect(panelSource).toContain('class="topology-panel__reset"')
-    expect(panelSource).toContain('@click="resetTopologyView"')
+  it('公共面板重置入口按业务决定注释保留，代码不得整体删除', () => {
+    // 2026-09-29 业务决定隐藏按钮入口；公共层代码与样式必须以注释完整保留，便于后续恢复。
+    expect(panelSource).toContain('topology-panel__reset')
+    expect(panelSource).toContain('function resetTopologyView(): void')
     expect(panelSource).toContain('stableCanvasController.resetView()')
   })
 

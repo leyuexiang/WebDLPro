@@ -105,6 +105,11 @@ namespace WebDLPro.Unity.SceneRuntime
         bool SupportsNodeVisualState { get; }
         bool TryFocusNode(string nodeId, bool isolate, out string message);
         bool TryClearSelection(out string message);
+        /// <summary>
+        /// 相机复位与场景复位共用的总览视觉恢复入口：清除节点聚焦与命名镜头产生的临时半透明，
+        /// 恢复默认显隐与基础材质，同时保留当前设备四态效果；未声明该能力的场景不得改动模型视觉。
+        /// </summary>
+        bool TryResetOverviewVisualsPreservingDeviceStates(out string message);
         BusinessSceneCommandResult UpdateNodeVisualState(string sceneNodeId, BusinessSceneNodeVisualState visualState);
         BusinessSceneCommandResult ClearNodeVisualState(string sceneNodeId);
     }
