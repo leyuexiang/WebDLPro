@@ -88,6 +88,7 @@ InitTestScene*.unity*
 # 上下文索引等均由工具按需重建，属于机器特定的可再生内容；入库会让其他开发机携带无用内容。
 /.codely-cli/
 /.codely.packages/
+/.codely/
 # Codely 在项目根自动生成的上下文忽略配置与本机 AI 会话记忆文件，仅对本机 Codely 生效，
 # 其他成员无需读取。
 /.codelyignore
@@ -225,3 +226,4 @@ ProjectSettings/ProjectVersion.txt
 #   git update-index --no-skip-worktree Assets/Scenes/Business/WindPower.unity Assets/Configuration/BusinessSceneCatalog.asset Assets/Tests/EditMode/BusinessSceneBootstrapAssetTests.cs Assets/Tests/EditMode/PowerPlantSelectionFocusTests.cs
 #   （移除 WindPowerS 美术的忽略条目后一并暂存提交；若远端有他人更新需先备份本地改动）
 # ProjectVersion.txt 的本地版本改动（编辑器版本差异）同理需要 skip-worktree 才能隐藏。
+.codely/clipboard/clipboard-1790686570229.png

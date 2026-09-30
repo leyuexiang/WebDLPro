@@ -479,6 +479,10 @@ MonoBehaviour:
   _focusDistancePadding: 1.25
   _focusMinimumDistance: 18
   _focusDuration: 0.45
+  _detailOrbitSensitivity: 0.075
+  _detailZoomFractionPerNotch: 0.035
+  _detailZoomSmoothTime: 0.12
+  _detailMovementMultiplier: 0.15
 --- !u!20 &1303796556
 Camera:
   m_ObjectHideFlags: 0
@@ -590,8 +594,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1303796554}
   serializedVersion: 2
-  m_LocalRotation: {x: -0.11020097, y: -0.87194085, z: 0.23012105, w: -0.41787475}
-  m_LocalPosition: {x: -39.045395, y: 40.327534, z: 69.48007}
+  m_LocalRotation: {x: -0.0015134668, y: 0.9439796, z: -0.32997194, w: -0.004329707}
+  m_LocalPosition: {x: 7.5855417, y: 34.448444, z: 70.928185}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
