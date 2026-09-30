@@ -259,7 +259,7 @@ public static class SolarInverterProcessDetailPrefabBuilder
         {
             throw new InvalidOperationException("光伏场景缺少逆变器设备根节点：SceneRoot/Equipment/逆变器控制。");
         }
-        GameObject[] visualStateTargets = ResolveSceneObjects(
+        GameObject[] inverterVisualStateTargets = ResolveSceneObjects(
             inverterEquipmentRoot,
             "汇流箱＋逆变器",
             "汇流箱＋逆变器.001",
@@ -267,6 +267,16 @@ public static class SolarInverterProcessDetailPrefabBuilder
             "汇流箱＋逆变器.003",
             "汇流箱＋逆变器.004",
             "汇流箱＋逆变器.005");
+        Transform equipmentRoot = businessRoot.transform.Find("Equipment");
+        if (equipmentRoot == null)
+        {
+            throw new InvalidOperationException("光伏场景缺少设备根节点：SceneRoot/Equipment。");
+        }
+        GameObject[] visualStateTargets = new GameObject[inverterVisualStateTargets.Length + 3];
+        Array.Copy(inverterVisualStateTargets, visualStateTargets, inverterVisualStateTargets.Length);
+        visualStateTargets[inverterVisualStateTargets.Length] = ResolveSceneObject(equipmentRoot, "电线.031");
+        visualStateTargets[inverterVisualStateTargets.Length + 1] = ResolveSceneObject(equipmentRoot, "箱式变压器");
+        visualStateTargets[inverterVisualStateTargets.Length + 2] = ResolveSceneObject(equipmentRoot, "电线.043");
         processController.ConfigureVisualStateBindingsForEditor(visualStateTargets);
         EditorUtility.SetDirty(processController);
 
@@ -298,6 +308,16 @@ public static class SolarInverterProcessDetailPrefabBuilder
         EditorUtility.SetDirty(loader);
         EditorUtility.SetDirty(coordinator);
         EditorSceneManager.MarkSceneDirty(scene);
+    }
+
+    private static GameObject ResolveSceneObject(Transform root, string childName)
+    {
+        Transform child = root.Find(childName);
+        if (child == null)
+        {
+            throw new InvalidOperationException($"光伏场景缺少显式设备目标：{childName}。");
+        }
+        return child.gameObject;
     }
 
     private static GameObject[] ResolveSceneObjects(Transform root, params string[] childNames)
