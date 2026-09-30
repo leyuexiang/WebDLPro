@@ -11,6 +11,8 @@ import StepUpSubstationTopologyJsonPreview from '@/modules/visual/topology-previ
 import StepDownSubstationTopologyJsonPreview from '@/modules/visual/topology-preview/StepDownSubstationTopologyJsonPreview.vue'
 import ConverterStationTopologyJsonPreview from '@/modules/visual/topology-preview/ConverterStationTopologyJsonPreview.vue'
 import SwitchingStationTopologyJsonPreview from '@/modules/visual/topology-preview/SwitchingStationTopologyJsonPreview.vue'
+import BusinessSceneTopologyJsonPreview from '@/modules/visual/topology-preview/BusinessSceneTopologyJsonPreview.vue'
+import { resolveBusinessSceneTopologySceneId } from '@/modules/visual/topology-preview/business-scene-topology'
 import { createTopologyPanelPresentation } from '@/modules/visual/components/topology-panel-presentation'
 import type { TopologyCanvasController } from '@/modules/visual/components/topology-canvas-controller'
 import type { TopologyDataContext } from '@/modules/visual/topology/topology-runtime'
@@ -80,9 +82,13 @@ const usesConverterStationOverviewCanvas = computed(() => (
 const usesSwitchingStationOverviewCanvas = computed(() => (
   String(props.topology.topologyKey) === 'topology.switching-station.overview'
 ))
+/** 三个新增业务场景共享一个清单式画布包装层，场景键只选数据集，不复制画布。 */
+const businessSceneTopologyId = computed(() => resolveBusinessSceneTopologySceneId(String(props.topology.topologyKey)))
+const usesBusinessSceneOverviewCanvas = computed(() => businessSceneTopologyId.value !== undefined)
 /** 窄端口画布只暴露视口和受控选择；四个站类的图元映射来自显式发布清单，不从标题推断。 */
 const usesNarrowJsonOverviewCanvas = computed(() => (
   usesWindOverviewCanvas.value
+  || usesBusinessSceneOverviewCanvas.value
   || usesStepUpSubstationOverviewCanvas.value
   || usesStepDownSubstationOverviewCanvas.value
   || usesConverterStationOverviewCanvas.value
@@ -354,6 +360,20 @@ watch(() => String(props.topology.topologyKey), () => {
       :selected-route-ids="props.selectedRouteIds"
       @select-node="emit('selectNode', $event)"
       @clear-selection="emit('clearSelection')"
+      @ready-change="handleNarrowCanvasReady"
+    />
+    <!-- 微电网、配电站和楼宇从逐文件清单读取 JSON，坐标归一化和筛选仍走公共 Meta2D 画布。 -->
+    <BusinessSceneTopologyJsonPreview
+      v-else-if="usesBusinessSceneOverviewCanvas"
+      ref="jsonOverviewCanvas"
+      :scene-id="businessSceneTopologyId!"
+      :fullscreen-target="panelRoot"
+      :suspended="props.suspended"
+      :selected-node-ids="props.selectedNodeIds"
+      :selected-route-ids="props.selectedRouteIds"
+      @select-node="emit('selectNode', $event)"
+      @clear-selection="emit('clearSelection')"
+      @double-click-node="emit('doubleClickNode', $event)"
       @ready-change="handleNarrowCanvasReady"
     />
     <!-- 光伏使用完整控制器：中央状态、二维选择和双击事件都沿用成熟场景的公共通道。 -->

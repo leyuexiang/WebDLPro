@@ -90,6 +90,10 @@ namespace WebDLPro.Unity.Tests
                           BusinessSceneCapability.MoveCameraToPose |
                           BusinessSceneCapability.ResetScene |
                           BusinessSceneCapability.Release
+                    : (SceneIds[index] == "distribution" || SceneIds[index] == "consumption" || SceneIds[index] == "microgrid")
+                        ? BusinessSceneCapability.Initialize |
+                          BusinessSceneCapability.ResetScene |
+                          BusinessSceneCapability.Release
                     : (SceneIds[index] == "step-up-substation" || SceneIds[index] == "step-down-substation" || SceneIds[index] == "converter-station" || SceneIds[index] == "switching-station")
                         ? SubstationOverviewController.SupportedCapabilities
                         : BusinessSceneCapability.Release;
@@ -614,12 +618,10 @@ namespace WebDLPro.Unity.Tests
         }
 
         /// <summary>
-        /// 燃气场景必须保留旧场景 GUID，燃煤场景必须保留已导入模型和属性面板控制器；
-        /// 其余七个业务文件仅持有一个不带渲染内容的占位根对象。
-        /// 占位控制器保留正确 sceneId，却不会实现任何业务能力，从而保障后续编辑人员可逐场景替换真实内容。
+        /// 燃气、燃煤以及微电网、配电站和楼宇场景保留真实内容；其余尚未交付模型的业务文件仍为空占位。
         /// </summary>
         [Test]
-        public void 燃气和燃煤场景保留真实内容且其余业务场景保持空内容()
+        public void 燃气燃煤和三类新增模型场景保留真实内容其余业务场景保持空内容()
         {
             for (int index = 0; index < ScenePaths.Length; index++)
             {
@@ -641,6 +643,15 @@ namespace WebDLPro.Unity.Tests
                         Assert.That(ContainsComponentNamed(roots, "PowerPlantProcessController"), Is.True, ScenePaths[index]);
                         Assert.That(ContainsRenderer(roots), Is.True, ScenePaths[index]);
                         Assert.That(ContainsCamera(roots), Is.True, ScenePaths[index]);
+                        continue;
+                    }
+
+                    if (SceneIds[index] == "distribution" || SceneIds[index] == "consumption" || SceneIds[index] == "microgrid")
+                    {
+                        Assert.That(roots, Is.Not.Empty, ScenePaths[index]);
+                        Assert.That(ContainsRenderer(roots), Is.True, ScenePaths[index]);
+                        Assert.That(ContainsCamera(roots), Is.True, ScenePaths[index]);
+                        Assert.That(ContainsComponentNamed(roots, "ModelBusinessSceneController"), Is.True, ScenePaths[index]);
                         continue;
                     }
 

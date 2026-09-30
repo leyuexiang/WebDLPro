@@ -42,17 +42,17 @@ MonoBehaviour:
     _unitySceneKey: distribution
     _scenePath: Assets/Scenes/Business/Distribution.unity
     _availability: 1
-    _declaredCapabilities: 64
+    _declaredCapabilities: 97
   - _sceneId: consumption
     _unitySceneKey: consumption
     _scenePath: Assets/Scenes/Business/Consumption.unity
     _availability: 1
-    _declaredCapabilities: 64
+    _declaredCapabilities: 97
   - _sceneId: microgrid
     _unitySceneKey: microgrid
     _scenePath: Assets/Scenes/Business/Microgrid.unity
     _availability: 1
-    _declaredCapabilities: 64
+    _declaredCapabilities: 97
   - _sceneId: dispatch
     _unitySceneKey: dispatch
     _scenePath: Assets/Scenes/Business/Dispatch.unity

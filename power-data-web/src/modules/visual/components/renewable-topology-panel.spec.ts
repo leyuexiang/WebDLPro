@@ -36,7 +36,7 @@ vi.mock('../topology-preview/switching-station-topology-preview-data', () => ({
 }))
 vi.mock('../topology-preview/CoalTopologyRuntimeCanvas.vue', () => ({ default: { render: () => null } }))
 vi.mock('../topology-preview/GasV3TopologyRuntimeCanvas.vue', () => ({ default: { render: () => null } }))
-// 面板契约测试只验证公共重置与事件转发；光伏画布本身由其专项测试覆盖，替身暴露真实控制器所需的就绪与重置端口。
+// 面板契约测试验证公共入口与事件转发；光伏画布本身由其专项测试覆盖，替身暴露真实控制器所需的受控接口。
 vi.mock('../topology-preview/SolarTopologyJsonPreview.vue', () => ({ default: {
   setup(_props: unknown, { expose }: { expose: (value: unknown) => void }) {
     // 光伏正式画布还暴露第三层上下文换源端口，面板转发测试需保留完整受控接口。
@@ -49,6 +49,12 @@ vi.mock('../topology-preview/SolarTopologyJsonPreview.vue', () => ({ default: {
         if (node) fullscreen(node)
       },
     })
+  },
+} }))
+vi.mock('../topology-preview/BusinessSceneTopologyJsonPreview.vue', () => ({ default: {
+  props: ['sceneId'],
+  setup(props: { sceneId: string }) {
+    return () => h('div', { class: 'business-scene-preview', 'data-scene-id': props.sceneId })
   },
 } }))
 // 空拓扑替身仍遵守真实控制器契约，避免把替身缺方法误判为正式面板错误。
@@ -79,10 +85,16 @@ const renderer = createRenderer<TestElement, TestElement>({
   remove(node) { if (node.parent) node.parent.children = node.parent.children.filter((child) => child !== node) },
   parentNode: (node) => node.parent, nextSibling: () => null,
 })
-function find(root: TestElement, predicate: (node: TestElement) => boolean): TestElement {
+/** 查找全部匹配节点，验证本地测试期隐藏重置按钮时页面中没有残留副本。 */
+function findAll(root: TestElement, predicate: (node: TestElement) => boolean): TestElement[] {
+  const matches: TestElement[] = []
   const queue = [root]
-  while (queue.length) { const node = queue.shift()!; if (predicate(node)) return node; queue.push(...node.children) }
-  throw new Error('未找到测试控件')
+  while (queue.length) {
+    const node = queue.shift()!
+    if (predicate(node)) matches.push(node)
+    queue.push(...node.children)
+  }
+  return matches
 }
 let frames: Map<number, FrameRequestCallback>
 let dispose: (() => void) | undefined
@@ -134,31 +146,40 @@ describe('风电正式面板第三层拓扑', () => {
   })
 })
 
-describe.each(['wind-power', 'solar-power', 'step-up-substation', 'step-down-substation', 'converter-station', 'switching-station'])('%s 正式面板重置', (scene) => {
-  it('空业务清单不妨碍真实数据重置，暂停时仍禁止操作，且不重新加载图元', async () => {
-    const state = reactive({ suspended: false })
+describe.each([
+  ['microgrid', '微电网'],
+  ['distribution', '配电站'],
+  ['consumption', '楼宇'],
+])('%s 新业务场景正式面板', (sceneId, title) => {
+  it('按稳定总览拓扑键挂载对应共享 JSON 画布', async () => {
     const root = element('root')
-    const topology = { topologyKey: toTopologyKey(`topology.${scene}.overview`), title: scene, configVersion: 'test', nodes: [], edges: [] } as TopologyDefinition
-    const app = renderer.createApp({ render: () => h(TopologyPanel, { topology, selectedNodeIds: [], selectedRouteIds: [], suspended: state.suspended }) })
+    const topology = {
+      topologyKey: toTopologyKey(`topology.${sceneId}.overview`),
+      title,
+      configVersion: 'test',
+      nodes: [],
+      edges: [],
+    } as TopologyDefinition
+    const app = renderer.createApp({
+      render: () => h(TopologyPanel, { topology, selectedNodeIds: [], selectedRouteIds: [] }),
+    })
     app.mount(root); dispose = () => app.unmount()
     await settle()
-    const reset = find(root, (node) => node.props.class === 'topology-panel__reset')
-    expect(reset.props.disabled).toBe(false)
-    const opened = engine.open.mock.calls.length
-    engine.fit.mockClear()
-    reset.props.onClick()
-    expect(engine.fit).toHaveBeenCalledTimes(1)
-    expect(engine.open).toHaveBeenCalledTimes(opened)
-    state.suspended = true; await nextTick()
-    expect(reset.props.disabled).toBe(true)
-    reset.props.onClick()
-    expect(engine.fit).toHaveBeenCalledTimes(1)
-    state.suspended = false; await settle()
-    expect(reset.props.disabled).toBe(false)
-    const button = find(root, (node) => node.props.class === 'topology-fullscreen-button')
-    await button.props.onClick({ currentTarget: button })
-    const panel = find(root, (node) => node.props.class === 'topology-panel')
-    expect(fullscreen).toHaveBeenCalledWith(panel)
-    expect(find(panel, (node) => node === reset)).toBe(reset)
+
+    /** 每个稳定拓扑键只应挂载自己的公共包装器，不能退回空的通用画布。 */
+    expect(findAll(root, (node) => node.props.class === 'business-scene-preview')
+      .map((node) => node.props['data-scene-id'])).toEqual([sceneId])
+  })
+})
+
+describe.each(['wind-power', 'solar-power', 'step-up-substation', 'step-down-substation', 'converter-station', 'switching-station'])('%s 正式面板公共入口', (scene) => {
+  it('遵守本地测试期隐藏重置入口的约定，并保留公共全屏入口', async () => {
+    const root = element('root')
+    const topology = { topologyKey: toTopologyKey(`topology.${scene}.overview`), title: scene, configVersion: 'test', nodes: [], edges: [] } as TopologyDefinition
+    const app = renderer.createApp({ render: () => h(TopologyPanel, { topology, selectedNodeIds: [], selectedRouteIds: [] }) })
+    app.mount(root); dispose = () => app.unmount()
+    await settle()
+    expect(findAll(root, (node) => node.props.class === 'topology-panel__reset')).toHaveLength(0)
+    expect(findAll(root, (node) => node.props.class === 'topology-fullscreen-button')).toHaveLength(1)
   })
 })

@@ -75,14 +75,53 @@ public static class BusinessSceneBootstrapGenerator
             BusinessSceneCapability.Release,
             false),
         new SceneDefinition("substation", "Assets/Scenes/Business/Substation.unity", BusinessSceneCapability.Release, true),
-        new SceneDefinition("distribution", "Assets/Scenes/Business/Distribution.unity", BusinessSceneCapability.Release, true),
-        new SceneDefinition("consumption", "Assets/Scenes/Business/Consumption.unity", BusinessSceneCapability.Release, true),
-        new SceneDefinition("microgrid", "Assets/Scenes/Business/Microgrid.unity", BusinessSceneCapability.Release, true),
+        new SceneDefinition(
+            "distribution",
+            "Assets/Scenes/Business/Distribution.unity",
+            BusinessSceneCapability.Initialize | BusinessSceneCapability.ResetScene | BusinessSceneCapability.Release,
+            false),
+        new SceneDefinition("consumption", "Assets/Scenes/Business/Consumption.unity", BusinessSceneCapability.Initialize | BusinessSceneCapability.ResetScene | BusinessSceneCapability.Release, false),
+        new SceneDefinition(
+            "microgrid",
+            "Assets/Scenes/Business/Microgrid.unity",
+            BusinessSceneCapability.Initialize | BusinessSceneCapability.ResetScene | BusinessSceneCapability.Release,
+            false),
         new SceneDefinition("dispatch", "Assets/Scenes/Business/Dispatch.unity", BusinessSceneCapability.Release, true),
         new SceneDefinition("step-up-substation", "Assets/Scenes/Business/StepUpSubstation.unity", SubstationOverviewController.SupportedCapabilities, false),
         new SceneDefinition("step-down-substation", "Assets/Scenes/Business/StepDownSubstation.unity", SubstationOverviewController.SupportedCapabilities, false),
         new SceneDefinition("converter-station", "Assets/Scenes/Business/ConverterStation.unity", SubstationOverviewController.SupportedCapabilities, false),
         new SceneDefinition("switching-station", "Assets/Scenes/Business/SwitchingStation.unity", SubstationOverviewController.SupportedCapabilities, false)
+    };
+
+    /// <summary>
+    /// 模型内容已经交付的三个业务场景使用通用资源型浏览控制器；其他尚未交付正式模型的场景仍保留空占位。
+    /// </summary>
+    private static readonly ModelSceneDefinition[] ModelScenes =
+    {
+        new ModelSceneDefinition(
+            "microgrid",
+            "Assets/Scenes/Business/Microgrid.unity",
+            "微电网场景",
+            "Assets/Art/模型及拓扑/模型及示意图/微电网918(1).fbx",
+            Vector3.zero,
+            Quaternion.identity,
+            1f),
+        new ModelSceneDefinition(
+            "distribution",
+            "Assets/Scenes/Business/Distribution.unity",
+            "配电站场景",
+            "Assets/Art/模型及拓扑/模型及示意图/配电站/PDZ.prefab",
+            Vector3.zero,
+            Quaternion.identity,
+            1f),
+        new ModelSceneDefinition(
+            "consumption",
+            "Assets/Scenes/Business/Consumption.unity",
+            "楼宇场景",
+            "Assets/Art/模型及拓扑/模型及示意图/楼宇.fbx",
+            Vector3.zero,
+            Quaternion.identity,
+            1f)
     };
 
     /// <summary>
@@ -115,14 +154,75 @@ public static class BusinessSceneBootstrapGenerator
                     CreateBusinessPlaceholderScene(BusinessScenes[index]);
                 }
             }
+
+            for (int index = 0; index < ModelScenes.Length; index++)
+            {
+                CreateModelBusinessScene(ModelScenes[index]);
+            }
         }
 
+        EnsureModelBusinessScenes();
+        EnsureCatalogEntries();
         EnsureOverviewAssets();
         ConfigureBuildScenes();
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
         ValidateGeneratedAssets();
         Debug.Log("十三个业务空场景、启动场景、目录映射和构建设置已就绪。");
+    }
+
+    /// <summary>同步三个模型场景的正式能力声明，不改变其他既有目录条目。</summary>
+    private static void EnsureCatalogEntries()
+    {
+        BusinessSceneCatalog catalog = AssetDatabase.LoadAssetAtPath<BusinessSceneCatalog>(CatalogAssetPath);
+        if (catalog == null)
+        {
+            catalog = CreateCatalogAsset();
+            return;
+        }
+
+        SerializedObject serializedCatalog = new SerializedObject(catalog);
+        SerializedProperty entries = serializedCatalog.FindProperty("_entries");
+        if (entries == null || !entries.isArray)
+        {
+            throw new InvalidOperationException("正式业务场景目录缺少条目数组，不能安全升级能力声明。");
+        }
+
+        for (int index = 0; index < ModelScenes.Length; index++)
+        {
+            ModelSceneDefinition modelScene = ModelScenes[index];
+            bool found = false;
+            for (int entryIndex = 0; entryIndex < entries.arraySize; entryIndex++)
+            {
+                SerializedProperty entry = entries.GetArrayElementAtIndex(entryIndex);
+                SerializedProperty sceneId = entry.FindPropertyRelative("_sceneId");
+                if (sceneId == null || sceneId.stringValue != modelScene.SceneId)
+                {
+                    continue;
+                }
+
+                SerializedProperty capabilities = entry.FindPropertyRelative("_declaredCapabilities");
+                if (capabilities == null)
+                {
+                    throw new InvalidOperationException($"场景 {modelScene.SceneId} 的目录条目缺少能力声明。");
+                }
+                capabilities.intValue = (int)BusinessSceneCapability.Initialize |
+                    (int)BusinessSceneCapability.ResetScene |
+                    (int)BusinessSceneCapability.Release;
+                found = true;
+                break;
+            }
+
+            if (!found)
+            {
+                throw new InvalidOperationException($"正式业务场景目录缺少场景 {modelScene.SceneId}，不能安全升级能力声明。");
+            }
+        }
+
+        if (serializedCatalog.ApplyModifiedPropertiesWithoutUndo())
+        {
+            EditorUtility.SetDirty(catalog);
+        }
     }
 
     /// <summary>
@@ -168,6 +268,161 @@ public static class BusinessSceneBootstrapGenerator
         // 本地从 Bootstrap 直接播放时自动进入总览；组件在正式构建中不执行，平台协议仍是生产唯一入口。
         runtimeRoot.AddComponent<BootstrapOverviewAutoEnterTest>();
         EditorSceneManager.SaveScene(bootstrapScene, BootstrapScenePath, false);
+    }
+
+    /// <summary>
+    /// 升级三个已知空占位场景。只有“单根 UnavailableBusinessSceneController、无渲染器/相机/灯光”的
+    /// 明确占位形态才允许自动替换；任何用户已开始编辑的非占位内容都立即停止，避免覆盖。
+    /// </summary>
+    private static void EnsureModelBusinessScenes()
+    {
+        for (int index = 0; index < ModelScenes.Length; index++)
+        {
+            ModelSceneDefinition definition = ModelScenes[index];
+            SceneAsset sceneAsset = AssetDatabase.LoadAssetAtPath<SceneAsset>(definition.ScenePath);
+            if (sceneAsset == null)
+            {
+                CreateModelBusinessScene(definition);
+                continue;
+            }
+
+            Scene scene = EditorSceneManager.OpenScene(definition.ScenePath, OpenSceneMode.Additive);
+            try
+            {
+                GameObject[] roots = scene.GetRootGameObjects();
+                if (ContainsComponentNamed(roots, "ModelBusinessSceneController"))
+                {
+                    continue;
+                }
+
+                bool isKnownPlaceholder = roots.Length == 1 &&
+                    roots[0].GetComponent<UnavailableBusinessSceneController>() != null &&
+                    roots[0].GetComponentsInChildren<Renderer>(true).Length == 0 &&
+                    roots[0].GetComponentsInChildren<Camera>(true).Length == 0 &&
+                    roots[0].GetComponentsInChildren<Light>(true).Length == 0;
+                if (!isKnownPlaceholder)
+                {
+                    throw new InvalidOperationException($"场景 {definition.ScenePath} 不是可安全升级的空占位场景，已停止以避免覆盖用户内容。");
+                }
+                if (scene.isDirty)
+                {
+                    throw new InvalidOperationException($"场景 {definition.ScenePath} 存在未保存修改，已停止以避免覆盖用户内容。");
+                }
+            }
+            finally
+            {
+                EditorSceneManager.CloseScene(scene, true);
+            }
+
+            CreateModelBusinessScene(definition);
+        }
+    }
+
+    /// <summary>判断场景根节点树中是否存在指定组件类型。</summary>
+    private static bool ContainsComponentNamed(GameObject[] roots, string componentTypeName)
+    {
+        for (int rootIndex = 0; rootIndex < roots.Length; rootIndex++)
+        {
+            MonoBehaviour[] behaviours = roots[rootIndex].GetComponentsInChildren<MonoBehaviour>(true);
+            for (int componentIndex = 0; componentIndex < behaviours.Length; componentIndex++)
+            {
+                if (behaviours[componentIndex] != null && behaviours[componentIndex].GetType().Name == componentTypeName)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// 创建已交付模型的业务场景。模型作为场景实例保存，源 FBX/Prefab 不被修改；
+    /// 相机按模型包围盒生成可浏览的初始镜位，避免直接沿用导出文件的巨大原点偏移。
+    /// </summary>
+    private static void CreateModelBusinessScene(ModelSceneDefinition definition)
+    {
+        Scene scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+        RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Skybox;
+        RenderSettings.fog = false;
+
+        GameObject runtimeRoot = new GameObject("BusinessSceneRuntime");
+        ModelBusinessSceneController controller = runtimeRoot.AddComponent<ModelBusinessSceneController>();
+        controller.ConfigureForEditor(definition.SceneId);
+
+        GameObject modelRoot = new GameObject(definition.DisplayName);
+        modelRoot.transform.SetParent(runtimeRoot.transform, false);
+        GameObject modelAsset = AssetDatabase.LoadAssetAtPath<GameObject>(definition.ModelPath);
+        if (modelAsset == null)
+        {
+            throw new InvalidOperationException($"未找到业务模型：{definition.ModelPath}");
+        }
+        GameObject modelInstance = PrefabUtility.InstantiatePrefab(modelAsset, scene) as GameObject;
+        if (modelInstance == null)
+        {
+            throw new InvalidOperationException($"无法实例化业务模型：{definition.ModelPath}");
+        }
+        modelInstance.name = modelAsset.name;
+        modelInstance.transform.SetParent(modelRoot.transform, false);
+        modelInstance.transform.localPosition = definition.ModelPosition;
+        modelInstance.transform.localRotation = definition.ModelRotation;
+        modelInstance.transform.localScale = Vector3.one * definition.ModelScale;
+
+        Renderer[] renderers = modelInstance.GetComponentsInChildren<Renderer>(true);
+        if (renderers.Length == 0)
+        {
+            throw new InvalidOperationException($"业务模型没有可渲染内容：{definition.ModelPath}");
+        }
+        Bounds bounds = renderers[0].bounds;
+        for (int index = 1; index < renderers.Length; index++)
+        {
+            bounds.Encapsulate(renderers[index].bounds);
+        }
+        Vector3 cameraOffset = new Vector3(bounds.extents.x * 0.85f, bounds.extents.y * 0.65f, -Mathf.Max(bounds.extents.z * 1.15f, 30f));
+        GameObject cameraObject = new GameObject("Main Camera");
+        cameraObject.tag = "MainCamera";
+        cameraObject.transform.SetParent(runtimeRoot.transform, false);
+        cameraObject.transform.position = bounds.center + cameraOffset;
+        cameraObject.transform.rotation = Quaternion.LookRotation(bounds.center - cameraObject.transform.position, Vector3.up);
+        Camera camera = cameraObject.AddComponent<Camera>();
+        camera.fieldOfView = 60f;
+        camera.nearClipPlane = 0.1f;
+        camera.farClipPlane = Mathf.Max(5000f, bounds.size.magnitude * 4f);
+        cameraObject.AddComponent<AudioListener>();
+        cameraObject.AddComponent<PowerPlantFreeCameraController>();
+
+        GameObject lightObject = new GameObject("Directional Light");
+        lightObject.transform.SetParent(runtimeRoot.transform, false);
+        lightObject.transform.rotation = Quaternion.Euler(50f, -30f, 0f);
+        Light light = lightObject.AddComponent<Light>();
+        light.type = LightType.Directional;
+        light.intensity = 1.2f;
+        light.shadows = LightShadows.Soft;
+
+        EditorSceneManager.SaveScene(scene, definition.ScenePath, false);
+    }
+
+    /// <summary>模型型业务场景的固定资源映射，禁止按文件名扫描猜测。</summary>
+    private sealed class ModelSceneDefinition
+    {
+        public string SceneId { get; }
+        public string ScenePath { get; }
+        public string DisplayName { get; }
+        public string ModelPath { get; }
+        public Vector3 ModelPosition { get; }
+        public Quaternion ModelRotation { get; }
+        public float ModelScale { get; }
+
+        public ModelSceneDefinition(string sceneId, string scenePath, string displayName, string modelPath, Vector3 modelPosition, Quaternion modelRotation, float modelScale)
+        {
+            SceneId = sceneId;
+            ScenePath = scenePath;
+            DisplayName = displayName;
+            ModelPath = modelPath;
+            ModelPosition = modelPosition;
+            ModelRotation = modelRotation;
+            ModelScale = modelScale;
+        }
     }
 
     /// <summary>
