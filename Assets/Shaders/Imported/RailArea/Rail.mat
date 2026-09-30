@@ -8,7 +8,7 @@ Material:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_Name: Rail
-  m_Shader: {fileID: 4800000, guid: 9504ae14718a2e548879970fe4efa7ca, type: 3}
+  m_Shader: {fileID: 4800000, guid: f640ce1b455fcc34a849a7dad6028e06, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords: []
@@ -28,8 +28,16 @@ Material:
         m_Scale: {x: 1, y: -3}
         m_Offset: {x: 0, y: 0}
     - _MainTexture:
-        m_Texture: {fileID: 2800000, guid: b811b86198f44594bbcfbfe61d1131f8, type: 3}
-        m_Scale: {x: 0.1, y: 0.1}
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _Texture:
+        m_Texture: {fileID: 2800000, guid: 2e2fe24b16758a646b2c2b85db193ea0, type: 3}
+        m_Scale: {x: 1, y: -3}
+        m_Offset: {x: 0, y: 0}
+    - _Texture2:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 0, y: 0}
         m_Offset: {x: 0, y: 0}
     - _texcoord:
         m_Texture: {fileID: 0}
@@ -37,11 +45,32 @@ Material:
         m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
+    - _BaseOpacity: 0.3
+    - _Brightness: 1
+    - _Color2S: 1
+    - _ColorS: 1
+    - _DE2: 0
+    - _FlowEmissionBoost: 2.58
     - _FlowSpeed: 1
+    - _GridDimming: 0.843
+    - _Metallic: 0.15
+    - _RimIntensity: 1
+    - _RimPower: 2.5
+    - _Smoothness: 0.75
+    - _SpecularIntensity: 1
+    - _UVRotation: 0
     - __dirty: 0
     - _speed: -1
     m_Colors:
-    - _direction: {r: 0.1, g: 1, b: 0, a: 0}
-    - _mainColor: {r: 0, g: 1, b: 0.906095, a: 1}
-    - _tilling: {r: 20, g: 10, b: 0, a: 0}
+    - _BaseColor: {r: 0.12941177, g: 0.34509805, b: 0.9529412, a: 0}
+    - _Color: {r: 0.13034001, g: 0.34440747, b: 0.9528302, a: 0}
+    - _Color2: {r: 0.12941177, g: 0.34509805, b: 0.9529412, a: 0}
+    - _MaskUV: {r: 1, g: 1, b: 0, a: 0}
+    - _MaskUV2: {r: 1, g: 1, b: 0, a: 0}
+    - _RimColor: {r: 0.12941177, g: 0.34509805, b: 0.9529412, a: 0}
+    - _Speed: {r: 0, g: -0.2, b: 0, a: 0}
+    - _Speed2: {r: 0, g: -0.2, b: 0, a: 0}
+    - _direction: {r: 1, g: 1, b: 0, a: 0}
+    - _mainColor: {r: 0.3254901, g: 0.5768473, b: 1, a: 1}
+    - _tilling: {r: 1, g: 1, b: 0, a: 0}
   m_BuildTextureStacks: []
