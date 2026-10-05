@@ -227,3 +227,34 @@ ProjectSettings/ProjectVersion.txt
 #   （移除 WindPowerS 美术的忽略条目后一并暂存提交；若远端有他人更新需先备份本地改动）
 # ProjectVersion.txt 的本地版本改动（编辑器版本差异）同理需要 skip-worktree 才能隐藏。
 .codely/clipboard/clipboard-1790686570229.png
+Assets/Art/新模型9.23/偏航系统.meta
+Assets/Art/新模型9.23/偏航系统/1.fbx
+Assets/Art/新模型9.23/偏航系统/1.fbx.meta
+Assets/Art/新模型9.23/偏航系统/2.fbx
+Assets/Art/新模型9.23/偏航系统/2.fbx.meta
+Assets/Art/新模型9.23/偏航系统/3.fbx
+Assets/Art/新模型9.23/偏航系统/3.fbx.meta
+Assets/Art/新模型9.23/偏航系统/偏航大齿轮.fbx
+Assets/Art/新模型9.23/偏航系统/偏航大齿轮.fbx.meta
+Assets/Art/新模型9.23/偏航系统/偏航小齿轮001.fbx
+Assets/Art/新模型9.23/偏航系统/偏航小齿轮001.fbx.meta
+Assets/Art/新模型9.23/偏航系统/偏航小齿轮002.fbx
+Assets/Art/新模型9.23/偏航系统/偏航小齿轮002.fbx.meta
+Assets/Art/新模型9.23/偏航系统/偏航小齿轮003.fbx
+Assets/Art/新模型9.23/偏航系统/偏航小齿轮003.fbx.meta
+Assets/Art/新模型9.23/偏航系统/偏航小齿轮004.fbx
+Assets/Art/新模型9.23/偏航系统/偏航小齿轮004.fbx.meta
+Assets/Art/新模型9.23/偏航系统/偏航液压站.fbx
+Assets/Art/新模型9.23/偏航系统/偏航液压站.fbx.meta
+Assets/Art/新模型9.23/偏航系统/减速机.fbx
+Assets/Art/新模型9.23/偏航系统/减速机.fbx.meta
+Assets/Art/新模型9.23/偏航系统/制动器.fbx
+Assets/Art/新模型9.23/偏航系统/制动器.fbx.meta
+Assets/Art/新模型9.23/偏航系统/液压站.fbx
+Assets/Art/新模型9.23/偏航系统/液压站.fbx.meta
+Assets/Art/新模型9.23/偏航系统/电机.fbx
+Assets/Art/新模型9.23/偏航系统/电机.fbx.meta
+Assets/Art/新模型9.23/偏航系统/角度传感器.fbx
+Assets/Art/新模型9.23/偏航系统/角度传感器.fbx.meta
+Assets/Art/新模型9.23/偏航系统/角度传感器齿轮.fbx
+Assets/Art/新模型9.23/偏航系统/角度传感器齿轮.fbx.meta
