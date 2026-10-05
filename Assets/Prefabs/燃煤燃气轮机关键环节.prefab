@@ -20862,6 +20862,7 @@ MonoBehaviour:
   _flowMesh: {fileID: 4300000, guid: 64752c51d531237418339362a8923444, type: 2}
   _flowMaterial: {fileID: 2100000, guid: 1550cbe6841270b44851bb424d3d7e48, type: 2}
   _glowMaterial: {fileID: 0}
+  _useBakedCircuitMesh: 1
   _baseGlowColor: {r: 0.005, g: 0.09, b: 0.25, a: 1}
   _flowColor: {r: 0.015, g: 1.1, b: 2.8, a: 1}
   _headColor: {r: 1.5, g: 3, b: 3.5, a: 1}

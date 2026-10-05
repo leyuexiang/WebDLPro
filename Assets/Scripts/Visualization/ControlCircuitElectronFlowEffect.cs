@@ -12,6 +12,8 @@ public sealed class ControlCircuitElectronFlowEffect : MonoBehaviour
     [SerializeField] private Mesh _flowMesh;
     [SerializeField] private Material _flowMaterial;
     [SerializeField] private Material _glowMaterial;
+    [Tooltip("使用预烘焙网格的 UV1 路径距离，让合并模型中的每根控制线各自流动。")]
+    [SerializeField] private bool _useBakedCircuitMesh;
 
     [Header("Electron Flow")]
     [SerializeField, ColorUsage(true, true)] private Color _baseGlowColor = new Color(0.005f, 0.09f, 0.25f, 1f);
@@ -48,6 +50,7 @@ public sealed class ControlCircuitElectronFlowEffect : MonoBehaviour
     private GameObject _runtimeOverlay;
     private LineRenderer _flowRenderer;
     private LineRenderer _glowRenderer;
+    private MeshRenderer _bakedRenderer;
     private MaterialPropertyBlock _properties;
     private bool _appearanceDirty = true;
     private bool _creationAttempted;
@@ -79,6 +82,7 @@ public sealed class ControlCircuitElectronFlowEffect : MonoBehaviour
         _playbackEnabled = playing;
         if (_flowRenderer != null) _flowRenderer.enabled = playing;
         if (_glowRenderer != null) _glowRenderer.enabled = playing;
+        if (_bakedRenderer != null) _bakedRenderer.enabled = playing;
     }
 
     public bool IsPlaybackEnabled => _playbackEnabled;
@@ -125,21 +129,41 @@ public sealed class ControlCircuitElectronFlowEffect : MonoBehaviour
             return false;
         }
 
-        Vector3[] route = BuildWorldRoute();
-        if (route == null || route.Length < 2) return false;
-
         _runtimeOverlay = new GameObject("__ControlCircuitFlyLine");
         _runtimeOverlay.hideFlags = HideFlags.DontSave;
         _runtimeOverlay.layer = _circuitRenderer.gameObject.layer;
         _runtimeOverlay.transform.SetParent(_circuitMeshFilter.transform, false);
-        _flowRenderer = CreateLineRenderer("Flow", _flowMaterial, _lineWidth);
-        _glowRenderer = CreateLineRenderer("Glow", _glowMaterial != null ? _glowMaterial : _flowMaterial, _lineWidth * _glowWidthMultiplier);
-        _flowRenderer.positionCount = route.Length;
-        _glowRenderer.positionCount = route.Length;
-        _flowRenderer.SetPositions(route);
-        _glowRenderer.SetPositions(route);
-        _flowRenderer.enabled = _playbackEnabled;
-        _glowRenderer.enabled = _playbackEnabled;
+        if (_useBakedCircuitMesh)
+        {
+            // UV1.x stores distance along each cable, UV1.y its independent phase.
+            // Do not collapse all six cables into one averaged LineRenderer route.
+            GameObject surface = new GameObject("CircuitSurfaces");
+            surface.transform.SetParent(_runtimeOverlay.transform, false);
+            surface.AddComponent<MeshFilter>().sharedMesh = _flowMesh;
+            _bakedRenderer = surface.AddComponent<MeshRenderer>();
+            _bakedRenderer.sharedMaterial = _flowMaterial;
+            _bakedRenderer.shadowCastingMode = ShadowCastingMode.Off;
+            _bakedRenderer.receiveShadows = false;
+            _bakedRenderer.enabled = _playbackEnabled;
+        }
+        else
+        {
+            Vector3[] route = BuildWorldRoute();
+            if (route == null || route.Length < 2)
+            {
+                Destroy(_runtimeOverlay);
+                _runtimeOverlay = null;
+                return false;
+            }
+            _flowRenderer = CreateLineRenderer("Flow", _flowMaterial, _lineWidth);
+            _glowRenderer = CreateLineRenderer("Glow", _glowMaterial != null ? _glowMaterial : _flowMaterial, _lineWidth * _glowWidthMultiplier);
+            _flowRenderer.positionCount = route.Length;
+            _glowRenderer.positionCount = route.Length;
+            _flowRenderer.SetPositions(route);
+            _glowRenderer.SetPositions(route);
+            _flowRenderer.enabled = _playbackEnabled;
+            _glowRenderer.enabled = _playbackEnabled;
+        }
         _properties = new MaterialPropertyBlock();
         _appearanceDirty = true;
         return true;
@@ -205,11 +229,23 @@ public sealed class ControlCircuitElectronFlowEffect : MonoBehaviour
 
     private void ApplyAppearance()
     {
-        if (_flowRenderer == null || _glowRenderer == null) return;
+        if (_properties == null) return;
         _properties.Clear();
         _properties.SetColor(BaseColorId, _baseGlowColor);
         _properties.SetColor(FlowColorId, _flowColor);
         _properties.SetFloat(FlowSpeedId, _flowSpeed);
+        if (_bakedRenderer != null)
+        {
+            _properties.SetColor(Shader.PropertyToID("_HeadColor"), _headColor);
+            _properties.SetFloat(Shader.PropertyToID("_Spacing"), Mathf.Max(0.1f, _pulseSpacing));
+            _properties.SetFloat(Shader.PropertyToID("_TailLength"), Mathf.Max(0.02f, _tailLength));
+            _properties.SetFloat(Shader.PropertyToID("_HeadLength"), Mathf.Max(0.01f, _headLength));
+            _properties.SetFloat(Shader.PropertyToID("_SurfaceOffset"), Mathf.Max(0f, _surfaceOffset));
+            _properties.SetFloat(OpacityId, Mathf.Clamp01(_opacity));
+            _bakedRenderer.SetPropertyBlock(_properties);
+            _appearanceDirty = false;
+            return;
+        }
         _properties.SetFloat(FlowIntensityId, 0.65f);
         _properties.SetFloat(FlowTilingId, 1.2f);
         _properties.SetFloat(FlowWidthId, 0.12f);
@@ -242,6 +278,7 @@ public sealed class ControlCircuitElectronFlowEffect : MonoBehaviour
         _runtimeOverlay = null;
         _flowRenderer = null;
         _glowRenderer = null;
+        _bakedRenderer = null;
         _creationAttempted = false;
     }
 }
