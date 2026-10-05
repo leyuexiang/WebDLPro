@@ -226,17 +226,17 @@ PrefabInstance:
     - target: {fileID: 1958712850829285211, guid: 467f9f573fc82b843a8057b57113ff71,
         type: 3}
       propertyPath: m_Positions.Array.data[1].x
-      value: -2.5394135
+      value: -2.9449072
       objectReference: {fileID: 0}
     - target: {fileID: 1958712850829285211, guid: 467f9f573fc82b843a8057b57113ff71,
         type: 3}
       propertyPath: m_Positions.Array.data[1].y
-      value: 2.754275
+      value: 2.335477
       objectReference: {fileID: 0}
     - target: {fileID: 1958712850829285211, guid: 467f9f573fc82b843a8057b57113ff71,
         type: 3}
       propertyPath: m_Positions.Array.data[1].z
-      value: 5.1015472
+      value: -0.41064405
       objectReference: {fileID: 0}
     - target: {fileID: 2729375769692017479, guid: 467f9f573fc82b843a8057b57113ff71,
         type: 3}
@@ -447,17 +447,17 @@ PrefabInstance:
     - target: {fileID: 1958712850829285211, guid: 467f9f573fc82b843a8057b57113ff71,
         type: 3}
       propertyPath: m_Positions.Array.data[1].x
-      value: 40.809464
+      value: 39.864044
       objectReference: {fileID: 0}
     - target: {fileID: 1958712850829285211, guid: 467f9f573fc82b843a8057b57113ff71,
         type: 3}
       propertyPath: m_Positions.Array.data[1].y
-      value: 6.4467654
+      value: 18.3898
       objectReference: {fileID: 0}
     - target: {fileID: 1958712850829285211, guid: 467f9f573fc82b843a8057b57113ff71,
         type: 3}
       propertyPath: m_Positions.Array.data[1].z
-      value: -1.8086357
+      value: -2.1352346
       objectReference: {fileID: 0}
     - target: {fileID: 2729375769692017479, guid: 467f9f573fc82b843a8057b57113ff71,
         type: 3}
@@ -806,17 +806,17 @@ PrefabInstance:
     - target: {fileID: 1958712850829285211, guid: 467f9f573fc82b843a8057b57113ff71,
         type: 3}
       propertyPath: m_Positions.Array.data[1].x
-      value: -27.258476
+      value: -23.4948
       objectReference: {fileID: 0}
     - target: {fileID: 1958712850829285211, guid: 467f9f573fc82b843a8057b57113ff71,
         type: 3}
       propertyPath: m_Positions.Array.data[1].y
-      value: 0.46367252
+      value: 6.1784472
       objectReference: {fileID: 0}
     - target: {fileID: 1958712850829285211, guid: 467f9f573fc82b843a8057b57113ff71,
         type: 3}
       propertyPath: m_Positions.Array.data[1].z
-      value: -1.6128079
+      value: -1.6662835
       objectReference: {fileID: 0}
     - target: {fileID: 2729375769692017479, guid: 467f9f573fc82b843a8057b57113ff71,
         type: 3}
@@ -1368,6 +1368,7 @@ GameObject:
   - component: {fileID: 1882783515}
   - component: {fileID: 1882783520}
   - component: {fileID: 1882783519}
+  - component: {fileID: 1882783521}
   m_Layer: 0
   m_Name: PowerPlantRuntime
   m_TagString: Untagged
@@ -1488,7 +1489,6 @@ MonoBehaviour:
     _focusCameraPose: {fileID: 7306233}
   - _id: unit.converter-measurement.control
     _targets:
-    - {fileID: 0}
     - {fileID: 2925019224767810129}
     - {fileID: 2925019224767810128}
     - {fileID: 2925019224767810112}
@@ -1578,6 +1578,22 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 081854311b8b75244bb0faaeb6f2065e, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+--- !u!114 &1882783521
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1882783514}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f73c2c4480b7fa045a2eeba0ed42db53, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _processDetailCoordinator: {fileID: 1882783519}
+  _catalog: {fileID: 0}
+  _showPanel: 1
+  _toggleKey: 290
 --- !u!1 &1940600733
 GameObject:
   m_ObjectHideFlags: 0
@@ -1775,17 +1791,17 @@ PrefabInstance:
     - target: {fileID: 1958712850829285211, guid: 467f9f573fc82b843a8057b57113ff71,
         type: 3}
       propertyPath: m_Positions.Array.data[1].x
-      value: 13.295974
+      value: 12.13318
       objectReference: {fileID: 0}
     - target: {fileID: 1958712850829285211, guid: 467f9f573fc82b843a8057b57113ff71,
         type: 3}
       propertyPath: m_Positions.Array.data[1].y
-      value: 3.3076622
+      value: 6.8757653
       objectReference: {fileID: 0}
     - target: {fileID: 1958712850829285211, guid: 467f9f573fc82b843a8057b57113ff71,
         type: 3}
       propertyPath: m_Positions.Array.data[1].z
-      value: -0.756119
+      value: -1.1604519
       objectReference: {fileID: 0}
     - target: {fileID: 2729375769692017479, guid: 467f9f573fc82b843a8057b57113ff71,
         type: 3}
