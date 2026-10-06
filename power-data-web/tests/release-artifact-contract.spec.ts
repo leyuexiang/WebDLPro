@@ -12,7 +12,7 @@ import {
 const webProjectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 /**
- * 生成发布门禁需要的最小联合结构清单。夹具保留当前二十五项公开动作和八个动作目标场景，
+ * 生成发布门禁需要的最小联合结构清单。夹具保留当前三十三项公开动作和八个动作目标场景，
  * 使正向用例本身不能再把“只有燃气、燃煤动作”的旧清单当成合格发布基线。
  */
 function createTopologyManifest() {
@@ -83,6 +83,40 @@ function createTopologyManifest() {
       targetViewMode: 'overview',
       allowedParameters: [],
       unityAction: { type: 'none' },
+      failurePolicy: 'keep-current-context',
+      configVersion: manifestVersion,
+    }, ...[
+      ['dispatch-center', '调度中心'],
+      ['generation', '发电'],
+      ['transmission', '输变电'],
+      ['distribution', '配电'],
+      ['consumption', '用电'],
+      ['microgrid', '微电网'],
+    ].map(([areaId, title]) => ({
+      actionId: `action.overview.area.${areaId}`,
+      title: `总览区域高亮：${title}`,
+      targetSceneId: 'overview',
+      targetViewMode: 'overview',
+      allowedParameters: [],
+      unityAction: { type: 'activateOverviewArea', areaId },
+      failurePolicy: 'keep-current-context',
+      configVersion: manifestVersion,
+    })), {
+      actionId: 'action.overview.polling.start',
+      title: '开始总览轮询播放',
+      targetSceneId: 'overview',
+      targetViewMode: 'overview',
+      allowedParameters: [],
+      unityAction: { type: 'setOverviewPolling', enabled: true },
+      failurePolicy: 'keep-current-context',
+      configVersion: manifestVersion,
+    }, {
+      actionId: 'action.overview.polling.stop',
+      title: '停止总览轮询播放',
+      targetSceneId: 'overview',
+      targetViewMode: 'overview',
+      allowedParameters: [],
+      unityAction: { type: 'setOverviewPolling', enabled: false },
       failurePolicy: 'keep-current-context',
       configVersion: manifestVersion,
     }, {
@@ -345,13 +379,13 @@ async function createArtifact() {
   writeFileSync(path.join(root, 'scene-topology-manifest.json'), `${JSON.stringify(createTopologyManifest(), null, 2)}\n`, 'utf8')
   mkdirSync(path.join(root, 'unity'))
   writeFileSync(path.join(root, 'unity', 'webgl-protocol-capabilities.json'), `${JSON.stringify({
-    schemaVersion: 10,
+    schemaVersion: 11,
     channel: 'power3d-unity',
     protocolVersion: 2,
     unityReleaseId: 'unity-contract',
     commandCapabilities: [
       'init', 'resize', 'switchScene', 'moveCameraToPose', 'enterProcessDetail', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'resetCamera', 'focusNode', 'clearSelection',
-      'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose',
+      'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'activateOverviewArea', 'setOverviewPolling', 'dispose',
     ],
     eventCapabilities: ['ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'selectionCleared', 'disposed'],
     processDetailCommandSchemaVersion: 2,
@@ -501,7 +535,7 @@ describe('发布产物输出标准', () => {
       await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
 
       expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
-        expect.stringContaining('完整发布当前二十五项公开动作'),
+        expect.stringContaining('完整发布当前三十三项公开动作'),
       ]))
     } finally {
       rmSync(root, { recursive: true, force: true })
@@ -545,7 +579,7 @@ describe('发布产物输出标准', () => {
       await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
 
       expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
-        expect.stringContaining('完整发布当前二十五项公开动作'),
+        expect.stringContaining('完整发布当前三十三项公开动作'),
       ]))
     } finally {
       rmSync(root, { recursive: true, force: true })

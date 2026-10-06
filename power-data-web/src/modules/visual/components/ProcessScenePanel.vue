@@ -8,6 +8,7 @@ import type { PipelineLegendVariant } from '@/modules/visual/components/pipeline
 import AppStatePanel from '@/shared/components/AppStatePanel.vue'
 import coalPipelineLegendUrl from '@/assets/pipeline-legend-horizontal-coal.png'
 import gasPipelineLegendUrl from '@/assets/pipeline-legend-horizontal.png'
+import elecPipelineLegendUrl from '@/assets/pipeline-legend-horizontal-elec.png'
 
 const props = defineProps<{
   result: ProcessConfigLoadResult
@@ -54,6 +55,10 @@ const pipelineLegendPresentations = {
   gas: {
     url: gasPipelineLegendUrl,
     alt: '燃气场景管线图例：橙色代表天然气，蓝色代表水，红色代表蒸汽，青色代表电缆，绿色代表控制线',
+  },
+  elec: {
+    url: elecPipelineLegendUrl,
+    alt: '电力场景管线图例：蓝色代表电线，绿色代表控制线',
   },
 } as const
 

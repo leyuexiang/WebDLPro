@@ -6,7 +6,7 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 using WebDLPro.Unity.SceneRuntime;
 
-/// <summary>Builds the two wind-power detail resources and binds the existing business scene.</summary>
+/// <summary>Builds the three wind-power detail resources and binds the existing business scene.</summary>
 public static class WindPowerProcessDetailPrefabBuilder
 {
     private const string ScenePath = "Assets/Scenes/Business/WindPower.unity";
@@ -15,7 +15,7 @@ public static class WindPowerProcessDetailPrefabBuilder
     private const string Folder = "Assets/ProcessDetails/WindPower";
     private static readonly Vector3 RemotePosition = new Vector3(10000f, 0f, 0f);
 
-    [MenuItem("Tools/WebDLPro/关键环节/生成风电齿轮箱和风机第三层资源")]
+    [MenuItem("Tools/WebDLPro/关键环节/生成风电齿轮箱、风机和偏航系统第三层资源")]
     public static void CreateOrUpdate()
     {
         if (Application.isPlaying)
@@ -29,16 +29,19 @@ public static class WindPowerProcessDetailPrefabBuilder
             "gearbox", "node.wind-gearbox", config);
         GameObject turbine = Build("WindTurbine", "WindTurbineProcessDetail", "Assets/Art/风机/FJPrefab.prefab",
             "wind-turbine", "node.wind-turbine", config);
+        GameObject yaw = Build("YawSystem", "YawSystemProcessDetail", "Assets/Art/新模型9.23/偏航系统.prefab",
+            "yaw-system", "node.wind-yaw-system", config);
         List<ProcessDetailCatalogEntry> entries = new List<ProcessDetailCatalogEntry>(catalog.Entries);
         Upsert(entries, gearbox, "gearbox", "node.wind-gearbox");
         Upsert(entries, turbine, "wind-turbine", "node.wind-turbine");
+        Upsert(entries, yaw, "yaw-system", "node.wind-yaw-system");
         catalog.SetEntriesForEditor(entries);
         if (catalog.ValidateForRuntime().Count != 0)
             throw new InvalidOperationException("风电目录配置校验失败：" + catalog.ValidateForRuntime()[0].Code);
         EditorUtility.SetDirty(catalog);
         ConfigureScene(catalog);
         AssetDatabase.SaveAssets();
-        Debug.Log("[ProcessDetailBuilder] 风电齿轮箱和风机第三层资源已装配。");
+        Debug.Log("[ProcessDetailBuilder] 风电齿轮箱、风机和偏航系统第三层资源已装配。");
     }
 
     private static GameObject Build(string subfolder, string name, string sourcePath, string step,
@@ -46,6 +49,15 @@ public static class WindPowerProcessDetailPrefabBuilder
     {
         EnsureFolder(Folder + "/" + subfolder);
         string path = Folder + "/" + subfolder + "/" + name + ".prefab";
+        // 已生成的预制体可能带有后续手动追加的标注、全息排除或环绕脚本配置；
+        // 以源模型为基准重建会抹掉这些增强（曾导致风机环节 orbit/标注丢失），因此存在即跳过，
+        // 只有显式删除该预制体后才能强制按最新源模型重建。
+        GameObject existing = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+        if (existing != null)
+        {
+            Debug.Log("[ProcessDetailBuilder] 预制体已存在，跳过重建（如需重建请先删除该预制体）：" + path);
+            return existing;
+        }
         GameObject source = AssetDatabase.LoadAssetAtPath<GameObject>(sourcePath);
         if (source == null) throw new InvalidOperationException("缺少源模型：" + sourcePath);
         GameObject host = new GameObject(name);
@@ -83,13 +95,26 @@ public static class WindPowerProcessDetailPrefabBuilder
 
             WindTurbineRotationController[] rotations = model.GetComponentsInChildren<WindTurbineRotationController>(true);
             GearboxExplodedView[] views = model.GetComponentsInChildren<GearboxExplodedView>(true);
-            if (rotations.Length == 0 && views.Length == 0)
-                throw new InvalidOperationException("源模型没有可绑定的动态组件：" + sourcePath);
-            WindPowerProcessDetailDynamicAdapter dynamic = host.AddComponent<WindPowerProcessDetailDynamicAdapter>();
-            dynamic.ConfigureForEditor(rotations, views);
             // The source orbit script competes with the business-scene snapshot camera.
             foreach (GearboxOrbitCamera orbit in model.GetComponentsInChildren<GearboxOrbitCamera>(true))
                 orbit.enabled = false;
+            // 动态目标按源模型能力分流：风机/齿轮箱走专用控制器；偏航系统复用源模型自带齿轮 Animator。
+            ProcessDetailDynamicTargetBase dynamic;
+            if (rotations.Length > 0 || views.Length > 0)
+            {
+                WindPowerProcessDetailDynamicAdapter windDynamic = host.AddComponent<WindPowerProcessDetailDynamicAdapter>();
+                windDynamic.ConfigureForEditor(rotations, views);
+                dynamic = windDynamic;
+            }
+            else
+            {
+                Animator[] gearAnimators = model.GetComponentsInChildren<Animator>(true);
+                if (gearAnimators.Length == 0)
+                    throw new InvalidOperationException("源模型没有可绑定的动态组件：" + sourcePath);
+                YawSystemProcessDetailDynamicAdapter yawDynamic = host.AddComponent<YawSystemProcessDetailDynamicAdapter>();
+                yawDynamic.ConfigureForEditor(gearAnimators);
+                dynamic = yawDynamic;
+            }
 
             List<Renderer> stateRenderers = new List<Renderer>();
             foreach (Renderer renderer in model.GetComponentsInChildren<Renderer>(true))

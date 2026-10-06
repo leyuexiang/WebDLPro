@@ -26,8 +26,12 @@ describe('第二层管线图例显示规则', () => {
     expect(resolvePipelineLegendVariant('ready', createBusinessContext(toSceneId('coal-power')))).toBe('coal')
   })
 
-  it.each(SCENE_IDS.filter((sceneId) => sceneId !== 'coal-power'))('%s 第二层稳定场景保持既有燃气图例', (sceneId) => {
-    expect(resolvePipelineLegendVariant('ready', createBusinessContext(sceneId))).toBe('gas')
+  it('燃气第二层稳定场景只解析燃气图例', () => {
+    expect(resolvePipelineLegendVariant('ready', createBusinessContext(toSceneId('gas-power')))).toBe('gas')
+  })
+
+  it.each(SCENE_IDS.filter((sceneId) => sceneId !== 'coal-power' && sceneId !== 'gas-power'))('%s 第二层稳定场景统一解析电力场景通用图例', (sceneId) => {
+    expect(resolvePipelineLegendVariant('ready', createBusinessContext(sceneId))).toBe('elec')
   })
 
   it('第一层沙盘和第三层关键环节不显示图例', () => {
@@ -51,15 +55,18 @@ describe('第二层管线图例显示规则', () => {
     expect(resolvePipelineLegendVariant(status, createBusinessContext(SCENE_IDS[0]!))).toBeNull()
   })
 
-  it('燃煤与燃气均发布各自的横向透明图例，且不会误用同一资源', () => {
+  it('燃煤、燃气与电力场景均发布各自的横向透明图例，且不会误用同一资源', () => {
     const gasImage = readFileSync(resolve(process.cwd(), 'src/assets/pipeline-legend-horizontal.png'))
     const coalImage = readFileSync(resolve(process.cwd(), 'src/assets/pipeline-legend-horizontal-coal.png'))
+    const elecImage = readFileSync(resolve(process.cwd(), 'src/assets/pipeline-legend-horizontal-elec.png'))
     // PNG（便携式网络图形）宽高固定写在 IHDR（图像头数据块）的第 16 与 20 字节，直接读取可避免引入图片解析依赖。
-    for (const image of [gasImage, coalImage]) {
+    for (const image of [gasImage, coalImage, elecImage]) {
       expect([...image.subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10])
       expect(image.readUInt32BE(16)).toBe(500)
       expect(image.readUInt32BE(20)).toBe(60)
     }
     expect(coalImage.equals(gasImage)).toBe(false)
+    expect(elecImage.equals(gasImage)).toBe(false)
+    expect(elecImage.equals(coalImage)).toBe(false)
   })
 })

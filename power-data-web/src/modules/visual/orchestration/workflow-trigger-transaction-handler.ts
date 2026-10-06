@@ -1,11 +1,12 @@
 import type { SceneActivationId } from '@/config/scene-topology/identifiers'
-import type { ActionDefinition } from '@/config/scene-topology/types'
+import type { ActionDefinition, UnityActionDefinition } from '@/config/scene-topology/types'
 import type { TopologyRegistry } from '@/config/scene-topology/topology-registry'
 import type { HostCommandExecutionResult } from '@/host-bridge/host-command-lifecycle'
 import type { HostDispatchableDomainCommand } from '@/host-bridge/host-command-dispatcher'
 import type { HostProtocolError, WorkflowTriggerPayload } from '@/host-bridge/host-protocol'
 import type { VisualizationCoordinatorFacade } from '@/modules/visual/orchestration/visualization-coordinator-facade'
 import type { ViewOpenTransactionHandler } from '@/modules/visual/orchestration/view-open-transaction-handler'
+import type { ViewOpenUnityPortResult } from '@/modules/visual/orchestration/view-open-transaction-handler'
 import type { ProcessDetailTransactionHandler } from '@/modules/visual/orchestration/process-detail-transaction-handler'
 import { isProcessDetailVisualizationStableContext } from '@/modules/visual/orchestration/visualization.store'
 
@@ -19,6 +20,16 @@ interface ActiveCrossSceneProcessDetailTransition {
 
 /** 流程触发处理器可以明确限定为同场景或跨场景，防止组合根把两类动作混入同一隐式分支。 */
 export type WorkflowTriggerScope = 'same-scene' | 'cross-scene'
+
+/**
+ * 首屏区域视觉动作（区域高亮/轮询）的受控 Unity 端口。
+ * 只暴露已通过清单校验的动作投影；端口不得取得运行时宿主、iframe 或窗口消息访问权。
+ */
+export type OverviewAreaUnityActionPort = {
+  executeOverviewAreaAction(
+    action: Extract<UnityActionDefinition, { type: 'activateOverviewArea' | 'setOverviewPolling' }>,
+  ): Promise<ViewOpenUnityPortResult>
+}
 
 /**
  * `workflow.trigger`（流程触发）事务处理器。
@@ -36,6 +47,7 @@ export class WorkflowTriggerTransactionHandler {
     private readonly scope: WorkflowTriggerScope = 'same-scene',
     private readonly processDetail?: Pick<ProcessDetailTransactionHandler, 'submit' | 'exitCurrentToDefaultBusiness' | 'cancelTimedOutCommand'>,
     private readonly synchronizeCrossSceneProcessDetailState: CrossSceneProcessDetailStateSynchronizer = async () => true,
+    private readonly overviewAreaUnityPort?: OverviewAreaUnityActionPort,
   ) {}
 
   /**
@@ -100,6 +112,20 @@ export class WorkflowTriggerTransactionHandler {
     if (startsInProcessDetail && this.scope === 'cross-scene') {
       if (!this.processDetail) return this.failure('protocol.capability.undeclared', 'validation', '当前发布未接入关键环节事务能力。')
       return this.exitProcessDetailAndContinue(action, payload, correlationId, currentContext.contextRevision)
+    }
+    if (action.targetViewMode === 'overview' && action.unityAction.type !== 'none') {
+      /*
+       * 首屏区域视觉动作（区域高亮/轮询）不切换视图、不改稳定上下文：
+       * 清单动作直接投影到 Unity 区域命令；失败保持当前稳定视图（keep-current-context）。
+       * 控制器只在总览场景存在，其余场景由 Unity 返回结构化业务错误。
+       */
+      if (!this.overviewAreaUnityPort) {
+        return this.failure('protocol.capability.undeclared', 'validation', '当前发布未接入首屏区域视觉动作能力。')
+      }
+      const result = await this.overviewAreaUnityPort.executeOverviewAreaAction(action.unityAction)
+      return result.success
+        ? { success: true, status: 'completed', contextRevision: currentContext.contextRevision }
+        : this.failure('action.execute.failed', 'executing-action', '首屏区域视觉命令未被三维运行时确认。')
     }
     if (action.targetViewMode === 'overview') {
       /*

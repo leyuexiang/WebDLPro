@@ -1,4 +1,4 @@
-import { SCENE_IDS, isOverviewSceneId, isSceneId, validateStableIdentifier } from '@/config/scene-topology/identifiers'
+import { SCENE_IDS, isOverviewAreaId, isOverviewSceneId, isSceneId, validateStableIdentifier } from '@/config/scene-topology/identifiers'
 import type { SceneTopologyManifest, SceneTopologyManifestValidationIssue } from '@/config/scene-topology/types'
 import { MAX_TOPOLOGY_DRILLDOWN_CONTENT_COUNT } from '@/config/scene-topology/topology-drilldown-registry'
 import { hasTopologyIconKey } from '@/services/topology/topology-icon-registry'
@@ -668,14 +668,26 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
     if (item.configVersion !== manifestVersion) appendIssue(issues, 'action.version', '动作版本与清单版本不一致。')
     if (!['keep-current-context', 'commit-view-with-warning'].includes(String(item.failurePolicy))) appendIssue(issues, 'action.failure-policy', '动作失败策略无效。')
     readArray(item, 'allowedParameters', issues, 'action.parameters').forEach((parameter) => validateIdentifier(parameter, '动作参数标识', issues))
-    if (!isRecord(item.unityAction) || !['none', 'enterProcessDetail', 'focusNode', 'resetScene', 'setRouteFlow'].includes(String(item.unityAction.type))) {
+    if (!isRecord(item.unityAction) || !['none', 'enterProcessDetail', 'focusNode', 'resetScene', 'setRouteFlow', 'activateOverviewArea', 'setOverviewPolling'].includes(String(item.unityAction.type))) {
       appendIssue(issues, 'action.unity-action', '动作必须包含受控Unity动作。')
     } else if (targetViewMode === 'process-detail') {
       if (item.unityAction.type !== 'enterProcessDetail' || item.unityAction.processDetailId !== item.processDetailId || item.failurePolicy !== 'keep-current-context') {
         appendIssue(issues, 'action.process-detail-contract', '第三层动作必须使用同一关键环节编号并保持当前上下文失败策略。')
       }
     } else if (targetViewMode === 'overview') {
-      if (item.unityAction.type !== 'none' || item.failurePolicy !== 'keep-current-context') {
+      /*
+       * 平台总览动作允许导航（none）与首屏区域视觉（activateOverviewArea/setOverviewPolling）；
+       * 区域动作必须携带闭集区域标识，且都不能改动稳定上下文（keep-current-context）。
+       */
+      if (item.unityAction.type === 'activateOverviewArea') {
+        if (!isOverviewAreaId(item.unityAction.areaId) || item.failurePolicy !== 'keep-current-context') {
+          appendIssue(issues, 'action.overview-contract', '总览区域动作必须携带固定六区域闭集标识并保持当前上下文失败策略。')
+        }
+      } else if (item.unityAction.type === 'setOverviewPolling') {
+        if (typeof item.unityAction.enabled !== 'boolean' || item.failurePolicy !== 'keep-current-context') {
+          appendIssue(issues, 'action.overview-contract', '总览轮询动作必须携带显式布尔开关并保持当前上下文失败策略。')
+        }
+      } else if (item.unityAction.type !== 'none' || item.failurePolicy !== 'keep-current-context') {
         appendIssue(issues, 'action.overview-contract', '平台总览动作必须保持当前上下文失败策略且不得执行额外Unity动作。')
       }
     } else if (item.unityAction.type === 'enterProcessDetail') {

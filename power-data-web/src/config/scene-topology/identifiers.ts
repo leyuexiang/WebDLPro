@@ -135,6 +135,30 @@ export function isBusinessViewSceneId(value: ViewSceneId): value is SceneId {
   return isSceneId(value)
 }
 
+/** 首屏沙盘区域高亮的固定六区域闭集；与 Unity OverviewAreaHighlightController 常量一致，禁止运行时扩展。 */
+export const OVERVIEW_AREA_ID_VALUES = [
+  'dispatch-center',
+  'generation',
+  'transmission',
+  'distribution',
+  'consumption',
+  'microgrid',
+] as const
+
+/** 仅接受固定六区域之一；未知字符串必须被校验层拒绝，不能进入 Unity 区域高亮命令。 */
+export function isOverviewAreaId(value: unknown): value is (typeof OVERVIEW_AREA_ID_VALUES)[number] {
+  return typeof value === 'string' && OVERVIEW_AREA_ID_VALUES.includes(value as (typeof OVERVIEW_AREA_ID_VALUES)[number])
+}
+
+/** 将已验证字符串窄化为区域标识；与其它稳定标识工厂一致，非法输入直接抛错。 */
+export function toOverviewAreaId(value: string): (typeof OVERVIEW_AREA_ID_VALUES)[number] {
+  if (!isOverviewAreaId(value)) {
+    throw new Error('区域标识不在首屏沙盘固定六区域目录中。')
+  }
+
+  return value
+}
+
 /** 将已验证的业务或平台总览字符串转换为视图场景标识。 */
 export function toViewSceneId(value: string): ViewSceneId {
   if (isOverviewSceneId(value)) return OVERVIEW_SCENE_ID

@@ -54,7 +54,7 @@ mergeInto(LibraryManager.library, {
       'init', 'resize', 'switchScene', 'moveCameraToPose', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail',
       'enterProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback',
       'resetScene', 'resetCamera', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState',
- 'setRouteFlow', 'setNodeVisibility', 'dispose'
+      'setRouteFlow', 'setNodeVisibility', 'activateOverviewArea', 'setOverviewPolling', 'dispose'
     ];
     var eventCapabilities = ['ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'selectionCleared', 'disposed'];
     var isSupportedCommand = function (type) {

@@ -67,7 +67,23 @@ export class VisualizationRuntimeViewOpenPort implements ViewOpenUnityPort, Proc
         return this.execute('resetScene', {})
       case 'setRouteFlow':
         return this.execute('setRouteFlow', { routeId: action.routeId, enabled: action.enabled })
+      case 'activateOverviewArea':
+        return this.execute('activateOverviewArea', { areaId: action.areaId })
+      case 'setOverviewPolling':
+        return this.execute('setOverviewPolling', { enabled: action.enabled })
     }
+  }
+
+  /**
+   * 首屏区域视觉动作（区域高亮/轮询）的唯一端口实现：
+   * 载荷只携带清单校验过的闭集区域标识或显式布尔，不携带场景、事务或资源字段。
+   */
+  public async executeOverviewAreaAction(
+    action: Extract<UnityActionDefinition, { type: 'activateOverviewArea' | 'setOverviewPolling' }>,
+  ): Promise<ViewOpenUnityPortResult> {
+    return action.type === 'activateOverviewArea'
+      ? this.execute('activateOverviewArea', { areaId: action.areaId })
+      : this.execute('setOverviewPolling', { enabled: action.enabled })
   }
 
   /**
@@ -127,7 +143,7 @@ export class VisualizationRuntimeViewOpenPort implements ViewOpenUnityPort, Proc
   }
 
   /** 等待宿主结算已验证的原请求回执；失败统一映射为动作执行失败，避免泄露内层原因。 */
-  private async execute(command: 'focusNode' | 'resetScene' | 'setRouteFlow', payload: unknown): Promise<ViewOpenUnityPortResult> {
+  private async execute(command: 'focusNode' | 'resetScene' | 'setRouteFlow' | 'activateOverviewArea' | 'setOverviewPolling', payload: unknown): Promise<ViewOpenUnityPortResult> {
     const result = await this.runtime.sendCommandAndWait(command, payload)
     return result.success ? { success: true } : { success: false, errorCode: 'action.execute.failed' }
   }

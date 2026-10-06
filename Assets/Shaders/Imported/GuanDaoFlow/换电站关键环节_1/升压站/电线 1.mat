@@ -52,6 +52,6 @@ Material:
     - _MaskUV: {r: 1, g: 1, b: 0, a: 0}
     - _MaskUV2: {r: 1, g: 2, b: 0, a: 0}
     - _RimColor: {r: 0.45, g: 0.85, b: 1, a: 1}
-    - _Speed: {r: 0, g: -1, b: 0, a: 0}
-    - _Speed2: {r: 0, g: -1, b: 0, a: 0}
+    - _Speed: {r: 0, g: 1, b: 0, a: 0}
+    - _Speed2: {r: 0, g: 1, b: 0, a: 0}
   m_BuildTextureStacks: []

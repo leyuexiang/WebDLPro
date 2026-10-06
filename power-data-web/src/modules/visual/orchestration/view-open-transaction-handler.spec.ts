@@ -28,6 +28,8 @@ const windOverviewTopologyId = toTopologyId('topology.wind.overview')
 const windDetailTopologyId = toTopologyId('topology.wind.detail')
 const solarOverviewTopologyId = toTopologyId('topology.solar-power.overview')
 const overviewActionId = toActionId('action.scene.overview')
+const overviewAreaActionId = toActionId('action.overview.area.generation')
+const overviewPollingActionId = toActionId('action.overview.polling.start')
 const windOpenActionId = toActionId('action.wind.open')
 const windResetActionId = toActionId('action.wind.reset')
 
@@ -100,6 +102,27 @@ function createManifest(): SceneTopologyManifest {
         allowedParameters: ['unit-id'],
         // resetScene（重置场景）不引用设备、流程或路径，适合验证可选动作的通用事务顺序。
         unityAction: { type: 'resetScene' },
+        failurePolicy: 'keep-current-context',
+        configVersion: manifestVersion,
+      },
+      {
+        actionId: overviewAreaActionId,
+        title: '总览区域高亮：发电',
+        targetSceneId: OVERVIEW_SCENE_ID,
+        targetViewMode: 'overview',
+        allowedParameters: [],
+        // 区域动作只投影首屏视觉，不切换视图、拓扑或稳定上下文。
+        unityAction: { type: 'activateOverviewArea', areaId: 'generation' },
+        failurePolicy: 'keep-current-context',
+        configVersion: manifestVersion,
+      },
+      {
+        actionId: overviewPollingActionId,
+        title: '开始总览轮询播放',
+        targetSceneId: OVERVIEW_SCENE_ID,
+        targetViewMode: 'overview',
+        allowedParameters: [],
+        unityAction: { type: 'setOverviewPolling', enabled: true },
         failurePolicy: 'keep-current-context',
         configVersion: manifestVersion,
       },
@@ -624,6 +647,61 @@ describe('view.open 原子切换事务', () => {
     expect(store.topologyStatus).toBe('idle')
     // 总览稳定上下文按公开协议不携带占位 topologyId 或 actionId，动作只负责进入该受控事务。
     expect(store.stableContext).toEqual({ sceneId: OVERVIEW_SCENE_ID, actionId: null, contextRevision: 2 })
+  })
+
+  it('总览区域高亮动作直接投影区域命令，不切换视图也不提交新稳定上下文', async () => {
+    const { handler, registry, facade, unity, canvas, store } = createHandler()
+    const overviewAreaPort = { executeOverviewAreaAction: vi.fn().mockResolvedValue({ success: true }) }
+    const workflow = new WorkflowTriggerTransactionHandler(registry, handler, facade, 'same-scene', undefined, undefined, overviewAreaPort)
+    await handler.submit({ type: 'view.open', correlationId: 'open-overview-direct', payload: { sceneId: OVERVIEW_SCENE_ID } })
+
+    const result = await workflow.submit({
+      type: 'workflow.trigger',
+      correlationId: 'workflow-trigger-overview-area',
+      payload: { actionId: overviewAreaActionId, expectedContextRevision: 1 },
+    })
+
+    // 区域视觉动作是总览场景内的局部效果：回执成功但稳定上下文与版本保持不变。
+    expect(result).toMatchObject({ success: true, status: 'completed', contextRevision: 1 })
+    expect(overviewAreaPort.executeOverviewAreaAction).toHaveBeenCalledWith({ type: 'activateOverviewArea', areaId: 'generation' })
+    expect(unity.switchScene).toHaveBeenCalledTimes(1)
+    expect(unity.executeAction).not.toHaveBeenCalled()
+    expect(canvas.setTopology).not.toHaveBeenCalled()
+    expect(store.stableContext).toEqual({ sceneId: OVERVIEW_SCENE_ID, actionId: null, contextRevision: 1 })
+  })
+
+  it('总览轮询动作按布尔开关投影轮询命令，同样不触碰场景切换或拓扑', async () => {
+    const { handler, registry, facade, unity, canvas } = createHandler()
+    const overviewAreaPort = { executeOverviewAreaAction: vi.fn().mockResolvedValue({ success: true }) }
+    const workflow = new WorkflowTriggerTransactionHandler(registry, handler, facade, 'same-scene', undefined, undefined, overviewAreaPort)
+    await handler.submit({ type: 'view.open', correlationId: 'open-overview-direct', payload: { sceneId: OVERVIEW_SCENE_ID } })
+
+    const result = await workflow.submit({
+      type: 'workflow.trigger',
+      correlationId: 'workflow-trigger-overview-polling',
+      payload: { actionId: overviewPollingActionId, expectedContextRevision: 1 },
+    })
+
+    expect(result).toMatchObject({ success: true, status: 'completed', contextRevision: 1 })
+    expect(overviewAreaPort.executeOverviewAreaAction).toHaveBeenCalledWith({ type: 'setOverviewPolling', enabled: true })
+    expect(unity.switchScene).toHaveBeenCalledTimes(1)
+    expect(canvas.setTopology).not.toHaveBeenCalled()
+  })
+
+  it('区域视觉动作在发布未接入端口能力时返回固定协议失败并保持稳定上下文', async () => {
+    const { handler, registry, facade, unity, store } = createHandler()
+    const workflow = new WorkflowTriggerTransactionHandler(registry, handler, facade, 'same-scene')
+    await handler.submit({ type: 'view.open', correlationId: 'open-overview-direct', payload: { sceneId: OVERVIEW_SCENE_ID } })
+
+    const result = await workflow.submit({
+      type: 'workflow.trigger',
+      correlationId: 'workflow-trigger-overview-area-unwired',
+      payload: { actionId: overviewAreaActionId, expectedContextRevision: 1 },
+    })
+
+    expect(result).toMatchObject({ success: false, status: 'failed', error: { code: 'protocol.capability.undeclared', recoverable: true } })
+    expect(unity.executeAction).not.toHaveBeenCalled()
+    expect(store.stableContext).toEqual({ sceneId: OVERVIEW_SCENE_ID, actionId: null, contextRevision: 1 })
   })
 
   it('同场景流程动作携带过期上下文版本时，不执行 Unity 动作或激活新拓扑', async () => {

@@ -300,6 +300,8 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         public string nodeName;
         public string routeId;
         public string visualState;
+        // areaId 只表示首屏沙盘固定六个区域标识；由桥接层闭集校验后才能进入区域高亮控制器。
+        public string areaId;
         // 本地快照序号从一开始单调递增，是三维迟到隔离的唯一依据；零表示旧协议或字段缺失，必须拒绝。
         public long snapshotSequence;
         // 状态来源时间由前端从已校验外层协议规范化后透传，仅用于诊断，不参与覆盖排序。
@@ -625,6 +627,12 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
                 break;
             case "setNodeVisibility":
                 HandleSetNodeVisibility(message);
+                break;
+            case "activateOverviewArea":
+                HandleActivateOverviewArea(message);
+                break;
+            case "setOverviewPolling":
+                HandleSetOverviewPolling(message);
                 break;
             case "dispose":
                 HandleDispose(message);
@@ -1551,6 +1559,57 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
             return;
         }
         SendSceneCommandResult(message, controller.SetNodeVisibility(payload.sceneNodeId, payload.enabled));
+    }
+
+    /// <summary>
+    /// 首屏区域高亮命令不经过业务场景控制器：它只作用于总览沙盘的局部视觉，
+    /// 不触碰场景租约、拓扑激活或设备状态。区域标识在桥接层做闭集校验，
+    /// 未知区域与控制器缺失都返回结构化失败，禁止静默空执行。
+    /// </summary>
+    private void HandleActivateOverviewArea(BridgeMessage message)
+    {
+        BridgePayload payload = message.payload;
+        if (!SceneActionProtocolValidator.TryParseOverviewAreaId(payload?.areaId, out string areaId))
+        {
+            SendCommandResult(message, false, "overview-area-payload-invalid", "区域高亮命令缺少合法区域标识。");
+            return;
+        }
+        if (!TryGetOverviewAreaController(message, out OverviewAreaHighlightController areaController))
+        {
+            return;
+        }
+
+        SendSceneCommandResult(message, areaController.ActivateArea(areaId));
+    }
+
+    /// <summary>轮询开关命令复用同一总览区域控制器；间隔时长由场景内序列化配置决定，网页不得下发数值。</summary>
+    private void HandleSetOverviewPolling(BridgeMessage message)
+    {
+        BridgePayload payload = message.payload;
+        if (!TryGetOverviewAreaController(message, out OverviewAreaHighlightController areaController))
+        {
+            return;
+        }
+
+        SendSceneCommandResult(message, areaController.SetPolling(payload?.enabled ?? false));
+    }
+
+    /// <summary>
+    /// 总览区域控制器只随首屏沙盘场景存在；跨场景或未加载总览时按结构化失败返回，
+    /// 不参与 DontDestroyOnLoad 常驻状态，也不缓存失效实例。
+    /// </summary>
+    private bool TryGetOverviewAreaController(BridgeMessage message, out OverviewAreaHighlightController areaController)
+    {
+        areaController = FindFirstObjectByType<OverviewAreaHighlightController>();
+        if (areaController == null)
+        {
+            StatusText = "当前场景没有可用的首屏区域高亮控制器。";
+            LogStatusToBrowserConsole(true);
+            SendCommandResult(message, false, "overview-area-controller-unavailable", StatusText);
+            return false;
+        }
+
+        return true;
     }
 
     /// <summary>命令只能进入当前活动统一控制器；未声明能力时返回结构化错误，禁止静默空执行。</summary>

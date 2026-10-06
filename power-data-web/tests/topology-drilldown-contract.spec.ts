@@ -51,6 +51,14 @@ describe('燃气与燃煤拓扑无下钻发布契约', () => {
     expect(manifest.topologies.every((topology) => topology.filter === undefined)).toBe(true)
     expect(manifest.actions.map((action) => action.actionId)).toEqual([
       'action.scene.overview',
+      'action.overview.area.dispatch-center',
+      'action.overview.area.generation',
+      'action.overview.area.transmission',
+      'action.overview.area.distribution',
+      'action.overview.area.consumption',
+      'action.overview.area.microgrid',
+      'action.overview.polling.start',
+      'action.overview.polling.stop',
       'action.gas-power.overview',
       'action.gas-power.gas-turbine',
       'action.coal-power.overview',

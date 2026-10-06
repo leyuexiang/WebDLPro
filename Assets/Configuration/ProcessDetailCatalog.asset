@@ -221,3 +221,16 @@ MonoBehaviour:
     _availability: 1
     _editorPrefab: {fileID: 5009747703228781346, guid: d0c2932d87fac754bac3a01f04860bf8,
       type: 3}
+  - _sceneId: wind-power
+    _processId: wind-power-generation
+    _stepId: yaw-system
+    _processDetailId: process-detail.wind-power.yaw-system
+    _resourceId: process-detail-resource.wind-power.yaw-system
+    _cameraPoseId: camera-pose.wind-power.yaw-system
+    _stateNodeIds:
+    - node.wind-yaw-system
+    _dynamicTargetIds:
+    - node.wind-yaw-system
+    _availability: 1
+    _editorPrefab: {fileID: 6536238279661995827, guid: 35fe17c3cbf1c9d4396bc13e9e41c821,
+      type: 3}

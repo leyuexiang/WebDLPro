@@ -9,6 +9,7 @@ import {
   toTopologyId,
   toUnityRuntimeKey,
   toUnitySceneKey,
+  OVERVIEW_SCENE_ID,
 } from '@/config/scene-topology/identifiers'
 import { SceneTopologyManifestLoader } from '@/config/scene-topology/loader'
 import type { SceneTopologyManifest } from '@/config/scene-topology/types'
@@ -349,5 +350,66 @@ describe('场景拓扑节点协议清单校验', () => {
     }))
     const manifest = createValidManifest({ gasNodes: nodes })
     expect(issueCodes(manifest)).toContain('topology.scene-node-capacity')
+  })
+
+  it('总览区域与轮询动作在固定闭集与显式开关下通过校验', () => {
+    const manifest = createValidManifest()
+    const validOverviewActions: unknown[] = [
+      {
+        actionId: 'action.overview.area.generation',
+        title: '总览区域高亮：发电',
+        targetSceneId: OVERVIEW_SCENE_ID,
+        targetViewMode: 'overview',
+        allowedParameters: [],
+        unityAction: { type: 'activateOverviewArea', areaId: 'generation' },
+        failurePolicy: 'keep-current-context',
+        configVersion: manifestVersion,
+      },
+      {
+        actionId: 'action.overview.polling.start',
+        title: '开始总览轮询播放',
+        targetSceneId: OVERVIEW_SCENE_ID,
+        targetViewMode: 'overview',
+        allowedParameters: [],
+        unityAction: { type: 'setOverviewPolling', enabled: true },
+        failurePolicy: 'keep-current-context',
+        configVersion: manifestVersion,
+      },
+    ]
+    const candidate = { ...manifest, actions: [...manifest.actions, ...validOverviewActions] } as SceneTopologyManifest
+    expect(validateSceneTopologyManifest(candidate)).toEqual([])
+  })
+
+  it('总览区域动作携带未知区域标识或非布尔轮询开关时被动作契约拒绝', () => {
+    const base = createValidManifest()
+    const invalidArea = {
+      ...base,
+      actions: [...base.actions, {
+        actionId: 'action.overview.area.unknown',
+        title: '未知区域',
+        targetSceneId: OVERVIEW_SCENE_ID,
+        targetViewMode: 'overview',
+        allowedParameters: [],
+        unityAction: { type: 'activateOverviewArea', areaId: 'not-an-area' },
+        failurePolicy: 'keep-current-context',
+        configVersion: manifestVersion,
+      }],
+    } as unknown as SceneTopologyManifest
+    expect(issueCodes(invalidArea)).toContain('action.overview-contract')
+
+    const invalidPolling = {
+      ...base,
+      actions: [...base.actions, {
+        actionId: 'action.overview.polling.start',
+        title: '轮询开关',
+        targetSceneId: OVERVIEW_SCENE_ID,
+        targetViewMode: 'overview',
+        allowedParameters: [],
+        unityAction: { type: 'setOverviewPolling', enabled: 'yes' },
+        failurePolicy: 'keep-current-context',
+        configVersion: manifestVersion,
+      }],
+    } as unknown as SceneTopologyManifest
+    expect(issueCodes(invalidPolling)).toContain('action.overview-contract')
   })
 })

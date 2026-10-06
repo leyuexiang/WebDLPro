@@ -44,6 +44,19 @@ export type UnityActionDefinition =
   | { type: 'focusNode'; sceneNodeId: SceneNodeId; isolate: boolean }
   | { type: 'resetScene' }
   | { type: 'setRouteFlow'; routeId: RouteId; enabled: boolean }
+  /** 首屏区域高亮只接受总览沙盘固定六个区域标识，运行时不得按名称或坐标猜测。 */
+  | { type: 'activateOverviewArea'; areaId: OverviewAreaId }
+  /** 轮询间隔由 Unity 场景内序列化配置决定，网页只允许下发显式开关。 */
+  | { type: 'setOverviewPolling'; enabled: boolean }
+
+/** 首屏沙盘区域高亮的固定区域闭集；与 Unity OverviewAreaHighlightController 常量一致。 */
+export type OverviewAreaId =
+  | 'dispatch-center'
+  | 'generation'
+  | 'transmission'
+  | 'distribution'
+  | 'consumption'
+  | 'microgrid'
 
 /** 单个 Unity 场景的能力映射，专供发布校验动作引用，绝不暴露层级路径或资源路径。 */
 export interface UnitySceneMappingDefinition {
@@ -264,14 +277,14 @@ export type ProcessDetailActionDefinition = ActionDefinitionBase<SceneId> & {
 }
 
 /**
- * 平台总览动作只表达受控导航，不携带拓扑或三维动作。
- * 该定义让只消费动作清单的合作方也能绑定总览入口，同时保持总览无拓扑的既有协议约束。
+ * 平台总览动作表达两类受控行为：导航（unityAction 为 none）或首屏区域视觉
+ * （区域高亮/轮询）。两者都不携带拓扑或关键环节，保持总览无拓扑的既有协议约束。
  */
 export type OverviewActionDefinition = ActionDefinitionBase<OverviewSceneId> & {
   targetViewMode: 'overview'
   targetTopologyId?: never
   processDetailId?: never
-  unityAction: Extract<UnityActionDefinition, { type: 'none' }>
+  unityAction: Extract<UnityActionDefinition, { type: 'none' | 'activateOverviewArea' | 'setOverviewPolling' }>
   failurePolicy: 'keep-current-context'
 }
 

@@ -78,6 +78,8 @@ namespace WebDLPro.Unity.SceneRuntime
         public bool IsActive => _activeInstance != null && _activeRuntime?.Root != null;
         public bool HasPreparedProcessDetail => _preparedInstance != null && _preparedRuntime?.Root != null;
         public bool BlocksBusinessSceneInteractions => !_released && IsActive;
+        /// <summary>场景标识只读入口：桥接器常驻化会把根对象搬入 DontDestroyOnLoad 场景，外部组件不得再从场景名推断。</summary>
+        public string SceneId => _sceneId ?? string.Empty;
         public string ActiveProcessDetailId => _activeEntry?.ProcessDetailId ?? string.Empty;
         public string PreparedProcessDetailId => _preparedEntry?.ProcessDetailId ?? string.Empty;
         public string ActiveEnterTransitionId => _activeEnterTransitionId;

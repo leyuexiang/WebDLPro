@@ -450,8 +450,8 @@ namespace WebDLPro.Unity.Tests
             Assert.That(catalog.ValidateForRuntime(), Is.Empty);
             Assert.That(
                 catalog.Entries.Count,
-                Is.EqualTo(16),
-                "当前应登记燃气轮机、燃煤汽轮机、风机、齿轮箱、光伏逆变器、三个站类的九项保护关键环节以及开关站的母线保护和线路保护。");
+                Is.EqualTo(17),
+                "当前应登记燃气轮机、燃煤汽轮机、风机、齿轮箱、偏航系统、光伏逆变器、三个站类的九项保护关键环节以及开关站的母线保护和线路保护。");
 
             Assert.That(
                 catalog.TryGet("gas-power", "process-detail.gas-power.gas-turbine", out ProcessDetailCatalogEntry entry),

@@ -172,7 +172,8 @@ const overviewActive = computed(() => (
 /** 第三层仍保持三维与二维双区布局；只有平台总览（第一层）隐藏拓扑画布。 */
 const topologySuppressed = computed(() => overviewActive.value)
 /**
- * 图例只按已提交稳定上下文决议可见性和资源语义：燃煤使用专用图例，当前其余第二层保持既有燃气图例。
+ * 图例只按已提交稳定上下文决议可见性和资源语义：燃煤与燃气使用专属图例，
+ * 其余第二层场景统一使用电力场景通用图例。
  * 原生全屏状态不参与该计算，因此进入全屏和退出全屏都复用同一个图例节点及同一份已解析资源。
  */
 const pipelineLegendVariant = computed(() => resolvePipelineLegendVariant(
@@ -590,7 +591,8 @@ function startHostRuntimeCompositionIfReady(): void {
       registry,
       visualizationCoordinatorFacade,
       // 同场景流程触发只复用同一个原子切换处理器；它不会取得运行时宿主的 release 或 iframe 访问权。
-      new WorkflowTriggerTransactionHandler(registry, viewOpen, visualizationCoordinatorFacade, 'same-scene', processDetail),
+      // 首屏区域视觉动作（区域高亮/轮询）复用同一 Unity 端口：只下发闭集区域标识与轮询开关。
+      new WorkflowTriggerTransactionHandler(registry, viewOpen, visualizationCoordinatorFacade, 'same-scene', processDetail, undefined, unityViewPort),
       // 跨场景流程动作先建立目标业务场景，再等待状态重放并进入关键环节，避免目标控制器尚不存在时直接发送第三层命令。
       new WorkflowTriggerTransactionHandler(
         registry,
@@ -599,6 +601,7 @@ function startHostRuntimeCompositionIfReady(): void {
         'cross-scene',
         processDetail,
         synchronizeCrossSceneProcessDetailState,
+        unityViewPort,
       ),
     )
     : undefined

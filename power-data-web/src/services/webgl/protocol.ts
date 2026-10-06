@@ -29,6 +29,8 @@ export const WEBGL_COMMAND_TYPES = [
   'clearNodeVisualState',
   'setRouteFlow',
   'setNodeVisibility',
+  'activateOverviewArea',
+  'setOverviewPolling',
   'dispose',
 ] as const
 

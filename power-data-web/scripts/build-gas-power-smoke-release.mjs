@@ -52,7 +52,8 @@ function getUnityRuntimeKey(sceneId) {
 }
 
 const unityProtocolMetadataFileName = 'webgl-protocol-capabilities.json'
-const expectedUnityProtocolMetadataSchemaVersion = 10
+// 第十一版元数据增加首屏区域高亮与轮询命令；发布前必须与 Unity 构建保持一致。
+const expectedUnityProtocolMetadataSchemaVersion = 11
 const expectedUnityProtocolChannel = 'power3d-unity'
 const expectedUnityProtocolVersion = 2
 const expectedSceneChangedSchemaVersion = 2
@@ -96,6 +97,9 @@ const requiredUnityCommandCapabilities = Object.freeze([
   'clearNodeVisualState',
   'setRouteFlow',
   'setNodeVisibility',
+  // 首屏区域高亮与轮询属于第十一版必需命令；旧 Unity 构建缺少它们时不得与新版前端混发。
+  'activateOverviewArea',
+  'setOverviewPolling',
   'dispose',
 ])
 // 双向选中依赖 objectSelected（对象选中）和 selectionCleared（选择清除）两类上行事件。
@@ -1143,6 +1147,45 @@ const addedSceneNavigations = [
       failurePolicy: 'keep-current-context',
       configVersion: manifestVersion,
     },
+    // 首屏沙盘六区域高亮动作：区域闭集与 Unity OverviewAreaHighlightController 常量一致，不切换视图。
+    ...[
+      { areaId: 'dispatch-center', title: '调度中心' },
+      { areaId: 'generation', title: '发电' },
+      { areaId: 'transmission', title: '输变电' },
+      { areaId: 'distribution', title: '配电' },
+      { areaId: 'consumption', title: '用电' },
+      { areaId: 'microgrid', title: '微电网' },
+    ].map((area) => ({
+      actionId: `action.overview.area.${area.areaId}`,
+      title: `总览区域高亮：${area.title}`,
+      targetSceneId: 'overview',
+      targetViewMode: 'overview',
+      allowedParameters: [],
+      unityAction: { type: 'activateOverviewArea', areaId: area.areaId },
+      failurePolicy: 'keep-current-context',
+      configVersion: manifestVersion,
+    })),
+    // 轮询按钮按当前状态发送 start/stop 两个无参动作；间隔时长由 Unity 场景内序列化配置决定。
+    {
+      actionId: 'action.overview.polling.start',
+      title: '开始总览轮询播放',
+      targetSceneId: 'overview',
+      targetViewMode: 'overview',
+      allowedParameters: [],
+      unityAction: { type: 'setOverviewPolling', enabled: true },
+      failurePolicy: 'keep-current-context',
+      configVersion: manifestVersion,
+    },
+    {
+      actionId: 'action.overview.polling.stop',
+      title: '停止总览轮询播放',
+      targetSceneId: 'overview',
+      targetViewMode: 'overview',
+      allowedParameters: [],
+      unityAction: { type: 'setOverviewPolling', enabled: false },
+      failurePolicy: 'keep-current-context',
+      configVersion: manifestVersion,
+    },
     ...gasManifest.actions,
     ...coalManifest.actions,
     ...addedSceneNavigations.map((navigation) => ({
@@ -1229,7 +1272,7 @@ const addedSceneNavigations = [
 }
 
 /**
- * 二十五项公开动作由全局、六个业务总览、两个风电控制模拟、四个变电场景保护环节和三个发电关键环节组成。
+ * 三十三项公开动作由全局、八个首屏区域（六区域高亮+轮询开关）、六个业务总览、两个风电控制模拟、四个变电场景保护环节和三个发电关键环节组成。
  * 页面中的状态按钮只通过第二版外层协议提交完整设备状态快照；它们不直连 Unity，也不伪造
  * 拓扑图元。每次提交同时携带燃气轮机和燃煤汽轮机两个 nodeId，确保切换场景或层级后仍能观察
  * 同一份权威状态在二维拓扑、沙盘和关键环节模型中的投影结果。
@@ -1305,6 +1348,16 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
         <button type="button" data-action-id="action.switching-station.busbar-protection" disabled>开关站母线保护</button>
         <button type="button" data-action-id="action.switching-station.line-protection" disabled>开关站线路保护</button>
       </div>
+      <div class="test-controls__overview-areas" aria-label="首屏区域高亮与轮询操作">
+        <button type="button" data-action-id="action.overview.area.dispatch-center" disabled>调度中心</button>
+        <button type="button" data-action-id="action.overview.area.generation" disabled>发电</button>
+        <button type="button" data-action-id="action.overview.area.transmission" disabled>输变电</button>
+        <button type="button" data-action-id="action.overview.area.distribution" disabled>配电</button>
+        <button type="button" data-action-id="action.overview.area.consumption" disabled>用电</button>
+        <button type="button" data-action-id="action.overview.area.microgrid" disabled>微电网</button>
+        <button type="button" data-action-id="action.overview.polling.start" disabled>轮询开始</button>
+        <button type="button" data-action-id="action.overview.polling.stop" disabled>轮询停止</button>
+      </div>
       <div class="test-controls__states" aria-label="关键设备状态切换">
         <div class="test-controls__state">
           <span class="test-controls__state-label">燃气轮机绑定设备：<output data-device-state-output="asset.gas-turbine" class="test-controls__state-output">正常</output></span>
@@ -1369,9 +1422,17 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
            'process-detail.switching-station.busbar-protection',
            'process-detail.switching-station.line-protection',
          ]);
-        // 页面只允许联合清单中已登记的二十五项动作；固定闭集禁止页面输入拼接任意场景或内部 Unity 方法。
+        // 页面只允许联合清单中已登记的动作；固定闭集禁止页面输入拼接任意场景或内部 Unity 方法。
         const allowedActionIds = new Set([
           'action.scene.overview',
+          'action.overview.area.dispatch-center',
+          'action.overview.area.generation',
+          'action.overview.area.transmission',
+          'action.overview.area.distribution',
+          'action.overview.area.consumption',
+          'action.overview.area.microgrid',
+          'action.overview.polling.start',
+          'action.overview.polling.stop',
           'action.gas-power.overview',
           'action.gas-power.gas-turbine',
           'action.coal-power.overview',
@@ -1476,7 +1537,7 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
         }
 
         /**
-         * 仅向当前已协商的嵌入壳发送清单中登记的二十五项动作之一，并携带最近稳定上下文版本。
+         * 仅向当前已协商的嵌入壳发送清单中登记的三十三项动作之一，并携带最近稳定上下文版本。
          * 版本不匹配由壳返回明确冲突，页面不会绕过事务直接切换拓扑或调用 Unity 方法。
          */
         function triggerWorkflow(actionId) {

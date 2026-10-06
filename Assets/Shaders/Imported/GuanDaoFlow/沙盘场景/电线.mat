@@ -9,7 +9,7 @@ Material:
   m_PrefabAsset: {fileID: 0}
   m_Name: "\u7535\u7EBF"
   m_Shader: {fileID: 4800000, guid: 9aa08db2fbf234b48b89f071470a45fa, type: 3}
-  m_Parent: {fileID: 2100000, guid: c8310a647e393a546804b2cf2dfafe15, type: 2}
+  m_Parent: {fileID: 2100000, guid: 830230157ad9d4849b7798981b4cc9c2, type: 2}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords: []
   m_InvalidKeywords: []
@@ -37,15 +37,15 @@ Material:
     - _Color2S: 5
     - _ColorS: 10
     - _DE2: -10
-    - _FlowEmissionBoost: 0.2
+    - _FlowEmissionBoost: 0.5
     - _FlowSpeed: 0.2
     - _UVRotation: 90
     m_Colors:
-    - _BaseColor: {r: 0, g: 0.44313726, b: 1, a: 0}
-    - _Color: {r: 0, g: 0.44420838, b: 1, a: 0}
+    - _BaseColor: {r: 0, g: 0.4, b: 1, a: 0}
+    - _Color: {r: 0, g: 0.4, b: 1, a: 0}
     - _Color2: {r: 1, g: 0.9355648, b: 0.5411765, a: 0}
     - _MaskUV2: {r: 1, g: 2, b: 0, a: 0}
-    - _RimColor: {r: 0, g: 0.44313726, b: 1, a: 0}
+    - _RimColor: {r: 0, g: 0.4, b: 1, a: 0}
     - _Speed: {r: 0, g: -1, b: 0, a: 0}
     - _Speed2: {r: 0, g: -1, b: 0, a: 0}
   m_BuildTextureStacks: []

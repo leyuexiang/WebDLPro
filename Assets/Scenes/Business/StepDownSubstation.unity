@@ -167,6 +167,7 @@ GameObject:
   - component: {fileID: 116480437}
   - component: {fileID: 116480442}
   - component: {fileID: 116480441}
+  - component: {fileID: 116480443}
   m_Layer: 0
   m_Name: PowerPlantRuntime
   m_TagString: Untagged
@@ -367,6 +368,22 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 081854311b8b75244bb0faaeb6f2065e, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+--- !u!114 &116480443
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 116480436}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f73c2c4480b7fa045a2eeba0ed42db53, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _processDetailCoordinator: {fileID: 116480441}
+  _catalog: {fileID: 0}
+  _showPanel: 1
+  _toggleKey: 290
 --- !u!1 &193577553
 GameObject:
   m_ObjectHideFlags: 0

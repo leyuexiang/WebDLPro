@@ -17,7 +17,7 @@ const allowedDeliveryRootEntries = new Set([
 ])
 const requiredUnityCommandCapabilities = Object.freeze([
   'init', 'resize', 'switchScene', 'moveCameraToPose', 'enterProcessDetail', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'resetCamera', 'focusNode', 'clearSelection',
-  'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose',
+  'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'activateOverviewArea', 'setOverviewPolling', 'dispose',
 ])
 const requiredEnterProcessDetailFields = Object.freeze(['sceneId', 'processId', 'stepId', 'processDetailId', 'transitionId'])
 const requiredPrepareProcessDetailFields = Object.freeze(['sceneId', 'processId', 'stepId', 'processDetailId', 'transitionId'])
@@ -25,16 +25,24 @@ const requiredCommitProcessDetailFields = Object.freeze(['sceneId', 'processDeta
 const requiredAbortProcessDetailFields = Object.freeze(['sceneId', 'processDetailId', 'transitionId'])
 const requiredExitProcessDetailFields = Object.freeze(['sceneId', 'processDetailId', 'transitionId'])
 const requiredSetProcessDetailPlaybackFields = Object.freeze(['sceneId', 'processDetailId', 'playing'])
-// 结构版本10在命名镜头点基础上增加独立相机复位能力；旧构建不得绕过右上角复位按钮发布门禁。
+// 结构版本11在相机复位能力基础上增加首屏区域高亮与轮询命令；旧构建不得绕过区域能力发布门禁。
 const requiredUnityEventCapabilities = Object.freeze([
   'ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'selectionCleared', 'disposed',
 ])
 /**
- * 当前合作方以动作摘要生成全部可绑定入口，因此二十五项公开动作属于发布契约本身，不能只做两份清单的相对一致性检查。
+ * 当前合作方以动作摘要生成全部可绑定入口，因此三十三项公开动作属于发布契约本身，不能只做两份清单的相对一致性检查。
  * 目标、视图和三维动作类型一并固定，防止生成器与摘要同时回退，或把普通场景导航误写成未实现的流程能力。
  */
 const requiredPublishedActionContracts = Object.freeze([
   { actionId: 'action.scene.overview', targetSceneId: 'overview', targetViewMode: 'overview', unityActionType: 'none' },
+  { actionId: 'action.overview.area.dispatch-center', targetSceneId: 'overview', targetViewMode: 'overview', unityActionType: 'activateOverviewArea' },
+  { actionId: 'action.overview.area.generation', targetSceneId: 'overview', targetViewMode: 'overview', unityActionType: 'activateOverviewArea' },
+  { actionId: 'action.overview.area.transmission', targetSceneId: 'overview', targetViewMode: 'overview', unityActionType: 'activateOverviewArea' },
+  { actionId: 'action.overview.area.distribution', targetSceneId: 'overview', targetViewMode: 'overview', unityActionType: 'activateOverviewArea' },
+  { actionId: 'action.overview.area.consumption', targetSceneId: 'overview', targetViewMode: 'overview', unityActionType: 'activateOverviewArea' },
+  { actionId: 'action.overview.area.microgrid', targetSceneId: 'overview', targetViewMode: 'overview', unityActionType: 'activateOverviewArea' },
+  { actionId: 'action.overview.polling.start', targetSceneId: 'overview', targetViewMode: 'overview', unityActionType: 'setOverviewPolling' },
+  { actionId: 'action.overview.polling.stop', targetSceneId: 'overview', targetViewMode: 'overview', unityActionType: 'setOverviewPolling' },
   { actionId: 'action.gas-power.overview', targetSceneId: 'gas-power', targetViewMode: 'business', targetTopologyId: 'topology.gas-power.overview', unityActionType: 'resetScene' },
   { actionId: 'action.gas-power.gas-turbine', targetSceneId: 'gas-power', targetViewMode: 'process-detail', processDetailId: 'process-detail.gas-power.gas-turbine', unityActionType: 'enterProcessDetail' },
   { actionId: 'action.coal-power.overview', targetSceneId: 'coal-power', targetViewMode: 'business', targetTopologyId: 'topology.coal-power.overview', unityActionType: 'resetScene' },
@@ -366,7 +374,7 @@ export async function validateReleaseArtifact(rootDirectory) {
     const requiredActionIds = new Set(requiredPublishedActionContracts.map((contract) => contract.actionId))
     if (publishedActions.length !== requiredPublishedActionContracts.length || actionById.size !== requiredPublishedActionContracts.length ||
         [...actionById.keys()].some((actionId) => !requiredActionIds.has(actionId)) || hasInvalidPublishedAction) {
-       issues.push('结构清单必须完整发布当前二十五项公开动作及其固定目标，禁止两份清单同时回退或伪造三维流程能力。')
+       issues.push('结构清单必须完整发布当前三十三项公开动作及其固定目标，禁止两份清单同时回退或伪造三维流程能力。')
     }
 
     /**
@@ -599,7 +607,8 @@ export async function validateReleaseArtifact(rootDirectory) {
     const missingAbortProcessDetailFields = requiredAbortProcessDetailFields.some((field) => !abortProcessDetailFields.has(field))
     const missingExitProcessDetailFields = requiredExitProcessDetailFields.some((field) => !exitProcessDetailFields.has(field))
     const missingPlaybackFields = requiredSetProcessDetailPlaybackFields.some((field) => !playbackFields.has(field))
-    if (unityProtocolMetadata.schemaVersion !== 10 || unityProtocolMetadata.channel !== 'power3d-unity' ||
+    // 结构版本11在相机复位能力基础上增加首屏区域高亮与轮询命令；旧构建缺少区域命令时不得通过发布门禁。
+    if (unityProtocolMetadata.schemaVersion !== 11 || unityProtocolMetadata.channel !== 'power3d-unity' ||
       unityProtocolMetadata.protocolVersion !== 2 || unityProtocolMetadata.unityReleaseId !== releaseManifest.unityReleaseId ||
       unityProtocolMetadata.processDetailCommandSchemaVersion !== 2 ||
       requiredUnityCommandCapabilities.some((capability) => !capabilities.has(capability)) ||

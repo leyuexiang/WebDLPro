@@ -11,8 +11,8 @@ namespace WebDLPro.Unity.SceneRuntime
     {
         public const string Channel = "power3d-unity";
         public const int ProtocolVersion = 2;
-        // 第十版元数据增加独立相机复位命令；该命令只恢复当前场景初始镜头，不复用场景重置语义。
-        public const int MetadataSchemaVersion = 10;
+        // 第十一版元数据增加首屏区域高亮与轮询命令；两命令只作用于总览场景的局部视觉，不触碰场景租约。
+        public const int MetadataSchemaVersion = 11;
         // 第二版场景完成结构新增物理 sceneActivationId；全局信封版本保持不变，避免无关命令被迫升级。
         public const int SceneChangedSchemaVersion = 2;
         // 第一版失败恢复声明要求 commandResult 在自动恢复成功时携带新的物理场景激活标识。
@@ -53,6 +53,8 @@ namespace WebDLPro.Unity.SceneRuntime
                 "clearNodeVisualState",
                 "setRouteFlow",
                 "setNodeVisibility",
+                "activateOverviewArea",
+                "setOverviewPolling",
                 "dispose"
             };
         }
@@ -140,6 +142,18 @@ namespace WebDLPro.Unity.SceneRuntime
         public static string[] CreateClearNodeVisualStateRequiredFields()
         {
             return new[] { "sceneNodeId", "snapshotSequence" };
+        }
+
+        /// <summary>区域高亮命令只携带总览沙盘的稳定区域标识，禁止传入层级路径、材质名或引擎参数。</summary>
+        public static string[] CreateActivateOverviewAreaRequiredFields()
+        {
+            return new[] { "areaId" };
+        }
+
+        /// <summary>轮询开关命令只携带显式布尔值，间隔时长由 Unity 场景内序列化配置决定。</summary>
+        public static string[] CreateSetOverviewPollingRequiredFields()
+        {
+            return new[] { "enabled" };
         }
     }
 
@@ -312,6 +326,28 @@ namespace WebDLPro.Unity.SceneRuntime
         public static bool IsValidRouteId(string routeId)
         {
             return SceneSwitchProtocolValidator.IsBoundedIdentifier(routeId);
+        }
+
+        /// <summary>
+        /// 区域高亮只接受首屏沙盘固定的六个区域标识；未知区域必须被桥接层拒绝，
+        /// 不能由控制器按对象名称或坐标猜测，防止网页把任意字符串写入三维视觉。
+        /// </summary>
+        public static bool TryParseOverviewAreaId(string areaId, out string parsedAreaId)
+        {
+            switch (areaId)
+            {
+                case OverviewAreaHighlightController.DispatchCenterAreaId:
+                case OverviewAreaHighlightController.GenerationAreaId:
+                case OverviewAreaHighlightController.TransmissionAreaId:
+                case OverviewAreaHighlightController.DistributionAreaId:
+                case OverviewAreaHighlightController.ConsumptionAreaId:
+                case OverviewAreaHighlightController.MicrogridAreaId:
+                    parsedAreaId = areaId;
+                    return true;
+                default:
+                    parsedAreaId = null;
+                    return false;
+            }
         }
 
         /// <summary>

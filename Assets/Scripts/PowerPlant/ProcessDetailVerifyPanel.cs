@@ -50,12 +50,18 @@ public sealed class ProcessDetailVerifyPanel : MonoBehaviour
         RefreshEntries();
     }
 
-    /// <summary>引用缺失时在唤醒阶段自动解析；场景标识按业务场景文件名（PascalCase → kebab-case）推断。</summary>
+    /// <summary>引用缺失时在唤醒阶段自动解析；场景标识优先取自协调器序列化值，桥接器常驻化后场景名推断不可靠。</summary>
     private void ResolveBindings()
     {
         if (_processDetailCoordinator == null)
         {
             _processDetailCoordinator = FindFirstObjectByType<ProcessDetailCoordinator>();
+        }
+        // 协调器的场景标识是唯一权威来源：编辑器直连 Play 时桥接器会把根对象搬入 DontDestroyOnLoad，
+        // 若仍从场景名推断会得到 dont-destroy-on-load 并过滤出空关键环节清单。
+        if (string.IsNullOrEmpty(_sceneId) && _processDetailCoordinator != null)
+        {
+            _sceneId = _processDetailCoordinator.SceneId;
         }
         if (_catalog == null)
         {
@@ -67,7 +73,9 @@ public sealed class ProcessDetailVerifyPanel : MonoBehaviour
         {
             // 业务场景遵循 PascalCase 文件名与 kebab-case 场景标识一一对应的命名规范。
             string sceneName = gameObject.scene.name;
-            if (!string.IsNullOrEmpty(sceneName) && !string.Equals(sceneName, "BusinessSceneRuntime", StringComparison.Ordinal))
+            if (!string.IsNullOrEmpty(sceneName) &&
+                !string.Equals(sceneName, "BusinessSceneRuntime", StringComparison.Ordinal) &&
+                !string.Equals(sceneName, "DontDestroyOnLoad", StringComparison.Ordinal))
             {
                 _sceneId = ToKebabSceneId(sceneName);
             }
