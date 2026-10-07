@@ -98,6 +98,7 @@ MonoBehaviour:
   _faultColor: {r: 1, g: 0, b: 0.03137255, a: 1}
   _offlineColor: {r: 0.6039216, g: 0.6431373, b: 0.69803923, a: 1}
   _tintStrength: 0.72
+  _flowStopRenderers: []
 --- !u!114 &9033695836813846106
 MonoBehaviour:
   m_ObjectHideFlags: 0

@@ -579,6 +579,18 @@ PrefabInstance:
       propertyPath: m_Name
       value: "\u65AD\u8DEF\u5668"
       objectReference: {fileID: 0}
+    - target: {fileID: 7401501404496198812, guid: 467f9f573fc82b843a8057b57113ff71,
+        type: 3}
+      propertyPath: m_Materials.Array.data[0]
+      value: 
+      objectReference: {fileID: -8863611711243083508, guid: f625c394478f8d04c83d4ea9490fedd9,
+        type: 3}
+    - target: {fileID: 7401501404496198812, guid: 467f9f573fc82b843a8057b57113ff71,
+        type: 3}
+      propertyPath: m_Materials.Array.data[1]
+      value: 
+      objectReference: {fileID: 6353364773545425400, guid: f625c394478f8d04c83d4ea9490fedd9,
+        type: 3}
     - target: {fileID: 7899659416171766221, guid: 467f9f573fc82b843a8057b57113ff71,
         type: 3}
       propertyPath: m_text
@@ -1029,6 +1041,18 @@ PrefabInstance:
       propertyPath: m_Name
       value: "\u53D8\u538B\u5668"
       objectReference: {fileID: 0}
+    - target: {fileID: 7401501404496198812, guid: 467f9f573fc82b843a8057b57113ff71,
+        type: 3}
+      propertyPath: m_Materials.Array.data[0]
+      value: 
+      objectReference: {fileID: -8863611711243083508, guid: f625c394478f8d04c83d4ea9490fedd9,
+        type: 3}
+    - target: {fileID: 7401501404496198812, guid: 467f9f573fc82b843a8057b57113ff71,
+        type: 3}
+      propertyPath: m_Materials.Array.data[1]
+      value: 
+      objectReference: {fileID: 6353364773545425400, guid: f625c394478f8d04c83d4ea9490fedd9,
+        type: 3}
     - target: {fileID: 7899659416171766221, guid: 467f9f573fc82b843a8057b57113ff71,
         type: 3}
       propertyPath: m_text
@@ -1791,6 +1815,18 @@ PrefabInstance:
       propertyPath: m_Name
       value: "\u51FA\u7EBF"
       objectReference: {fileID: 0}
+    - target: {fileID: 7401501404496198812, guid: 467f9f573fc82b843a8057b57113ff71,
+        type: 3}
+      propertyPath: m_Materials.Array.data[0]
+      value: 
+      objectReference: {fileID: -8863611711243083508, guid: f625c394478f8d04c83d4ea9490fedd9,
+        type: 3}
+    - target: {fileID: 7401501404496198812, guid: 467f9f573fc82b843a8057b57113ff71,
+        type: 3}
+      propertyPath: m_Materials.Array.data[1]
+      value: 
+      objectReference: {fileID: 6353364773545425400, guid: f625c394478f8d04c83d4ea9490fedd9,
+        type: 3}
     - target: {fileID: 7899659416171766221, guid: 467f9f573fc82b843a8057b57113ff71,
         type: 3}
       propertyPath: m_text
@@ -1950,6 +1986,18 @@ PrefabInstance:
       propertyPath: m_Name
       value: "\u8FDB\u7EBF"
       objectReference: {fileID: 0}
+    - target: {fileID: 7401501404496198812, guid: 467f9f573fc82b843a8057b57113ff71,
+        type: 3}
+      propertyPath: m_Materials.Array.data[0]
+      value: 
+      objectReference: {fileID: -8863611711243083508, guid: f625c394478f8d04c83d4ea9490fedd9,
+        type: 3}
+    - target: {fileID: 7401501404496198812, guid: 467f9f573fc82b843a8057b57113ff71,
+        type: 3}
+      propertyPath: m_Materials.Array.data[1]
+      value: 
+      objectReference: {fileID: 6353364773545425400, guid: f625c394478f8d04c83d4ea9490fedd9,
+        type: 3}
     - target: {fileID: 7899659416171766221, guid: 467f9f573fc82b843a8057b57113ff71,
         type: 3}
       propertyPath: m_text
@@ -2109,6 +2157,18 @@ PrefabInstance:
       propertyPath: m_Name
       value: "\u4E92\u611F\u5668"
       objectReference: {fileID: 0}
+    - target: {fileID: 7401501404496198812, guid: 467f9f573fc82b843a8057b57113ff71,
+        type: 3}
+      propertyPath: m_Materials.Array.data[0]
+      value: 
+      objectReference: {fileID: -8863611711243083508, guid: f625c394478f8d04c83d4ea9490fedd9,
+        type: 3}
+    - target: {fileID: 7401501404496198812, guid: 467f9f573fc82b843a8057b57113ff71,
+        type: 3}
+      propertyPath: m_Materials.Array.data[1]
+      value: 
+      objectReference: {fileID: 6353364773545425400, guid: f625c394478f8d04c83d4ea9490fedd9,
+        type: 3}
     - target: {fileID: 7899659416171766221, guid: 467f9f573fc82b843a8057b57113ff71,
         type: 3}
       propertyPath: m_text

@@ -33,7 +33,10 @@ public sealed class ProcessDetailVerifyPanel : MonoBehaviour
     private GUIStyle _resultLabelStyle;
     private GUIStyle _entryButtonStyle;
     private GUIStyle _exitButtonStyle;
+    private GUIStyle _actionButtonStyle;
     private bool _stylesInitialized;
+    // 状态模拟经它把四态同步到二层业务模型；纯浏览场景缺失时只更新第三层实例。
+    private PowerPlantProcessController _processController;
 
     private void OnEnable()
     {
@@ -156,9 +159,112 @@ public sealed class ProcessDetailVerifyPanel : MonoBehaviour
         {
             ExitCurrent();
         }
+        DrawActiveDetailStateControls();
         GUILayout.Space(4f);
         GUILayout.Label(_lastResult, _resultLabelStyle);
         GUILayout.EndArea();
+    }
+
+    /// <summary>
+    /// 活动环节的状态模拟：把四态写入当前环节登记的状态节点，与生产路径同构——
+    /// 先经流程控制器更新二层模型，再经协调器投影到第三层实例（故障会下发 faultStop 停播，
+    /// 如燃煤汽轮机箭头停流、轴延迟减速；正常恢复播放）。
+    /// </summary>
+    private void DrawActiveDetailStateControls()
+    {
+        if (_processDetailCoordinator == null || !_processDetailCoordinator.IsActive)
+        {
+            return;
+        }
+        string activeStateNode = FindActiveStateNode();
+        if (string.IsNullOrEmpty(activeStateNode))
+        {
+            GUILayout.Label("当前活动环节没有登记状态节点，无法模拟状态。", _resultLabelStyle);
+            return;
+        }
+
+        GUILayout.Space(4f);
+        GUILayout.Label($"状态模拟（写入节点 {activeStateNode}）", _resultLabelStyle);
+        GUILayout.BeginHorizontal();
+        if (GUILayout.Button("正常", _actionButtonStyle)) ApplyActiveState(activeStateNode, BusinessSceneNodeVisualState.Normal);
+        if (GUILayout.Button("告警", _actionButtonStyle)) ApplyActiveState(activeStateNode, BusinessSceneNodeVisualState.Alarm);
+        if (GUILayout.Button("故障", _actionButtonStyle)) ApplyActiveState(activeStateNode, BusinessSceneNodeVisualState.Fault);
+        if (GUILayout.Button("离线", _actionButtonStyle)) ApplyActiveState(activeStateNode, BusinessSceneNodeVisualState.Offline);
+        GUILayout.EndHorizontal();
+        if (GUILayout.Button("清除关键环节状态（恢复默认视觉）", _actionButtonStyle))
+        {
+            ClearActiveState(activeStateNode);
+        }
+    }
+
+    /// <summary>从目录反查当前活动环节登记的第一个状态节点；多节点环节取主节点即可驱动整体故障行为。</summary>
+    private string FindActiveStateNode()
+    {
+        if (_catalog == null || _processDetailCoordinator == null)
+        {
+            return null;
+        }
+        string activeId = _processDetailCoordinator.ActiveProcessDetailId;
+        if (string.IsNullOrEmpty(activeId))
+        {
+            return null;
+        }
+        foreach (var entry in _catalog.Entries)
+        {
+            if (entry != null &&
+                string.Equals(entry.ProcessDetailId, activeId, StringComparison.Ordinal) &&
+                entry.StateNodeIds.Count > 0)
+            {
+                return entry.StateNodeIds[0];
+            }
+        }
+        return null;
+    }
+
+    /// <summary>与运行时测试面板同构的两步下发：流程控制器（二层模型染色）→ 协调器（三层实例状态与播放许可）。</summary>
+    private void ApplyActiveState(string stateNodeId, BusinessSceneNodeVisualState visualState)
+    {
+        if (_processController == null)
+        {
+            _processController = FindFirstObjectByType<PowerPlantProcessController>();
+        }
+        BusinessSceneCommandResult controllerResult = _processController != null
+            ? _processController.UpdateNodeVisualState(stateNodeId, visualState)
+            : BusinessSceneCommandResult.Completed("流程控制器不在场景中，仅更新第三层实例。");
+        if (!controllerResult.Success)
+        {
+            _lastResult = $"[{GetVisualStateLabel(visualState)}] 二层更新失败：{controllerResult.Message}";
+            return;
+        }
+        BusinessSceneCommandResult result = _processDetailCoordinator.UpdateNodeVisualState(stateNodeId, visualState);
+        _lastResult = result.Success
+            ? $"[{GetVisualStateLabel(visualState)}] 已作用于 {stateNodeId}。"
+            : $"[{GetVisualStateLabel(visualState)}] 三层更新失败：{result.Message}";
+    }
+
+    private void ClearActiveState(string stateNodeId)
+    {
+        if (_processController == null)
+        {
+            _processController = FindFirstObjectByType<PowerPlantProcessController>();
+        }
+        _processController?.ClearNodeVisualState(stateNodeId);
+        BusinessSceneCommandResult result = _processDetailCoordinator.ClearNodeVisualState(stateNodeId);
+        _lastResult = result.Success
+            ? $"[清除状态] {stateNodeId} 已恢复默认视觉。"
+            : $"[清除状态] 失败：{result.Message}";
+    }
+
+    private static string GetVisualStateLabel(BusinessSceneNodeVisualState visualState)
+    {
+        switch (visualState)
+        {
+            case BusinessSceneNodeVisualState.Normal: return "正常";
+            case BusinessSceneNodeVisualState.Alarm: return "告警";
+            case BusinessSceneNodeVisualState.Fault: return "故障";
+            case BusinessSceneNodeVisualState.Offline: return "离线";
+            default: return visualState.ToString();
+        }
     }
 
     /// <summary>点击按钮进入对应关键环节：使用唯一事务标识并缓存协程句柄便于取消。</summary>
@@ -269,6 +375,7 @@ public sealed class ProcessDetailVerifyPanel : MonoBehaviour
         _resultLabelStyle = new GUIStyle(GUI.skin.label) { fontSize = 12, wordWrap = true };
         _entryButtonStyle = new GUIStyle(GUI.skin.button) { fontSize = 13, alignment = TextAnchor.MiddleLeft };
         _exitButtonStyle = new GUIStyle(GUI.skin.button) { fontSize = 13 };
+        _actionButtonStyle = new GUIStyle(GUI.skin.button) { fontSize = 13 };
         _stylesInitialized = true;
     }
 }

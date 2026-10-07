@@ -1,4 +1,4 @@
-import { SCENE_IDS, isOverviewAreaId, isOverviewSceneId, isSceneId, validateStableIdentifier } from '@/config/scene-topology/identifiers'
+import { SCENE_IDS, isOverviewAreaId, isOverviewSceneId, isSceneId, isViewSceneId, validateStableIdentifier } from '@/config/scene-topology/identifiers'
 import type { SceneTopologyManifest, SceneTopologyManifestValidationIssue } from '@/config/scene-topology/types'
 import { MAX_TOPOLOGY_DRILLDOWN_CONTENT_COUNT } from '@/config/scene-topology/topology-drilldown-registry'
 import { hasTopologyIconKey } from '@/services/topology/topology-icon-registry'
@@ -225,8 +225,8 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
 
 
     const sceneId = item.sceneId
-    if (!isSceneId(sceneId)) {
-      appendIssue(issues, 'scene.id', '场景定义使用了非固定九场景标识。')
+    if (!isViewSceneId(sceneId)) {
+      appendIssue(issues, 'scene.id', '场景定义使用了非固定场景标识。')
       continue
     }
 
@@ -234,14 +234,21 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
     scenesById.set(sceneId, item)
     hasNonEmptyString(item, 'title', issues, 'scene.title')
     validateIdentifier(item.unitySceneKey, 'Unity场景键', issues)
-    validateIdentifier(item.defaultTopologyId, '场景默认拓扑标识', issues)
     hasNonEmptyString(item, 'sceneMappingVersion', issues, 'scene.mapping-version')
     hasNonEmptyString(item, 'resourceVersion', issues, 'scene.resource-version')
     if (item.switchStrategy !== 'unload-first' && item.switchStrategy !== 'preload-then-unload') {
       appendIssue(issues, 'scene.switch-strategy', '场景切换策略无效。')
     }
-    for (const topologyId of readArray(item, 'topologyIds', issues, 'scene.topology-ids')) {
-      validateIdentifier(topologyId, '场景拓扑标识', issues)
+    if (isOverviewSceneId(sceneId)) {
+      // 总览视图没有业务拓扑；登记拓扑字段会让平台把总览误当作第十四个业务场景。
+      if (item.defaultTopologyId !== undefined || item.topologyIds !== undefined) {
+        appendIssue(issues, 'overview-scene.topology-forbidden', '平台总览场景不得登记业务拓扑。')
+      }
+    } else {
+      validateIdentifier(item.defaultTopologyId, '场景默认拓扑标识', issues)
+      for (const topologyId of readArray(item, 'topologyIds', issues, 'scene.topology-ids')) {
+        validateIdentifier(topologyId, '场景拓扑标识', issues)
+      }
     }
     for (const actionId of readArray(item, 'supportedActionIds', issues, 'scene.action-ids')) {
       validateIdentifier(actionId, '场景动作标识', issues)
@@ -740,15 +747,19 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
   }
 
   for (const [sceneId, scene] of scenesById) {
-    if (!unityMappingsBySceneId.has(sceneId)) appendIssue(issues, 'unity-mapping.missing', `场景${sceneId}缺少Unity映射。`)
-    const defaultTopologyId = String(scene.defaultTopologyId)
-    const topology = topologiesById.get(defaultTopologyId)
-    const topologyIds = readArray(scene, 'topologyIds', issues, 'scene.topology-ids').map(String)
-    if (!topologyIds.includes(defaultTopologyId) || !topology || topology.sceneId !== sceneId) {
-      appendIssue(issues, 'scene.default-topology', `场景${sceneId}默认拓扑无效。`)
-    }
-    for (const topologyId of topologyIds) {
-      if (topologiesById.get(topologyId)?.sceneId !== sceneId) appendIssue(issues, 'scene.topology-scene', `场景${sceneId}引用了其他场景拓扑。`)
+    // 总览场景没有业务拓扑与三维节点映射，跳过映射与拓扑交叉校验；动作反向目标校验保持同构。
+    const isOverviewScene = isOverviewSceneId(sceneId)
+    if (!isOverviewScene && !unityMappingsBySceneId.has(sceneId)) appendIssue(issues, 'unity-mapping.missing', `场景${sceneId}缺少Unity映射。`)
+    if (!isOverviewScene) {
+      const defaultTopologyId = String(scene.defaultTopologyId)
+      const topology = topologiesById.get(defaultTopologyId)
+      const topologyIds = readArray(scene, 'topologyIds', issues, 'scene.topology-ids').map(String)
+      if (!topologyIds.includes(defaultTopologyId) || !topology || topology.sceneId !== sceneId) {
+        appendIssue(issues, 'scene.default-topology', `场景${sceneId}默认拓扑无效。`)
+      }
+      for (const topologyId of topologyIds) {
+        if (topologiesById.get(topologyId)?.sceneId !== sceneId) appendIssue(issues, 'scene.topology-scene', `场景${sceneId}引用了其他场景拓扑。`)
+      }
     }
     for (const actionId of readArray(scene, 'supportedActionIds', issues, 'scene.action-ids').map(String)) {
       if (actionsById.get(actionId)?.targetSceneId !== sceneId) appendIssue(issues, 'scene.action-scene', `场景${sceneId}引用了不存在或目标不一致的动作。`)
@@ -911,8 +922,11 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
    * 权限与事务编排；反向收录检查让动作与场景声明形成双向闭环。
    */
   for (const [actionId, action] of actionsById) {
-    // 平台总览不属于业务场景闭集，因此没有 SceneDefinition 可承载反向动作列表。
-    if (action.targetViewMode === 'overview') continue
+    /*
+     * 总览动作与业务动作同构：必须由目标场景条目的动作列表显式收录。
+     * 清单未登记总览场景条目时查询同样失败并以 action.scene-unlisted 阻断，
+     * 防止平台在当前场景解析动作时找不到可绑定的目标场景。
+     */
     const scene = scenesById.get(String(action.targetSceneId))
     const declaredActionIds = scene ? readArray(scene, 'supportedActionIds', issues, 'scene.action-ids').map(String) : []
     if (!scene || !declaredActionIds.includes(actionId)) {

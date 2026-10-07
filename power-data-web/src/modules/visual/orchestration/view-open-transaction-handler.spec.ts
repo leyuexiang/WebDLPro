@@ -35,7 +35,7 @@ const windResetActionId = toActionId('action.wind.reset')
 
 /** 构造九场景原子清单夹具；节点为空，只验证事务顺序和跨引用，不声明真实设备、模型或业务映射。 */
 function createManifest(): SceneTopologyManifest {
-  const scenes = SCENE_IDS.map((sceneId) => {
+  const businessScenes = SCENE_IDS.map((sceneId) => {
     const topologyIds = sceneId === 'gas-power'
       ? [gasOverviewTopologyId, gasDetailTopologyId]
       : [sceneId === 'wind-power'
@@ -56,13 +56,24 @@ function createManifest(): SceneTopologyManifest {
       switchStrategy: 'unload-first' as const,
     }
   })
+  // 总览场景条目与业务场景同构登记，但没有拓扑；三个总览动作必须由它双向收录。
+  const overviewScene = {
+    sceneId: OVERVIEW_SCENE_ID,
+    title: '测试场景-overview',
+    unitySceneKey: toUnitySceneKey('overview'),
+    supportedActionIds: [overviewActionId, overviewAreaActionId, overviewPollingActionId],
+    sceneMappingVersion: 'mapping.overview.1',
+    resourceVersion: 'resource.overview.1',
+    switchStrategy: 'unload-first' as const,
+  }
+  const scenes: SceneTopologyManifest['scenes'] = [...businessScenes, overviewScene]
 
   return {
     manifestVersion,
     unityBuildId: 'view-open-build.1',
     unityRuntimeKey: toUnityRuntimeKey('view-open-runtime'),
     scenes,
-    topologies: scenes.flatMap((scene) => scene.topologyIds.map((topologyId) => ({
+    topologies: businessScenes.flatMap((scene) => scene.topologyIds.map((topologyId) => ({
       topologyId,
       sceneId: scene.sceneId,
       title: `测试拓扑-${topologyId}`,
@@ -127,7 +138,7 @@ function createManifest(): SceneTopologyManifest {
         configVersion: manifestVersion,
       },
     ],
-    unitySceneMappings: scenes.map((scene) => ({
+    unitySceneMappings: businessScenes.map((scene) => ({
       sceneId: scene.sceneId,
       mappingVersion: scene.sceneMappingVersion,
       sceneNodeIds: [],

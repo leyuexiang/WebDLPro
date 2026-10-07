@@ -31,11 +31,11 @@ const temporaryDirectories: string[] = []
  */
 function createValidMetadata(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    schemaVersion: 10,
+    schemaVersion: 11,
     unityReleaseId: 'unity-release-test',
     channel: 'power3d-unity',
     protocolVersion: 2,
-    commandCapabilities: ['init', 'resize', 'switchScene', 'moveCameraToPose', 'enterProcessDetail', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'resetCamera', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'dispose'],
+    commandCapabilities: ['init', 'resize', 'switchScene', 'moveCameraToPose', 'enterProcessDetail', 'prepareProcessDetail', 'commitProcessDetail', 'abortProcessDetail', 'exitProcessDetail', 'setProcessDetailPlayback', 'resetScene', 'resetCamera', 'focusNode', 'clearSelection', 'setNodeVisualState', 'clearNodeVisualState', 'setRouteFlow', 'setNodeVisibility', 'activateOverviewArea', 'setOverviewPolling', 'dispose'],
     eventCapabilities: ['ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'selectionCleared', 'disposed'],
     sceneChangedSchemaVersion: 2,
     sceneChangedRequiredFields: ['requestId', 'sceneId', 'transitionId', 'sceneActivationId', 'success'],

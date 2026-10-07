@@ -1,5 +1,6 @@
 import type { ActionId, NodeId, ProcessDetailId, SceneId, SceneNodeId, TopologyId } from '@/config/scene-topology/identifiers'
-import type { ActionDefinition, ProcessDetailDefinition, SceneDefinition, SceneTopologyManifest, SceneTopologyManifestValidationIssue, TopologyDefinition, TopologyNodeDefinition } from '@/config/scene-topology/types'
+import type { ActionDefinition, BusinessSceneDefinition, OverviewSceneDefinition, ProcessDetailDefinition, SceneDefinition, SceneTopologyManifest, SceneTopologyManifestValidationIssue, TopologyDefinition, TopologyNodeDefinition } from '@/config/scene-topology/types'
+import { isBusinessSceneDefinition } from '@/config/scene-topology/types'
 import { validateSceneTopologyManifest } from '@/config/scene-topology/validator'
 import { TopologyDrilldownRegistry, type TopologyDrilldownLookupResult } from '@/config/scene-topology/topology-drilldown-registry'
 
@@ -74,7 +75,9 @@ function resolveTopologyViews(topologies: readonly TopologyDefinition[]): readon
  * 它只维护轻量索引：场景到可切换拓扑、默认拓扑和拓扑定义；不创建画布、图片或隐藏渲染实例。
  */
 export class TopologyRegistry {
-  private readonly sceneById: ReadonlyMap<SceneId, SceneDefinition>
+  /** 业务场景与总览场景分开索引：业务接口保持十三场景闭集语义，总览条目仅供完整列举。 */
+  private readonly businessSceneById: ReadonlyMap<SceneId, BusinessSceneDefinition>
+  private readonly overviewScene: OverviewSceneDefinition | undefined
   private readonly topologyById: ReadonlyMap<TopologyId, TopologyDefinition>
   /** 动作与场景、拓扑同属一份原子清单；事务处理器只能从这里读取已校验映射。 */
   private readonly actionById: ReadonlyMap<ActionId, ActionDefinition>
@@ -92,7 +95,12 @@ export class TopologyRegistry {
 
   private constructor(manifest: SceneTopologyManifest) {
     const resolvedTopologies = resolveTopologyViews(manifest.topologies)
-    this.sceneById = new Map(manifest.scenes.map((scene) => [scene.sceneId, scene]))
+    const businessScenes: [SceneId, BusinessSceneDefinition][] = []
+    for (const scene of manifest.scenes) {
+      if (isBusinessSceneDefinition(scene)) businessScenes.push([scene.sceneId, scene])
+      else this.overviewScene = scene
+    }
+    this.businessSceneById = new Map(businessScenes)
     this.topologyById = new Map(resolvedTopologies.map((topology) => [topology.topologyId, topology]))
     this.actionById = new Map(manifest.actions.map((action) => [action.actionId, action]))
     const processDetails = manifest.processDetails ?? []
@@ -154,15 +162,20 @@ export class TopologyRegistry {
     return { status: 'ready', registry: new TopologyRegistry(input as SceneTopologyManifest), issues: [] }
   }
 
-  /** 返回场景默认拓扑；缺失时返回 undefined，调用方不得回退猜测名称相近的拓扑。 */
+  /** 返回业务场景默认拓扑；缺失时返回 undefined，调用方不得回退猜测名称相近的拓扑。 */
   public getDefaultTopology(sceneId: SceneId): TopologyDefinition | undefined {
-    const scene = this.sceneById.get(sceneId)
+    const scene = this.businessSceneById.get(sceneId)
     return scene ? this.topologyById.get(scene.defaultTopologyId) : undefined
   }
 
-  /** 仅返回固定目录中已登记的场景；未知场景不会由标题或数组位置回退补全。 */
-  public getScene(sceneId: SceneId): SceneDefinition | undefined {
-    return this.sceneById.get(sceneId)
+  /** 仅返回固定目录中已登记的业务场景；未知场景不会由标题或数组位置回退补全。 */
+  public getScene(sceneId: SceneId): BusinessSceneDefinition | undefined {
+    return this.businessSceneById.get(sceneId)
+  }
+
+  /** 返回唯一总览场景条目；总览没有业务拓扑，调用方不得把它当作第十四个业务场景。 */
+  public getOverviewScene(): OverviewSceneDefinition | undefined {
+    return this.overviewScene
   }
 
   /** 查询单份全局唯一拓扑定义，不因当前场景或 UI 标题做模糊匹配。 */
@@ -175,7 +188,7 @@ export class TopologyRegistry {
    * 让协调器以 topology.scene.mismatch 处理，而不是把错误图直接交给画布。
    */
   public getTopologyForScene(sceneId: SceneId, topologyId: TopologyId): TopologyDefinition | undefined {
-    const scene = this.sceneById.get(sceneId)
+    const scene = this.businessSceneById.get(sceneId)
     if (!scene || !scene.topologyIds.includes(topologyId)) return undefined
     return this.topologyById.get(topologyId)
   }
@@ -224,7 +237,7 @@ export class TopologyRegistry {
 
   /** 返回场景已声明的所有拓扑，顺序严格沿用清单，不由组件按标题重新排序。 */
   public listTopologiesForScene(sceneId: SceneId): readonly TopologyDefinition[] {
-    const scene = this.sceneById.get(sceneId)
+    const scene = this.businessSceneById.get(sceneId)
     if (!scene) return []
     return scene.topologyIds.flatMap((topologyId) => {
       const topology = this.topologyById.get(topologyId)
@@ -232,9 +245,11 @@ export class TopologyRegistry {
     })
   }
 
-  /** 只返回当前已登记场景，不泄露内部 Map，调用方无法修改注册表。 */
+  /** 只返回当前已登记场景（含总览条目），不泄露内部 Map，调用方无法修改注册表。 */
   public listScenes(): readonly SceneDefinition[] {
-    return [...this.sceneById.values()]
+    return this.overviewScene
+      ? [...this.businessSceneById.values(), this.overviewScene]
+      : [...this.businessSceneById.values()]
   }
 
   /** 复合键仅拼接已经过清单校验的稳定标识，调用方永远不能传入路径、标题或资源名。 */

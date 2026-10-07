@@ -1044,6 +1044,8 @@ const addedSceneNavigations = [
     { sceneId: 'step-down-substation', title: '降压站', actionId: 'action.step-down-substation.overview', actionTitle: '进入降压站总览' },
     { sceneId: 'converter-station', title: '换流站', actionId: 'action.converter-station.overview', actionTitle: '进入换流站总览' },
     { sceneId: 'switching-station', title: '开关站', actionId: 'action.switching-station.overview', actionTitle: '进入开关站总览' },
+    { sceneId: 'microgrid', title: '微电网', actionId: 'action.microgrid.overview', actionTitle: '进入微电网总览' },
+    { sceneId: 'consumption', title: '用电', actionId: 'action.consumption.overview', actionTitle: '进入用电总览' },
   ]
   // 四个变电业务场景使用已核验的 Unity sceneNodeId；拓扑节点显式携带反向映射，
   // 不依赖标题、数组顺序或图元编号推断三维目标。
@@ -1257,6 +1259,31 @@ const addedSceneNavigations = [
     } else unitySceneMappings.push({ sceneId, mappingVersion: unitySceneMappingVersion, sceneNodeIds: sceneId === 'wind-power' ? ['node.wind-turbine', 'node.wind-gearbox'] : sceneId === 'solar-power' ? [...verifiedSolarSceneNodeIdByTopologyNodeId.values()] : (stationTopologyBySceneId.get(sceneId)?.nodes ?? []).map((node) => node.sceneNodeId), routeIds: [] })
   }
 
+  /*
+   * 平台总览场景与业务场景同构登记 sceneId，让平台按当前场景解析动作时不再找不到绑定目标；
+   * 总览视图没有业务拓扑，条目按协议不携带任何拓扑字段。unitySceneKey 与 Unity 独立
+   * 总览目录（OverviewSceneCatalog，sceneId/unitySceneKey 均为 overview）保持同键。
+   */
+  scenes.push({
+    sceneId: 'overview',
+    title: '全局沙盘总览',
+    unitySceneKey: 'overview',
+    supportedActionIds: [
+      'action.scene.overview',
+      'action.overview.area.dispatch-center',
+      'action.overview.area.generation',
+      'action.overview.area.transmission',
+      'action.overview.area.distribution',
+      'action.overview.area.consumption',
+      'action.overview.area.microgrid',
+      'action.overview.polling.start',
+      'action.overview.polling.stop',
+    ],
+    sceneMappingVersion: unitySceneMappingVersion,
+    resourceVersion: `resource.${unityReleaseId}.overview`,
+    switchStrategy: 'unload-first',
+  })
+
   return {
     manifestVersion,
     unityBuildId: unityReleaseId,
@@ -1334,6 +1361,8 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
         <button type="button" data-action-id="action.step-down-substation.overview" disabled>降压站场景</button>
         <button type="button" data-action-id="action.converter-station.overview" disabled>换流站场景</button>
         <button type="button" data-action-id="action.switching-station.overview" disabled>开关站场景</button>
+        <button type="button" data-action-id="action.microgrid.overview" disabled>微电网场景</button>
+        <button type="button" data-action-id="action.consumption.overview" disabled>用电场景</button>
       </div>
       <div class="test-controls__detail-actions" aria-label="变电场景关键环节跳转操作">
         <button type="button" data-action-id="action.step-up-substation.transformer-protection" disabled>升压站变压保护</button>
@@ -1446,6 +1475,8 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
           'action.step-down-substation.overview',
           'action.converter-station.overview',
           'action.switching-station.overview',
+          'action.microgrid.overview',
+          'action.consumption.overview',
           'action.step-up-substation.transformer-protection',
           'action.step-up-substation.busbar-protection',
           'action.step-up-substation.line-protection',

@@ -12,7 +12,7 @@ import {
 const webProjectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 /**
- * 生成发布门禁需要的最小联合结构清单。夹具保留当前三十三项公开动作和八个动作目标场景，
+ * 生成发布门禁需要的最小联合结构清单。夹具保留当前三十五项公开动作和八个动作目标场景，
  * 使正向用例本身不能再把“只有燃气、燃煤动作”的旧清单当成合格发布基线。
  */
 function createTopologyManifest() {
@@ -24,6 +24,8 @@ function createTopologyManifest() {
     ['step-down-substation', '降压站'],
     ['converter-station', '换流站'],
     ['switching-station', '开关站'],
+    ['microgrid', '微电网'],
+    ['consumption', '用电'],
   ]
   return {
     manifestVersion,
@@ -52,7 +54,21 @@ function createTopologyManifest() {
             : sceneId === 'wind-power'
               ? ['action.wind-power.overview', 'action.wind-power.wind-turbine', 'action.wind-power.gearbox']
               : [`action.${sceneId}.overview`],
-    }))],
+    })), {
+      sceneId: 'overview',
+      unitySceneKey: 'overview',
+      supportedActionIds: [
+        'action.scene.overview',
+        'action.overview.area.dispatch-center',
+        'action.overview.area.generation',
+        'action.overview.area.transmission',
+        'action.overview.area.distribution',
+        'action.overview.area.consumption',
+        'action.overview.area.microgrid',
+        'action.overview.polling.start',
+        'action.overview.polling.stop',
+      ],
+    }],
     topologies: [{
       topologyId: 'topology.gas-power.overview',
       sceneId: 'gas-power',
@@ -535,7 +551,25 @@ describe('发布产物输出标准', () => {
       await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
 
       expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
-        expect.stringContaining('完整发布当前三十三项公开动作'),
+        expect.stringContaining('完整发布当前三十五项公开动作'),
+      ]))
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('结构清单漏登记总览场景条目时阻断交付', async () => {
+    const root = await createArtifact()
+    try {
+      const topologyManifest = createTopologyManifest()
+      // 模拟旧版清单：九个总览动作仍然存在，但总览场景未登记 sceneId，
+      // 平台在当前场景解析动作时找不到可绑定目标，历史相对校验无法发现该漏项。
+      topologyManifest.scenes = topologyManifest.scenes.filter((scene) => scene.sceneId !== 'overview')
+      writeFileSync(path.join(root, 'scene-topology-manifest.json'), `${JSON.stringify(topologyManifest, null, 2)}\n`, 'utf8')
+      await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
+
+      expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
+        expect.stringContaining('无拓扑的总览场景条目'),
       ]))
     } finally {
       rmSync(root, { recursive: true, force: true })
@@ -579,7 +613,7 @@ describe('发布产物输出标准', () => {
       await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
 
       expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
-        expect.stringContaining('完整发布当前三十三项公开动作'),
+        expect.stringContaining('完整发布当前三十五项公开动作'),
       ]))
     } finally {
       rmSync(root, { recursive: true, force: true })

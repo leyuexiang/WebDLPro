@@ -32,7 +32,10 @@ public sealed class SolarInverterProcessDetailDynamicAdapter : ProcessDetailDyna
             return;
         }
 
-        bool shouldPlay = playing && !faultStop;
+        // 故障只驱动设备的红色闪烁高亮（SolarInverterFaultVisualAdapter），
+        // 电线与控制线路的流光保持流动（用户需求：其他流动不受故障影响）；
+        // faultStop 优先于 playing 的暂停语义，确保故障期间流光不会因状态切换被误停。
+        bool shouldPlay = playing || faultStop;
         for (int effectIndex = 0; effectIndex < _flowEffects.Count; effectIndex++)
         {
             _flowEffects[effectIndex].SetPlayback(shouldPlay);

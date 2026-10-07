@@ -16,6 +16,7 @@ import type {
   ViewSceneId,
 } from '@/config/scene-topology/identifiers'
 import type { TopologyIconKey } from '@/config/process/types'
+import { isOverviewSceneId } from '@/config/scene-topology/identifiers'
 
 /** 四态设备视觉与旧拓扑保持一致，但状态来源改由外层父页面的受控消息提供。 */
 export type DeviceVisualStatus = 'normal' | 'alarm' | 'fault' | 'offline'
@@ -66,8 +67,11 @@ export interface UnitySceneMappingDefinition {
   routeIds: readonly RouteId[]
 }
 
-/** 九个场景的基础登记；每个场景必须独立声明资源和映射版本，防止跨版本缓存混用。 */
-export interface SceneDefinition {
+/**
+ * 业务场景登记：必须携带默认拓扑与拓扑列表，sceneId 只接受固定十三场景闭集。
+ * 每个场景必须独立声明资源和映射版本，防止跨版本缓存混用。
+ */
+export interface BusinessSceneDefinition {
   sceneId: SceneId
   title: string
   unitySceneKey: UnitySceneKey
@@ -77,6 +81,34 @@ export interface SceneDefinition {
   sceneMappingVersion: string
   resourceVersion: string
   switchStrategy: SceneSwitchStrategy
+}
+
+/**
+ * 平台总览场景登记：sceneId 固定为 overview，与 Unity 独立总览目录同键。
+ * 总览视图没有业务拓扑，因此禁止登记拓扑字段；supportedActionIds 反向收录总览导航
+ * 与首屏区域视觉动作，让平台按场景解析动作时与业务场景同构。
+ */
+export interface OverviewSceneDefinition {
+  sceneId: OverviewSceneId
+  title: string
+  unitySceneKey: UnitySceneKey
+  defaultTopologyId?: never
+  topologyIds?: never
+  supportedActionIds: readonly ActionId[]
+  sceneMappingVersion: string
+  resourceVersion: string
+  switchStrategy: SceneSwitchStrategy
+}
+
+/** 清单场景条目是业务场景或唯一总览场景；十三场景闭集与 OverviewSceneId 品牌保持互斥。 */
+export type SceneDefinition = BusinessSceneDefinition | OverviewSceneDefinition
+
+/**
+ * 判定清单场景条目是否为业务场景；联合中唯一剩余成员是总览场景。
+ * sceneId 品牌化后判别比较不能自动收窄联合，调用方须使用本守卫访问业务拓扑字段。
+ */
+export function isBusinessSceneDefinition(scene: SceneDefinition): scene is BusinessSceneDefinition {
+  return !isOverviewSceneId(scene.sceneId)
 }
 
 /**

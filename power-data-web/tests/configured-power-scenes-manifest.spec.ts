@@ -81,7 +81,7 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
     expect(manifest.actions.filter((action) => action.targetSceneId === 'gas-power')).toHaveLength(2)
     expect(manifest.actions.filter((action) => action.targetSceneId === 'coal-power')).toHaveLength(2)
     expect(manifest.actions.filter((action) => action.targetSceneId === 'solar-power')).toHaveLength(2)
-    expect(manifest.actions).toHaveLength(33)
+    expect(manifest.actions).toHaveLength(35)
     expect(manifest.actions.find((action) => action.actionId === 'action.scene.overview')).toEqual({
       actionId: 'action.scene.overview',
       title: '返回全局总览',
@@ -278,6 +278,29 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
         'action.switching-station.busbar-protection',
         'action.switching-station.line-protection',
       ])
+      /*
+       * 总览场景必须与业务场景同构登记 sceneId：平台在当前场景解析动作时依赖该条目；
+       * 条目不携带任何拓扑字段，且双向收录全部九个总览导航与区域视觉动作。
+       */
+      const overviewScene = manifest.scenes.find((scene) => scene.sceneId === 'overview')
+      expect(overviewScene).toEqual(expect.objectContaining({
+        sceneId: 'overview',
+        title: '全局沙盘总览',
+        unitySceneKey: 'overview',
+        supportedActionIds: [
+          'action.scene.overview',
+          'action.overview.area.dispatch-center',
+          'action.overview.area.generation',
+          'action.overview.area.transmission',
+          'action.overview.area.distribution',
+          'action.overview.area.consumption',
+          'action.overview.area.microgrid',
+          'action.overview.polling.start',
+          'action.overview.polling.stop',
+        ],
+      }))
+      expect(overviewScene).not.toHaveProperty('defaultTopologyId')
+      expect(overviewScene).not.toHaveProperty('topologyIds')
       expect(manifest.actions.filter((action) => action.targetSceneId === 'switching-station' && action.targetViewMode === 'process-detail')).toHaveLength(2)
       expect(manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'switching-station')).not.toHaveProperty('processSteps')
       for (const sceneId of ['step-up-substation', 'step-down-substation', 'converter-station']) {

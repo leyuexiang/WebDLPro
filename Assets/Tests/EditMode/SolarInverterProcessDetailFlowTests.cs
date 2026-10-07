@@ -133,9 +133,9 @@ namespace WebDLPro.Unity.Tests
                 dynamicTarget.SetPlayback(false, false);
                 AssertFlowPlaybackState(modelRoot, false, "暂停");
 
-                // 故障许可即使请求播放也必须保持停流；清除故障后则应能恢复七条流光。
+                // 故障许可必须保持流光播放：故障只驱动设备红色闪烁，线路流动不受故障影响。
                 dynamicTarget.SetPlayback(true, true);
-                AssertFlowPlaybackState(modelRoot, false, "故障停止");
+                AssertFlowPlaybackState(modelRoot, true, "故障保持播放");
                 dynamicTarget.SetPlayback(true, false);
                 AssertFlowPlaybackState(modelRoot, true, "恢复播放");
             }
@@ -145,7 +145,7 @@ namespace WebDLPro.Unity.Tests
             }
         }
 
-        /// <summary>逐条核实七个叠加流光组件收到同一播放许可，覆盖暂停、故障停流及恢复播放。</summary>
+        /// <summary>逐条核实七个叠加流光组件收到同一播放许可，覆盖暂停、故障保持播放及恢复播放。</summary>
         private static void AssertFlowPlaybackState(Transform modelRoot, bool expected, string stateLabel)
         {
             for (int index = 0; index < FlowLineNames.Length; index++)

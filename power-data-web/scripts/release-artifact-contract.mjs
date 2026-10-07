@@ -30,7 +30,7 @@ const requiredUnityEventCapabilities = Object.freeze([
   'ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'selectionCleared', 'disposed',
 ])
 /**
- * 当前合作方以动作摘要生成全部可绑定入口，因此三十三项公开动作属于发布契约本身，不能只做两份清单的相对一致性检查。
+ * 当前合作方以动作摘要生成全部可绑定入口，因此三十五项公开动作属于发布契约本身，不能只做两份清单的相对一致性检查。
  * 目标、视图和三维动作类型一并固定，防止生成器与摘要同时回退，或把普通场景导航误写成未实现的流程能力。
  */
 const requiredPublishedActionContracts = Object.freeze([
@@ -56,6 +56,8 @@ const requiredPublishedActionContracts = Object.freeze([
   { actionId: 'action.step-down-substation.overview', targetSceneId: 'step-down-substation', targetViewMode: 'business', targetTopologyId: 'topology.step-down-substation.overview', unityActionType: 'resetScene' },
   { actionId: 'action.converter-station.overview', targetSceneId: 'converter-station', targetViewMode: 'business', targetTopologyId: 'topology.converter-station.overview', unityActionType: 'resetScene' },
   { actionId: 'action.switching-station.overview', targetSceneId: 'switching-station', targetViewMode: 'business', targetTopologyId: 'topology.switching-station.overview', unityActionType: 'resetScene' },
+  { actionId: 'action.microgrid.overview', targetSceneId: 'microgrid', targetViewMode: 'business', targetTopologyId: 'topology.microgrid.overview', unityActionType: 'none' },
+  { actionId: 'action.consumption.overview', targetSceneId: 'consumption', targetViewMode: 'business', targetTopologyId: 'topology.consumption.overview', unityActionType: 'none' },
   { actionId: 'action.step-up-substation.transformer-protection', targetSceneId: 'step-up-substation', targetViewMode: 'process-detail', processDetailId: 'process-detail.step-up-substation.transformer-protection', unityActionType: 'enterProcessDetail' },
   { actionId: 'action.step-up-substation.busbar-protection', targetSceneId: 'step-up-substation', targetViewMode: 'process-detail', processDetailId: 'process-detail.step-up-substation.busbar-protection', unityActionType: 'enterProcessDetail' },
   { actionId: 'action.step-up-substation.line-protection', targetSceneId: 'step-up-substation', targetViewMode: 'process-detail', processDetailId: 'process-detail.step-up-substation.line-protection', unityActionType: 'enterProcessDetail' },
@@ -68,6 +70,25 @@ const requiredPublishedActionContracts = Object.freeze([
   { actionId: 'action.switching-station.busbar-protection', targetSceneId: 'switching-station', targetViewMode: 'process-detail', processDetailId: 'process-detail.switching-station.busbar-protection', unityActionType: 'enterProcessDetail' },
   { actionId: 'action.switching-station.line-protection', targetSceneId: 'switching-station', targetViewMode: 'process-detail', processDetailId: 'process-detail.switching-station.line-protection', unityActionType: 'enterProcessDetail' },
 ])
+/**
+ * 总览场景条目是本次应发布的绝对能力：平台按当前场景解析动作时依赖该登记。
+ * 总览没有业务拓扑，动作闭集固定为九个总览导航与区域视觉动作，禁止缺项或夹带业务动作。
+ */
+const requiredOverviewSceneContract = Object.freeze({
+  sceneId: 'overview',
+  unitySceneKey: 'overview',
+  supportedActionIds: Object.freeze([
+    'action.scene.overview',
+    'action.overview.area.dispatch-center',
+    'action.overview.area.generation',
+    'action.overview.area.transmission',
+    'action.overview.area.distribution',
+    'action.overview.area.consumption',
+    'action.overview.area.microgrid',
+    'action.overview.polling.start',
+    'action.overview.polling.stop',
+  ]),
+})
 const navigationOnlySceneIds = Object.freeze([])
 const deviceIdentifierSuffixes = new Set(['id', 'ids'])
 const deviceMappingSuffixes = new Set(['mapping', 'mappings'])
@@ -374,7 +395,7 @@ export async function validateReleaseArtifact(rootDirectory) {
     const requiredActionIds = new Set(requiredPublishedActionContracts.map((contract) => contract.actionId))
     if (publishedActions.length !== requiredPublishedActionContracts.length || actionById.size !== requiredPublishedActionContracts.length ||
         [...actionById.keys()].some((actionId) => !requiredActionIds.has(actionId)) || hasInvalidPublishedAction) {
-       issues.push('结构清单必须完整发布当前三十三项公开动作及其固定目标，禁止两份清单同时回退或伪造三维流程能力。')
+       issues.push('结构清单必须完整发布当前三十五项公开动作及其固定目标，禁止两份清单同时回退或伪造三维流程能力。')
     }
 
     /**
@@ -383,7 +404,7 @@ export async function validateReleaseArtifact(rootDirectory) {
      */
     const actionIdsBySceneId = new Map()
     for (const action of publishedActions) {
-      if (action?.targetSceneId === 'overview' || typeof action?.targetSceneId !== 'string' || typeof action?.actionId !== 'string') continue
+      if (typeof action?.targetSceneId !== 'string' || typeof action?.actionId !== 'string') continue
       const actionIds = actionIdsBySceneId.get(action.targetSceneId) ?? []
       actionIds.push(action.actionId)
       actionIdsBySceneId.set(action.targetSceneId, actionIds)
@@ -401,6 +422,23 @@ export async function validateReleaseArtifact(rootDirectory) {
     })
     if (hasInvalidSceneActionIndex) {
       issues.push('业务场景的支持动作标识必须与指向该场景的公开动作双向一致。')
+    }
+
+    /*
+     * 总览场景条目的绝对契约：必须存在、与 Unity 总览目录同键、不得携带拓扑字段，
+     * 并完整收录九个总览动作。结构清单与平台侧绑定同时缺登记时相对校验无法发现，
+     * 因此这里独立声明本次应发布的总览场景能力。
+     */
+    const overviewScene = sceneById.get(requiredOverviewSceneContract.sceneId)
+    const hasInvalidOverviewScene = !overviewScene ||
+      overviewScene.unitySceneKey !== requiredOverviewSceneContract.unitySceneKey ||
+      overviewScene.defaultTopologyId !== undefined ||
+      overviewScene.topologyIds !== undefined ||
+      !Array.isArray(overviewScene.supportedActionIds) ||
+      overviewScene.supportedActionIds.length !== requiredOverviewSceneContract.supportedActionIds.length ||
+      requiredOverviewSceneContract.supportedActionIds.some((actionId) => !overviewScene.supportedActionIds.includes(actionId))
+    if (hasInvalidOverviewScene) {
+      issues.push('结构清单必须登记无拓扑的总览场景条目并完整收录九个总览动作，防止平台在当前场景解析动作时失效。')
     }
 
     /**

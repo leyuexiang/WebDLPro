@@ -1,12 +1,14 @@
 using System;
-using System.Collections.Generic;
+using System.Collections;
 using UnityEngine;
 using UnityEngine.Scripting;
 using WebDLPro.Unity.SceneRuntime;
 
 /// <summary>
-/// 光伏逆变器故障视觉适配器。故障时向显式绑定设备渲染器写入红色自发光（外发光高亮），
-/// 不改变本色；恢复或清除状态时移除自发光覆盖。
+/// 光伏逆变器故障视觉适配器。故障时向显式绑定设备渲染器按材质槽写入红色底色并按周期闪烁；
+/// 不改变本色；恢复或清除状态时还原各材质槽基础颜色并停止闪烁。
+/// 注意：不能走 _EmissionColor 自发光路线——逆变器 FBX 导入的 URP/Lit 材质未启用 _EMISSION
+/// 关键字，发光色会被渲染器整体忽略，因此这里与四态适配器一致走底色属性块。
 /// </summary>
 [Preserve]
 [DisallowMultipleComponent]
@@ -15,14 +17,24 @@ public sealed class SolarInverterFaultVisualAdapter : MonoBehaviour, IProcessDet
     [SerializeField] private Renderer[] _equipmentRenderers = Array.Empty<Renderer>();
     [SerializeField, ColorUsage(true, true)] private Color _faultColor = Color.red;
 
-    private static readonly int EmissionColorPropertyId = Shader.PropertyToID("_EmissionColor");
+    private static readonly int BaseColorPropertyId = Shader.PropertyToID("_BaseColor");
+    private static readonly int AlternateBaseColorPropertyId = Shader.PropertyToID("_BASE_COLOR");
 
-    private readonly List<Renderer> _activeRenderers = new List<Renderer>();
-    private readonly List<int[]> _activeMaterialIndices = new List<int[]>();
+    // 每渲染器每材质槽：颜色属性 Id 与基础颜色；0 表示该槽没有可用底色属性，闪烁时跳过。
+    private int[][] _colorPropertyIds;
+    private Color[][] _baselineColors;
     private MaterialPropertyBlock _propertyBlock;
     private bool _initialized;
     private bool _released;
     private bool _faultActive;
+    private Coroutine _blinkRoutine;
+    private float _blinkStrength = 1f;
+
+    /// <summary>当前闪烁强度（0.35~1）；供测试与验证面板读取，用于推算期望颜色。</summary>
+    public float CurrentBlinkStrength => _blinkStrength;
+
+    /// <summary>配置的故障色只读入口；供测试按强度推算期望闪烁颜色。</summary>
+    public Color FaultColor => _faultColor;
 
     public BusinessSceneCommandResult ApplyVisualState(BusinessSceneNodeVisualState visualState)
     {
@@ -34,11 +46,11 @@ public sealed class SolarInverterFaultVisualAdapter : MonoBehaviour, IProcessDet
         if (visualState == BusinessSceneNodeVisualState.Fault)
         {
             ApplyFaultGlow();
-            return BusinessSceneCommandResult.Completed("逆变器及汇流箱设备已切换为故障红色外发光。");
+            return BusinessSceneCommandResult.Completed("逆变器及汇流箱设备已切换为故障红色闪烁高亮。");
         }
 
         ClearFaultGlow();
-        return BusinessSceneCommandResult.Completed("逆变器及汇流箱设备已恢复默认发光状态。");
+        return BusinessSceneCommandResult.Completed("逆变器及汇流箱设备已恢复默认基础颜色。");
     }
 
     public BusinessSceneCommandResult ClearVisualState()
@@ -57,12 +69,22 @@ public sealed class SolarInverterFaultVisualAdapter : MonoBehaviour, IProcessDet
         if (_released) return;
         ClearFaultGlow();
         _released = true;
-        _activeRenderers.Clear();
-        _activeMaterialIndices.Clear();
+        _colorPropertyIds = null;
+        _baselineColors = null;
         _propertyBlock = null;
     }
 
-    /// <summary>初始化：收集全部有效目标渲染器（不过滤材质属性，确保新模型也能参与发光高亮）。</summary>
+    private void OnEnable()
+    {
+        // 提交阶段会在实例 Root.SetActive(true) 之前重放故障状态；未激活对象上协程无法启动，
+        // 这里在激活时补启，保证"先故障后进入"的环节进入后立即闪烁。
+        if (_faultActive)
+        {
+            TryStartBlinkRoutine();
+        }
+    }
+
+    /// <summary>初始化：解析每个设备渲染器各材质槽的底色属性并缓存基础颜色。</summary>
     private bool EnsureInitialized(out string error)
     {
         error = string.Empty;
@@ -80,43 +102,159 @@ public sealed class SolarInverterFaultVisualAdapter : MonoBehaviour, IProcessDet
         }
 
         _propertyBlock = new MaterialPropertyBlock();
-        for (int i = 0; i < _equipmentRenderers.Length; i++)
+        _colorPropertyIds = new int[_equipmentRenderers.Length][];
+        _baselineColors = new Color[_equipmentRenderers.Length][];
+        for (int rendererIndex = 0; rendererIndex < _equipmentRenderers.Length; rendererIndex++)
         {
-            var renderer = _equipmentRenderers[i];
+            Renderer renderer = _equipmentRenderers[rendererIndex];
             if (renderer == null)
             {
-                error = $"逆变器故障视觉渲染器包含空引用（索引 {i}）。";
+                error = $"逆变器故障视觉渲染器包含空引用（索引 {rendererIndex}）。";
                 return false;
             }
-            _activeRenderers.Add(renderer);
+
+            Material[] materials = renderer.sharedMaterials;
+            if (materials == null || materials.Length == 0)
+            {
+                error = $"逆变器故障视觉渲染器 {renderer.name} 没有共享材质。";
+                return false;
+            }
+
+            _colorPropertyIds[rendererIndex] = new int[materials.Length];
+            _baselineColors[rendererIndex] = new Color[materials.Length];
+            for (int materialIndex = 0; materialIndex < materials.Length; materialIndex++)
+            {
+                Material material = materials[materialIndex];
+                int propertyId = ResolveColorPropertyId(material);
+                if (propertyId == 0)
+                {
+                    error = $"逆变器故障视觉材质 {material?.name ?? "<null>"} 不支持底色属性。";
+                    return false;
+                }
+
+                _colorPropertyIds[rendererIndex][materialIndex] = propertyId;
+                _propertyBlock.Clear();
+                renderer.GetPropertyBlock(_propertyBlock, materialIndex);
+                _baselineColors[rendererIndex][materialIndex] = _propertyBlock.HasColor(propertyId)
+                    ? _propertyBlock.GetColor(propertyId)
+                    : material.GetColor(propertyId);
+            }
         }
 
         _initialized = true;
         return true;
     }
 
-    /// <summary>故障高亮：通过材质属性块向所有目标渲染器写入红色自发光。</summary>
+    /// <summary>故障高亮：标记故障、同步写入首帧颜色并启动闪烁协程；实例未激活时由 OnEnable 补启。</summary>
     private void ApplyFaultGlow()
     {
         _faultActive = true;
-        _propertyBlock.SetColor(EmissionColorPropertyId, _faultColor);
-        foreach (var renderer in _activeRenderers)
+        // 协程只在激活实例上运行；隐藏加载或编辑器测试中没有协程，状态应用时必须同步落一次颜色，
+        // 否则进入提交前重放的故障状态在下一帧之前没有任何视觉。
+        _blinkStrength = ComputeBlink();
+        if (_initialized)
         {
-            if (renderer == null) continue;
-            renderer.SetPropertyBlock(_propertyBlock);
+            ApplyBlinkColor(_blinkStrength);
+        }
+        TryStartBlinkRoutine();
+    }
+
+    private void TryStartBlinkRoutine()
+    {
+        if (_blinkRoutine == null && isActiveAndEnabled)
+        {
+            _blinkRoutine = StartCoroutine(FaultBlinkRoutine());
         }
     }
 
-    /// <summary>恢复正常：清除全部目标渲染器上的自发光覆盖。</summary>
+    private static float ComputeBlink()
+    {
+        // 0.4 秒周期呼吸：强度在 0.35 与 1 之间平滑波动，人眼读作持续闪烁。
+        return 0.35f + 0.65f * Mathf.Abs(Mathf.Sin(Time.time * Mathf.PI / 0.4f));
+    }
+
+    /// <summary>故障闪烁协程：红色底色按正弦呼吸式明暗变化，直到故障解除。</summary>
+    private IEnumerator FaultBlinkRoutine()
+    {
+        if (!_initialized)
+        {
+            _blinkRoutine = null;
+            yield break;
+        }
+        while (_faultActive)
+        {
+            _blinkStrength = ComputeBlink();
+            ApplyBlinkColor(_blinkStrength);
+            yield return null;
+        }
+        _blinkRoutine = null;
+    }
+
+    /// <summary>按材质槽写入故障色×闪烁强度；保留各槽基础透明度，不覆盖属性块中的其它属性。</summary>
+    private void ApplyBlinkColor(float blink)
+    {
+        for (int rendererIndex = 0; rendererIndex < _equipmentRenderers.Length; rendererIndex++)
+        {
+            Renderer renderer = _equipmentRenderers[rendererIndex];
+            if (renderer == null) continue;
+            for (int materialIndex = 0; materialIndex < _colorPropertyIds[rendererIndex].Length; materialIndex++)
+            {
+                Color baseline = _baselineColors[rendererIndex][materialIndex];
+                Color blinkColor = new Color(
+                    _faultColor.r * blink,
+                    _faultColor.g * blink,
+                    _faultColor.b * blink,
+                    baseline.a);
+                _propertyBlock.Clear();
+                renderer.GetPropertyBlock(_propertyBlock, materialIndex);
+                _propertyBlock.SetColor(_colorPropertyIds[rendererIndex][materialIndex], blinkColor);
+                renderer.SetPropertyBlock(_propertyBlock, materialIndex);
+            }
+        }
+    }
+
+    /// <summary>恢复正常：停止闪烁并把全部目标材质槽还原为登记时的基础颜色。</summary>
     private void ClearFaultGlow()
     {
         _faultActive = false;
-        _propertyBlock.Clear();
-        foreach (var renderer in _activeRenderers)
+        if (_blinkRoutine != null)
         {
-            if (renderer == null) continue;
-            renderer.SetPropertyBlock(_propertyBlock);
+            StopCoroutine(_blinkRoutine);
+            _blinkRoutine = null;
         }
+        _blinkStrength = 0f;
+        if (!_initialized || _equipmentRenderers == null)
+        {
+            return;
+        }
+
+        for (int rendererIndex = 0; rendererIndex < _equipmentRenderers.Length; rendererIndex++)
+        {
+            Renderer renderer = _equipmentRenderers[rendererIndex];
+            if (renderer == null) continue;
+            for (int materialIndex = 0; materialIndex < _colorPropertyIds[rendererIndex].Length; materialIndex++)
+            {
+                _propertyBlock.Clear();
+                renderer.GetPropertyBlock(_propertyBlock, materialIndex);
+                _propertyBlock.SetColor(
+                    _colorPropertyIds[rendererIndex][materialIndex],
+                    _baselineColors[rendererIndex][materialIndex]);
+                renderer.SetPropertyBlock(_propertyBlock, materialIndex);
+            }
+        }
+    }
+
+    private static int ResolveColorPropertyId(Material material)
+    {
+        if (material == null)
+        {
+            return 0;
+        }
+        if (material.HasProperty(BaseColorPropertyId))
+        {
+            return BaseColorPropertyId;
+        }
+        return material.HasProperty(AlternateBaseColorPropertyId) ? AlternateBaseColorPropertyId : 0;
     }
 
 #if UNITY_EDITOR
@@ -127,8 +265,11 @@ public sealed class SolarInverterFaultVisualAdapter : MonoBehaviour, IProcessDet
         _faultColor = faultColor;
         _initialized = false;
         _released = false;
-        _activeRenderers.Clear();
-        _activeMaterialIndices.Clear();
+        _colorPropertyIds = null;
+        _baselineColors = null;
+        _faultActive = false;
+        _blinkRoutine = null;
+        _blinkStrength = 0f;
     }
 #endif
 }

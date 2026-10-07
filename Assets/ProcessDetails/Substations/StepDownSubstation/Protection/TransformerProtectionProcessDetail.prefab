@@ -95,6 +95,8 @@ MonoBehaviour:
   _faultColor: {r: 1, g: 0, b: 0.03137255, a: 1}
   _offlineColor: {r: 0.6039216, g: 0.6431373, b: 0.69803923, a: 1}
   _tintStrength: 0.72
+  _flowStopRenderers: []
+  _faultHiddenRenderers: []
 --- !u!114 &4940137914106637581
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -158,8 +160,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 6439362511872741655}
   serializedVersion: 2
-  m_LocalRotation: {x: -0.2405538, y: -0.020662488, z: 0.005471508, w: -0.97040045}
-  m_LocalPosition: {x: 9991.265, y: 49.655563, z: -59.293713}
+  m_LocalRotation: {x: -0.0007836768, y: 0.9537249, z: -0.30066925, w: -0.0024858282}
+  m_LocalPosition: {x: 9996.228, y: 45.7754, z: 54.97644}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []

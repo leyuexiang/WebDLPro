@@ -69,6 +69,8 @@ describe('燃气与燃煤拓扑无下钻发布契约', () => {
       'action.step-down-substation.overview',
       'action.converter-station.overview',
       'action.switching-station.overview',
+      'action.microgrid.overview',
+      'action.consumption.overview',
       'action.wind-power.wind-turbine',
       'action.wind-power.gearbox',
       'action.solar-power.inverter',

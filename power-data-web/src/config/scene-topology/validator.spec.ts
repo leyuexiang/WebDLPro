@@ -12,7 +12,8 @@ import {
   OVERVIEW_SCENE_ID,
 } from '@/config/scene-topology/identifiers'
 import { SceneTopologyManifestLoader } from '@/config/scene-topology/loader'
-import type { SceneTopologyManifest } from '@/config/scene-topology/types'
+import { isBusinessSceneDefinition } from '@/config/scene-topology/types'
+import type { BusinessSceneDefinition, SceneTopologyManifest } from '@/config/scene-topology/types'
 import { MAX_DEVICE_STATE_SCENE_NODE_TARGETS_PER_SCENE, validateSceneTopologyManifest } from '@/config/scene-topology/validator'
 
 const manifestVersion = 'node-protocol-test.1'
@@ -51,7 +52,7 @@ function createValidManifest(options: { gasNodes?: SceneTopologyManifest['topolo
     toNodeId: gasNodes[1]!.nodeId,
     title: '机械连接',
   }]
-  const scenes = SCENE_IDS.map((sceneId) => {
+  const businessScenes: BusinessSceneDefinition[] = SCENE_IDS.map((sceneId) => {
     const topologyId = toTopologyId(`topology.${sceneId}.overview`)
     return {
       sceneId,
@@ -65,7 +66,18 @@ function createValidManifest(options: { gasNodes?: SceneTopologyManifest['topolo
       switchStrategy: 'unload-first' as const,
     }
   })
-  const topologies = scenes.map((scene) => scene.sceneId === 'gas-power'
+  // 总览场景条目与业务场景同构登记，但不携带任何拓扑字段；总览动作必须由它反向收录。
+  const overviewScene = {
+    sceneId: OVERVIEW_SCENE_ID,
+    title: '测试场景-overview',
+    unitySceneKey: toUnitySceneKey('overview'),
+    supportedActionIds: [],
+    sceneMappingVersion: `${manifestVersion}.overview`,
+    resourceVersion: `${manifestVersion}.overview`,
+    switchStrategy: 'unload-first' as const,
+  }
+  const scenes: SceneTopologyManifest['scenes'] = [...businessScenes, overviewScene]
+  const topologies = businessScenes.map((scene) => scene.sceneId === 'gas-power'
     ? {
         topologyId: gasOverviewId,
         sceneId: scene.sceneId,
@@ -89,7 +101,7 @@ function createValidManifest(options: { gasNodes?: SceneTopologyManifest['topolo
     scenes,
     topologies: options.flow ? [...topologies, options.flow] : topologies,
     actions: [],
-    unitySceneMappings: scenes.map((scene) => ({
+    unitySceneMappings: businessScenes.map((scene) => ({
       sceneId: scene.sceneId,
       mappingVersion: scene.sceneMappingVersion,
       sceneNodeIds: scene.sceneId === 'gas-power' ? gasNodes.flatMap((node) => node.sceneNodeId ? [node.sceneNodeId] : []) : [],
@@ -113,7 +125,7 @@ describe('场景拓扑节点协议清单校验', () => {
     const flowTopologyId = toTopologyId('topology.gas-power.focus-flow')
     const manifest = {
       ...baseManifest,
-      scenes: baseManifest.scenes.map((scene) => scene.sceneId === 'gas-power'
+      scenes: baseManifest.scenes.map((scene) => isBusinessSceneDefinition(scene) && scene.sceneId === 'gas-power'
         ? { ...scene, topologyIds: [...scene.topologyIds, flowTopologyId] }
         : scene),
       topologies: [
@@ -229,7 +241,7 @@ describe('场景拓扑节点协议清单校验', () => {
     })
     const validManifest: SceneTopologyManifest = {
       ...baseManifest,
-      scenes: baseManifest.scenes.map((scene) => scene.sceneId === 'gas-power'
+      scenes: baseManifest.scenes.map((scene) => isBusinessSceneDefinition(scene) && scene.sceneId === 'gas-power'
         ? { ...scene, topologyIds: [...scene.topologyIds, flowTopologyId], supportedActionIds: [actionId] }
         : scene),
       actions: [{
@@ -352,7 +364,7 @@ describe('场景拓扑节点协议清单校验', () => {
     expect(issueCodes(manifest)).toContain('topology.scene-node-capacity')
   })
 
-  it('总览区域与轮询动作在固定闭集与显式开关下通过校验', () => {
+  it('总览区域与轮询动作在固定闭集与显式开关下通过校验，且由总览场景条目双向收录', () => {
     const manifest = createValidManifest()
     const validOverviewActions: unknown[] = [
       {
@@ -376,8 +388,49 @@ describe('场景拓扑节点协议清单校验', () => {
         configVersion: manifestVersion,
       },
     ]
-    const candidate = { ...manifest, actions: [...manifest.actions, ...validOverviewActions] } as SceneTopologyManifest
+    const candidate = {
+      ...manifest,
+      actions: [...manifest.actions, ...validOverviewActions],
+      scenes: manifest.scenes.map((scene) => scene.sceneId === OVERVIEW_SCENE_ID
+        ? { ...scene, supportedActionIds: validOverviewActions.map((action) => toActionId((action as { actionId: string }).actionId)) }
+        : scene),
+    } as SceneTopologyManifest
     expect(validateSceneTopologyManifest(candidate)).toEqual([])
+  })
+
+  it('总览动作未被总览场景条目收录时被双向收录校验拒绝', () => {
+    const base = createValidManifest()
+    const manifest = {
+      ...base,
+      actions: [...base.actions, {
+        actionId: 'action.overview.area.generation',
+        title: '总览区域高亮：发电',
+        targetSceneId: OVERVIEW_SCENE_ID,
+        targetViewMode: 'overview',
+        allowedParameters: [],
+        unityAction: { type: 'activateOverviewArea', areaId: 'generation' },
+        failurePolicy: 'keep-current-context',
+        configVersion: manifestVersion,
+      }],
+    } as unknown as SceneTopologyManifest
+    expect(issueCodes(manifest)).toContain('action.scene-unlisted')
+  })
+
+  it('总览场景条目携带业务拓扑或重复登记时被拒绝', () => {
+    const base = createValidManifest()
+    const withTopology = {
+      ...base,
+      scenes: base.scenes.map((scene) => scene.sceneId === OVERVIEW_SCENE_ID
+        ? { ...scene, defaultTopologyId: 'topology.gas-power.overview', topologyIds: ['topology.gas-power.overview'] }
+        : scene),
+    } as unknown as SceneTopologyManifest
+    expect(issueCodes(withTopology)).toContain('overview-scene.topology-forbidden')
+
+    const duplicated = {
+      ...base,
+      scenes: [...base.scenes, base.scenes.find((scene) => scene.sceneId === OVERVIEW_SCENE_ID)],
+    } as unknown as SceneTopologyManifest
+    expect(issueCodes(duplicated)).toContain('scene.duplicate')
   })
 
   it('总览区域动作携带未知区域标识或非布尔轮询开关时被动作契约拒绝', () => {
