@@ -1,5 +1,5 @@
 import type { ProcessNodeId, RouteId } from '@/config/process/identifiers'
-import type { TopologyDefinition, TopologyDeviceStatus, TopologyEdgeDefinition, TopologyNodeDefinition } from '@/config/process/types'
+import { DEFAULT_TOPOLOGY_DEVICE_STATUS, type TopologyDefinition, type TopologyDeviceStatus, type TopologyEdgeDefinition, type TopologyNodeDefinition } from '@/config/process/types'
 import { getTopologyIconUrl, MAXIMUM_TOPOLOGY_ICON_ASSETS } from '@/services/topology/topology-icon-registry'
 import type { TopologyRenderer } from '@/services/topology/topology-renderer'
 
@@ -270,10 +270,11 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
       const configuredNode = this.nodeById.get(nodeId)
       if (!configuredNode) continue
 
-      const currentStatus = this.nodeStatusOverrideById.get(nodeId) ?? configuredNode.deviceStatus
+      // 覆盖表只保存外部已收到的状态；空覆盖必须回到正常基线，不能回退到清单中的离线值。
+      const currentStatus = this.nodeStatusOverrideById.get(nodeId) ?? DEFAULT_TOPOLOGY_DEVICE_STATUS
       if (currentStatus === nextStatus) continue
 
-      if (nextStatus === configuredNode.deviceStatus) this.nodeStatusOverrideById.delete(nodeId)
+      if (nextStatus === DEFAULT_TOPOLOGY_DEVICE_STATUS) this.nodeStatusOverrideById.delete(nodeId)
       else this.nodeStatusOverrideById.set(nodeId, nextStatus)
       changed = true
     }
@@ -1455,7 +1456,8 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
    * 设备状态仍由图元本身和提示层表达，选中反馈只表达用户交互状态。
    */
   private drawNode(context: CanvasRenderingContext2D, layout: NodeLayout): void {
-    const deviceStatus = this.nodeStatusOverrideById.get(layout.node.nodeId) ?? layout.node.deviceStatus
+    // 未收到设备状态时始终绘制正常图元；离线只能由外部状态快照明确下发。
+    const deviceStatus = this.nodeStatusOverrideById.get(layout.node.nodeId) ?? DEFAULT_TOPOLOGY_DEVICE_STATUS
 
     context.save()
     const metrics = this.getResponsiveMetrics()

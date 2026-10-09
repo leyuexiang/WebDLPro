@@ -292,7 +292,7 @@ export class TopologyDeviceStateCache {
 
   /**
    * 只遍历权威表中已识别节点及其直接二维目标，生成指定拓扑相对发布基线的覆盖表。
-   * 状态等于节点配置基线时不保存覆盖，使节点从后续快照缺失后自然恢复原始图元状态。
+   * 状态等于统一正常基线时不保存覆盖，使节点从后续快照缺失后自然恢复正常图元。
    */
   private buildTopologyProjection(
     states: ReadonlyMap<NodeId, CachedNodeState>,

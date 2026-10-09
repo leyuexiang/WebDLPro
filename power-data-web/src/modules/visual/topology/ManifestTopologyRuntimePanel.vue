@@ -49,7 +49,7 @@ const selectedNodeIds = ref<readonly ProcessNodeId[]>([])
 const selectedRouteIds = ref<readonly ProcessRouteId[]>([])
 /**
  * 节点状态是运行时快照，不写入清单定义；浅引用避免 Vue 递归代理 Map（映射）并让每批更新只触发一次属性同步。
- * 空映射会让画布回退到拓扑发布的节点基线状态，不需要创建全节点离线覆盖。
+ * 空映射会让画布回退到统一正常图元，不需要创建全节点离线覆盖；离线只能由外部状态快照明确下发。
  */
 const nodeStatuses = shallowRef<ReadonlyMap<ProcessNodeId, TopologyDeviceStatus>>(new Map())
 let topologyRuntime: TopologyRuntime | undefined

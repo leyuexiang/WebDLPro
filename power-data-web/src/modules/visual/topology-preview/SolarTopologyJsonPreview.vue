@@ -104,7 +104,8 @@ const appliedStatusByPenId = new Map<string, TopologyDeviceStatus>()
 let highlightedLineIds: ReadonlySet<string> = new Set()
 
 function getEffectiveNodeStatus(nodeId: ProcessNodeId): TopologyDeviceStatus {
-  return runtimeStatuses.value.get(nodeId) ?? activeNodeById.value.get(nodeId)?.deviceStatus ?? 'normal'
+  // 未收到设备状态时统一显示正常图元；清单字段不参与实时状态推断。
+  return runtimeStatuses.value.get(nodeId) ?? 'normal'
 }
 
 /** 增量状态更新只遍历当前文件的显式绑定，并把多次图元写入合并为一次重绘。 */

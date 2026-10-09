@@ -71,6 +71,21 @@ function resolveTopologyViews(topologies: readonly TopologyDefinition[]): readon
 }
 
 /**
+ * 将远程清单节点的初始状态统一归一为正常图元。
+ * 清单中的 deviceStatus 不是实时设备快照，若直接作为画布基线会把未上报状态误显示为离线、告警或故障；
+ * 真正的四态只允许由 TopologyDeviceStateCache（拓扑设备状态缓存）接收合法设备状态后覆盖。
+ */
+function normalizeTopologyDefaultStatuses(topologies: readonly TopologyDefinition[]): readonly TopologyDefinition[] {
+  return topologies.map((topology) => Object.freeze({
+    ...topology,
+    nodes: Object.freeze(topology.nodes.map((node) => Object.freeze({
+      ...node,
+      deviceStatus: 'normal' as const,
+    }))),
+  }))
+}
+
+/**
  * 多拓扑注册表由同一份已验证场景清单构造。
  * 它只维护轻量索引：场景到可切换拓扑、默认拓扑和拓扑定义；不创建画布、图片或隐藏渲染实例。
  */
@@ -94,7 +109,8 @@ export class TopologyRegistry {
   private readonly drilldownRegistry: TopologyDrilldownRegistry
 
   private constructor(manifest: SceneTopologyManifest) {
-    const resolvedTopologies = resolveTopologyViews(manifest.topologies)
+    // 先解析过滤视图，再统一清单初始状态；状态快照不会改写原始 JSON，只覆盖当前画布图元。
+    const resolvedTopologies = normalizeTopologyDefaultStatuses(resolveTopologyViews(manifest.topologies))
     const businessScenes: [SceneId, BusinessSceneDefinition][] = []
     for (const scene of manifest.scenes) {
       if (isBusinessSceneDefinition(scene)) businessScenes.push([scene.sceneId, scene])
@@ -129,7 +145,8 @@ export class TopologyRegistry {
         targets.push({
           topologyId: topology.topologyId,
           nodeId: node.nodeId,
-          configuredStatus: node.deviceStatus,
+          // 外部清单中的状态不能作为实时基线；未收到状态快照时统一显示正常图元。
+          configuredStatus: 'normal',
         })
         topologyTargetsByNodeId.set(node.nodeId, targets)
       }
@@ -230,7 +247,7 @@ export class TopologyRegistry {
     return this.nodeIdBySceneNodeReference.get(this.createSceneNodeReference(sceneId, sceneNodeId))
   }
 
-  /** 以拓扑标识和二维节点标识精确读取节点定义，供实时状态路径以常数时间取得发布基线状态。 */
+  /** 以拓扑标识和二维节点标识精确读取节点定义，供实时状态路径以常数时间取得正常基线状态。 */
   public getTopologyNode(topologyId: TopologyId, nodeId: NodeId): TopologyNodeDefinition | undefined {
     return this.nodeByTopologyReference.get(this.createTopologyNodeReference(topologyId, nodeId))
   }

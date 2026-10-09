@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ProcessNodeId, RouteId } from '@/config/process/identifiers'
-import type { TopologyDefinition, TopologyDeviceStatus } from '@/config/process/types'
+import { DEFAULT_TOPOLOGY_DEVICE_STATUS, type TopologyDefinition, type TopologyDeviceStatus } from '@/config/process/types'
 import { CanvasTopologyAdapter, type CanvasTopologyViewState } from '@/services/topology/canvas-topology-adapter'
 import { TopologyCanvasUpdateCoordinator } from '@/modules/visual/components/topology-canvas-update-coordinator'
 import type { TopologyCanvasController } from '@/modules/visual/components/topology-canvas-controller'
@@ -67,7 +67,8 @@ const activeTooltipStatus = computed(() => {
   const node = activeTooltipNode.value
 
   if (!node) return ''
-  const status = props.nodeStatuses?.get(node.nodeId) ?? node.deviceStatus
+  // 拓扑清单中的 deviceStatus 仅是历史配置字段；没有外部状态快照时必须显示统一正常图元。
+  const status = props.nodeStatuses?.get(node.nodeId) ?? DEFAULT_TOPOLOGY_DEVICE_STATUS
   return ({ normal: '正常', alarm: '告警', fault: '故障', offline: '离线' } as const)[status]
 })
 const tooltipStyle = computed(() => tooltipUsesKeyboardPosition.value

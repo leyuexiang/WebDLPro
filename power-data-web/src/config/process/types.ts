@@ -31,10 +31,16 @@ export type TopologyEvidenceStatus = 'verified' | 'pending-confirmation' | 'conc
 
 /**
  * 设备运行状态与用户选中状态分离。
- * 拓扑首次加载且尚未收到外部状态快照时使用配置中的正常基线；外部数据仍可明确下发
+ * 拓扑首次加载且尚未收到外部状态快照时使用统一正常基线；外部数据仍可明确下发
  * 正常、告警、故障或离线四态，非法状态由外部协议校验拒绝，不在画布侧自行推断。
  */
 export type TopologyDeviceStatus = 'normal' | 'alarm' | 'fault' | 'offline'
+
+/**
+ * 拓扑图元在尚未收到设备状态快照时的统一显示基线。
+ * “未收到状态”不等同于“离线”；只有外部设备状态消息明确上报离线后才允许显示离线图元。
+ */
+export const DEFAULT_TOPOLOGY_DEVICE_STATUS: TopologyDeviceStatus = 'normal'
 
 /**
  * 受控图元键只描述设备类别，具体 SVG 由图元登记表按四态解析。
@@ -111,7 +117,7 @@ export interface ProcessGuideDefinition {
 
 /**
  * 二维节点的布局坐标为归一化百分比，画布适配器据此适配任意容器尺寸。
- * 图元和状态由受控登记表驱动；没有实时状态时使用清单显式登记的正常基线，
+ * 图元和状态由受控登记表驱动；没有实时状态时使用统一正常基线，
  * 收到外部状态快照后仅由该快照覆盖对应节点，画布不自行变更状态。
  */
 export interface TopologyNodeDefinition {

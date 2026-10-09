@@ -18,7 +18,7 @@ import type {
 import type { TopologyIconKey } from '@/config/process/types'
 import { isOverviewSceneId } from '@/config/scene-topology/identifiers'
 
-/** 四态设备视觉与旧拓扑保持一致，但状态来源改由外层父页面的受控消息提供。 */
+/** 四态设备视觉与旧拓扑保持一致；未收到外层状态消息时统一显示正常图元。 */
 export type DeviceVisualStatus = 'normal' | 'alarm' | 'fault' | 'offline'
 
 /** 场景切换默认先卸载旧资源，只有经过内存验证的场景才可提高峰值内存预加载。 */
