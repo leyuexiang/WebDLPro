@@ -9,6 +9,7 @@ import {
   resolveBusinessSceneTopologySceneId,
 } from './business-scene-topology'
 import type { Pen } from '@meta2d/core'
+import { TOPOLOGY_SHARED_ASSET_ALIASES, getTopologySharedPublicAssetUrl } from './topology-shared-assets'
 
 /** 用户提交的源文件哈希与图元数作为独立基准，防止输入文件漏项或变体串线。 */
 const SOURCE_CONTRACT = {
@@ -77,7 +78,10 @@ describe('新业务场景拓扑数据契约', () => {
 
         for (const pen of data.pens.filter((item) => item.image)) {
           expect(pen.image).toMatch(/^(assets|background|icons)\//)
-          expect(existsSync(resolve(process.cwd(), 'public/topology/shared', pen.image!))).toBe(true)
+          const publicImagePath = TOPOLOGY_SHARED_ASSET_ALIASES[pen.image!] ?? pen.image!
+          expect(existsSync(resolve(process.cwd(), 'public/topology/shared', publicImagePath))).toBe(true)
+          expect(getTopologySharedPublicAssetUrl(pen.image!, '/power/', undefined))
+            .toBe(`/power/topology/shared/${publicImagePath}`)
         }
 
         for (const processPenId of variant.processPenIds) {

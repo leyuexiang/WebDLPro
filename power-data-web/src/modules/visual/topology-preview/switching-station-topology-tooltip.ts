@@ -13,8 +13,8 @@ function normalizeTooltipTitle(text: string | undefined): string {
 }
 
 /**
- * 只有显式登记且带图的设备显示提示。源包未提供四态资源和实时绑定，
- * 因此明确标注预览默认态，禁止把静态动画冒充外部正常状态快照。
+ * 只有显式登记且带图的设备显示提示。公共四态资源已经存在，但场景尚未登记实时设备绑定，
+ * 因此明确标注预览默认态，禁止把静态图标冒充外部正常状态快照。
  */
 export function getSwitchingStationTopologyTooltipContent(
   pen: Pen,

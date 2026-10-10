@@ -125,11 +125,11 @@ const RESOURCE_MANIFEST_BY_VARIANT_ID: ReadonlyMap<CoalTopologyVariantId, CoalTo
     titleBackgroundPenIds: ['d22317e', '44e2393', '7d7130ab'],
     // 控制系统类图片已有项目内静态资源，但没有可靠独立业务节点，保持静态展示。
     staticImagePathByPenId: {
-      '6de883f': 'assets/turbine-governor.png',
-      'c6c435c': 'assets/boiler-safety-control.png',
-      '57ad893': 'assets/coordination-control.png',
-      '6ec996f': 'assets/generator-excitation-control.png',
-      '7902e1f': 'assets/unit-coordination.png',
+      '6de883f': 'icons/normal/dcs.webp',
+      'c6c435c': 'icons/normal/dcs.webp',
+      '57ad893': 'icons/normal/dcs.webp',
+      '6ec996f': 'icons/normal/dcs.webp',
+      '7902e1f': 'icons/normal/coordination.webp',
     },
     processNodePenIds: [],
   })],

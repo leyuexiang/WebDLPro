@@ -75,7 +75,6 @@ const runtimeStatuses = shallowRef<ReadonlyMap<ProcessNodeId, TopologyDeviceStat
 const currentBindings = shallowRef<readonly SolarTopologyRuntimeBinding[]>(getSolarTopologyRuntimeBindings(currentVariantId.value))
 const bindingIndex = shallowRef(createSolarTopologyRuntimeBindingIndex(currentVariantId.value))
 const connectedLineIndex = ref<ReturnType<typeof createGasTopologyConnectedLineIndex>>(new Map())
-const activeNodeById = computed(() => new Map((runtimeTopology.value?.nodes ?? []).map((node) => [node.nodeId, node])))
 const activeTooltip = computed<SolarTopologyTooltipContent | null>(() => {
   const pen = activeTooltipPen.value
   if (!pen?.id) return null

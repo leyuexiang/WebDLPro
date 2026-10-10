@@ -40,7 +40,7 @@ function localizePenImage(pen: Pen, variantId: StepUpSubstationTopologyVariantId
   if (!pen.image?.trim() || !pen.id) return
   const manifest = getStepUpSubstationTopologyResourceManifest(variantId)
   if (manifest.titleBackgroundPenIds.has(pen.id)) {
-    pen.image = getTopologySharedPublicAssetUrl('assets/ba8187270926d7debab4e2073959d603c10b126425efc533883ac60c4579130e.png')
+    pen.image = getTopologySharedPublicAssetUrl('background/flow-light-3.png')
     return
   }
   const staticPath = manifest.staticImagePathByPenId.get(pen.id)

@@ -27,7 +27,8 @@ export const SECURITY_CONFIG = {
    * - 180：6个月试用期
    * - 365：1年试用期
    */
-  TRIAL_DAYS: 30,
+  // 从 2026-09-23 起计算 38 天，截止到 2026-10-31。
+  TRIAL_DAYS: 38,
 
   /**
    * 过期警告天数

@@ -102,7 +102,7 @@ export const GAS_V3_TOPOLOGY_RESOURCE_MANIFEST_BY_VARIANT_ID: ReadonlyMap<
     processNodePenIds: [],
   })],
   // 网络层＋业务层采用 2026-09-07 纠正文件的完整编号清单；43 张图片含 37 个设备和 6 个标题背景。
-  // 源图片已按散列核对公共资源；设备类型沿用现有燃气网络层的显式分类，切层继续共用四态图片。
+  // 旧图片已按图元类型映射到新公共资源；设备类型沿用燃气网络层显式分类，切层继续共用四态图片。
   ['network-business', createResourceManifest({
     dcs: ['4026b99', '4ffe660d', '1cff0ae6', '3ea7f2e1'],
     desktop: [
@@ -179,11 +179,11 @@ export const GAS_V3_TOPOLOGY_RESOURCE_MANIFEST_BY_VARIANT_ID: ReadonlyMap<
     gas_turbine: ['14d76d6'],
     titleBackgroundPenIds: ['3d5a336a', '2dc53a65', '4458b51'],
     processNodePenIds: [],
-    // 控制系统源图与公共控制资源逐项按文件哈希核对，未登记为设备状态图元。
+    // 控制系统图元仍使用公共控制类正常图标；缺少实时绑定时不纳入设备状态切换。
     staticImagePathByPenId: {
-      '47c8043': 'assets/denitration-control.png',
-      '1a099f22': 'assets/coordination-control.png',
-      'cee16fb': 'assets/coordination-control.png',
+      '47c8043': 'icons/normal/plc.webp',
+      '1a099f22': 'icons/normal/dcs.webp',
+      'cee16fb': 'icons/normal/dcs.webp',
     },
   })],
 ])

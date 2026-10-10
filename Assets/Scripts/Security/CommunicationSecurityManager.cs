@@ -87,8 +87,8 @@ namespace WebDLPro.Unity.Security
         DateTime baseDate = new DateTime(2026, 9, 23);
         
         // 通过计算得出过期日期，而非直接写死
-        // 当前设置：2026年9月23日 + 30天 = 2026年10月23日
-        int obfuscatedDays = 30; // 30天试用期
+        // 当前设置：2026年9月23日 + 38天 = 2026年10月31日（月末）
+        int obfuscatedDays = 38; // 截止到2026年10月31日
         
         // 你可以修改这个值来设置实际的试用期限
         // 例如：90天试用期、180天试用期等

@@ -77,7 +77,8 @@ describe('拓扑节点状态完整快照缓存', () => {
     const second = cache.apply({ sourceRevision: 1, items: [{ nodeId: primaryNodeId, deviceStatus: 'normal', statusUpdatedAt: '2026-08-10T08:00:00.000+08:00' }] })
     expect(second.committed).toBe(true)
     expect(second.restoredNodeIds).toEqual([standbyNodeId])
-    expect(second.activeTopologyNodeStatuses).toEqual(new Map([[primaryNodeId, 'normal']]))
+    // 正常是统一二维基线；收到正常状态时无需写入覆盖表，画布会直接显示正常图元。
+    expect(second.activeTopologyNodeStatuses).toEqual(new Map())
     expect(second.activeSceneNodeStatuses).toEqual(new Map([[primarySceneNodeId, 'normal']]))
     expect(second.clearedActiveSceneNodeIds).toEqual([standbySceneNodeId])
   })

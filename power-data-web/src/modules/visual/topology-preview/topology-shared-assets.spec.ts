@@ -74,12 +74,16 @@ describe('拓扑公共设备图标', () => {
     }
   })
 
-  it('公共目录完整包含29类设备的四种状态且没有额外格式', () => {
+  it('公共目录完整包含64类新图元的四种状态且没有额外格式', () => {
     for (const status of statuses) {
       const files = readdirSync(resolve(sharedRoot, 'icons', status))
-      expect(files).toHaveLength(29)
+      expect(files).toHaveLength(64)
       expect(files.every((file) => file.endsWith('.webp'))).toBe(true)
     }
+  })
+
+  it('旧静态资源目录已移除，默认拓扑图元使用新公共资源目录', () => {
+    expect(existsSync(resolve(sharedRoot, 'assets'))).toBe(false)
   })
 
   it('拓扑版本目录不再保存图片资源副本', () => {

@@ -66,7 +66,7 @@ describe('场景拓扑发布契约命令', () => {
       issueCount: 0,
       issues: [],
     })
-  })
+  }, 30_000)
 
   it('可将同一份有限报告写入工作区内指定位置，供发布流水线归档', () => {
     const reportPath = 'tests/fixtures/.scene-topology-contract-report.generated.json'

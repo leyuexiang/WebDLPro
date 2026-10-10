@@ -8,15 +8,16 @@ const PATH_BY_CONTEXT = new Map([
 ])
 const IMAGE_MAP: Readonly<Record<string, string>> = Object.freeze({
   '/material/装饰/流光3.png': 'background/flow-light-3.png',
-  '/cloud/2026/09/09/19/01a085ee-550a-730f-88af-d790f1148bcd.png': 'assets/chemical-water-control.png',
-  '/cloud/2026/09/09/19/01a085ee-07b2-7487-a60f-a54b4ebc048c.png': 'assets/chemical-water-control.png',
-  '/cloud/2026/09/09/19/01a085ee-352c-7587-ba00-b77266e4aaf6.png': 'assets/chemical-water-control.png',
-  '/cloud/2026/09/01/22/01a05d75-b20c-7e1f-9f04-6f70a3344851.png': 'assets/boiler-safety-control.png',
-  '/cloud/2026/09/15/17/01a0a44f-adaf-7ebf-b5e5-46566af514d0.png': 'assets/24ebf71e12d52b8eefa670e47598f2d2a983ad9c8144a48c54995269286485f4.png',
-  '/cloud/2026/09/15/17/01a0a44e-c9b0-74d9-9ef4-69fdd545759b.png': 'assets/3bccb7e7c803d154697613cbf9442e7a1a0558ae700eff0fe525e3fa1540b50f.png',
-  '/cloud/2026/09/15/17/01a0a44f-0f9d-7d98-bf20-22d7f35114f5.png': 'assets/c22310dddba4eac96f3576338f9fb8c1a3c8c35c8135860d41f65a2bc919b8b4.png',
-  '/cloud/2026/09/09/20/01a08639-799b-7a65-8a8f-e31e02cb35fe.png': 'assets/21960efa9d7b5349021290020a64889d5bf9116717949f55b5be9225fe67162a.png',
-  '/cloud/2026/09/09/20/01a08639-15ae-7ed0-9ab4-539dee85ade1.png': 'assets/fc2eb70c87fa47ee40600832dd9de280ba60b79aedbaaf99304ed30043fd5ffb.png',
+  // 云端历史图片键只保留在输入端；输出统一指向新动态图标，避免再次请求已删除的静态目录。
+  '/cloud/2026/09/09/19/01a085ee-550a-730f-88af-d790f1148bcd.png': 'icons/normal/plc.webp',
+  '/cloud/2026/09/09/19/01a085ee-07b2-7487-a60f-a54b4ebc048c.png': 'icons/normal/plc.webp',
+  '/cloud/2026/09/09/19/01a085ee-352c-7587-ba00-b77266e4aaf6.png': 'icons/normal/plc.webp',
+  '/cloud/2026/09/01/22/01a05d75-b20c-7e1f-9f04-6f70a3344851.png': 'icons/normal/dcs.webp',
+  '/cloud/2026/09/15/17/01a0a44f-adaf-7ebf-b5e5-46566af514d0.png': 'icons/normal/gearbox.webp',
+  '/cloud/2026/09/15/17/01a0a44e-c9b0-74d9-9ef4-69fdd545759b.png': 'icons/normal/yaw_motor.webp',
+  '/cloud/2026/09/15/17/01a0a44f-0f9d-7d98-bf20-22d7f35114f5.png': 'icons/normal/pitch_hydraulic.webp',
+  '/cloud/2026/09/09/20/01a08639-799b-7a65-8a8f-e31e02cb35fe.png': 'icons/normal/wind_blade.webp',
+  '/cloud/2026/09/09/20/01a08639-15ae-7ed0-9ab4-539dee85ade1.png': 'icons/normal/brake_disc.webp',
 })
 
 /** 风电第三层只读取显式登记文件，图片统一转换为公共资源地址。 */
