@@ -19,7 +19,7 @@ function verifyVariant(variant: {
   const file = resolve(topologyRoot, variant.topologyPath)
   expect(existsSync(file)).toBe(true)
   const bytes = readFileSync(file)
-  // 旧第二层文件曾做过受控公共资源路径本地化，清单保留的是原压缩包散列；本次第三层原样归档才锁定当前文件字节。
+  // 第二层清单记录用户原始输入散列；资源路径可能已本地化。第三层原样归档并校验当前文件字节。
   if (verifySourceBytes) expect(createHash('sha256').update(bytes).digest('hex')).toBe(variant.sourceSha256)
   const data = JSON.parse(bytes.toString('utf8')) as Meta2dData
   expect(data.pens).toHaveLength(variant.expectedPenCount)

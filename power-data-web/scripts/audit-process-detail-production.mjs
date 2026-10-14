@@ -189,7 +189,11 @@ export async function auditProcessDetailProduction(releaseId = 'process-detail-s
       windGearboxDetailAction.unityAction?.type !== 'enterProcessDetail') {
     issues.push({ code: 'process-detail.action-uses-legacy-path', file: 'power-data-web/scripts/build-gas-power-smoke-release.mjs' })
   }
-  if (!windMapping || windMapping.sceneNodeIds?.length !== 2 ||
+  /**
+   * 这项第三层审计只锁住风机和齿轮箱的既有状态目标，不限制风电第二层拓扑契约扩展目标数量。
+   * 新增的十个拓扑目标由风电节点映射测试检查；本审计不宣称 Unity 场景已实际配置这些目标。
+   */
+  if (!windMapping ||
       !windMapping.sceneNodeIds?.includes('node.wind-turbine') ||
       !windMapping.sceneNodeIds?.includes('node.wind-gearbox')) {
     issues.push({ code: 'process-detail.wind-mapping-not-approved', file: 'power-data-web/scripts/build-gas-power-smoke-release.mjs' })

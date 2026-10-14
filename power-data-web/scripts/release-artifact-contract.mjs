@@ -442,8 +442,8 @@ export async function validateReleaseArtifact(rootDirectory) {
     }
 
     /**
-     * 风电当前只提供场景导航；开关站已提供两项保护关键环节。必须指向本场景默认总览拓扑，且不得登记流程步骤或第三层目录。
-     * 该约束把“可从菜单进入场景”和“已实现三维工艺能力”明确分开。
+     * 风电总览动作只负责场景导航；十节点编号和 Unity 目标闭集由清单生成器校验，
+     * 风机与齿轮箱继续由独立第三层目录承载。该约束不把总览导航动作误判为流程控制能力。
      */
     const unityMappingBySceneId = new Map(
       (Array.isArray(topologyManifest.unitySceneMappings) ? topologyManifest.unitySceneMappings : [])

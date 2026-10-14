@@ -225,6 +225,51 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
     expect(publishedMappedNodes).toHaveLength(verifiedMappings.length)
   })
 
+  it('风电三层组合发布十个稳定映射并阻止缺失的 Unity 目标', async () => {
+    const manifest = await createConfiguredPowerScenesManifest('wind-topology-node-contract')
+    const topology = manifest.topologies.find((item) => item.topologyId === 'topology.wind-power.overview')
+    const unityMapping = manifest.unitySceneMappings.find((item) => item.sceneId === 'wind-power')
+    const expectedNodeTargets = [
+      ['system.wind-pitch-control', 'unit.wind-pitch.control'],
+      ['system.wind-converter-control', 'unit.wind-converter.control'],
+      ['system.wind-yaw-control', 'unit.wind-yaw.control'],
+      ['system.wind-drivetrain-control', 'unit.wind-drivetrain.control'],
+      ['system.wind-brake-control', 'unit.wind-brake.control'],
+      ['asset.wind-pitch-system', 'node.wind-pitch-system'],
+      ['asset.wind-converter-system', 'node.wind-converter-system'],
+      ['asset.wind-yaw-system', 'node.wind-yaw-system'],
+      ['asset.wind-drivetrain-system', 'node.wind-drivetrain-system'],
+      ['asset.wind-brake-system', 'node.wind-brake-system'],
+    ] as const
+
+    expect(topology?.nodes.map((node) => [node.nodeId, node.sceneNodeId])).toEqual(expectedNodeTargets)
+    expect(unityMapping?.sceneNodeIds).toEqual([
+      'node.wind-turbine',
+      'node.wind-gearbox',
+      ...expectedNodeTargets.map(([, sceneNodeId]) => sceneNodeId),
+    ])
+    expect(validateSceneTopologyManifest(manifest)).toEqual([])
+
+    const registryResult = TopologyRegistry.create(manifest)
+    expect(registryResult.status).toBe('ready')
+    if (registryResult.status !== 'ready') return
+    for (const [nodeId, sceneNodeId] of expectedNodeTargets) {
+      expect(registryResult.registry.getNodeIdForSceneNode(
+        toSceneId('wind-power'),
+        toSceneNodeId(sceneNodeId),
+      )).toBe(nodeId)
+    }
+
+    // 负向校验：清单节点仍在而目标从场景闭集中移除时，结构门禁必须拒绝该绑定。
+    const missingTargetManifest = structuredClone(manifest)
+    const missingTargetMapping = missingTargetManifest.unitySceneMappings.find((item) => item.sceneId === 'wind-power')
+    missingTargetMapping.sceneNodeIds = missingTargetMapping.sceneNodeIds.filter(
+      (sceneNodeId) => sceneNodeId !== expectedNodeTargets[0][1],
+    )
+    expect(validateSceneTopologyManifest(missingTargetManifest).map((issue) => issue.code))
+      .toContain('topology.scene-node-unregistered')
+  })
+
   it('发布场景选择只改变运行时入口别名而不裁剪另一场景内容', async () => {
     const [gasInitial, coalInitial, solarInitial] = await Promise.all([
       createConfiguredPowerScenesManifest('dual-selection-initial-gas', 'gas-power'),

@@ -15,7 +15,8 @@ import {
  * 燃气、燃煤发电联合发布包构建器。
  *
  * 此脚本为“现有燃气发电 Unity 场景 + 已确认燃气拓扑”生成本地测试、合作方联调或正式发布目录。
- * 它不会改写九场景正式清单，也不会把尚未交付的设备、三维节点、流程或状态映射伪造成真实内容。
+ * 风电十个第二层节点的稳定编号按本次映射约定登记，作为后续 Unity 场景配置契约；登记本身不代表 Unity 模型已完成配置。
+ * 其他未确认设备、三维节点、流程或状态映射仍保持空缺，不得伪造。
  * 其余固定场景仅保留契约要求的空占位；本地测试宿主页从全局沙盘出发，可在同一个 Unity 实例内验收两套真实场景。
  */
 const workspaceRoot = process.cwd()
@@ -39,7 +40,22 @@ let unityEntryUrl = `${hostOrigin}/unity/index.html`
 let topologyManifestUrl = `${hostOrigin}/scene-topology-manifest.json`
 // 发布脚本默认仍构建燃气回归包；场景参数可显式选择燃煤或光伏入口。
 let releaseSceneId = 'gas-power'
-const unitySceneMappingVersion = '2026.09.10-coal-layer-split.1'
+const unitySceneMappingVersion = '2026.10.15-wind-topology-interaction.1'
+/** 风电前端拓扑目标加上既有第三层状态目标，共同组成 Unity 后续必须登记的稳定节点闭集。 */
+const windTopologySceneNodeIds = Object.freeze([
+  'node.wind-turbine',
+  'node.wind-gearbox',
+  'unit.wind-pitch.control',
+  'unit.wind-converter.control',
+  'unit.wind-yaw.control',
+  'unit.wind-drivetrain.control',
+  'unit.wind-brake.control',
+  'node.wind-pitch-system',
+  'node.wind-converter-system',
+  'node.wind-yaw-system',
+  'node.wind-drivetrain-system',
+  'node.wind-brake-system',
+])
 
 /**
  * 网页壳按发布场景选择对应运行时键；两个键仍指向同一个九场景 Unity 构建和同一资源摘要。
@@ -1049,6 +1065,35 @@ const addedSceneNavigations = [
   ]
   // 四个变电业务场景使用已核验的 Unity sceneNodeId；拓扑节点显式携带反向映射，
   // 不依赖标题、数组顺序或图元编号推断三维目标。
+  /**
+   * 风电第二层本次约定的十个节点；图纸中重复展示的同类图元共用同一个业务与三维身份。
+   * sceneNodeId 按本表登记，Unity 后续可把对应的多处模型部件绑定到同一个聚合目标。
+   */
+  const windTopologyNodes = [
+    ['system.wind-pitch-control', '变桨控制', 'unit.wind-pitch.control', 'plc', 10, 35],
+    ['system.wind-converter-control', '变流控制', 'unit.wind-converter.control', 'plc', 30, 35],
+    ['system.wind-yaw-control', '偏航控制', 'unit.wind-yaw.control', 'plc', 50, 35],
+    ['system.wind-drivetrain-control', '传动控制', 'unit.wind-drivetrain.control', 'plc', 70, 35],
+    ['system.wind-brake-control', '刹车控制', 'unit.wind-brake.control', 'plc', 90, 35],
+    ['asset.wind-pitch-system', '变桨系统', 'node.wind-pitch-system', 'generic', 10, 70],
+    ['asset.wind-converter-system', '变流系统', 'node.wind-converter-system', 'generic', 30, 70],
+    ['asset.wind-yaw-system', '偏航系统', 'node.wind-yaw-system', 'generic', 50, 70],
+    ['asset.wind-drivetrain-system', '传动系统', 'node.wind-drivetrain-system', 'generic', 70, 70],
+    ['asset.wind-brake-system', '刹车系统', 'node.wind-brake-system', 'generic', 90, 70],
+  ]
+  const windTopologyBySceneId = new Map([
+    ['wind-power', {
+      topologyId: 'topology.wind-power.overview',
+      sceneId: 'wind-power',
+      title: '风力发电总览',
+      configVersion: manifestVersion,
+      nodes: windTopologyNodes.map(([nodeId, title, sceneNodeId, iconKey, x, y]) => ({
+        nodeId, title, sceneNodeId, iconKey, x, y,
+        deviceStatus: 'normal', doubleClickBehavior: 'emit-node', metricKeys: [],
+      })),
+      edges: [],
+    }],
+  ])
   const substationTopologyNodes = {
     'step-up-substation': [
       ['system.step-up-protection-control', '升压站保护控制', 'unit.step-up-protection.control', 'plc', 25, 35],
@@ -1228,9 +1273,11 @@ const addedSceneNavigations = [
     }
     const topologyId = `topology.${sceneId}.overview`
     const existingTopologyIndex = topologies.findIndex((item) => item.topologyId === topologyId)
-    // 光伏上方已经登记两个已核验节点，不能被通用空占位逻辑覆盖。
+    // 光伏、风电及站类场景各自提供显式节点清单；只有其他未交付场景保留空占位。
     if (stationTopologyBySceneId.has(sceneId)) {
       topologies[existingTopologyIndex >= 0 ? existingTopologyIndex : topologies.length] = stationTopologyBySceneId.get(sceneId)
+    } else if (windTopologyBySceneId.has(sceneId)) {
+      topologies[existingTopologyIndex >= 0 ? existingTopologyIndex : topologies.length] = windTopologyBySceneId.get(sceneId)
     } else if (sceneId !== 'solar-power') {
       const emptyTopology = { topologyId, sceneId, title: `${scene?.title ?? sceneId}总览`, configVersion: manifestVersion, nodes: [], edges: [] }
       if (existingTopologyIndex >= 0) topologies[existingTopologyIndex] = emptyTopology
@@ -1245,18 +1292,30 @@ const addedSceneNavigations = [
     if (!coalMapping) throw new Error('燃煤 Unity 映射缺失，无法生成联合清单。')
     return { ...coalMapping }
   })
-  // 风电发布两个已核验第三层节点；偏航系统尚无 Prefab，不登记未实现能力。
+  // 十个第二层映射与风机、齿轮箱两项第三层状态目标使用同一场景映射版本发布。
   for (const sceneId of ['wind-power', 'solar-power', 'step-up-substation', 'step-down-substation', 'converter-station', 'switching-station']) {
     const mapping = unitySceneMappings.find((item) => item.sceneId === sceneId)
     if (mapping) {
       mapping.mappingVersion = unitySceneMappingVersion
       mapping.sceneNodeIds = sceneId === 'wind-power'
-        ? ['node.wind-turbine', 'node.wind-gearbox']
+        ? [...windTopologySceneNodeIds]
         : sceneId === 'solar-power'
           ? [...verifiedSolarSceneNodeIdByTopologyNodeId.values()]
           : (stationTopologyBySceneId.get(sceneId)?.nodes ?? []).map((node) => node.sceneNodeId)
       mapping.routeIds = []
-    } else unitySceneMappings.push({ sceneId, mappingVersion: unitySceneMappingVersion, sceneNodeIds: sceneId === 'wind-power' ? ['node.wind-turbine', 'node.wind-gearbox'] : sceneId === 'solar-power' ? [...verifiedSolarSceneNodeIdByTopologyNodeId.values()] : (stationTopologyBySceneId.get(sceneId)?.nodes ?? []).map((node) => node.sceneNodeId), routeIds: [] })
+    } else unitySceneMappings.push({ sceneId, mappingVersion: unitySceneMappingVersion, sceneNodeIds: sceneId === 'wind-power' ? [...windTopologySceneNodeIds] : sceneId === 'solar-power' ? [...verifiedSolarSceneNodeIdByTopologyNodeId.values()] : (stationTopologyBySceneId.get(sceneId)?.nodes ?? []).map((node) => node.sceneNodeId), routeIds: [] })
+  }
+
+  /** 发布生成阶段校验风电十节点与 Unity 目标闭集一致，避免清单只更新二维或三维一侧。 */
+  const windTopology = topologies.find((topology) => topology.topologyId === 'topology.wind-power.overview')
+  const windMapping = unitySceneMappings.find((mapping) => mapping.sceneId === 'wind-power')
+  const windSceneNodeIdSet = new Set(windMapping?.sceneNodeIds ?? [])
+  const windTopologyNodeIds = new Set(windTopology?.nodes?.map((node) => node.nodeId) ?? [])
+  const windTopologySceneNodeIdSet = new Set(windTopology?.nodes?.map((node) => node.sceneNodeId) ?? [])
+  if (!windTopology || windTopology.nodes.length !== 10 || windTopologyNodeIds.size !== 10 || windTopologySceneNodeIdSet.size !== 10 ||
+      !windMapping || windSceneNodeIdSet.size !== windMapping.sceneNodeIds.length ||
+      windTopology.nodes.some((node) => !node.sceneNodeId || !windSceneNodeIdSet.has(node.sceneNodeId))) {
+    throw new Error('风电十个第二层节点必须全部登记稳定业务编号和唯一 Unity 场景目标。')
   }
 
   /*

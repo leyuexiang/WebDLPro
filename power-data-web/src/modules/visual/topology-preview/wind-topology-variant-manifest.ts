@@ -118,8 +118,8 @@ export const WIND_TOPOLOGY_VARIANTS = [
       "key-process"
     ],
     "topologyPath": "variants/network-business-key-process/topology.json",
-    "sourceSha256": "08db7672e29370482d58364240f3f11aaec44c510f0fb56e30df034efb29afde",
-    "expectedPenCount": 128,
+    "sourceSha256": "f3671aa7bccd0a3f936943881cc35479aef21cdc6ac5e2f66842da2febd9d614",
+    "expectedPenCount": 114,
     "isDefault": true
   }
 ] as const satisfies readonly WindTopologyVariantManifestEntry[]

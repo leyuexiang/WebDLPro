@@ -18,12 +18,18 @@ type ResourceManifestSource = {
 /** 一次性构建只读索引，运行时查询不扫描图元或重复解析资源。 */
 function createResourceManifest(source: ResourceManifestSource): WindTopologyResourceManifest {
   const staticImagePathByPenId = new Map(Object.entries(source.staticImagePathByPenId))
+  const titleBackgroundPenIds = new Set(source.titleBackgroundPenIds)
+  const devicePenIds = new Set<string>()
+  for (const [penId, imagePath] of staticImagePathByPenId) {
+    // 仅把显式映射到公共设备图标的图片登记为可选设备；标题底图仍保持不可命中。
+    if (imagePath.startsWith('icons/normal/') && !titleBackgroundPenIds.has(penId)) devicePenIds.add(penId)
+  }
   return Object.freeze({
-    // 当前源包没有与公共正常、告警、故障、离线四态图标精确匹配的设备图片，禁止猜测四态映射。
+    // 未确认四态业务映射前不切换状态图片，但已登记公共设备图标的节点仍可独立二维选中。
     deviceIconPathByPenId: new Map<string, string>(),
     staticImagePathByPenId,
-    devicePenIds: new Set<string>(),
-    titleBackgroundPenIds: new Set(source.titleBackgroundPenIds),
+    devicePenIds,
+    titleBackgroundPenIds,
     processNodePenIds: new Set(source.processNodePenIds),
   })
 }
@@ -227,26 +233,16 @@ const RESOURCE_MANIFEST_BY_VARIANT_ID: ReadonlyMap<WindTopologyVariantId, WindTo
     processNodePenIds: ["730f9118", "eb7d4da", "5b1b946", "53f5be", "f48a03d", "050e39b"],
   })],
   ['network-business-key-process', createResourceManifest({
+    // 本次三层组合按源 JSON 的图片引用核对公共设备图标；三张 9 月 15 日更新的设备图
+    // 复用风电关键环节清单中已登记的同源资源映射，不按标题或图元位置推断。
     staticImagePathByPenId: {
-      '641ad6': 'icons/normal/generator.webp',
-      '7c0be9c': 'icons/normal/wind_blade.webp',
-      '90a032f': 'icons/normal/yaw_motor.webp',
       '1ae2e552': 'icons/normal/firewall.webp',
       '0c8a079': 'icons/normal/firewall.webp',
       'dad2c5b': 'icons/normal/server.webp',
       '77d10fd': 'icons/normal/server.webp',
-      '391907e8': 'icons/normal/generator.webp',
       '87f441c': 'icons/normal/wind_blade.webp',
-      '210b4294': 'icons/normal/plc.webp',
-      '121a52d5': 'icons/normal/plc.webp',
-      '53faeab': 'icons/normal/plc.webp',
-      '3e7914c8': 'icons/normal/plc.webp',
-      '59925d99': 'icons/normal/plc.webp',
-      '7ee2b128': 'icons/normal/dcs.webp',
-      '4a053f68': 'icons/normal/gearbox.webp',
-      '4b0ee679': 'icons/normal/heat_fan.webp',
-      '2fbe527': 'icons/normal/brake_disc.webp',
-      '4996538': 'icons/normal/yaw_motor.webp',
+      'd4ab511': 'icons/normal/wind_blade.webp',
+      '4996538': 'icons/normal/pitch_hydraulic.webp',
       '10497337': 'icons/normal/office.webp',
       'd8e617b': 'icons/normal/office.webp',
       '986ad3d': 'icons/normal/desktop.webp',
@@ -256,15 +252,23 @@ const RESOURCE_MANIFEST_BY_VARIANT_ID: ReadonlyMap<WindTopologyVariantId, WindTo
       '67fd9a': 'icons/normal/plc.webp',
       'c8042a6': 'icons/normal/plc.webp',
       '27e09c2f': 'icons/normal/plc.webp',
-      '41ab4ea5': 'icons/normal/plc.webp',
       '1380738': 'icons/normal/dcs.webp',
-      '03ed836': 'icons/normal/plc.webp',
-      '44940c8': 'icons/normal/gearbox.webp',
-      '52b0990b': 'icons/normal/heat_fan.webp',
+      '44940c8': 'icons/normal/yaw_motor.webp',
+      '52b0990b': 'icons/normal/gearbox.webp',
+      '5e9d380': 'icons/normal/pitch_hydraulic.webp',
       '9331d40': 'icons/normal/brake_disc.webp',
       '781bfab9': 'icons/normal/router.webp',
       '6258c20d': 'icons/normal/dual_router.webp',
+      '006f1fc': 'icons/normal/plc.webp',
+      '7a8bb9bf': 'icons/normal/plc.webp',
+      'b4a3335': 'icons/normal/plc.webp',
+      '49fe7d9': 'icons/normal/plc.webp',
+      'c7345cf': 'icons/normal/dcs.webp',
       '28457c83': 'icons/normal/plc.webp',
+      'a89f0ae': 'icons/normal/yaw_motor.webp',
+      '5fbd69f': 'icons/normal/gearbox.webp',
+      '828058d': 'icons/normal/brake_disc.webp',
+      '26bfee5': 'icons/normal/plc.webp',
       '1aeb61': 'background/flow-light-3.png',
       '24384824': 'background/flow-light-3.png',
       '748a6a1': 'background/flow-light-3.png',
@@ -273,7 +277,8 @@ const RESOURCE_MANIFEST_BY_VARIANT_ID: ReadonlyMap<WindTopologyVariantId, WindTo
       '4a5310d': 'background/flow-light-3.png',
     },
     titleBackgroundPenIds: ["1aeb61", "24384824", "748a6a1", "39d73f43", "08c05a7", "4a5310d"],
-    processNodePenIds: ["59539828", "55ce2ad0", "2f6e06", "2bfdf432", "42e6522b", "6596f4f"],
+    // 两台风机底部各有三步工艺节点；编号逐一取自当前输入 JSON。
+    processNodePenIds: ["2bfdf432", "42e6522b", "6596f4f", "deeb260", "e3d9c0", "c2c2897"],
   })],
   ['network-key-process', createResourceManifest({
     staticImagePathByPenId: {
