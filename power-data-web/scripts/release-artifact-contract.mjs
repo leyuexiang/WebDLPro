@@ -53,6 +53,7 @@ const requiredPublishedActionContracts = Object.freeze([
   { actionId: 'action.solar-power.overview', targetSceneId: 'solar-power', targetViewMode: 'business', targetTopologyId: 'topology.solar-power.overview', unityActionType: 'none' },
   { actionId: 'action.solar-power.inverter', targetSceneId: 'solar-power', targetViewMode: 'process-detail', processDetailId: 'process-detail.solar-power.inverter', unityActionType: 'enterProcessDetail' },
   { actionId: 'action.step-up-substation.overview', targetSceneId: 'step-up-substation', targetViewMode: 'business', targetTopologyId: 'topology.step-up-substation.overview', unityActionType: 'resetScene' },
+  { actionId: 'action.distribution.overview', targetSceneId: 'distribution-substation', targetViewMode: 'business', targetTopologyId: 'topology.distribution.overview', unityActionType: 'resetScene' },
   { actionId: 'action.step-down-substation.overview', targetSceneId: 'step-down-substation', targetViewMode: 'business', targetTopologyId: 'topology.step-down-substation.overview', unityActionType: 'resetScene' },
   { actionId: 'action.converter-station.overview', targetSceneId: 'converter-station', targetViewMode: 'business', targetTopologyId: 'topology.converter-station.overview', unityActionType: 'resetScene' },
   { actionId: 'action.switching-station.overview', targetSceneId: 'switching-station', targetViewMode: 'business', targetTopologyId: 'topology.switching-station.overview', unityActionType: 'resetScene' },
@@ -442,8 +443,8 @@ export async function validateReleaseArtifact(rootDirectory) {
     }
 
     /**
-     * 风电总览动作只负责场景导航；十节点编号和 Unity 目标闭集由清单生成器校验，
-     * 风机与齿轮箱继续由独立第三层目录承载。该约束不把总览导航动作误判为流程控制能力。
+     * 风电当前只提供场景导航；开关站已提供两项保护关键环节。必须指向本场景默认总览拓扑，且不得登记流程步骤或第三层目录。
+     * 该约束把“可从菜单进入场景”和“已实现三维工艺能力”明确分开。
      */
     const unityMappingBySceneId = new Map(
       (Array.isArray(topologyManifest.unitySceneMappings) ? topologyManifest.unitySceneMappings : [])

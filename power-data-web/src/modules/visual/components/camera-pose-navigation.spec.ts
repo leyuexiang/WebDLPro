@@ -1,3 +1,4 @@
+
 import { describe, expect, it } from 'vitest'
 import { toSceneId } from '@/config/scene-topology/identifiers'
 import { getCameraPoseNavigationButtons } from '@/modules/visual/components/camera-pose-navigation'
@@ -67,6 +68,58 @@ describe('燃气、燃煤、风电与光伏命名镜头按钮映射', () => {
     ])
   })
 
+  it('按接口说明为升压站返回四个固定镜头点', () => {
+    const buttons = getCameraPoseNavigationButtons(toSceneId('step-up-substation'))
+
+    expect(buttons).toHaveLength(4)
+    expect(buttons.map(({ cameraPoseId }) => cameraPoseId)).toEqual([
+      'step-up-substation.camera.input',
+      'step-up-substation.camera.step-up-transmission',
+      'step-up-substation.camera.step-up-monline',
+      'step-up-substation.camera.output',
+    ])
+    expect(buttons.map(({ label }) => label)).toEqual([
+      '35KV进线',
+      '变压器',
+      '母线',
+      '220KV出线',
+    ])
+  })
+
+  it('按接口说明为降压站返回四个固定镜头点', () => {
+    const buttons = getCameraPoseNavigationButtons(toSceneId('step-down-substation'))
+
+    expect(buttons).toHaveLength(4)
+    expect(buttons.map(({ cameraPoseId }) => cameraPoseId)).toEqual([
+      'step-down-substation.camera.input',
+      'step-down-substation.camera.step-down-transmission',
+      'step-down-substation.camera.step-down-monline',
+      'step-down-substation.camera.output',
+    ])
+    expect(buttons.map(({ label }) => label)).toEqual([
+      '220KV进线',
+      '变压器',
+      '母线',
+      '35KV出线',
+    ])
+  })
+
+  it('按接口说明为配电站返回三个固定镜头点', () => {
+    const buttons = getCameraPoseNavigationButtons(toSceneId('distribution'))
+
+    expect(buttons).toHaveLength(3)
+    expect(buttons.map(({ cameraPoseId }) => cameraPoseId)).toEqual([
+      'distribution.camera.input',
+      'distribution.camera.transmission',
+      'distribution.camera.output',
+    ])
+    expect(buttons.map(({ label }) => label)).toEqual([
+      '中压电进线',
+      '变压器降压',
+      '出线供电',
+    ])
+  })
+
   it('未登记场景不复用其他业务场景按钮', () => {
     expect(getCameraPoseNavigationButtons(toSceneId('substation'))).toEqual([])
     expect(getCameraPoseNavigationButtons(undefined)).toEqual([])
@@ -78,10 +131,13 @@ describe('燃气、燃煤、风电与光伏命名镜头按钮映射', () => {
       ...getCameraPoseNavigationButtons(toSceneId('coal-power')),
       ...getCameraPoseNavigationButtons(toSceneId('wind-power')),
       ...getCameraPoseNavigationButtons(toSceneId('solar-power')),
+      ...getCameraPoseNavigationButtons(toSceneId('step-up-substation')),
+      ...getCameraPoseNavigationButtons(toSceneId('step-down-substation')),
+      ...getCameraPoseNavigationButtons(toSceneId('distribution')),
     ].map(({ description }) => description)
 
-    expect(descriptions).toHaveLength(20)
+    expect(descriptions).toHaveLength(31)
     expect(descriptions.every((description) => description.trim().length > 0)).toBe(true)
-    expect(new Set(descriptions).size).toBe(20)
+    expect(new Set(descriptions).size).toBe(31)
   })
 })

@@ -4,7 +4,7 @@ import { toCameraPoseId, type CameraPoseId, type SceneId } from '@/config/scene-
  * 第二层厂区三维视口允许展示镜头按钮的场景闭集。
  * 该闭集与十三场景目录分开维护，防止其他业务场景因标题相似而误用已登记镜头点。
  */
-export type CameraPoseNavigationSceneId = 'gas-power' | 'coal-power' | 'wind-power' | 'solar-power'
+export type CameraPoseNavigationSceneId = 'gas-power' | 'coal-power' | 'wind-power' | 'solar-power'|'step-up-substation'|'step-down-substation'|'distribution'
 
 /**
  * 单个镜头按钮只保存用户可见标题、临时说明和 Unity 已登记的稳定镜头标识。
@@ -134,6 +134,67 @@ const CAMERA_POSE_BUTTONS_BY_SCENE: Readonly<Record<CameraPoseNavigationSceneId,
       cameraPoseId: toCameraPoseId('solar-power.camera.grid-output'),
     },
   ]),
+  'step-up-substation': Object.freeze([
+    {
+      label: '35KV进线',
+      description: '接收发电厂或分布式电源送来的低压电能（10kV/35kV），经进线送入。',
+      cameraPoseId: toCameraPoseId('step-up-substation.camera.input'),
+    },
+    {
+      label: '变压器',
+      description: '主变压器将低压电能升至高压（110kV/220kV/500kV），降低远距离输电损耗。',
+      cameraPoseId: toCameraPoseId('step-up-substation.camera.step-up-transmission'),
+    },
+    {
+      label: '母线',
+      description: '高压母线汇集多路进线电能，按运行方式分配至各出线间隔。',
+      cameraPoseId: toCameraPoseId('step-up-substation.camera.step-up-monline'),
+    },
+    {
+      label: '220KV出线',
+      description: '经出线断路器控制，将电能送入输电线路并入主网。',
+      cameraPoseId: toCameraPoseId('step-up-substation.camera.output'),
+    },
+  ]),
+    'step-down-substation': Object.freeze([
+    {
+      label: '220KV进线',
+      description: '接收输电网送来的高压电能（110kV/220kV），经进线间隔送入站内。',
+      cameraPoseId: toCameraPoseId('step-down-substation.camera.input'),
+    },
+    {
+      label: '变压器',
+      description: '主变压器将高压降至中压等级（10kV/35kV），适配配电网络电压。',
+      cameraPoseId: toCameraPoseId('step-down-substation.camera.step-down-transmission'),
+    },
+    {
+      label: '母线',
+      description: '中压母线汇集电能，经分段母线分配至各馈线回路。',
+      cameraPoseId: toCameraPoseId('step-down-substation.camera.step-down-monline'),
+    },
+    {
+      label: '35KV出线',
+      description: '经出线向各区域配电网供电。',
+      cameraPoseId: toCameraPoseId('step-down-substation.camera.output'),
+    },
+  ]),
+    'distribution': Object.freeze([
+    {
+      label: '中压电进线',
+      description: '接收10kV中压配电网电能，经进线柜与计量装置进入配电房。',
+      cameraPoseId: toCameraPoseId('distribution.camera.input'),
+    },
+    {
+      label: '变压器降压',
+      description: '配电变压器将10kV中压降至400V低压，适配终端用电设备电压。',
+      cameraPoseId: toCameraPoseId('distribution.camera.transmission'),
+    },
+    {
+      label: '出线供电',
+      description: '中压母线汇集电能，经分段母线分配至各馈线回路。',
+      cameraPoseId: toCameraPoseId('distribution.camera.output'),
+    },
+  ]),
 })
 
 /**
@@ -145,5 +206,8 @@ export function getCameraPoseNavigationButtons(sceneId: SceneId | undefined): re
   if (sceneId === 'coal-power') return CAMERA_POSE_BUTTONS_BY_SCENE['coal-power']
   if (sceneId === 'wind-power') return CAMERA_POSE_BUTTONS_BY_SCENE['wind-power']
   if (sceneId === 'solar-power') return CAMERA_POSE_BUTTONS_BY_SCENE['solar-power']
+  if (sceneId === 'step-up-substation') return CAMERA_POSE_BUTTONS_BY_SCENE['step-up-substation']
+  if (sceneId === 'step-down-substation') return CAMERA_POSE_BUTTONS_BY_SCENE['step-down-substation']
+  if (sceneId === 'distribution') return CAMERA_POSE_BUTTONS_BY_SCENE['distribution']
   return EMPTY_CAMERA_POSE_BUTTONS
 }

@@ -4,8 +4,9 @@ import { getTopologySharedPublicAssetUrl } from './topology-shared-assets'
 import type {
   ManifestTopologyPreviewProfile,
 } from './manifest-topology-preview-profile'
-import { getBusinessSceneTopologyRuntimeBindings } from './business-scene-topology-runtime-bindings'
 import { BUSINESS_SCENE_TOPOLOGY_SOURCE_MANIFEST } from './business-scene-topology-source-manifest'
+import { DISTRIBUTION_TOPOLOGY_RUNTIME_BINDINGS } from './distribution-topology-runtime-bindings'
+import type { SubstationTopologyRuntimeBinding } from './substation-topology-runtime-bindings'
 import {
   formatWindTopologyFilterSelection,
   toggleWindTopologyFilter,
@@ -17,6 +18,11 @@ import {
 export const BUSINESS_SCENE_TOPOLOGY_SCENE_IDS = ['microgrid', 'distribution', 'consumption'] as const
 
 export type BusinessSceneTopologySceneId = (typeof BUSINESS_SCENE_TOPOLOGY_SCENE_IDS)[number]
+
+/** 配电站图纸已登记运行时绑定（图元可点击）；微电网、楼宇仍为纯浏览场景。 */
+const RUNTIME_BINDINGS_BY_SCENE: Partial<Record<BusinessSceneTopologySceneId, readonly SubstationTopologyRuntimeBinding[]>> = {
+  distribution: DISTRIBUTION_TOPOLOGY_RUNTIME_BINDINGS,
+}
 
 interface BusinessSceneTopologyFlattenedCombine {
   readonly id: string
@@ -131,23 +137,6 @@ export function flattenBusinessSceneTopologyPens(
   validateSourcePens(pens, variant)
 
   const combineIdsToFlatten = new Set(variant.flattenedCombines.map((item) => item.id))
-  const rootCombine = pens.filter((pen) => pen.name === 'combine' && !pen.parentId)
-  if (rootCombine.length === 0) {
-    /*
-     * 最新楼宇来源文件是完整平铺画布，本身没有组合容器或父子坐标。
-     * 只在清单也声明零个待展平父级、源文件没有任何组合/父级且图元数精确匹配时直接放行；
-     * 这样不会把结构不完整的组合文件误当成平铺图，也不改变原有组合图展平规则。
-     */
-    if (
-      combineIdsToFlatten.size > 0 ||
-      pens.some((pen) => pen.name === 'combine' || Boolean(pen.parentId)) ||
-      pens.length !== variant.expectedRuntimePenCount
-    ) {
-      throw new Error(`拓扑 ${variant.id} 无组合画布与清单不匹配。`)
-    }
-    return pens
-  }
-
   const penById = new Map<string, Pen>(pens.map((pen) => [pen.id!, pen]))
   const childrenByParentId = new Map<string, Pen[]>()
   for (const pen of pens) {
@@ -157,6 +146,7 @@ export function flattenBusinessSceneTopologyPens(
     else childrenByParentId.set(pen.parentId, [pen])
   }
 
+  const rootCombine = pens.filter((pen) => pen.name === 'combine' && !pen.parentId)
   if (rootCombine.length !== 1 || !rootCombine[0]?.id || !combineIdsToFlatten.has(rootCombine[0].id)) {
     throw new Error(`拓扑 ${variant.id} 缺少唯一登记的全图组合父级。`)
   }
@@ -361,11 +351,8 @@ function createPreviewProfile(sceneId: BusinessSceneTopologySceneId): ManifestTo
       variantId as BusinessSceneTopologyVariantId,
       signal,
     ),
-    // 楼宇的二维图元只按清单逐文件绑定；微电网和配电站尚无对应映射，因此返回空数组。
-    getRuntimeBindings: (variantId: string) => sceneId === 'consumption'
-      ? getBusinessSceneTopologyRuntimeBindings(variantId)
-      : [],
     getTooltipContent: getDeviceTooltipContent,
+    runtimeBindings: RUNTIME_BINDINGS_BY_SCENE[sceneId],
   })
 }
 

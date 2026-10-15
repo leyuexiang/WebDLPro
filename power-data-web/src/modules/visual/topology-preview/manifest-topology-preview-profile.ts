@@ -1,14 +1,6 @@
 import type { Meta2dData, Pen } from '@meta2d/core'
-import type { ProcessNodeId } from '@/config/process/identifiers'
-import type { SceneNodeId } from '@/config/scene-topology/identifiers'
 import type { TopologyDataContext } from '@/modules/visual/topology/topology-runtime'
-
-/** 公共 JSON 画布接收的显式图元映射；场景模块负责按文件版本登记所有编号。 */
-export interface ManifestTopologyPreviewRuntimeBinding {
-  readonly penId: string
-  readonly nodeId: ProcessNodeId
-  readonly sceneNodeId?: SceneNodeId
-}
+import type { SubstationTopologyRuntimeBinding } from './substation-topology-runtime-bindings'
 
 /** 清单式第二层拓扑的完整文件描述；每个筛选组合只能命中一项。 */
 export interface ManifestTopologyPreviewVariant {
@@ -46,10 +38,8 @@ export interface ManifestTopologyPreviewProfile {
   readonly sceneLabel: string
   readonly defaultVariantId: string
   readonly filterGroups: readonly ManifestTopologyPreviewFilterGroup[]
-  /** 固定图纸可直接提供映射；按组合切图的场景必须通过 getRuntimeBindings 返回对应文件映射。 */
-  readonly runtimeBindings?: readonly ManifestTopologyPreviewRuntimeBinding[]
-  /** 每个完整 JSON 版本独立返回 penId → nodeId → sceneNodeId，禁止跨版本沿用图元编号。 */
-  getRuntimeBindings?(variantId: string): readonly ManifestTopologyPreviewRuntimeBinding[]
+  /** 正式发布用的 penId → nodeId → sceneNodeId 清单；预览层不得自行推导绑定。 */
+  readonly runtimeBindings?: readonly SubstationTopologyRuntimeBinding[]
   createDefaultSelection(): ReadonlySet<string>
   toggleFilter(current: ReadonlySet<string>, filterId: string, checked: boolean): ReadonlySet<string>
   resolveVariant(selected: ReadonlySet<string>): ManifestTopologyPreviewVariant | undefined

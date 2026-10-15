@@ -9,7 +9,6 @@ import {
   resolveBusinessSceneTopologySceneId,
 } from './business-scene-topology'
 import type { Pen } from '@meta2d/core'
-import { TOPOLOGY_SHARED_ASSET_ALIASES, getTopologySharedPublicAssetUrl } from './topology-shared-assets'
 
 /** 用户提交的源文件哈希与图元数作为独立基准，防止输入文件漏项或变体串线。 */
 const SOURCE_CONTRACT = {
@@ -41,7 +40,7 @@ const SOURCE_CONTRACT = {
     ['network-key-process', 50, '583e4881a6f29da66b57aabbf244a45b5527f7bcf2c3659669a1f1ecbccb8589'],
     ['network-business', 51, '5ff080b707b35a859aea0ccc595d4045c970b8840ebaa11a448662dfcc48e6c9'],
     ['business-key-process', 32, 'a396e48c91b42235db242bce38c1c730cdfd434acb9b3b355857e89e9de4f3f1'],
-    ['network-business-key-process', 48, '31273101e1bbb458134a41fec86e77471eb945f03d75058a54195192eb556f05'],
+    ['network-business-key-process', 57, '4fd1d494b3c659b60c63a9ee5107ed8098f37e7f3812b39b98aee7ec5d027394'],
   ],
 } as const
 
@@ -54,7 +53,7 @@ describe('新业务场景拓扑数据契约', () => {
   })
 
   it('为三个场景登记源文件提供的 24 个独立版本，且每场景只有一个明确默认版本', () => {
-    expect(BUSINESS_SCENE_TOPOLOGY_SCENE_IDS).toEqual(['microgrid', 'distribution', 'consumption'])
+    expect(BUSINESS_SCENE_TOPOLOGY_SCENE_IDS).toEqual(['microgrid', 'consumption'])
 
     for (const sceneId of BUSINESS_SCENE_TOPOLOGY_SCENE_IDS) {
       const variants = BUSINESS_SCENE_TOPOLOGY_VARIANTS_BY_SCENE[sceneId]
@@ -78,10 +77,7 @@ describe('新业务场景拓扑数据契约', () => {
 
         for (const pen of data.pens.filter((item) => item.image)) {
           expect(pen.image).toMatch(/^(assets|background|icons)\//)
-          const publicImagePath = TOPOLOGY_SHARED_ASSET_ALIASES[pen.image!] ?? pen.image!
-          expect(existsSync(resolve(process.cwd(), 'public/topology/shared', publicImagePath))).toBe(true)
-          expect(getTopologySharedPublicAssetUrl(pen.image!, '/power/', undefined))
-            .toBe(`/power/topology/shared/${publicImagePath}`)
+          expect(existsSync(resolve(process.cwd(), 'public/topology/shared', pen.image!))).toBe(true)
         }
 
         for (const processPenId of variant.processPenIds) {

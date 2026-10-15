@@ -36,3 +36,7 @@ export const stationNode = (nodeId: string, sceneNodeId: string): Omit<Substatio
   nodeId: toProcessNodeId(nodeId),
   sceneNodeId: toSceneNodeId(sceneNodeId),
 })
+
+/** 同一业务节点在多个筛选组合中的图元编号汇聚为一条映射（升压站、配电站共用）。 */
+export const bindNode = (nodeId: string, sceneNodeId: string, penIds: readonly string[]): readonly SubstationTopologyRuntimeBinding[] =>
+  penIds.map((penId) => ({ penId, ...stationNode(nodeId, sceneNodeId) }))

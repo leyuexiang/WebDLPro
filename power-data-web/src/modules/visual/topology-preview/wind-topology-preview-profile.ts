@@ -1,9 +1,7 @@
 import type { ManifestTopologyPreviewProfile } from './manifest-topology-preview-profile'
 import { loadWindTopologyPreviewData } from './wind-topology-preview-data'
-import { getWindTopologyRuntimeBindings } from './wind-topology-runtime-bindings'
 import { getWindTopologyTooltipContent } from './wind-topology-tooltip'
 import { loadWindProcessDetailTopologyData } from './wind-process-detail-topology-data'
-import type { WindTopologyVariantId } from './wind-topology-variant-manifest'
 import {
   createDefaultWindTopologyFilterSelection,
   formatWindTopologyFilterSelection,
@@ -30,9 +28,7 @@ export const WIND_TOPOLOGY_PREVIEW_PROFILE: ManifestTopologyPreviewProfile = Obj
   formatSelection: (selected: ReadonlySet<string>) => formatWindTopologyFilterSelection(
     selected as ReadonlySet<WindTopologyFilterId>,
   ),
-  loadData: (variantId: string, signal?: AbortSignal) => loadWindTopologyPreviewData(variantId as WindTopologyVariantId, signal),
-  // 只有筛选状态机解析出的已登记版本会进入画布；每次换文件都同步换成该 JSON 的图元绑定。
-  getRuntimeBindings: (variantId: string) => getWindTopologyRuntimeBindings(variantId as WindTopologyVariantId),
+  loadData: (variantId: string, signal?: AbortSignal) => loadWindTopologyPreviewData(variantId as never, signal),
   loadDataContext: loadWindProcessDetailTopologyData,
   getTooltipContent: getWindTopologyTooltipContent,
 })

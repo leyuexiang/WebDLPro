@@ -686,14 +686,28 @@ export const BUSINESS_SCENE_TOPOLOGY_SOURCE_MANIFEST = {
         "key-process"
       ],
       "topologyPath": "variants/network-business-key-process/topology.json",
-      "sourceSha256": "31273101e1bbb458134a41fec86e77471eb945f03d75058a54195192eb556f05",
-      "expectedPenCount": 48,
-      "expectedRuntimePenCount": 48,
-      "flattenedCombines": [],
+      "sourceSha256": "4fd1d494b3c659b60c63a9ee5107ed8098f37e7f3812b39b98aee7ec5d027394",
+      "expectedPenCount": 57,
+      "expectedRuntimePenCount": 54,
+      "flattenedCombines": [
+        {
+          "id": "8954bdb",
+          "directChildCount": 1
+        },
+        {
+          "id": "75dcfa53",
+          "directChildCount": 7
+        },
+        {
+          "id": "084b4",
+          "directChildCount": 6
+        }
+      ],
       "processPenIds": [
         "c3964cf",
         "20e2131b",
-        "23e8722"
+        "23e8722",
+        "34f3f54f"
       ],
       "isDefault": true
     }

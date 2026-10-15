@@ -5,14 +5,12 @@ import TopologyLayerFilterRail from './TopologyLayerFilterRail.vue'
 import TopologyFullscreenButton from './TopologyFullscreenButton.vue'
 import type {
   ManifestTopologyPreviewProfile,
-  ManifestTopologyPreviewRuntimeBinding,
   ManifestTopologyPreviewTooltip,
   ManifestTopologyPreviewVariant,
 } from './manifest-topology-preview-profile'
 import { resolveManifestTopologyClickSelection } from './manifest-topology-click-selection'
 import type { TopologyDataContext } from '@/modules/visual/topology/topology-runtime'
-import { toProcessNodeId, type ProcessNodeId, type RouteId } from '@/config/process/identifiers'
-import { toSceneNodeId } from '@/config/scene-topology/identifiers'
+import type { ProcessNodeId, RouteId } from '@/config/process/identifiers'
 import {
   createGasTopologyConnectedLineIndex,
   GAS_TOPOLOGY_SELECTION_COLOR,
@@ -22,6 +20,7 @@ import {
 
 interface Meta2dPointerEvent { readonly pen?: Pen }
 interface SourceLinePresentation { readonly color: string; readonly lineWidth: number }
+interface RuntimeBinding { readonly penId: string; readonly nodeId: ProcessNodeId; readonly sceneNodeId?: string }
 
 /**
  * 业务包装层只提供不可变清单和文案；公共画布负责唯一引擎实例、加载竞态、视口、提示与高亮。
@@ -59,9 +58,7 @@ const currentVariantId = ref(props.profile.defaultVariantId)
 /** 第三层上下文存在时隐藏第二层筛选轨；退出后恢复离开前的第二层完整文件。 */
 const activeDataContext = ref<TopologyDataContext | undefined>()
 /** 当前完整文件的显式业务绑定；切换第三层时替换，禁止跨文件复用旧图元编号。 */
-const currentRuntimeBindings = ref<readonly ManifestTopologyPreviewRuntimeBinding[]>(
-  props.profile.getRuntimeBindings?.(currentVariantId.value) ?? props.profile.runtimeBindings ?? [],
-)
+const currentRuntimeBindings = ref<readonly RuntimeBinding[]>(props.profile.runtimeBindings ?? [])
 const nodeIdByPenId = computed(() => new Map(currentRuntimeBindings.value.map((binding) => [binding.penId, binding.nodeId])))
 const penIdsByNodeId = computed(() => {
   const index = new Map<ProcessNodeId, string[]>()
@@ -128,16 +125,10 @@ async function setTopologyDataContext(context: TopologyDataContext | undefined):
   currentRuntimeBindings.value = context
     ? context.bindings.map((binding) => ({
       penId: binding.penId,
-      // 第三层上下文跨模块只传字符串；进入画布索引前重新校验并提升为稳定编号类型。
-      nodeId: toProcessNodeId(binding.nodeId),
-      ...(binding.sceneNodeId ? { sceneNodeId: toSceneNodeId(binding.sceneNodeId) } : {}),
+      nodeId: binding.nodeId as ProcessNodeId,
+      ...(binding.sceneNodeId ? { sceneNodeId: binding.sceneNodeId } : {}),
     }))
-    : (() => {
-      const businessVariant = props.profile.resolveVariant(selectedFilterIds.value)
-      return businessVariant
-        ? props.profile.getRuntimeBindings?.(businessVariant.id) ?? props.profile.runtimeBindings ?? []
-        : props.profile.runtimeBindings ?? []
-    })()
+    : (props.profile.runtimeBindings ?? [])
   try {
     if (context) {
       if (!props.profile.loadDataContext) throw new Error(`${props.profile.sceneLabel}未登记第三层拓扑加载器。`)
@@ -262,10 +253,8 @@ function commitTopologyVariant(
   if (imageReadyFrame !== undefined) cancelAnimationFrame(imageReadyFrame)
   imageReadyFrame = undefined
   currentVariantId.value = variant.id
-  // 第三层绑定已在请求开始时写入；普通第二层切换则按新文件编号重建绑定，禁止沿用旧 penId。
-  if (activeDataContext.value?.contextId !== variant.id) {
-    currentRuntimeBindings.value = props.profile.getRuntimeBindings?.(variant.id) ?? props.profile.runtimeBindings ?? []
-  }
+  // 第三层上下文已经在请求开始时写入当前绑定；只有普通第二层切换才恢复 profile 默认绑定。
+  if (activeDataContext.value?.contextId !== variant.id) currentRuntimeBindings.value = props.profile.runtimeBindings ?? []
   connectedLineIndex.value = createGasTopologyConnectedLineIndex(data.pens)
   const defaultLineColor = data.color ?? '#bdc7db'
   for (const pen of data.pens) {

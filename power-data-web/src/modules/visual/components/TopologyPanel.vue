@@ -43,7 +43,7 @@ const emit = defineEmits<{
 const topologyCanvas = ref<(TopologyCanvasController & { readonly ready?: boolean }) | null>(null)
 /** 正式面板是全屏公共祖先，重置、筛选和图形需要一起进入全屏。 */
 const panelRoot = ref<HTMLElement | null>(null)
-/** 风电和四个站类场景使用窄视口接口；选择快照、第三层上下文和就绪事件通过受控端口转发。 */
+/** 风电和四个站类场景使用窄视口接口；站类选择、第三层上下文和就绪事件仍通过受控端口转发。 */
 const jsonOverviewCanvas = ref<{
   readonly ready: boolean
   resetView(): void
@@ -312,11 +312,6 @@ watch(() => String(props.topology.topologyKey), () => {
       ref="jsonOverviewCanvas"
       :fullscreen-target="panelRoot"
       :suspended="props.suspended"
-      :selected-node-ids="props.selectedNodeIds"
-      :selected-route-ids="props.selectedRouteIds"
-      @select-node="emit('selectNode', $event)"
-      @clear-selection="emit('clearSelection')"
-      @double-click-node="emit('doubleClickNode', $event)"
       @ready-change="handleNarrowCanvasReady"
     />
     <!-- 升压站使用显式 penId→nodeId→sceneNodeId 绑定，选择事件回到统一运行时。 -->
