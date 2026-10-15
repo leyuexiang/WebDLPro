@@ -1,4 +1,5 @@
 import type { TopologyDeviceStatus, TopologyIconKey } from '@/config/process/types'
+import { getTopologySharedPublicAssetUrl } from './topology-shared-assets'
 
 /** 每套图元都必须显式登记四个状态，渲染器不会根据文件名或外部输入拼接资源地址。 */
 type TopologyIconAssetSet = Readonly<Record<TopologyDeviceStatus, string>>
@@ -9,23 +10,20 @@ function createIconAssetSet(normal: string, alarm: string, fault: string, offlin
 }
 
 /**
- * 拓扑网络允许使用的拟物化思科（Cisco）风格图元登记表。
- * 资源使用 Vite 的静态 URL 转换打包，运行时只按受控图元键和四态索引，
- * 既避免业务配置出现文件路径，也避免动态路径造成未审核资源被加载。
- *
- * 新图标按已确认语义分批接入：素材“正常”映射 normal，素材“告警”实际映射 fault，
- * 素材“停止”映射 offline；当前 alarm 尚无对应新素材，因此继续保留既有告警图标。
- * 只有中文对照名称在三套素材中一致的设备才整组替换，禁止按图层编号或外观猜测类型。
+ * 拓扑运行时仅允许通过受控图元键读取显式登记的四态图标，避免业务配置拼接任意资源路径。
+ * 核心交换机改用补充目录中的“双交换机”公共四态 WebP，服务器和工作站复用公共服务器、台式电脑 WebP；
+ * 这三类不再引用旧版 PNG 或旧版告警矢量图。其余设备仍保留各自已登记的矢量图片，不按名称猜配缺失素材。
+ * 公共 WebP 地址由统一地址工具生成，能够跟随站点基准路径及壳目录部署。
  */
 /** `generic` 仅是画布中性占位，不对应任何图像资源，也不应进入正式图元资产登记。 */
 type RegisteredTopologyIconKey = Exclude<TopologyIconKey, 'generic'>
 
 const topologyIconRegistry: Readonly<Record<RegisteredTopologyIconKey, TopologyIconAssetSet>> = {
   'core-switch': createIconAssetSet(
-    new URL('../../assets/topology-icons/net_通用网络/icon_net_switch_core_normal.png', import.meta.url).href,
-    new URL('../../assets/topology-icons/net_通用网络/icon_net_switch_core_alarm.svg', import.meta.url).href,
-    new URL('../../assets/topology-icons/net_通用网络/icon_net_switch_core_fault.png', import.meta.url).href,
-    new URL('../../assets/topology-icons/net_通用网络/icon_net_switch_core_offline.png', import.meta.url).href,
+    getTopologySharedPublicAssetUrl('icons/registry/core-switch/normal.webp'),
+    getTopologySharedPublicAssetUrl('icons/registry/core-switch/alarm.webp'),
+    getTopologySharedPublicAssetUrl('icons/registry/core-switch/fault.webp'),
+    getTopologySharedPublicAssetUrl('icons/registry/core-switch/offline.webp'),
   ),
   firewall: createIconAssetSet(
     new URL('../../assets/topology-icons/sec_网络安全/icon_sec_firewall_normal.svg', import.meta.url).href,
@@ -34,16 +32,16 @@ const topologyIconRegistry: Readonly<Record<RegisteredTopologyIconKey, TopologyI
     new URL('../../assets/topology-icons/sec_网络安全/icon_sec_firewall_offline.svg', import.meta.url).href,
   ),
   server: createIconAssetSet(
-    new URL('../../assets/topology-icons/aux_辅助设备/icon_aux_server_normal.png', import.meta.url).href,
-    new URL('../../assets/topology-icons/aux_辅助设备/icon_aux_server_alarm.svg', import.meta.url).href,
-    new URL('../../assets/topology-icons/aux_辅助设备/icon_aux_server_fault.png', import.meta.url).href,
-    new URL('../../assets/topology-icons/aux_辅助设备/icon_aux_server_offline.png', import.meta.url).href,
+    getTopologySharedPublicAssetUrl('icons/normal/server.webp'),
+    getTopologySharedPublicAssetUrl('icons/alarm/server.webp'),
+    getTopologySharedPublicAssetUrl('icons/fault/server.webp'),
+    getTopologySharedPublicAssetUrl('icons/offline/server.webp'),
   ),
   workstation: createIconAssetSet(
-    new URL('../../assets/topology-icons/aux_辅助设备/icon_aux_workstation_normal.png', import.meta.url).href,
-    new URL('../../assets/topology-icons/aux_辅助设备/icon_aux_workstation_alarm.svg', import.meta.url).href,
-    new URL('../../assets/topology-icons/aux_辅助设备/icon_aux_workstation_fault.png', import.meta.url).href,
-    new URL('../../assets/topology-icons/aux_辅助设备/icon_aux_workstation_offline.png', import.meta.url).href,
+    getTopologySharedPublicAssetUrl('icons/normal/desktop.webp'),
+    getTopologySharedPublicAssetUrl('icons/alarm/desktop.webp'),
+    getTopologySharedPublicAssetUrl('icons/fault/desktop.webp'),
+    getTopologySharedPublicAssetUrl('icons/offline/desktop.webp'),
   ),
   'data-gateway': createIconAssetSet(
     new URL('../../assets/topology-icons/disp_调度/icon_disp_data_gateway_normal.svg', import.meta.url).href,

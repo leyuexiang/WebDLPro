@@ -13,25 +13,20 @@ export {
   WIND_TOPOLOGY_DEVICE_PEN_IDS,
 } from './wind-topology-manifest'
 
-/** 平台四态协议与公共资源目录保持一一对应。 */
-const ICON_DIRECTORY_BY_STATUS: Readonly<Record<TopologyDeviceStatus, string>> = Object.freeze({
-  normal: 'normal', alarm: 'alarm', fault: 'fault', offline: 'offline',
-})
-
 /**
  * 缓存只保存未交给二维组态引擎（Meta2D）的安全原始副本；每次打开返回深拷贝，
  * 防止状态图片、选中样式或引擎计算字段污染再次切回同一版本的结果。
  */
 const sourceDataCache = new Map<WindTopologyVariantId, Meta2dData>()
 
-/** 按版本和图元编号读取公共四态图标，不解析标题、坐标或输入文件的原图片地址。 */
+/** 按版本、图元编号和状态读取显式登记的公共 WebP，不从正常态路径拼接其它状态。 */
 export function getWindTopologyPreviewIconPath(
   variantId: WindTopologyVariantId,
   penId: string,
   status: TopologyDeviceStatus = 'normal',
 ): string | undefined {
-  const normalPath = getWindTopologyResourceManifest(variantId).deviceIconPathByPenId.get(penId)
-  return normalPath?.replace('/normal/', `/${ICON_DIRECTORY_BY_STATUS[status]}/`)
+  const iconPaths = getWindTopologyResourceManifest(variantId).deviceIconPathByPenId.get(penId)
+  return iconPaths?.[status]
 }
 
 /** 把正式设备状态转换为受控公共资源地址。 */
@@ -73,7 +68,7 @@ function localizePenImage(pen: Pen, variantId: WindTopologyVariantId): void {
   if (!pen.image?.trim() || !pen.id) return
   const manifest = getWindTopologyResourceManifest(variantId)
   if (manifest.titleBackgroundPenIds.has(pen.id)) {
-    pen.image = getTopologySharedPublicAssetUrl('background/flow-light-3.png')
+    pen.image = getTopologySharedPublicAssetUrl('background/flow-light-3.webp')
     return
   }
   const iconPath = getWindTopologyPreviewIconPath(variantId, pen.id)

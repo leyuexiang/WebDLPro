@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { ProcessNodeId, RouteId } from '@/config/process/identifiers'
+import type { TopologyDeviceStatus } from '@/config/process/types'
 import type { TopologyDataContext } from '@/modules/visual/topology/topology-runtime'
 import ManifestTopologyJsonPreview from './ManifestTopologyJsonPreview.vue'
 import {
@@ -15,6 +16,7 @@ const props = defineProps<{
   suspended?: boolean
   selectedNodeIds?: readonly ProcessNodeId[]
   selectedRouteIds?: readonly RouteId[]
+  nodeStatuses?: ReadonlyMap<ProcessNodeId, TopologyDeviceStatus>
 }>()
 
 const emit = defineEmits<{
@@ -34,6 +36,10 @@ defineExpose({
   setSelection: (nodeIds: readonly ProcessNodeId[], routeIds: readonly RouteId[]) => (
     preview.value?.setSelection(nodeIds, routeIds)
   ),
+  /** 楼宇设备状态由公共面板透传，四态显示仍由变体专属清单映射到 WebP。 */
+  setNodeStatuses: (statuses: ReadonlyMap<ProcessNodeId, TopologyDeviceStatus>) => (
+    preview.value?.setNodeStatuses(statuses)
+  ),
   setTopologyDataContext: (context: TopologyDataContext | undefined) => (
     preview.value?.setTopologyDataContext(context)
   ),
@@ -48,6 +54,7 @@ defineExpose({
     :suspended="props.suspended"
     :selected-node-ids="props.selectedNodeIds"
     :selected-route-ids="props.selectedRouteIds"
+    :node-statuses="props.nodeStatuses"
     @select-node="emit('selectNode', $event)"
     @clear-selection="emit('clearSelection')"
     @double-click-node="emit('doubleClickNode', $event)"

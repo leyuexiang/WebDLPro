@@ -1,5 +1,4 @@
 import { existsSync, readFileSync } from 'node:fs'
-import { createHash } from 'node:crypto'
 import { resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { clearSolarTopologyPreviewDataCacheForTests, loadSolarTopologyPreviewData } from './solar-topology-preview-data'
@@ -17,10 +16,11 @@ afterEach(() => {
 })
 
 describe('光伏发布图片地址', () => {
-  it('公共别名只合并字节完全相同的资源，且适配子目录部署', () => {
+  it('历史 PNG 键只解析到现存 WebP，且适配子目录部署', () => {
     for (const [source, target] of Object.entries(TOPOLOGY_SHARED_ASSET_ALIASES)) {
-      const digest = (path: string) => createHash('sha256').update(readFileSync(resolve('public/topology/shared', path))).digest('hex')
-      expect(digest(source)).toBe(digest(target))
+      expect(source).toMatch(/\.png$/i)
+      expect(target).toMatch(/\.webp$/i)
+      expect(existsSync(resolve('public/topology/shared', target))).toBe(true)
       expect(getTopologySharedPublicAssetUrl(source, '/power/', undefined)).toBe(`/power/topology/shared/${target}`)
     }
   })

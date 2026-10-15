@@ -74,10 +74,17 @@ describe('拓扑公共设备图标', () => {
     }
   })
 
-  it('公共目录完整包含29类设备的四种状态且没有额外格式', () => {
+  it('公共目录的基础设备与风电专用图标均使用 WebP 格式', () => {
+    // 风电四种系统图元补齐告警、故障和离线 WebP；楼宇三类设备另各登记独立四态资源。
+    const expectedCounts: Record<TopologyDeviceStatus, number> = {
+      normal: 32,
+      alarm: 36,
+      fault: 36,
+      offline: 36,
+    }
     for (const status of statuses) {
       const files = readdirSync(resolve(sharedRoot, 'icons', status))
-      expect(files).toHaveLength(29)
+      expect(files).toHaveLength(expectedCounts[status])
       expect(files.every((file) => file.endsWith('.webp'))).toBe(true)
     }
   })
@@ -90,7 +97,7 @@ describe('拓扑公共设备图标', () => {
   })
 
   it('公共装饰资源不绑定具体拓扑版本', () => {
-    expect(existsSync(resolve(sharedRoot, 'background/flow-light-3.png'))).toBe(true)
+    expect(existsSync(resolve(sharedRoot, 'background/flow-light-3.webp'))).toBe(true)
   })
 
   it('燃煤 V2 加载后所有图片图元都指向公共资源', async () => {

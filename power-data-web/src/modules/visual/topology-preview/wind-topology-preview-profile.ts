@@ -1,5 +1,6 @@
 import type { ManifestTopologyPreviewProfile } from './manifest-topology-preview-profile'
 import { loadWindTopologyPreviewData } from './wind-topology-preview-data'
+import { getWindTopologyRuntimeBindings } from './wind-topology-runtime-bindings'
 import { getWindTopologyTooltipContent } from './wind-topology-tooltip'
 import { loadWindProcessDetailTopologyData } from './wind-process-detail-topology-data'
 import {
@@ -10,6 +11,7 @@ import {
   WIND_TOPOLOGY_FILTER_GROUPS,
   type WindTopologyFilterId,
 } from './wind-topology-layer-filter'
+import type { WindTopologyVariantId } from './wind-topology-variant-manifest'
 
 /** 风电现有清单适配到公共画布；所有业务编号仍留在风电模块内部。 */
 export const WIND_TOPOLOGY_PREVIEW_PROFILE: ManifestTopologyPreviewProfile = Object.freeze({
@@ -28,6 +30,7 @@ export const WIND_TOPOLOGY_PREVIEW_PROFILE: ManifestTopologyPreviewProfile = Obj
   formatSelection: (selected: ReadonlySet<string>) => formatWindTopologyFilterSelection(
     selected as ReadonlySet<WindTopologyFilterId>,
   ),
+  getRuntimeBindings: (variantId: string) => getWindTopologyRuntimeBindings(variantId as WindTopologyVariantId),
   loadData: (variantId: string, signal?: AbortSignal) => loadWindTopologyPreviewData(variantId as never, signal),
   loadDataContext: loadWindProcessDetailTopologyData,
   getTooltipContent: getWindTopologyTooltipContent,

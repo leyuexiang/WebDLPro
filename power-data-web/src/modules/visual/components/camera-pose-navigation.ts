@@ -191,7 +191,8 @@ const CAMERA_POSE_BUTTONS_BY_SCENE: Readonly<Record<CameraPoseNavigationSceneId,
     },
     {
       label: '出线供电',
-      description: '中压母线汇集电能，经分段母线分配至各馈线回路。',
+      // 配电站说明聚焦低压馈线终端，与降压站的中压母线汇集说明区分业务范围。
+      description: '低压母线汇集配变输出，再按馈线回路向楼宇和终端用户分配电能。',
       cameraPoseId: toCameraPoseId('distribution.camera.output'),
     },
   ]),

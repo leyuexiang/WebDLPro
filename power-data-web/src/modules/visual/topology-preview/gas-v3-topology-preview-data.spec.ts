@@ -65,7 +65,7 @@ describe('燃气拓扑独立数据与公共资源', () => {
       }
       for (const penId of manifest.titleBackgroundPenIds) {
         expect(data.pens.find((pen) => pen.id === penId)?.image)
-          .toContain('/topology/shared/background/flow-light-3.png')
+          .toContain('/topology/shared/background/flow-light-3.webp')
       }
     }
   })

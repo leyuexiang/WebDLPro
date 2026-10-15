@@ -17,6 +17,34 @@ const productionRoots = Object.freeze([path.join(webProjectRoot, 'src')])
 const processDetailPathPattern = /(?:process-detail|processdetail)/i
 const productionSourceExtensionPattern = /\.(?:ts|vue|cs)$/i
 const testPathPattern = /(?:\.spec\.|\.test\.|[\\/]Tests?[\\/])/i
+/** 风电映射包含图2的十个总览目标与既有风机、齿轮箱两个第三层目标。 */
+const expectedWindSceneNodeIds = Object.freeze([
+  'unit.wind-pitch.control',
+  'unit.wind-converter.control',
+  'unit.wind-yaw.control',
+  'unit.wind-drivetrain.control',
+  'unit.wind-brake.control',
+  'node.wind-pitch-system',
+  'node.wind-converter-system',
+  'node.wind-yaw-system',
+  'node.wind-drivetrain-system',
+  'node.wind-brake-system',
+  'node.wind-turbine',
+  'node.wind-gearbox',
+])
+/** 绝对契约：风电总览十个业务节点及 Unity 编号必须与用户提供的图2一致。 */
+const expectedWindOverviewNodeMappings = Object.freeze([
+  Object.freeze({ nodeId: 'system.wind-pitch-control', sceneNodeId: 'unit.wind-pitch.control' }),
+  Object.freeze({ nodeId: 'system.wind-converter-control', sceneNodeId: 'unit.wind-converter.control' }),
+  Object.freeze({ nodeId: 'system.wind-yaw-control', sceneNodeId: 'unit.wind-yaw.control' }),
+  Object.freeze({ nodeId: 'system.wind-drivetrain-control', sceneNodeId: 'unit.wind-drivetrain.control' }),
+  Object.freeze({ nodeId: 'system.wind-brake-control', sceneNodeId: 'unit.wind-brake.control' }),
+  Object.freeze({ nodeId: 'asset.wind-pitch-system', sceneNodeId: 'node.wind-pitch-system' }),
+  Object.freeze({ nodeId: 'asset.wind-converter-system', sceneNodeId: 'node.wind-converter-system' }),
+  Object.freeze({ nodeId: 'asset.wind-yaw-system', sceneNodeId: 'node.wind-yaw-system' }),
+  Object.freeze({ nodeId: 'asset.wind-drivetrain-system', sceneNodeId: 'node.wind-drivetrain-system' }),
+  Object.freeze({ nodeId: 'asset.wind-brake-system', sceneNodeId: 'node.wind-brake-system' }),
+])
 
 /**
  * 旧流程步骤、场景级显隐、上下文半透明、流程描边和包围盒聚焦均被禁止。
@@ -162,6 +190,7 @@ export async function auditProcessDetailProduction(releaseId = 'process-detail-s
   const coalMapping = manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'coal-power')
   const solarMapping = manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'solar-power')
   const windMapping = manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'wind-power')
+  const windOverviewTopology = manifest.topologies.find((topology) => topology.topologyId === 'topology.wind-power.overview')
   if (gasDetails.length !== 1 || gasDetails[0]?.processDetailId !== 'process-detail.gas-power.gas-turbine' ||
       coalDetails.length !== 1 || coalDetails[0]?.processDetailId !== 'process-detail.coal-power.steam-turbine' ||
       solarDetails.length !== 1 || solarDetails[0]?.processDetailId !== 'process-detail.solar-power.inverter' ||
@@ -189,10 +218,15 @@ export async function auditProcessDetailProduction(releaseId = 'process-detail-s
       windGearboxDetailAction.unityAction?.type !== 'enterProcessDetail') {
     issues.push({ code: 'process-detail.action-uses-legacy-path', file: 'power-data-web/scripts/build-gas-power-smoke-release.mjs' })
   }
-  if (!windMapping || windMapping.sceneNodeIds?.length !== 2 ||
-      !windMapping.sceneNodeIds?.includes('node.wind-turbine') ||
-      !windMapping.sceneNodeIds?.includes('node.wind-gearbox')) {
+  if (!windMapping || windMapping.sceneNodeIds?.length !== expectedWindSceneNodeIds.length ||
+      expectedWindSceneNodeIds.some((sceneNodeId) => !windMapping.sceneNodeIds.includes(sceneNodeId))) {
     issues.push({ code: 'process-detail.wind-mapping-not-approved', file: 'power-data-web/scripts/build-gas-power-smoke-release.mjs' })
+  }
+  if (!windOverviewTopology || windOverviewTopology.nodes?.length !== expectedWindOverviewNodeMappings.length ||
+      expectedWindOverviewNodeMappings.some((expected) => !windOverviewTopology.nodes.some((node) => (
+        node.nodeId === expected.nodeId && node.sceneNodeId === expected.sceneNodeId
+      )))) {
+    issues.push({ code: 'process-detail.wind-overview-node-mapping-not-approved', file: 'power-data-web/scripts/build-gas-power-smoke-release.mjs' })
   }
 
   /**

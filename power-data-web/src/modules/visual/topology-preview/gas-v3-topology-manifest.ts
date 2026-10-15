@@ -181,9 +181,9 @@ export const GAS_V3_TOPOLOGY_RESOURCE_MANIFEST_BY_VARIANT_ID: ReadonlyMap<
     processNodePenIds: [],
     // 控制系统源图与公共控制资源逐项按文件哈希核对，未登记为设备状态图元。
     staticImagePathByPenId: {
-      '47c8043': 'assets/denitration-control.png',
-      '1a099f22': 'assets/coordination-control.png',
-      'cee16fb': 'assets/coordination-control.png',
+      '47c8043': 'icons/normal/plc.webp',
+      '1a099f22': 'icons/normal/dcs.webp',
+      'cee16fb': 'icons/normal/dcs.webp',
     },
   })],
 ])

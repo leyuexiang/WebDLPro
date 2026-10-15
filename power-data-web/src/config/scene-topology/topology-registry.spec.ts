@@ -137,6 +137,21 @@ describe('多拓扑注册表', () => {
     expect(result.registry.getTopology(toTopologyId('gas-power.detail'))?.focusRegions).toBeUndefined()
   })
 
+  it('未收到外部设备状态前，忽略总图和过滤视图清单中的离线值并统一显示正常态', () => {
+    const result = TopologyRegistry.create(createManifestWithFilteredTopology())
+
+    expect(result.status).toBe('ready')
+    if (result.status !== 'ready') return
+
+    // 测试清单故意把来源节点设为离线；注册表必须将总图和派生过滤视图都归一为正常基线。
+    const topologyIds = ['gas-power.overview', 'gas-power.detail'] as const
+    for (const topologyId of topologyIds) {
+      const topology = result.registry.getTopology(toTopologyId(topologyId))
+      expect(topology?.nodes.length).toBeGreaterThan(0)
+      expect(topology?.nodes.every((node) => node.deviceStatus === 'normal')).toBe(true)
+    }
+  })
+
   it('清单缺失固定场景时不创建任何注册表', () => {
     const manifest = createManifest() as { scenes: unknown[] }
     manifest.scenes.pop()

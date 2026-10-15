@@ -30,7 +30,7 @@ const requiredUnityEventCapabilities = Object.freeze([
   'ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'selectionCleared', 'disposed',
 ])
 /**
- * 当前合作方以动作摘要生成全部可绑定入口，因此三十五项公开动作属于发布契约本身，不能只做两份清单的相对一致性检查。
+ * 当前合作方以动作摘要生成全部可绑定入口，因此三十六项公开动作属于发布契约本身，不能只做两份清单的相对一致性检查。
  * 目标、视图和三维动作类型一并固定，防止生成器与摘要同时回退，或把普通场景导航误写成未实现的流程能力。
  */
 const requiredPublishedActionContracts = Object.freeze([
@@ -53,7 +53,7 @@ const requiredPublishedActionContracts = Object.freeze([
   { actionId: 'action.solar-power.overview', targetSceneId: 'solar-power', targetViewMode: 'business', targetTopologyId: 'topology.solar-power.overview', unityActionType: 'none' },
   { actionId: 'action.solar-power.inverter', targetSceneId: 'solar-power', targetViewMode: 'process-detail', processDetailId: 'process-detail.solar-power.inverter', unityActionType: 'enterProcessDetail' },
   { actionId: 'action.step-up-substation.overview', targetSceneId: 'step-up-substation', targetViewMode: 'business', targetTopologyId: 'topology.step-up-substation.overview', unityActionType: 'resetScene' },
-  { actionId: 'action.distribution.overview', targetSceneId: 'distribution-substation', targetViewMode: 'business', targetTopologyId: 'topology.distribution.overview', unityActionType: 'resetScene' },
+  { actionId: 'action.distribution.overview', targetSceneId: 'distribution', targetViewMode: 'business', targetTopologyId: 'topology.distribution.overview', unityActionType: 'resetScene' },
   { actionId: 'action.step-down-substation.overview', targetSceneId: 'step-down-substation', targetViewMode: 'business', targetTopologyId: 'topology.step-down-substation.overview', unityActionType: 'resetScene' },
   { actionId: 'action.converter-station.overview', targetSceneId: 'converter-station', targetViewMode: 'business', targetTopologyId: 'topology.converter-station.overview', unityActionType: 'resetScene' },
   { actionId: 'action.switching-station.overview', targetSceneId: 'switching-station', targetViewMode: 'business', targetTopologyId: 'topology.switching-station.overview', unityActionType: 'resetScene' },
@@ -396,7 +396,7 @@ export async function validateReleaseArtifact(rootDirectory) {
     const requiredActionIds = new Set(requiredPublishedActionContracts.map((contract) => contract.actionId))
     if (publishedActions.length !== requiredPublishedActionContracts.length || actionById.size !== requiredPublishedActionContracts.length ||
         [...actionById.keys()].some((actionId) => !requiredActionIds.has(actionId)) || hasInvalidPublishedAction) {
-       issues.push('结构清单必须完整发布当前三十五项公开动作及其固定目标，禁止两份清单同时回退或伪造三维流程能力。')
+       issues.push('结构清单必须完整发布当前三十六项公开动作及其固定目标，禁止两份清单同时回退或伪造三维流程能力。')
     }
 
     /**
@@ -443,7 +443,7 @@ export async function validateReleaseArtifact(rootDirectory) {
     }
 
     /**
-     * 风电当前只提供场景导航；开关站已提供两项保护关键环节。必须指向本场景默认总览拓扑，且不得登记流程步骤或第三层目录。
+     * 仅导航场景按显式闭集校验默认拓扑和无流程副作用；风电与开关站等已登记关键环节的场景不受此限制。
      * 该约束把“可从菜单进入场景”和“已实现三维工艺能力”明确分开。
      */
     const unityMappingBySceneId = new Map(
@@ -462,7 +462,7 @@ export async function validateReleaseArtifact(rootDirectory) {
     })
     const processDetails = Array.isArray(topologyManifest.processDetails) ? topologyManifest.processDetails : []
     if (hasInvalidNavigationScene || processDetails.some((detail) => navigationOnlySceneIds.includes(detail?.sceneId))) {
-      issues.push('风电只能发布无三维流程副作用的总览导航；开关站已发布母线保护和线路保护，不能按导航-only场景拒绝其第三层目录。')
+      issues.push('仅导航场景必须发布无三维流程副作用的总览导航；已登记关键环节的场景不得加入该闭集。')
     }
     const windTurbineDetail = processDetails.find((detail) => detail?.processDetailId === 'process-detail.wind-power.wind-turbine')
     const windGearboxDetail = processDetails.find((detail) => detail?.processDetailId === 'process-detail.wind-power.gearbox')

@@ -257,7 +257,7 @@ export class CanvasTopologyAdapter implements TopologyRenderer {
 
     let changed = false
 
-    // 先移除新快照未再声明的旧覆盖值，使节点安全回退到拓扑发布时的基线状态。
+    // 先移除新快照未再声明的旧覆盖值，使节点统一回退到正常基线，不读取拓扑清单里的预设状态。
     for (const nodeId of this.nodeStatusOverrideById.keys()) {
       if (!statusByNodeId.has(nodeId)) {
         this.nodeStatusOverrideById.delete(nodeId)

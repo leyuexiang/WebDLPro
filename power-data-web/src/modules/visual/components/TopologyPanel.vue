@@ -48,6 +48,8 @@ const jsonOverviewCanvas = ref<{
   readonly ready: boolean
   resetView(): void
   setSelection?(nodeIds: readonly ProcessNodeId[], routeIds: readonly RouteId[]): void
+  /** 清单式画布接收同一中央设备快照，逐当前变体绑定替换图标状态。 */
+  setNodeStatuses?(statuses: ReadonlyMap<ProcessNodeId, TopologyDeviceStatus>): void
   /** 站类场景在同一窄端口画布上切换第三层，不向面板暴露具体引擎。 */
   setTopologyDataContext?(context: TopologyDataContext | undefined): void
 } | null>(null)
@@ -137,7 +139,10 @@ const stableCanvasController: TopologyCanvasController = Object.freeze({
   },
   setNodeStatuses(statuses: ReadonlyMap<ProcessNodeId, TopologyDeviceStatus>) {
     pendingControllerStatuses = statuses
-    if (!canvasControllerSuspended) topologyCanvas.value?.setNodeStatuses(statuses)
+    if (!canvasControllerSuspended) {
+      if (usesNarrowJsonOverviewCanvas.value) jsonOverviewCanvas.value?.setNodeStatuses?.(statuses)
+      else topologyCanvas.value?.setNodeStatuses(statuses)
+    }
   },
   getViewState() {
     return topologyCanvas.value?.getViewState() ?? pendingControllerViewState
@@ -371,6 +376,7 @@ watch(() => String(props.topology.topologyKey), () => {
       :suspended="props.suspended"
       :selected-node-ids="props.selectedNodeIds"
       :selected-route-ids="props.selectedRouteIds"
+      :node-statuses="props.nodeStatuses"
       @select-node="emit('selectNode', $event)"
       @clear-selection="emit('clearSelection')"
       @double-click-node="emit('doubleClickNode', $event)"

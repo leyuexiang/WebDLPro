@@ -73,7 +73,7 @@ function localizePenImage(pen: Pen, variantId: CoalTopologyVariantId): void {
   if (!pen.image?.trim() || !pen.id) return
   const manifest = getCoalTopologyResourceManifest(variantId)
   if (manifest.titleBackgroundPenIds.has(pen.id)) {
-    pen.image = getTopologySharedPublicAssetUrl('background/flow-light-3.png')
+    pen.image = getTopologySharedPublicAssetUrl('background/flow-light-3.webp')
     return
   }
   const iconPath = getCoalTopologyPreviewIconPath(variantId, pen.id)

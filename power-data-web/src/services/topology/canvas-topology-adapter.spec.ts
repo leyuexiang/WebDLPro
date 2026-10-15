@@ -294,7 +294,7 @@ describe('CanvasTopologyAdapter 节点状态增量', () => {
     adapter.dispose()
   })
 
-  it('状态快照撤销覆盖值后回退到拓扑配置基线，不缓存未知节点', () => {
+  it('状态快照撤销覆盖值后回退到正常基线，不缓存未知节点', () => {
     vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
     vi.stubGlobal('cancelAnimationFrame', vi.fn())
 

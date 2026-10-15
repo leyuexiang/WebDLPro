@@ -12,7 +12,7 @@ export interface SolarProcessDetailVariantManifestEntry {
   readonly expectedPenCount: number
   readonly isProcessDetail: true
 }
-/** 八份文件均直接来自用户指定的独立压缩包，散列和图元数用于防止误替换。 */
+/** 八个层级变体均由各自明确提供的完整输入文件建立，散列和图元数用于防止误替换。 */
 export const SOLAR_TOPOLOGY_VARIANTS = [
   { id: 'architecture', combinationKey: 'architecture', layerIds: ['architecture'], topologyPath: 'variants/architecture/topology.json', sourceSha256: '42d11a6c9e0951dce4bb179697a4f02f811ff94e5d6949efbd6dd6b14fdb264c', expectedPenCount: 54 },
   { id: 'network', combinationKey: 'network', layerIds: ['network'], topologyPath: 'variants/network/topology.json', sourceSha256: '68e1ef5f5b5197f314dc54b8e78aab3e181b6fbad9804971a5b11bc04478579e', expectedPenCount: 75 },
@@ -21,7 +21,8 @@ export const SOLAR_TOPOLOGY_VARIANTS = [
   { id: 'network-business', combinationKey: 'network+business', layerIds: ['network', 'business'], topologyPath: 'variants/network-business/topology.json', sourceSha256: '0661afe914481790fcd45610d9842b09a76610e055724faf0f0041fb7573944b', expectedPenCount: 101 },
   { id: 'network-key-process', combinationKey: 'network+key-process', layerIds: ['network', 'key-process'], topologyPath: 'variants/network-key-process/topology.json', sourceSha256: '4408545bb1ab7cf9d48a65e475e76ecc8536314f29c4a647f2317239be8a9b31', expectedPenCount: 96 },
   { id: 'business-key-process', combinationKey: 'business+key-process', layerIds: ['business', 'key-process'], topologyPath: 'variants/business-key-process/topology.json', sourceSha256: '9baa6c3ab00f7a43d074c09e2282e6f4534c6d3e37c2e5c3b4b1d3253e769f4b', expectedPenCount: 100 },
-  { id: 'network-business-key-process', combinationKey: 'network+business+key-process', layerIds: ['network', 'business', 'key-process'], topologyPath: 'variants/network-business-key-process/topology.json', sourceSha256: '01cefac7b1c70150e9827af66cdd178fae850ac036c24a9d7ecf5237625b993c', expectedPenCount: 129, isDefault: true },
+  /** 2026-10-14 用户提供的最新光伏全图参考，原样对应网络、业务、关键环节组合。 */
+  { id: 'network-business-key-process', combinationKey: 'network+business+key-process', layerIds: ['network', 'business', 'key-process'], topologyPath: 'variants/network-business-key-process/topology.json', sourceSha256: '277fc9088618b56613c5ace30aa5b1d48a7f3d48ada988d095207ace1785727f', expectedPenCount: 122, isDefault: true },
 ] as const satisfies readonly SolarTopologyVariantManifestEntry[]
 
 /** 逆变器关键环节只加载本次压缩包审核通过的唯一完整文件，不拼接第二层图元。 */

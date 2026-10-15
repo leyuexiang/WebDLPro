@@ -67,6 +67,7 @@ describe('燃气与燃煤拓扑无下钻发布契约', () => {
       'action.solar-power.overview',
       'action.step-up-substation.overview',
       'action.step-down-substation.overview',
+      'action.distribution.overview',
       'action.converter-station.overview',
       'action.switching-station.overview',
       'action.microgrid.overview',

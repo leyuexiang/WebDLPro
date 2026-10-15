@@ -7,7 +7,7 @@ import { LOCAL_PROCESS_CONFIG_VERSION } from '../src/config/process/config-versi
 import { createConfiguredPowerScenesManifest, createSelfTestPage } from '../scripts/build-gas-power-smoke-release.mjs'
 import { coalPowerEdgeColors } from '../scripts/coal-power-topology.mjs'
 
-/** 七个已交付场景只允许使用资料和 Unity 属性面板已经核验的三十九对映射，测试不得按名称自动扩充。 */
+/** 已交付映射只允许使用显式编号清单，测试不得按标题或模型名称自动扩充。 */
 const verifiedMappings = Object.freeze([
   Object.freeze({ sceneId: 'gas-power', nodeId: 'system.gas-turbine-control', sceneNodeId: 'unit.gas-turbine.control' }),
   Object.freeze({ sceneId: 'gas-power', nodeId: 'system.gas-hrsg-control', sceneNodeId: 'unit.gas-hrsg.control' }),
@@ -27,6 +27,9 @@ const verifiedMappings = Object.freeze([
   Object.freeze({ sceneId: 'coal-power', nodeId: 'system.coal-handling-ash-plc', sceneNodeId: 'node.coal-precipitator' }),
   Object.freeze({ sceneId: 'solar-power', nodeId: 'system.solar-inverter-control', sceneNodeId: 'unit.solar-inverter.control' }),
   Object.freeze({ sceneId: 'solar-power', nodeId: 'asset.solar-inverter', sceneNodeId: 'node.solar-inverter' }),
+  Object.freeze({ sceneId: 'consumption', nodeId: 'asset.building-hvac-control', sceneNodeId: 'node.building-hvac-control' }),
+  Object.freeze({ sceneId: 'consumption', nodeId: 'asset.building-access-control', sceneNodeId: 'node.building-access-control' }),
+  Object.freeze({ sceneId: 'consumption', nodeId: 'asset.building-smart-lighting', sceneNodeId: 'node.building-smart-lighting' }),
 ])
 
 /**
@@ -81,7 +84,8 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
     expect(manifest.actions.filter((action) => action.targetSceneId === 'gas-power')).toHaveLength(2)
     expect(manifest.actions.filter((action) => action.targetSceneId === 'coal-power')).toHaveLength(2)
     expect(manifest.actions.filter((action) => action.targetSceneId === 'solar-power')).toHaveLength(2)
-    expect(manifest.actions).toHaveLength(35)
+    // 配电站总览已纳入公开动作，固定数量必须与绝对发布契约保持一致。
+    expect(manifest.actions).toHaveLength(36)
     expect(manifest.actions.find((action) => action.actionId === 'action.scene.overview')).toEqual({
       actionId: 'action.scene.overview',
       title: '返回全局总览',
@@ -206,7 +210,7 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
     }))
   })
 
-  it('十六对显式映射均可常数时间反查且不会产生额外猜测映射', async () => {
+  it('二十一对显式映射均可常数时间反查且不会产生额外猜测映射', async () => {
     const manifest = await createConfiguredPowerScenesManifest('dual-selection-reverse-index')
     const result = TopologyRegistry.create(manifest)
     expect(result.status).toBe('ready')
@@ -220,9 +224,16 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
     }
 
     const publishedMappedNodes = manifest.topologies
-      .filter((topology) => topology.filter === undefined && ['gas-power', 'coal-power', 'solar-power'].includes(topology.sceneId))
+      .filter((topology) => topology.filter === undefined && ['gas-power', 'coal-power', 'solar-power', 'consumption'].includes(topology.sceneId))
       .flatMap((topology) => topology.nodes.filter((node) => node.sceneNodeId !== undefined))
     expect(publishedMappedNodes).toHaveLength(verifiedMappings.length)
+    expect(manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'consumption')?.sceneNodeIds).toEqual([
+      'node.building-hvac-control',
+      'node.building-access-control',
+      'node.building-smart-lighting',
+    ])
+    expect(manifest.topologies.find((topology) => topology.sceneId === 'consumption')?.nodes.map(({ title }) => title))
+      .toEqual(['暖通空调调控', '门禁', '智能照明'])
   })
 
   it('发布场景选择只改变运行时入口别名而不裁剪另一场景内容', async () => {

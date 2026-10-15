@@ -29,7 +29,7 @@ describe('保护关键环节公共拓扑数据', () => {
     const images = data.pens.filter((pen) => pen.image).map((pen) => pen.image)
     expect(images.length).toBeGreaterThan(0)
     // 公共图片别名必须像第二层一样生效，避免源文件路径绕开部署地址生成器。
-    expect(images).toContain('/topology/shared/background/flow-light-3.png')
+    expect(images).toContain('/topology/shared/background/flow-light-3.webp')
     expect(images.every((url) => url?.includes('/topology/shared/'))).toBe(true)
   })
 })

@@ -66,7 +66,7 @@ describe('燃煤拓扑独立数据与公共资源', () => {
       }
       for (const penId of manifest.titleBackgroundPenIds) {
         expect(data.pens.find((pen) => pen.id === penId)?.image)
-          .toContain('/topology/shared/background/flow-light-3.png')
+          .toContain('/topology/shared/background/flow-light-3.webp')
       }
     }
   })
@@ -101,16 +101,16 @@ describe('燃煤拓扑独立数据与公共资源', () => {
     for (const pen of imagePens) expect(pen.image).toContain('/topology/shared/')
     expect([...manifest.devicePenIds]).toEqual(['9533a1f', '8be4fc2', '429749ea'])
     expect(manifest.staticImagePathByPenId).toEqual(new Map([
-      ['6de883f', 'assets/turbine-governor.png'],
-      ['c6c435c', 'assets/boiler-safety-control.png'],
-      ['57ad893', 'assets/coordination-control.png'],
-      ['6ec996f', 'assets/generator-excitation-control.png'],
-      ['7902e1f', 'assets/unit-coordination.png'],
+      ['6de883f', 'icons/normal/dcs.webp'],
+      ['c6c435c', 'icons/normal/dcs.webp'],
+      ['57ad893', 'icons/normal/dcs.webp'],
+      ['6ec996f', 'icons/normal/dcs.webp'],
+      ['7902e1f', 'icons/static/84aa73a62f2c0663b2d9e6525749f6fe3e41ba975eb277620d26600072d94c91.webp'],
     ]))
     // 静态控制图和区域背景必须在公共资源目录真实存在，防止运行时退回外部云端地址。
     for (const relativePath of manifest.staticImagePathByPenId.values()) {
       expect(existsSync(resolve(process.cwd(), 'public/topology/shared', relativePath))).toBe(true)
     }
-    expect(existsSync(resolve(process.cwd(), 'public/topology/shared/background/flow-light-3.png'))).toBe(true)
+    expect(existsSync(resolve(process.cwd(), 'public/topology/shared/background/flow-light-3.webp'))).toBe(true)
   })
 })

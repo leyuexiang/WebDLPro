@@ -79,7 +79,7 @@ function localizePenImage(pen: Pen, variantId: SolarTopologyVariantId): void {
   }
   const manifest = getSolarTopologyResourceManifest(variantId)
   if (manifest.titleBackgroundPenIds.has(pen.id)) {
-    pen.image = getTopologySharedPublicAssetUrl('background/flow-light-3.png')
+    pen.image = getTopologySharedPublicAssetUrl('background/flow-light-3.webp')
     return
   }
   const iconPath = getSolarTopologyPreviewIconPath(variantId, pen.id)

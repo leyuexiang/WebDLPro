@@ -77,7 +77,7 @@ function localizePenImage(pen: Pen, variantId: GasV3TopologyVariantId): void {
   if (!pen.image?.trim() || !pen.id) return
   const manifest = getGasV3TopologyResourceManifest(variantId)
   if (manifest.titleBackgroundPenIds.has(pen.id)) {
-    pen.image = getTopologySharedPublicAssetUrl('background/flow-light-3.png')
+    pen.image = getTopologySharedPublicAssetUrl('background/flow-light-3.webp')
     return
   }
   const iconPath = getGasV3TopologyPreviewIconPath(variantId, pen.id)

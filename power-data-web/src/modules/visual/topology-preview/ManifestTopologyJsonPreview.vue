@@ -1,16 +1,16 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { LockState, Meta2d, type Meta2dData, type Pen } from '@meta2d/core'
 import TopologyLayerFilterRail from './TopologyLayerFilterRail.vue'
 import TopologyFullscreenButton from './TopologyFullscreenButton.vue'
 import type {
   ManifestTopologyPreviewProfile,
-  ManifestTopologyPreviewTooltip,
   ManifestTopologyPreviewVariant,
 } from './manifest-topology-preview-profile'
 import { resolveManifestTopologyClickSelection } from './manifest-topology-click-selection'
 import type { TopologyDataContext } from '@/modules/visual/topology/topology-runtime'
 import type { ProcessNodeId, RouteId } from '@/config/process/identifiers'
+import type { TopologyDeviceStatus } from '@/config/process/types'
 import {
   createGasTopologyConnectedLineIndex,
   GAS_TOPOLOGY_SELECTION_COLOR,
@@ -32,6 +32,7 @@ const props = defineProps<{
   suspended?: boolean
   selectedNodeIds?: readonly ProcessNodeId[]
   selectedRouteIds?: readonly RouteId[]
+  nodeStatuses?: ReadonlyMap<ProcessNodeId, TopologyDeviceStatus>
   /** 独立预览入口可指定首屏第三层文件，避免画布先提交默认第二层总览。 */
   initialDataContext?: TopologyDataContext
 }>()
@@ -50,15 +51,20 @@ const loadingState = ref<'loading' | 'ready' | 'error'>('loading')
 const errorMessage = ref('')
 const layerNotice = ref('')
 const zoomPercent = ref(100)
-const activeTooltip = ref<ManifestTopologyPreviewTooltip | null>(null)
 const tooltipX = ref(16)
 const tooltipY = ref(68)
 const selectedFilterIds = ref<ReadonlySet<string>>(props.profile.createDefaultSelection())
 const currentVariantId = ref(props.profile.defaultVariantId)
+/** 状态来自公共拓扑快照；文件切换时沿用最新快照，不从图元标题推断设备状态。 */
+const runtimeStatuses = shallowRef<ReadonlyMap<ProcessNodeId, TopologyDeviceStatus>>(props.nodeStatuses ?? new Map())
+/** 单文件场景沿用固定清单；多文件场景按版本读取对应图元编号，避免切层后点击旧绑定。 */
+function getProfileRuntimeBindings(variantId: string): readonly RuntimeBinding[] {
+  return props.profile.getRuntimeBindings?.(variantId) ?? props.profile.runtimeBindings ?? []
+}
 /** 第三层上下文存在时隐藏第二层筛选轨；退出后恢复离开前的第二层完整文件。 */
 const activeDataContext = ref<TopologyDataContext | undefined>()
 /** 当前完整文件的显式业务绑定；切换第三层时替换，禁止跨文件复用旧图元编号。 */
-const currentRuntimeBindings = ref<readonly RuntimeBinding[]>(props.profile.runtimeBindings ?? [])
+const currentRuntimeBindings = ref<readonly RuntimeBinding[]>(getProfileRuntimeBindings(currentVariantId.value))
 const nodeIdByPenId = computed(() => new Map(currentRuntimeBindings.value.map((binding) => [binding.penId, binding.nodeId])))
 const penIdsByNodeId = computed(() => {
   const index = new Map<ProcessNodeId, string[]>()
@@ -68,6 +74,16 @@ const penIdsByNodeId = computed(() => {
     else index.set(binding.nodeId, [binding.penId])
   }
   return index
+})
+/** 已应用状态按图元缓存，中央状态快照更新时只重绘真正变化的绑定图元。 */
+const appliedStatusByPenId = new Map<string, TopologyDeviceStatus>()
+const activeTooltipPen = shallowRef<Pen | null>(null)
+const activeTooltip = computed(() => {
+  const pen = activeTooltipPen.value
+  if (!pen?.id) return null
+  const nodeId = nodeIdByPenId.value.get(pen.id)
+  const status = nodeId ? runtimeStatuses.value.get(nodeId) ?? 'normal' : undefined
+  return props.profile.getTooltipContent(pen, status) ?? null
 })
 const connectedLineIndex = ref<ReturnType<typeof createGasTopologyConnectedLineIndex>>(new Map())
 const statusText = computed(() => loadingState.value === 'loading'
@@ -128,7 +144,7 @@ async function setTopologyDataContext(context: TopologyDataContext | undefined):
       nodeId: binding.nodeId as ProcessNodeId,
       ...(binding.sceneNodeId ? { sceneNodeId: binding.sceneNodeId } : {}),
     }))
-    : (props.profile.runtimeBindings ?? [])
+    : getProfileRuntimeBindings(currentVariantId.value)
   try {
     if (context) {
       if (!props.profile.loadDataContext) throw new Error(`${props.profile.sceneLabel}未登记第三层拓扑加载器。`)
@@ -163,6 +179,10 @@ defineExpose({
   resetView: fitTopologyToViewport,
   setTopologyDataContext,
   setSelection: (nodeIds: readonly ProcessNodeId[], _routeIds: readonly RouteId[]) => applyRuntimeSelection(nodeIds),
+  setNodeStatuses: (statuses: ReadonlyMap<ProcessNodeId, TopologyDeviceStatus>) => {
+    runtimeStatuses.value = statuses
+    applyRuntimeStatuses()
+  },
 })
 
 function changeZoom(multiplier: number): void {
@@ -186,14 +206,30 @@ function updateTooltipAnchor(event: MouseEvent): void {
 }
 
 function handleTooltipPenEnter(pen?: Pen): void {
-  activeTooltip.value = pen ? props.profile.getTooltipContent(pen) ?? null : null
+  activeTooltipPen.value = pen ?? null
 }
 
 function handleTooltipPenLeave(pen?: Pen): void {
-  if (!pen || activeTooltip.value?.penId === pen.id) clearTopologyTooltip()
+  if (!pen || activeTooltipPen.value?.id === pen.id) clearTopologyTooltip()
 }
 
-function clearTopologyTooltip(): void { activeTooltip.value = null }
+function clearTopologyTooltip(): void { activeTooltipPen.value = null }
+
+/** 状态更新只访问当前变体的映射图元，并合并成一次画布重绘。 */
+function applyRuntimeStatuses(render = true): void {
+  if (!meta2d || loadingState.value !== 'ready' || props.suspended || !props.profile.getStatusImage) return
+  let changed = false
+  for (const binding of currentRuntimeBindings.value) {
+    const status = runtimeStatuses.value.get(binding.nodeId) ?? 'normal'
+    if (appliedStatusByPenId.get(binding.penId) === status) continue
+    const image = props.profile.getStatusImage(binding.nodeId, status)
+    if (!image || !meta2d.find(binding.penId)?.[0]) continue
+    meta2d.setValue({ id: binding.penId, image }, { render: false, doEvent: false, history: false })
+    appliedStatusByPenId.set(binding.penId, status)
+    changed = true
+  }
+  if (render && changed) meta2d.render()
+}
 
 /** 选中只更新当前文件的直接关联线，取消时按提交阶段缓存的源样式精确恢复。 */
 function applySelectionVisual(pens: readonly Pen[], render = true): void {
@@ -250,11 +286,12 @@ function commitTopologyVariant(
   clearTopologyTooltip()
   highlightedLineIds = new Set()
   sourceLinePresentationById.clear()
+  appliedStatusByPenId.clear()
   if (imageReadyFrame !== undefined) cancelAnimationFrame(imageReadyFrame)
   imageReadyFrame = undefined
   currentVariantId.value = variant.id
   // 第三层上下文已经在请求开始时写入当前绑定；只有普通第二层切换才恢复 profile 默认绑定。
-  if (activeDataContext.value?.contextId !== variant.id) currentRuntimeBindings.value = props.profile.runtimeBindings ?? []
+  if (activeDataContext.value?.contextId !== variant.id) currentRuntimeBindings.value = getProfileRuntimeBindings(variant.id)
   connectedLineIndex.value = createGasTopologyConnectedLineIndex(data.pens)
   const defaultLineColor = data.color ?? '#bdc7db'
   for (const pen of data.pens) {
@@ -268,6 +305,7 @@ function commitTopologyVariant(
   meta2d.open(data)
   meta2d.lock(LockState.DisableEdit)
   loadingState.value = 'ready'
+  applyRuntimeStatuses()
   emit('readyChange', true)
   applyRuntimeSelection(props.selectedNodeIds ?? [], false)
   errorMessage.value = ''
@@ -403,6 +441,7 @@ watch(() => props.suspended, (suspended) => {
     resizeObserver?.observe(canvasHost.value)
     scheduleCanvasResize()
     // 运行时可能在拓扑面板隐藏期间更新选择；恢复后重新投影一次，避免只更新中央快照而不更新图元高亮。
+    applyRuntimeStatuses()
     applyRuntimeSelection(props.selectedNodeIds ?? [])
   }
 })
@@ -422,6 +461,10 @@ onBeforeUnmount(() => {
 })
 
 watch(() => props.selectedNodeIds, (nodeIds) => applyRuntimeSelection(nodeIds ?? []))
+watch(() => props.nodeStatuses, (statuses) => {
+  runtimeStatuses.value = statuses ?? new Map()
+  applyRuntimeStatuses()
+})
 </script>
 
 <template>

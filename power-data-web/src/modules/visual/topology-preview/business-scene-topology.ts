@@ -5,6 +5,10 @@ import type {
   ManifestTopologyPreviewProfile,
 } from './manifest-topology-preview-profile'
 import { BUSINESS_SCENE_TOPOLOGY_SOURCE_MANIFEST } from './business-scene-topology-source-manifest'
+import {
+  getBuildingTopologyRuntimeBindings,
+  getBuildingTopologyStatusIconUrl,
+} from './building-topology-runtime-bindings'
 import { DISTRIBUTION_TOPOLOGY_RUNTIME_BINDINGS } from './distribution-topology-runtime-bindings'
 import type { SubstationTopologyRuntimeBinding } from './substation-topology-runtime-bindings'
 import {
@@ -19,7 +23,7 @@ export const BUSINESS_SCENE_TOPOLOGY_SCENE_IDS = ['microgrid', 'distribution', '
 
 export type BusinessSceneTopologySceneId = (typeof BUSINESS_SCENE_TOPOLOGY_SCENE_IDS)[number]
 
-/** 配电站图纸已登记运行时绑定（图元可点击）；微电网、楼宇仍为纯浏览场景。 */
+/** 配电站和楼宇图纸按完整 JSON 变体登记点击绑定；微电网仍为纯浏览场景。 */
 const RUNTIME_BINDINGS_BY_SCENE: Partial<Record<BusinessSceneTopologySceneId, readonly SubstationTopologyRuntimeBinding[]>> = {
   distribution: DISTRIBUTION_TOPOLOGY_RUNTIME_BINDINGS,
 }
@@ -135,6 +139,17 @@ export function flattenBusinessSceneTopologyPens(
   variant: BusinessSceneTopologyVariant,
 ): Pen[] {
   validateSourcePens(pens, variant)
+
+  // 新版楼宇组合文件已由导出器直接写成画布坐标；空展平清单只接受完全没有组合父级的独立图。
+  if (variant.flattenedCombines.length === 0) {
+    if (pens.some((pen) => pen.name === 'combine')) {
+      throw new Error(`拓扑 ${variant.id} 存在未登记的组合父级。`)
+    }
+    if (pens.length !== variant.expectedRuntimePenCount) {
+      throw new Error(`拓扑 ${variant.id} 展平后图元数量异常：应为 ${variant.expectedRuntimePenCount}，实际为 ${pens.length}。`)
+    }
+    return pens
+  }
 
   const combineIdsToFlatten = new Set(variant.flattenedCombines.map((item) => item.id))
   const penById = new Map<string, Pen>(pens.map((pen) => [pen.id!, pen]))
@@ -301,11 +316,16 @@ export async function loadBusinessSceneTopologyPreviewData(
 }
 
 /** 设备提示只由带共享设备图元的源 pen 提供，不按标题或坐标补造三维绑定。 */
-function getDeviceTooltipContent(pen: Pen) {
+function getDeviceTooltipContent(pen: Pen, status?: TopologyDeviceStatus) {
   if (pen.locked !== SELECTABLE_PEN_LOCK || !pen.id || !pen.image || pen.image.includes('/background/')) return undefined
   const title = pen.text?.replace(/\r?\n/g, '').replace(/[ \t]+/g, ' ').trim() ?? ''
-  return title ? { penId: pen.id, title, status: PREVIEW_STATUS_LABEL.normal } : undefined
+  return title ? { penId: pen.id, title, status: status ? STATUS_LABEL[status] : PREVIEW_STATUS_LABEL.normal } : undefined
 }
+
+/** 已接入三维映射的楼宇节点直接按中央状态切换四态 WebP，其它预览仍显示默认态说明。 */
+const STATUS_LABEL: Readonly<Record<TopologyDeviceStatus, string>> = Object.freeze({
+  normal: '正常', alarm: '告警', fault: '故障', offline: '离线',
+})
 
 /** 选中和组合解析所依赖的非架构层顺序固定，和变体清单的组合键排序一致。 */
 const FILTER_ORDER = ['network', 'business', 'key-process'] as const
@@ -352,6 +372,10 @@ function createPreviewProfile(sceneId: BusinessSceneTopologySceneId): ManifestTo
       signal,
     ),
     getTooltipContent: getDeviceTooltipContent,
+    getStatusImage: sceneId === 'consumption' ? getBuildingTopologyStatusIconUrl : undefined,
+    getRuntimeBindings: sceneId === 'consumption'
+      ? getBuildingTopologyRuntimeBindings
+      : () => RUNTIME_BINDINGS_BY_SCENE[sceneId] ?? [],
     runtimeBindings: RUNTIME_BINDINGS_BY_SCENE[sceneId],
   })
 }

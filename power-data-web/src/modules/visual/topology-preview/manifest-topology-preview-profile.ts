@@ -1,5 +1,7 @@
 import type { Meta2dData, Pen } from '@meta2d/core'
 import type { TopologyDataContext } from '@/modules/visual/topology/topology-runtime'
+import type { TopologyDeviceStatus } from '@/config/process/types'
+import type { ProcessNodeId } from '@/config/process/identifiers'
 import type { SubstationTopologyRuntimeBinding } from './substation-topology-runtime-bindings'
 
 /** 清单式第二层拓扑的完整文件描述；每个筛选组合只能命中一项。 */
@@ -40,6 +42,10 @@ export interface ManifestTopologyPreviewProfile {
   readonly filterGroups: readonly ManifestTopologyPreviewFilterGroup[]
   /** 正式发布用的 penId → nodeId → sceneNodeId 清单；预览层不得自行推导绑定。 */
   readonly runtimeBindings?: readonly SubstationTopologyRuntimeBinding[]
+  /** 多份筛选文件的图元编号不同，由场景模块按当前完整文件返回专属绑定。 */
+  getRuntimeBindings?(variantId: string): readonly SubstationTopologyRuntimeBinding[]
+  /** 已登记节点的四态图片按业务节点与状态显式查表；未登记组合不拼接图片路径。 */
+  getStatusImage?(nodeId: ProcessNodeId, status: TopologyDeviceStatus): string | undefined
   createDefaultSelection(): ReadonlySet<string>
   toggleFilter(current: ReadonlySet<string>, filterId: string, checked: boolean): ReadonlySet<string>
   resolveVariant(selected: ReadonlySet<string>): ManifestTopologyPreviewVariant | undefined
@@ -47,5 +53,5 @@ export interface ManifestTopologyPreviewProfile {
   loadData(variantId: string, signal?: AbortSignal): Promise<Meta2dData>
   /** 第三层上下文由公共画布按显式清单加载；未实现时保持第二层文件，不做路径猜测。 */
   loadDataContext?(context: TopologyDataContext, signal?: AbortSignal): Promise<Meta2dData>
-  getTooltipContent(pen: Pen): ManifestTopologyPreviewTooltip | undefined
+  getTooltipContent(pen: Pen, status?: TopologyDeviceStatus): ManifestTopologyPreviewTooltip | undefined
 }

@@ -27,7 +27,7 @@ export const SECURITY_CONFIG = {
    * - 180：6个月试用期
    * - 365：1年试用期
    */
-  TRIAL_DAYS: 30,
+  TRIAL_DAYS: 38,
 
   /**
    * 过期警告天数

@@ -12,7 +12,7 @@ import {
 const webProjectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 /**
- * 生成发布门禁需要的最小联合结构清单。夹具保留当前三十五项公开动作和八个动作目标场景，
+ * 生成发布门禁需要的最小联合结构清单。夹具保留当前三十六项公开动作和九个动作目标场景，
  * 使正向用例本身不能再把“只有燃气、燃煤动作”的旧清单当成合格发布基线。
  */
 function createTopologyManifest() {
@@ -22,6 +22,7 @@ function createTopologyManifest() {
     ['solar-power', '光伏发电'],
     ['step-up-substation', '升压站'],
     ['step-down-substation', '降压站'],
+    ['distribution', '配电站'],
     ['converter-station', '换流站'],
     ['switching-station', '开关站'],
     ['microgrid', '微电网'],
@@ -202,7 +203,8 @@ function createTopologyManifest() {
       targetViewMode: 'business',
       targetTopologyId: `topology.${sceneId}.overview`,
       allowedParameters: [],
-      unityAction: { type: ['step-up-substation', 'step-down-substation', 'converter-station', 'switching-station'].includes(sceneId) ? 'resetScene' : 'none' },
+      // 配电站总览也执行复位；夹具必须与生成器对该场景的公开动作语义一致。
+      unityAction: { type: ['step-up-substation', 'step-down-substation', 'distribution', 'converter-station', 'switching-station'].includes(sceneId) ? 'resetScene' : 'none' },
       failurePolicy: 'keep-current-context',
       configVersion: manifestVersion,
     })), ...['step-up-substation', 'step-down-substation', 'converter-station'].flatMap((sceneId) => ['transformer-protection', 'busbar-protection', 'line-protection'].map((stepId) => ({
@@ -551,7 +553,7 @@ describe('发布产物输出标准', () => {
       await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
 
       expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
-        expect.stringContaining('完整发布当前三十五项公开动作'),
+        expect.stringContaining('完整发布当前三十六项公开动作'),
       ]))
     } finally {
       rmSync(root, { recursive: true, force: true })
@@ -613,7 +615,7 @@ describe('发布产物输出标准', () => {
       await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
 
       expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
-        expect.stringContaining('完整发布当前三十五项公开动作'),
+        expect.stringContaining('完整发布当前三十六项公开动作'),
       ]))
     } finally {
       rmSync(root, { recursive: true, force: true })

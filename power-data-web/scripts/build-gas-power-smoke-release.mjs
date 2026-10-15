@@ -165,6 +165,40 @@ const verifiedSolarSceneNodeIdByTopologyNodeId = new Map([
   ['asset.solar-inverter', 'node.solar-inverter'],
 ])
 
+/** 楼宇三个前端映射按用户截图逐项登记；离线 Unity 工程未同步，本表不代替场景节点验收。 */
+const buildingSceneNodeIdByTopologyNodeId = new Map([
+  ['asset.building-hvac-control', 'node.building-hvac-control'],
+  ['asset.building-access-control', 'node.building-access-control'],
+  ['asset.building-smart-lighting', 'node.building-smart-lighting'],
+])
+
+const buildingSceneNodeIds = Object.freeze([...buildingSceneNodeIdByTopologyNodeId.values()])
+
+/** 结构清单只登记中央选择与三维反查所需的三个节点，拓扑画面仍由新版 Meta2D JSON 完整绘制。 */
+function createBuildingTopology(manifestVersion) {
+  return {
+    topologyId: 'topology.consumption.overview',
+    sceneId: 'consumption',
+    title: '用电总览',
+    configVersion: manifestVersion,
+    nodes: [
+      ['asset.building-hvac-control', '暖通空调调控', 18],
+      ['asset.building-access-control', '门禁', 50],
+      ['asset.building-smart-lighting', '智能照明', 82],
+    ].map(([nodeId, title, x]) => ({
+      nodeId,
+      title,
+      sceneNodeId: buildingSceneNodeIdByTopologyNodeId.get(nodeId),
+      iconKey: 'generic',
+      x,
+      y: 72,
+      deviceStatus: 'normal',
+      doubleClickBehavior: 'emit-node',
+    })),
+    edges: [],
+  }
+}
+
 /** 外部 JSON 图纸负责完整绘制；结构清单只登记需要状态与三维联动的两个稳定节点。 */
 function createSolarPowerTopology(manifestVersion) {
   return {
@@ -186,6 +220,43 @@ function createSolarPowerTopology(manifestVersion) {
         iconKey: 'solar', x: 58, y: 88, deviceStatus: 'normal', doubleClickBehavior: 'emit-node',
       },
     ],
+    edges: [],
+  }
+}
+
+/** 图2确认的风电十类业务节点；默认组合图的左右重复图元共用这些稳定业务与 Unity 编号。 */
+const windOverviewNodeDefinitions = Object.freeze([
+  Object.freeze({ nodeId: 'system.wind-pitch-control', title: '变桨控制', sceneNodeId: 'unit.wind-pitch.control', iconKey: 'plc', x: 10, y: 35 }),
+  Object.freeze({ nodeId: 'system.wind-converter-control', title: '变流控制', sceneNodeId: 'unit.wind-converter.control', iconKey: 'plc', x: 30, y: 35 }),
+  Object.freeze({ nodeId: 'system.wind-yaw-control', title: '偏航控制', sceneNodeId: 'unit.wind-yaw.control', iconKey: 'plc', x: 50, y: 35 }),
+  Object.freeze({ nodeId: 'system.wind-drivetrain-control', title: '传动控制', sceneNodeId: 'unit.wind-drivetrain.control', iconKey: 'plc', x: 70, y: 35 }),
+  Object.freeze({ nodeId: 'system.wind-brake-control', title: '刹车控制', sceneNodeId: 'unit.wind-brake.control', iconKey: 'plc', x: 90, y: 35 }),
+  Object.freeze({ nodeId: 'asset.wind-pitch-system', title: '变桨系统', sceneNodeId: 'node.wind-pitch-system', iconKey: 'generic', x: 10, y: 75 }),
+  Object.freeze({ nodeId: 'asset.wind-converter-system', title: '变流系统', sceneNodeId: 'node.wind-converter-system', iconKey: 'generic', x: 30, y: 75 }),
+  Object.freeze({ nodeId: 'asset.wind-yaw-system', title: '偏航系统', sceneNodeId: 'node.wind-yaw-system', iconKey: 'generic', x: 50, y: 75 }),
+  Object.freeze({ nodeId: 'asset.wind-drivetrain-system', title: '传动系统', sceneNodeId: 'node.wind-drivetrain-system', iconKey: 'generic', x: 70, y: 75 }),
+  Object.freeze({ nodeId: 'asset.wind-brake-system', title: '刹车系统', sceneNodeId: 'node.wind-brake-system', iconKey: 'generic', x: 90, y: 75 }),
+])
+
+/** 场景映射同时登记十个总览节点与两个已发布的第三层设备，供正反向选择校验使用。 */
+const verifiedWindSceneNodeIds = Object.freeze([
+  ...windOverviewNodeDefinitions.map((node) => node.sceneNodeId),
+  'node.wind-turbine',
+  'node.wind-gearbox',
+])
+
+/** 结构清单为中央状态与跨端映射登记十个节点；画面仍由独立 Meta2D JSON 完整绘制。 */
+function createWindPowerTopology(manifestVersion) {
+  return {
+    topologyId: 'topology.wind-power.overview',
+    sceneId: 'wind-power',
+    title: '风力发电总览',
+    configVersion: manifestVersion,
+    nodes: windOverviewNodeDefinitions.map((node) => ({
+      ...node,
+      deviceStatus: 'normal',
+      doubleClickBehavior: 'emit-node',
+    })),
     edges: [],
   }
 }
@@ -999,11 +1070,11 @@ export async function createCoalPowerManifest(releaseId) {
 }
 
 /**
- * 生成同时承载燃气、燃煤真实配置的原子结构清单。
+ * 生成承载燃气、燃煤、光伏、风电及变电业务配置的联合发布清单。
  *
- * 两个独立清单生成器继续保留为场景专项回归夹具；正式发布改用本函数一次装配两张真实总览拓扑、
- * 七个受控导航动作、五项已核验第三层动作和二十组三维映射。initialSceneId（初始场景标识）只决定当前入口使用的运行时别名，
- * 不再裁剪另一场景内容，因此同一 Unity 实例可在燃气、燃煤之间往返并保持双向选中。
+ * 两个独立清单生成器继续保留为场景专项配置来源；正式发布在本函数中合并各场景总览拓扑、
+ * 受控导航动作、已核验的第三层动作及显式三维节点映射。initialSceneId（初始场景标识）只决定当前入口使用的运行时别名，
+ * 不裁剪其他场景内容，因此同一 Unity 场景实例可在已登记业务场景间切换并保持双向选中。
  */
 export async function createConfiguredPowerScenesManifest(releaseId, initialSceneId = 'gas-power') {
   if (!['gas-power', 'coal-power', 'solar-power'].includes(initialSceneId)) {
@@ -1033,6 +1104,12 @@ export async function createConfiguredPowerScenesManifest(releaseId, initialScen
   const solarTopology = createSolarPowerTopology(manifestVersion)
   if (solarTopologyIndex >= 0) topologies[solarTopologyIndex] = solarTopology
   else topologies.push(solarTopology)
+  // 风电总览清单登记十个业务节点；具体画面与图元编号仍由公共画布读取三层组合 JSON。
+  const windTopology = createWindPowerTopology(manifestVersion)
+  const windTopologyIndex = topologies.findIndex((topology) => topology.sceneId === 'wind-power')
+  if (windTopologyIndex >= 0) topologies[windTopologyIndex] = windTopology
+  else topologies.push(windTopology)
+  const buildingTopology = createBuildingTopology(manifestVersion)
   /*
    * 合作方当前只从 workflowActions（流程动作摘要）生成可绑定菜单，因此六个新增场景必须登记稳定导航动作。
    * 这些动作复用原子视图事务且 unityAction（Unity动作）固定为 none（无动作），不会伪造控制器未声明的工艺步骤。
@@ -1236,8 +1313,12 @@ const addedSceneNavigations = [
     }
     const topologyId = `topology.${sceneId}.overview`
     const existingTopologyIndex = topologies.findIndex((item) => item.topologyId === topologyId)
-    // 光伏上方已经登记两个已核验节点，不能被通用空占位逻辑覆盖。
-    if (stationTopologyBySceneId.has(sceneId)) {
+    // 风电、光伏和站类总览已登记稳定业务节点，不可被通用空占位清单覆盖。
+    if (sceneId === 'wind-power') {
+      topologies[existingTopologyIndex >= 0 ? existingTopologyIndex : topologies.length] = windTopology
+    } else if (sceneId === 'consumption') {
+      topologies[existingTopologyIndex >= 0 ? existingTopologyIndex : topologies.length] = buildingTopology
+    } else if (stationTopologyBySceneId.has(sceneId)) {
       topologies[existingTopologyIndex >= 0 ? existingTopologyIndex : topologies.length] = stationTopologyBySceneId.get(sceneId)
     } else if (sceneId !== 'solar-power') {
       const emptyTopology = { topologyId, sceneId, title: `${scene?.title ?? sceneId}总览`, configVersion: manifestVersion, nodes: [], edges: [] }
@@ -1253,18 +1334,33 @@ const addedSceneNavigations = [
     if (!coalMapping) throw new Error('燃煤 Unity 映射缺失，无法生成联合清单。')
     return { ...coalMapping }
   })
-  // 风电发布两个已核验第三层节点；偏航系统尚无 Prefab，不登记未实现能力。
-  for (const sceneId of ['wind-power', 'solar-power', 'step-up-substation', 'step-down-substation','distribution', 'converter-station', 'switching-station']) {
+  // 风电登记十个总览交互目标，楼宇登记三个总览目标；全部来源于显式清单，不按标题补造编号。
+  for (const sceneId of ['wind-power', 'solar-power', 'consumption', 'step-up-substation', 'step-down-substation', 'distribution', 'converter-station', 'switching-station']) {
     const mapping = unitySceneMappings.find((item) => item.sceneId === sceneId)
     if (mapping) {
       mapping.mappingVersion = unitySceneMappingVersion
       mapping.sceneNodeIds = sceneId === 'wind-power'
-        ? ['node.wind-turbine', 'node.wind-gearbox']
+        ? [...verifiedWindSceneNodeIds]
         : sceneId === 'solar-power'
           ? [...verifiedSolarSceneNodeIdByTopologyNodeId.values()]
+          : sceneId === 'consumption'
+            ? [...buildingSceneNodeIds]
           : (stationTopologyBySceneId.get(sceneId)?.nodes ?? []).map((node) => node.sceneNodeId)
       mapping.routeIds = []
-    } else unitySceneMappings.push({ sceneId, mappingVersion: unitySceneMappingVersion, sceneNodeIds: sceneId === 'wind-power' ? ['node.wind-turbine', 'node.wind-gearbox'] : sceneId === 'solar-power' ? [...verifiedSolarSceneNodeIdByTopologyNodeId.values()] : (stationTopologyBySceneId.get(sceneId)?.nodes ?? []).map((node) => node.sceneNodeId), routeIds: [] })
+    } else {
+      unitySceneMappings.push({
+        sceneId,
+        mappingVersion: unitySceneMappingVersion,
+        sceneNodeIds: sceneId === 'wind-power'
+          ? [...verifiedWindSceneNodeIds]
+          : sceneId === 'solar-power'
+            ? [...verifiedSolarSceneNodeIdByTopologyNodeId.values()]
+            : sceneId === 'consumption'
+              ? [...buildingSceneNodeIds]
+            : (stationTopologyBySceneId.get(sceneId)?.nodes ?? []).map((node) => node.sceneNodeId),
+        routeIds: [],
+      })
+    }
   }
 
   /*
@@ -1367,6 +1463,7 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
         <button type="button" data-action-id="action.solar-power.inverter" disabled>光伏关键</button>
         <button type="button" data-action-id="action.step-up-substation.overview" disabled>升压站场景</button>
         <button type="button" data-action-id="action.step-down-substation.overview" disabled>降压站场景</button>
+        <button type="button" data-action-id="action.distribution.overview" disabled>配电站场景</button>
         <button type="button" data-action-id="action.converter-station.overview" disabled>换流站场景</button>
         <button type="button" data-action-id="action.switching-station.overview" disabled>开关站场景</button>
         <button type="button" data-action-id="action.microgrid.overview" disabled>微电网场景</button>
