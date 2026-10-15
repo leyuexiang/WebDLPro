@@ -7,8 +7,8 @@ import { LOCAL_PROCESS_CONFIG_VERSION } from '../src/config/process/config-versi
 import { createConfiguredPowerScenesManifest, createSelfTestPage } from '../scripts/build-gas-power-smoke-release.mjs'
 import { coalPowerEdgeColors } from '../scripts/coal-power-topology.mjs'
 
-/** 已交付映射只允许使用显式编号清单，测试不得按标题或模型名称自动扩充。 */
-const verifiedMappings = Object.freeze([
+/** 发布映射只允许使用显式编号清单；配电站目标编号按截图约定供后续 Unity 配置。 */
+const registeredMappings = Object.freeze([
   Object.freeze({ sceneId: 'gas-power', nodeId: 'system.gas-turbine-control', sceneNodeId: 'unit.gas-turbine.control' }),
   Object.freeze({ sceneId: 'gas-power', nodeId: 'system.gas-hrsg-control', sceneNodeId: 'unit.gas-hrsg.control' }),
   Object.freeze({ sceneId: 'gas-power', nodeId: 'system.gas-steam-turbine-control', sceneNodeId: 'unit.gas-steam-turbine.control' }),
@@ -30,6 +30,11 @@ const verifiedMappings = Object.freeze([
   Object.freeze({ sceneId: 'consumption', nodeId: 'asset.building-hvac-control', sceneNodeId: 'node.building-hvac-control' }),
   Object.freeze({ sceneId: 'consumption', nodeId: 'asset.building-access-control', sceneNodeId: 'node.building-access-control' }),
   Object.freeze({ sceneId: 'consumption', nodeId: 'asset.building-smart-lighting', sceneNodeId: 'node.building-smart-lighting' }),
+  Object.freeze({ sceneId: 'distribution', nodeId: 'asset.distribution-protection', sceneNodeId: 'node.distribution-protection' }),
+  Object.freeze({ sceneId: 'distribution', nodeId: 'asset.distribution-measurement', sceneNodeId: 'node.distribution-measurement' }),
+  Object.freeze({ sceneId: 'distribution', nodeId: 'asset.distribution-transformer', sceneNodeId: 'node.distribution-transformer' }),
+  Object.freeze({ sceneId: 'distribution', nodeId: 'asset.distribution-breaker', sceneNodeId: 'node.distribution-breaker' }),
+  Object.freeze({ sceneId: 'distribution', nodeId: 'asset.distribution-instrument-transformer', sceneNodeId: 'node.distribution-instrument-transformer' }),
 ])
 
 /**
@@ -210,13 +215,13 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
     }))
   })
 
-  it('二十一对显式映射均可常数时间反查且不会产生额外猜测映射', async () => {
+  it('二十六对显式映射均可常数时间反查且不会产生额外猜测映射', async () => {
     const manifest = await createConfiguredPowerScenesManifest('dual-selection-reverse-index')
     const result = TopologyRegistry.create(manifest)
     expect(result.status).toBe('ready')
     if (result.status !== 'ready') return
 
-    for (const mapping of verifiedMappings) {
+    for (const mapping of registeredMappings) {
       expect(result.registry.getNodeIdForSceneNode(
         toSceneId(mapping.sceneId),
         toSceneNodeId(mapping.sceneNodeId),
@@ -224,9 +229,9 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
     }
 
     const publishedMappedNodes = manifest.topologies
-      .filter((topology) => topology.filter === undefined && ['gas-power', 'coal-power', 'solar-power', 'consumption'].includes(topology.sceneId))
+      .filter((topology) => topology.filter === undefined && ['gas-power', 'coal-power', 'solar-power', 'consumption', 'distribution'].includes(topology.sceneId))
       .flatMap((topology) => topology.nodes.filter((node) => node.sceneNodeId !== undefined))
-    expect(publishedMappedNodes).toHaveLength(verifiedMappings.length)
+    expect(publishedMappedNodes).toHaveLength(registeredMappings.length)
     expect(manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'consumption')?.sceneNodeIds).toEqual([
       'node.building-hvac-control',
       'node.building-access-control',
@@ -234,6 +239,23 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
     ])
     expect(manifest.topologies.find((topology) => topology.sceneId === 'consumption')?.nodes.map(({ title }) => title))
       .toEqual(['暖通空调调控', '门禁', '智能照明'])
+
+    // 用户截图定义的五项以设备级 nodeId 和 sceneNodeId 发布；Unity 节点由用户后续离线配置。
+    expect(manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'distribution')?.sceneNodeIds).toEqual([
+      'node.distribution-protection',
+      'node.distribution-measurement',
+      'node.distribution-transformer',
+      'node.distribution-breaker',
+      'node.distribution-instrument-transformer',
+    ])
+    expect(manifest.topologies.find((topology) => topology.sceneId === 'distribution')?.nodes.map(({ nodeId, title, sceneNodeId }) => [nodeId, title, sceneNodeId]))
+      .toEqual([
+        ['asset.distribution-protection', '保护装置', 'node.distribution-protection'],
+        ['asset.distribution-measurement', '测控装置', 'node.distribution-measurement'],
+        ['asset.distribution-transformer', '配电变压器', 'node.distribution-transformer'],
+        ['asset.distribution-breaker', '断路器', 'node.distribution-breaker'],
+        ['asset.distribution-instrument-transformer', '互感器', 'node.distribution-instrument-transformer'],
+      ])
   })
 
   it('发布场景选择只改变运行时入口别名而不裁剪另一场景内容', async () => {

@@ -38,7 +38,7 @@ function isChecked(option: TopologyLayerFilterRailOption<FilterId>): boolean {
 
 <template>
   <div class="topology-layer-filter-rail" role="group" aria-label="图层筛选" title="图层筛选">
-    <!-- “筛选框”三个字依次占据前三行，筛选轨整体只保留一个汉字的内容宽度。 -->
+    <!-- 保留原有筛选标题与选项结构；公共样式隐藏整轨，只有恢复产品入口时才会参与展示。 -->
     <span class="topology-layer-filter-rail__title" aria-hidden="true">筛选框</span>
     <fieldset
       v-for="group in props.groups"
@@ -69,8 +69,9 @@ function isChecked(option: TopologyLayerFilterRailOption<FilterId>): boolean {
 
 <style scoped>
 /*
- * 筛选轨绝对定位在最近的相对定位画布右上角，不参与网格轨道计算；
- * 顶部预留公共全屏按钮的高度后整体下移，因而所有当前及后续拓扑都能复用同一位置规范。
+ * 当前产品统一默认展示“网络层 + 业务层 + 关键环节层”的完整组合拓扑，不再向用户显示图层筛选框。
+ * 保留筛选组件和场景内部的组合清单，便于画布继续按显式默认版本加载；display:none 同时将控件移出布局、
+ * 键盘焦点和辅助技术树，避免只隐藏外观却留下不可见的交互入口。后续如需恢复筛选，只需调整此公共策略。
  */
 .topology-layer-filter-rail {
   position: absolute;
@@ -93,6 +94,8 @@ function isChecked(option: TopologyLayerFilterRailOption<FilterId>): boolean {
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
   color: #d6deeb;
   font: 11px/14px "Microsoft YaHei", sans-serif;
+  /* 必须放在原有网格显示声明之后，让公共隐藏策略成为最终生效值。 */
+  display: none;
   scrollbar-width: thin;
 }
 

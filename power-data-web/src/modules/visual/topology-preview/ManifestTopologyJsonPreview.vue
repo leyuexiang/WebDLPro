@@ -61,7 +61,7 @@ const runtimeStatuses = shallowRef<ReadonlyMap<ProcessNodeId, TopologyDeviceStat
 function getProfileRuntimeBindings(variantId: string): readonly RuntimeBinding[] {
   return props.profile.getRuntimeBindings?.(variantId) ?? props.profile.runtimeBindings ?? []
 }
-/** 第三层上下文存在时隐藏第二层筛选轨；退出后恢复离开前的第二层完整文件。 */
+/** 第三层上下文存在时隔离第二层组合事件；退出后恢复离开前的第二层完整文件。 */
 const activeDataContext = ref<TopologyDataContext | undefined>()
 /** 当前完整文件的显式业务绑定；切换第三层时替换，禁止跨文件复用旧图元编号。 */
 const currentRuntimeBindings = ref<readonly RuntimeBinding[]>(getProfileRuntimeBindings(currentVariantId.value))
@@ -112,15 +112,12 @@ function syncZoomPercent(): void {
 
 /** 按当前完整文件边界等比适配，不改写图元坐标、文字或连线路径。 */
 function fitTopologyToViewport(): void {
-  // 重置只作用于当前有效视口，不加载文件、不清空图层筛选或业务选择。
+  // 重置只作用于当前有效视口，不加载文件、不改变当前组合、中央状态或业务选择。
   if (!meta2d || disposed || props.suspended || loadingState.value !== 'ready') return
   if (!canvasHost.value?.clientWidth || !canvasHost.value?.clientHeight) return
   clearTopologyTooltip()
-  // 四边距为 [上, 右, 下, 左]：仅右侧为避让悬浮筛选轨预留，其余方向贴边填满画布。
-  meta2d.fitView(true, [0, 24, 0, 0])
-  // fitView 内部 centerView 会忽略不对称边距并强制把内容居中，右侧预留被平摊成左右两侧留白，
-  // 导致右侧仍压住悬浮筛选轨、左侧出现缝隙；这里按当前缩放把内容向左平移半个右侧预留量补回。
-  meta2d.translate(-12 / (meta2d.store.data.scale || 1), 0)
+  // 公共筛选框已隐藏，四边不再为其预留空间；用零边距让当前组合拓扑在完整画布内居中适配。
+  meta2d.fitView(true, [0, 0, 0, 0])
   syncZoomPercent()
 }
 

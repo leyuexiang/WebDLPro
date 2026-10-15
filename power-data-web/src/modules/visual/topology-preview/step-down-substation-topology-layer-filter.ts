@@ -7,7 +7,7 @@ import {
 
 export type StepDownSubstationTopologyFilterId = StepDownSubstationTopologyLayerId
 
-/** 四层显示顺序和公共筛选轨颜色与现有燃气、燃煤拓扑保持一致。 */
+/** 四层组合顺序和颜色元数据与现有拓扑保持一致；公共筛选框当前隐藏。 */
 export const STEP_DOWN_SUBSTATION_TOPOLOGY_FILTER_GROUPS = Object.freeze([
   { id: 'architecture', options: Object.freeze([{ id: 'architecture', label: '架构层', color: '#60a5fa' }]) },
   { id: 'network', options: Object.freeze([{ id: 'network', label: '网络层', color: '#d19a2a' }]) },

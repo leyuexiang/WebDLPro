@@ -70,7 +70,7 @@ const selectedFilterIds = ref<ReadonlySet<GasV3TopologyFilterId>>(createDefaultG
 const currentVariantId = ref<GasV3TopologyVariantId>('network-business-key-process')
 /**
  * 第三层关键环节由业务上下文唯一指定整份拓扑数据，不存在层级组合选择。
- * 单独保存上下文状态可在异步 JSON 加载开始前立即隐藏筛选轨，避免短暂显示第二层控件。
+ * 单独保存上下文状态可在异步 JSON 加载期间隔离第二层组合事件，并保留返回时应恢复的默认组合。
  */
 const processDetailContextActive = ref(false)
 const currentBindings = shallowRef<readonly GasV3TopologyRuntimeBinding[]>(getGasV3TopologyRuntimeBindings(currentVariantId.value))
@@ -266,7 +266,7 @@ async function switchTopologyVariant(
 function setTopologyDataContext(context: TopologyDataContext | undefined): void {
   if (disposed) return
   if (!context) {
-    // 先恢复筛选轨，再异步恢复进入第三层前的完整业务拓扑，界面状态与当前层级同步。
+    // 先结束第三层上下文，再异步恢复进入前的完整业务拓扑，保证数据层级与当前业务状态同步。
     processDetailContextActive.value = false
     if (currentVariantId.value === 'process-detail-gas-turbine') {
       const variant = GAS_V3_TOPOLOGY_VARIANT_BY_ID.get(lastBusinessVariantId)
@@ -366,11 +366,8 @@ function handleCanvasKeydown(event: KeyboardEvent): void {
 function fitTopologyToViewport(): void {
   if (!meta2d || loadingState.value !== 'ready' || suspended || !readUsableTopologyViewportSize(canvasHost.value)) return
   activeTooltipPen.value = null
-  // 四边距为 [上, 右, 下, 左]：仅右侧为避让悬浮筛选轨预留，其余方向贴边填满画布。
-  meta2d.fitView(true, [0, 24, 0, 0])
-  // fitView 内部 centerView 会忽略不对称边距并强制居中，右侧预留被平摊成左右留白；
-  // 这里按当前缩放把内容向左平移半个右侧预留量，保证右侧净空避让筛选轨、左侧贴边。
-  meta2d.translate(-12 / (meta2d.store.data.scale || 1), 0)
+  // 公共筛选框已隐藏，四边不再为其预留空间；用零边距让当前组合拓扑在完整画布内居中适配。
+  meta2d.fitView(true, [0, 0, 0, 0])
 }
 
 /** 公共重置只恢复当前文件视图，不改变层级、中央状态或业务选择。 */

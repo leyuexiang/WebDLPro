@@ -3,14 +3,13 @@ import { createSubstationTopologyRuntimeBindingIndex, bindNode, type SubstationT
 /**
  * 配电站 JSON 图纸的运行时绑定表：图元 penId → 二维业务节点 → Unity 三维节点。
  *
- * 登记规则（与升压站一致）：
+ * 登记规则：
  * - penId 来自 distribution-json-preview 各变体 JSON 的图元编号，同一业务节点在
  *   所有筛选组合中的图元编号已按图纸文字自动汇聚（bindNode 的 penIds 数组）。
- * - nodeId/sceneNodeId 必须与 Unity 场景 PowerPlantProcessController._nodes 的
- *   稳定标识逐字一致，并已登记进结构清单的 unitySceneMappings。
+ * - sceneNodeId 是按本次配电站截图确定的后续 Unity 配置目标编号，并同步登记进
+ *   结构清单的 unitySceneMappings；它不表示当前离线 Unity 场景已创建或通过验收。
  * - 未登记图元点击只清空选择，不会发送任何 Unity 命令；禁止按标题或坐标推断绑定。
- * - nodeId/sceneNodeId 当前为按命名规范生成的草稿：若与 Unity _nodes._id 不一致，
- *   改绑定表或改 Unity 侧 ID 使三方一致后才能生效。
+ * - 用户后续按此表配置 Unity 节点后，二维选择与三维反向选择才会实际命中对应对象。
  */
 export const DISTRIBUTION_TOPOLOGY_RUNTIME_BINDINGS: readonly SubstationTopologyRuntimeBinding[] = Object.freeze([
   ...bindNode('asset.distribution-auxiliary-monitoring', 'node.distribution-auxiliary-monitoring', ['10527c7', '395abbc', '4b94d7b', '6ecfd09', '9c80115']),

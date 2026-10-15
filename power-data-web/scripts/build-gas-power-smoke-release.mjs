@@ -1125,8 +1125,8 @@ const addedSceneNavigations = [
     { sceneId: 'microgrid', title: '微电网', actionId: 'action.microgrid.overview', actionTitle: '进入微电网总览' },
     { sceneId: 'consumption', title: '用电', actionId: 'action.consumption.overview', actionTitle: '进入用电总览' },
   ]
-  // 四个变电业务场景使用已核验的 Unity sceneNodeId；拓扑节点显式携带反向映射，
-  // 不依赖标题、数组顺序或图元编号推断三维目标。
+  // 站类场景拓扑显式携带二维—三维映射，不依赖标题、数组顺序或图元编号推断目标。
+  // 配电站五个 sceneNodeId 按本次截图定义为后续 Unity 配置约定，不代表本地 Unity 场景现状。
   const substationTopologyNodes = {
     'step-up-substation': [
       ['system.step-up-protection-control', '升压站保护控制', 'unit.step-up-protection.control', 'plc', 25, 35],
@@ -1136,11 +1136,11 @@ const addedSceneNavigations = [
       ['asset.step-up-instrument-transformer', '升压站仪用变压器', 'node.step-up-instrument-transformer', 'transformer', 80, 72],
     ],
      'distribution': [
-      ['system.distribution-protection-control', '配电站保护控制', 'unit.distribution-protection.control', 'plc', 25, 35],
-      ['system.distribution-measurement-control', '配电站测量控制', 'unit.distribution-measurement.control', 'instrument', 75, 35],
-      ['asset.distribution-transformer', '配电站主变压器', 'node.distribution-transformer', 'transformer', 20, 72],
-      ['asset.distribution-breaker', '配电站断路器', 'node.distribution-breaker', 'breaker', 50, 72],
-      ['asset.distribution-instrument-transformer', '配电站仪用变压器', 'node.distribution-instrument-transformer', 'transformer', 80, 72],
+      ['asset.distribution-protection', '保护装置', 'node.distribution-protection', 'plc', 50, 35],
+      ['asset.distribution-measurement', '测控装置', 'node.distribution-measurement', 'instrument', 80, 35],
+      ['asset.distribution-transformer', '配电变压器', 'node.distribution-transformer', 'transformer', 20, 72],
+      ['asset.distribution-breaker', '断路器', 'node.distribution-breaker', 'breaker', 50, 72],
+      ['asset.distribution-instrument-transformer', '互感器', 'node.distribution-instrument-transformer', 'transformer', 80, 72],
     ],
     'step-down-substation': [
       ['system.step-down-protection-control', '降压站保护控制', 'unit.step-down-protection.control', 'plc', 20, 35],

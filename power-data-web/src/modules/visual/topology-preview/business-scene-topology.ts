@@ -70,7 +70,7 @@ export const BUSINESS_SCENE_TOPOLOGY_VARIANTS_BY_SCENE: Readonly<Record<
   readonly BusinessSceneTopologyVariant[]
 >>
 
-/** 筛选轨样式与既有第二层一致，状态机继续复用成熟的架构层互斥规则。 */
+/** 隐藏筛选框后仍保留稳定层级元数据，内部组合解析复用成熟的架构层互斥规则。 */
 const FILTER_GROUPS = WIND_TOPOLOGY_FILTER_GROUPS
 
 /** 首次加载的安全原始副本仅按“场景 + 文件版本”缓存，绝不缓存 Meta2D 运行时对象。 */
@@ -347,7 +347,7 @@ function resolveVariant(
   return variantsByCombinationByScene.get(sceneId)?.get(combinationKey)
 }
 
-/** 每个新场景只改变数据清单和地址，共用同一筛选轨、Meta2D 画布和交互处理。 */
+/** 每个新场景只改变数据清单和地址，共用同一组合状态机、Meta2D 画布和交互处理。 */
 function createPreviewProfile(sceneId: BusinessSceneTopologySceneId): ManifestTopologyPreviewProfile {
   const defaultVariant = BUSINESS_SCENE_TOPOLOGY_VARIANTS_BY_SCENE[sceneId].find((variant) => variant.isDefault)
   if (!defaultVariant) throw new Error(`${sceneId} 拓扑必须且只能登记一个默认版本。`)

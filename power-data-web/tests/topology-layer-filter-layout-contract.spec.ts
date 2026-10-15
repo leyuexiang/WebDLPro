@@ -1,20 +1,70 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { COAL_DEFAULT_TOPOLOGY_VARIANT } from '../src/modules/visual/topology-preview/coal-topology-variant-manifest'
+import { CONVERTER_STATION_DEFAULT_TOPOLOGY_VARIANT } from '../src/modules/visual/topology-preview/converter-station-topology-variant-manifest'
+import {
+  BUSINESS_SCENE_TOPOLOGY_SCENE_IDS,
+  BUSINESS_SCENE_TOPOLOGY_VARIANTS_BY_SCENE,
+  getBusinessSceneTopologyPreviewProfile,
+} from '../src/modules/visual/topology-preview/business-scene-topology'
+import { GAS_V3_DEFAULT_TOPOLOGY_VARIANT } from '../src/modules/visual/topology-preview/gas-v3-topology-variant-manifest'
+import { SOLAR_DEFAULT_TOPOLOGY_VARIANT } from '../src/modules/visual/topology-preview/solar-topology-variant-manifest'
+import { STEP_DOWN_SUBSTATION_DEFAULT_TOPOLOGY_VARIANT } from '../src/modules/visual/topology-preview/step-down-substation-topology-variant-manifest'
+import { STEP_UP_SUBSTATION_DEFAULT_TOPOLOGY_VARIANT } from '../src/modules/visual/topology-preview/step-up-substation-topology-variant-manifest'
+import { SWITCHING_STATION_DEFAULT_TOPOLOGY_VARIANT } from '../src/modules/visual/topology-preview/switching-station-topology-variant-manifest'
+import { WIND_DEFAULT_TOPOLOGY_VARIANT } from '../src/modules/visual/topology-preview/wind-topology-variant-manifest'
 
 const basePath = `${process.cwd()}/src/modules/visual/topology-preview`
 
-/** 公共组件锁定所有当前及后续拓扑的右侧单列筛选轨默认外观。 */
-describe('公共拓扑筛选轨布局', () => {
+/** 汇总所有当前第二层拓扑入口，直接检查默认条目而不是依赖组合名称推断层级内容。 */
+const defaultTopologyVariants = [
+  ['燃气', GAS_V3_DEFAULT_TOPOLOGY_VARIANT],
+  ['燃煤', COAL_DEFAULT_TOPOLOGY_VARIANT],
+  ['风电', WIND_DEFAULT_TOPOLOGY_VARIANT],
+  ['光伏', SOLAR_DEFAULT_TOPOLOGY_VARIANT],
+  ['换流站', CONVERTER_STATION_DEFAULT_TOPOLOGY_VARIANT],
+  ['升压站', STEP_UP_SUBSTATION_DEFAULT_TOPOLOGY_VARIANT],
+  ['降压站', STEP_DOWN_SUBSTATION_DEFAULT_TOPOLOGY_VARIANT],
+  ['开关站', SWITCHING_STATION_DEFAULT_TOPOLOGY_VARIANT],
+  ...BUSINESS_SCENE_TOPOLOGY_SCENE_IDS.map((sceneId) => {
+    const profile = getBusinessSceneTopologyPreviewProfile(sceneId)
+    const variant = BUSINESS_SCENE_TOPOLOGY_VARIANTS_BY_SCENE[sceneId].find(({ id }) => id === profile.defaultVariantId)
+    if (!variant) throw new Error(`${sceneId} 默认拓扑没有对应的组合清单项。`)
+    return [sceneId, variant] as const
+  }),
+]
+
+/** 所有当前第二层实现都必须移除隐藏筛选轨的旧视口避让量，完整使用画布宽度。 */
+const fullCanvasFitSources = [
+  'GasV3TopologyJsonPreview.vue',
+  'GasV3TopologyRuntimeCanvas.vue',
+  'CoalTopologyJsonPreview.vue',
+  'CoalTopologyRuntimeCanvas.vue',
+  'SolarTopologyJsonPreview.vue',
+  'ManifestTopologyJsonPreview.vue',
+] as const
+
+/** 公共组件保证所有当前及后续拓扑筛选框都隐藏，画布使用清单中的组合默认项。 */
+describe('公共拓扑默认展示与筛选框', () => {
   const railSource = readFileSync(`${basePath}/TopologyLayerFilterRail.vue`, 'utf8')
 
-  it('筛选器固定在右侧且完整文字逐字向下排列', () => {
-    expect(railSource).toContain('position: absolute;')
-    expect(railSource).toContain('inset-inline-end: 8px;')
-    expect(railSource).toContain('inline-size: 15px;')
-    expect(railSource).toContain('>筛选框</span>')
-    expect(railSource).toContain('{{ option.label }}')
-    expect(railSource).toContain('overflow-wrap: anywhere;')
-    expect(railSource).not.toContain('option.label.slice(0, 1)')
+  it('公共筛选框从画布、键盘焦点和辅助技术树中统一隐藏', () => {
+    const railRule = railSource.match(/\.topology-layer-filter-rail\s*\{([^}]*)\}/s)?.[1] ?? ''
+    const displayDeclarations = [...railRule.matchAll(/display:\s*([^;]+);/g)]
+    expect(displayDeclarations.at(-1)?.[1]?.trim()).toBe('none')
+  })
+
+  it.each(defaultTopologyVariants)('%s 首屏固定加载网络层、业务层和关键环节层组合', (_scene, variant) => {
+    expect(variant.id).toBe('network-business-key-process')
+    expect(variant.combinationKey).toBe('network+business+key-process')
+    expect(variant.layerIds).toEqual(['network', 'business', 'key-process'])
+  })
+
+  it.each(fullCanvasFitSources)('%s 不再为已隐藏的筛选框保留右侧空白', (file) => {
+    const source = readFileSync(`${basePath}/${file}`, 'utf8')
+    expect(source).toContain('meta2d.fitView(true, [0, 0, 0, 0])')
+    expect(source).not.toContain('meta2d.fitView(true, [0, 24, 0, 0])')
+    expect(source).not.toContain('meta2d.translate(-12 / (meta2d.store.data.scale || 1), 0)')
   })
 
   it.each(['GasV3TopologyLayerFilter.vue', 'CoalTopologyLayerFilter.vue'])('%s 只保留业务类型包装', (filter) => {
@@ -25,7 +75,7 @@ describe('公共拓扑筛选轨布局', () => {
   })
 })
 
-/** 正式燃气第三版和燃煤入口都必须把完整高度交给画布，防止公共筛选轨再次进入布局流。 */
+/** 正式燃气第三版和燃煤入口都必须把完整高度交给画布，不受公共筛选框显示状态影响。 */
 describe.each([
   {
     kind: '燃气第三版',
@@ -54,7 +104,7 @@ describe.each([
     expect(previewSource).toContain('grid-template-rows: minmax(0, 1fr);')
   })
 
-  it('第三层隐藏并禁用筛选，退出后恢复第二层筛选', () => {
+  it('第三层切换仍短路筛选事件，并保留离开前的第二层组合状态', () => {
     // 统一换行符后再做静态契约匹配，避免 Windows 工作区的 CRLF 与 Linux CI 的 LF 造成无意义红测。
     const runtimeSource = readFileSync(`${basePath}/${runtime}`, 'utf8').replace(/\r\n/g, '\n')
     expect(runtimeSource).toContain('const processDetailContextActive = ref(false)')

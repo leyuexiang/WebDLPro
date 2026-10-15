@@ -15,7 +15,7 @@ export interface ManifestTopologyPreviewVariant {
   readonly isDefault?: true
 }
 
-/** 公共筛选轨只消费展示字段，不读取场景专属拓扑数据。 */
+/** 场景只提供稳定层级展示元数据；公共画布不读取筛选项来推断拓扑数据或默认文件。 */
 export interface ManifestTopologyPreviewFilterGroup {
   readonly id: string
   readonly options: readonly {

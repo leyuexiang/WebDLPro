@@ -10,6 +10,7 @@ import {
 } from './business-scene-topology'
 import type { Pen } from '@meta2d/core'
 import { TOPOLOGY_SHARED_ASSET_ALIASES } from './topology-shared-assets'
+import { DISTRIBUTION_TOPOLOGY_RUNTIME_BINDINGS } from './distribution-topology-runtime-bindings'
 
 /** 用户提交的源文件哈希与图元数作为独立基准，防止输入文件漏项或变体串线。 */
 const SOURCE_CONTRACT = {
@@ -31,7 +32,7 @@ const SOURCE_CONTRACT = {
     ['network-key-process', 76, 'f2bfddad4c6d03193d4041eb25fcfeec26e64b394a19fb6753d477e72bb157bd'],
     ['network-business', 87, 'ea111ca170273108a8e886ed6a5f7336d8d3ef923f86df61f2312dbf05813772'],
     ['business-key-process', 55, 'b3794b4684842ddd6a6a98b5e1550e2f779849c6ab13f8e8a038110154bd0db4'],
-    ['network-business-key-process', 98, 'd4e0850f65569f1b09015a17bfb232562c6c32367ad423ed5239bcd292c730cd'],
+    ['network-business-key-process', 85, '06d9a7650b68ac58432c0bb66b0c5b8cd6c76e6bcbbd74a62500649353f31e0a'],
   ],
   consumption: [
     ['architecture', 38, 'f0c1477c06a84cda9ad24894b1aae9e146eea1b808876273fca9e16d2069992b'],
@@ -51,6 +52,34 @@ describe('新业务场景拓扑数据契约', () => {
     expect(resolveBusinessSceneTopologySceneId('topology.distribution.overview')).toBe('distribution')
     expect(resolveBusinessSceneTopologySceneId('topology.consumption.overview')).toBe('consumption')
     expect(resolveBusinessSceneTopologySceneId('topology.unknown.overview')).toBeUndefined()
+  })
+
+  it('配电站默认组合按截图标签将重复图元绑定到五个后续 Unity 目标编号', () => {
+    const variant = BUSINESS_SCENE_TOPOLOGY_VARIANTS_BY_SCENE.distribution.find((item) => item.isDefault)!
+    const path = resolve(process.cwd(), 'public/topology/distribution-json-preview', variant.topologyPath)
+    const topology = JSON.parse(readFileSync(path, 'utf8')) as { pens: Pen[] }
+    const bindingsByPenId = new Map(DISTRIBUTION_TOPOLOGY_RUNTIME_BINDINGS.map((binding) => [binding.penId, binding]))
+    const expected = [
+      { title: '保护装置', image: 'icons/normal/protection-device.webp', nodeId: 'asset.distribution-protection', sceneNodeId: 'node.distribution-protection', penIds: ['1406260e', '1508d7f'] },
+      { title: '测控装置', image: 'icons/normal/measurement-device.webp', nodeId: 'asset.distribution-measurement', sceneNodeId: 'node.distribution-measurement', penIds: ['175412f5', '99f85e3'] },
+      { title: '配电变压器', image: 'icons/normal/distribution-transformer.webp', nodeId: 'asset.distribution-transformer', sceneNodeId: 'node.distribution-transformer', penIds: ['6db2600f', 'cb0cbf4'] },
+      { title: '断路器', image: 'icons/normal/distribution-breaker.webp', nodeId: 'asset.distribution-breaker', sceneNodeId: 'node.distribution-breaker', penIds: ['a1a5b54', '4f0d6e4a'] },
+      { title: '互感器', image: 'icons/normal/instrument-transformer.webp', nodeId: 'asset.distribution-instrument-transformer', sceneNodeId: 'node.distribution-instrument-transformer', penIds: ['c1499f9', '67b16fb'] },
+    ] as const
+
+    for (const item of expected) {
+      const matchingPens = topology.pens.filter((pen) => pen.text?.trim() === item.title).map((pen) => pen.id)
+      expect(matchingPens.sort()).toEqual([...item.penIds].sort())
+      const targetPenIds = new Set<string>(item.penIds)
+      expect(topology.pens.filter((pen) => targetPenIds.has(pen.id ?? '')).every((pen) => pen.image === item.image)).toBe(true)
+      for (const penId of item.penIds) {
+        expect(bindingsByPenId.get(penId)).toEqual({ penId, nodeId: item.nodeId, sceneNodeId: item.sceneNodeId })
+      }
+    }
+
+    // 默认文件直接引用共享目录中的 WebP；PNG 源图和在线编辑器封面不进入前端拓扑 JSON。
+    expect(topology.pens.filter((pen) => pen.image).every((pen) => /^(?:icons|background)\/.+\.webp$/i.test(pen.image!))).toBe(true)
+    expect(JSON.stringify(topology)).not.toMatch(/\.png(?:$|[?#"])/i)
   })
 
   it('为三个场景登记源文件提供的 24 个独立版本，且每场景只有一个明确默认版本', () => {

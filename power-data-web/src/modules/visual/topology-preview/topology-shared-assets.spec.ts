@@ -75,9 +75,9 @@ describe('拓扑公共设备图标', () => {
   })
 
   it('公共目录的基础设备与风电专用图标均使用 WebP 格式', () => {
-    // 风电四种系统图元补齐告警、故障和离线 WebP；楼宇三类设备另各登记独立四态资源。
+    // 配电站五类专用设备图标补入正常态目录；风电和楼宇既有四态资源数量保持显式锁定。
     const expectedCounts: Record<TopologyDeviceStatus, number> = {
-      normal: 32,
+      normal: 37,
       alarm: 36,
       fault: 36,
       offline: 36,

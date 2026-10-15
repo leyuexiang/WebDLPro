@@ -19,7 +19,7 @@ export interface WindTopologyFilterGroup {
   readonly options: readonly WindTopologyFilterOption[]
 }
 
-/** 四层顺序与产品定义一致；公共筛选轨只负责显示和转发事件。 */
+/** 四层组合顺序与产品定义一致；元数据供默认组合解析使用，公共筛选框当前隐藏。 */
 export const WIND_TOPOLOGY_FILTER_GROUPS = Object.freeze([
   { id: 'architecture', options: Object.freeze([{ id: 'architecture', label: '架构层', color: '#60a5fa' }]) },
   { id: 'network', options: Object.freeze([{ id: 'network', label: '网络层', color: '#d19a2a' }]) },
