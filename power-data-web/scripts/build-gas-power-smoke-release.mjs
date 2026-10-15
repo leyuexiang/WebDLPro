@@ -15,7 +15,8 @@ import {
  * 燃气、燃煤发电联合发布包构建器。
  *
  * 此脚本为“现有燃气发电 Unity 场景 + 已确认燃气拓扑”生成本地测试、合作方联调或正式发布目录。
- * 风电十个第二层节点的稳定编号按本次映射约定登记，作为后续 Unity 场景配置契约；登记本身不代表 Unity 模型已完成配置。
+ * 风电十个第二层节点和楼宇三个设备节点的稳定编号按用户确认的约定登记，作为后续统一引擎场景配置契约；
+ * 登记本身不代表统一引擎模型已完成配置。
  * 其他未确认设备、三维节点、流程或状态映射仍保持空缺，不得伪造。
  * 其余固定场景仅保留契约要求的空占位；本地测试宿主页从全局沙盘出发，可在同一个 Unity 实例内验收两套真实场景。
  */
@@ -40,7 +41,7 @@ let unityEntryUrl = `${hostOrigin}/unity/index.html`
 let topologyManifestUrl = `${hostOrigin}/scene-topology-manifest.json`
 // 发布脚本默认仍构建燃气回归包；场景参数可显式选择燃煤或光伏入口。
 let releaseSceneId = 'gas-power'
-const unitySceneMappingVersion = '2026.10.15-wind-topology-interaction.1'
+const unitySceneMappingVersion = '2026.10.15-topology-node-mapping.2'
 /** 风电前端拓扑目标加上既有第三层状态目标，共同组成 Unity 后续必须登记的稳定节点闭集。 */
 const windTopologySceneNodeIds = Object.freeze([
   'node.wind-turbine',
@@ -1094,6 +1095,28 @@ const addedSceneNavigations = [
       edges: [],
     }],
   ])
+  /*
+   * 楼宇截图中的三个设备使用稳定业务编号与统一引擎（Unity）场景节点编号。
+   * 这些编号是供后续统一引擎配置采用的显式契约，不表示当前场景已经创建对应对象。
+   */
+  const consumptionTopologyNodeDefinitions = [
+    ['asset.building-hvac-control', '暖通空调控', 'node.building-hvac-control', 'generic', 20, 50],
+    ['asset.building-access-control', '门禁', 'node.building-access-control', 'generic', 50, 50],
+    ['asset.building-smart-lighting', '智能照明', 'node.building-smart-lighting', 'generic', 80, 50],
+  ]
+  const consumptionTopologyBySceneId = new Map([
+    ['consumption', {
+      topologyId: 'topology.consumption.overview',
+      sceneId: 'consumption',
+      title: '楼宇总览',
+      configVersion: manifestVersion,
+      nodes: consumptionTopologyNodeDefinitions.map(([nodeId, title, sceneNodeId, iconKey, x, y]) => ({
+        nodeId, title, sceneNodeId, iconKey, x, y,
+        deviceStatus: 'normal', doubleClickBehavior: 'emit-node', metricKeys: [],
+      })),
+      edges: [],
+    }],
+  ])
   const substationTopologyNodes = {
     'step-up-substation': [
       ['system.step-up-protection-control', '升压站保护控制', 'unit.step-up-protection.control', 'plc', 25, 35],
@@ -1257,7 +1280,7 @@ const addedSceneNavigations = [
     const scene = scenes.find((item) => item.sceneId === sceneId)
     if (scene) {
       scene.title = navigation.title
-      // 六个场景通过公开流程动作进入默认拓扑，资源版本使用本次 Unity 发布号。
+      // 新增业务场景通过公开流程动作进入默认拓扑，资源版本使用本次统一引擎（Unity）发布号。
       scene.resourceVersion = `resource.${unityReleaseId}.${sceneId}`
       scene.defaultTopologyId = `topology.${sceneId}.overview`
       scene.topologyIds = [scene.defaultTopologyId]
@@ -1274,7 +1297,9 @@ const addedSceneNavigations = [
     const topologyId = `topology.${sceneId}.overview`
     const existingTopologyIndex = topologies.findIndex((item) => item.topologyId === topologyId)
     // 光伏、风电及站类场景各自提供显式节点清单；只有其他未交付场景保留空占位。
-    if (stationTopologyBySceneId.has(sceneId)) {
+    if (consumptionTopologyBySceneId.has(sceneId)) {
+      topologies[existingTopologyIndex >= 0 ? existingTopologyIndex : topologies.length] = consumptionTopologyBySceneId.get(sceneId)
+    } else if (stationTopologyBySceneId.has(sceneId)) {
       topologies[existingTopologyIndex >= 0 ? existingTopologyIndex : topologies.length] = stationTopologyBySceneId.get(sceneId)
     } else if (windTopologyBySceneId.has(sceneId)) {
       topologies[existingTopologyIndex >= 0 ? existingTopologyIndex : topologies.length] = windTopologyBySceneId.get(sceneId)
@@ -1292,18 +1317,41 @@ const addedSceneNavigations = [
     if (!coalMapping) throw new Error('燃煤 Unity 映射缺失，无法生成联合清单。')
     return { ...coalMapping }
   })
-  // 十个第二层映射与风机、齿轮箱两项第三层状态目标使用同一场景映射版本发布。
-  for (const sceneId of ['wind-power', 'solar-power', 'step-up-substation', 'step-down-substation', 'converter-station', 'switching-station']) {
+  /** 各类已登记拓扑统一从节点定义派生目标列表，减少节点定义与映射数组分开维护造成的漂移。 */
+  const getPublishedSceneNodeIds = (sceneId) => {
+    if (sceneId === 'wind-power') return [...windTopologySceneNodeIds]
+    if (sceneId === 'solar-power') return [...verifiedSolarSceneNodeIdByTopologyNodeId.values()]
+    const topology = stationTopologyBySceneId.get(sceneId) ?? consumptionTopologyBySceneId.get(sceneId)
+    return (topology?.nodes ?? []).map((node) => node.sceneNodeId)
+  }
+  // 风电、光伏、四个变电站类场景和楼宇共用当前映射版本，目标集合均从本场景登记拓扑派生。
+  for (const sceneId of ['wind-power', 'solar-power', 'step-up-substation', 'step-down-substation', 'converter-station', 'switching-station', 'consumption']) {
     const mapping = unitySceneMappings.find((item) => item.sceneId === sceneId)
     if (mapping) {
       mapping.mappingVersion = unitySceneMappingVersion
-      mapping.sceneNodeIds = sceneId === 'wind-power'
-        ? [...windTopologySceneNodeIds]
-        : sceneId === 'solar-power'
-          ? [...verifiedSolarSceneNodeIdByTopologyNodeId.values()]
-          : (stationTopologyBySceneId.get(sceneId)?.nodes ?? []).map((node) => node.sceneNodeId)
+      mapping.sceneNodeIds = getPublishedSceneNodeIds(sceneId)
       mapping.routeIds = []
-    } else unitySceneMappings.push({ sceneId, mappingVersion: unitySceneMappingVersion, sceneNodeIds: sceneId === 'wind-power' ? [...windTopologySceneNodeIds] : sceneId === 'solar-power' ? [...verifiedSolarSceneNodeIdByTopologyNodeId.values()] : (stationTopologyBySceneId.get(sceneId)?.nodes ?? []).map((node) => node.sceneNodeId), routeIds: [] })
+    } else unitySceneMappings.push({ sceneId, mappingVersion: unitySceneMappingVersion, sceneNodeIds: getPublishedSceneNodeIds(sceneId), routeIds: [] })
+  }
+
+  /** 发布构建校验楼宇二维逻辑节点、三维目标和合作方映射数组严格同集，避免只更新预览一侧。 */
+  const consumptionTopology = topologies.find((topology) => topology.topologyId === 'topology.consumption.overview')
+  const consumptionMapping = unitySceneMappings.find((mapping) => mapping.sceneId === 'consumption')
+  const consumptionNodeIds = new Set(consumptionTopology?.nodes?.map((node) => node.nodeId) ?? [])
+  const consumptionTopologySceneNodeIds = new Set(consumptionTopology?.nodes?.map((node) => node.sceneNodeId) ?? [])
+  const consumptionSceneNodeIds = new Set(consumptionMapping?.sceneNodeIds ?? [])
+  const expectedConsumptionNodeIds = new Set(consumptionTopologyNodeDefinitions.map(([nodeId]) => nodeId))
+  const expectedConsumptionSceneNodeIds = new Set(consumptionTopologyNodeDefinitions.map(([, , sceneNodeId]) => sceneNodeId))
+  if (
+    !consumptionTopology || consumptionTopology.nodes.length !== 3 || consumptionNodeIds.size !== 3 ||
+    consumptionTopologySceneNodeIds.size !== 3 || !consumptionMapping ||
+    consumptionSceneNodeIds.size !== 3 || consumptionMapping.sceneNodeIds.length !== 3 ||
+    [...consumptionNodeIds].some((nodeId) => !expectedConsumptionNodeIds.has(nodeId)) ||
+    [...consumptionTopologySceneNodeIds].some((sceneNodeId) => !expectedConsumptionSceneNodeIds.has(sceneNodeId)) ||
+    [...consumptionSceneNodeIds].some((sceneNodeId) => !expectedConsumptionSceneNodeIds.has(sceneNodeId)) ||
+    consumptionTopology.nodes.some((node) => !node.sceneNodeId || !consumptionSceneNodeIds.has(node.sceneNodeId))
+  ) {
+    throw new Error('楼宇三个拓扑节点必须全部登记约定的稳定业务编号和唯一三维场景目标。')
   }
 
   /** 发布生成阶段校验风电十节点与 Unity 目标闭集一致，避免清单只更新二维或三维一侧。 */
@@ -2016,6 +2064,8 @@ const mimeByExtension = new Map([
   ['.png', 'image/png'],
   ['.jpg', 'image/jpeg'],
   ['.jpeg', 'image/jpeg'],
+  // 拓扑设备图元由 HTML 图片元素加载 WebP 文件；显式返回图片媒体类型，避免被回退为二进制流。
+  ['.webp', 'image/webp'],
 ])
 
 /** 运行时同源模式只允许当前服务提供 Unity、清单和脚本；固定模式继续使用发布时核验过的来源。 */

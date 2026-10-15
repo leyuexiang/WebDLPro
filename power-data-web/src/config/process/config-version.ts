@@ -9,4 +9,4 @@
  * 当前版本对应燃煤、燃气分层映射和风电十节点二维/三维交互目录。节点命名规范化属于映射内容变更，
  * 不能另设前端运行时版本，以免握手版本与切场景版本发生漂移。
  */
-export const LOCAL_PROCESS_CONFIG_VERSION = '2026.10.15-wind-topology-interaction.1' as const
+export const LOCAL_PROCESS_CONFIG_VERSION = '2026.10.15-topology-node-mapping.2' as const

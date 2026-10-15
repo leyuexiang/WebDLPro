@@ -41,7 +41,7 @@ const SOURCE_CONTRACT = {
     ['network-key-process', 50, '583e4881a6f29da66b57aabbf244a45b5527f7bcf2c3659669a1f1ecbccb8589'],
     ['network-business', 51, '5ff080b707b35a859aea0ccc595d4045c970b8840ebaa11a448662dfcc48e6c9'],
     ['business-key-process', 32, 'a396e48c91b42235db242bce38c1c730cdfd434acb9b3b355857e89e9de4f3f1'],
-    ['network-business-key-process', 57, '4fd1d494b3c659b60c63a9ee5107ed8098f37e7f3812b39b98aee7ec5d027394'],
+    ['network-business-key-process', 48, '31273101e1bbb458134a41fec86e77471eb945f03d75058a54195192eb556f05'],
   ],
 } as const
 
