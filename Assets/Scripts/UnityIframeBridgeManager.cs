@@ -361,11 +361,13 @@ public sealed class UnityIframeBridgeManager : MonoBehaviour
         Instance = this;
         DontDestroyOnLoad(gameObject);
         // 发电适配器位于默认运行时程序集，不能由场景注册表程序集反向引用；
-        // 该桥接器是 Bootstrap 必然序列化的常驻组件，因此在此处直接登记两个
-        // 适配工厂可阻止 IL2CPP（中间语言到 C++ 的裁剪编译器）把燃煤适配器
-        // 当作“无场景引用”的代码裁掉。重复登记只覆盖同名工厂，不创建第二个实例。
+        // 该桥接器是 Bootstrap 必然序列化的常驻组件，因此在此处显式登记燃气、燃煤、楼宇和光伏适配工厂，
+        // 让 IL2CPP（中间语言到 C++ 的裁剪编译器）可以从直接代码引用保留这些运行时创建的适配器。
+        // 重复登记只覆盖同名工厂，不创建第二个控制器实例。
         GasPowerBusinessSceneControllerAdapter.RegisterFactory();
         CoalPowerBusinessSceneControllerAdapter.RegisterFactory();
+        // 楼宇场景同样由 sceneId 工厂创建适配器；动画路由器仍通过场景序列化组件单独绑定。
+        BuildingBusinessSceneControllerAdapter.RegisterFactory();
         // 光伏场景复用 PowerPlantProcessController，但通过独立适配器声明已核验的聚焦与四态能力。
         SolarPowerBusinessSceneControllerAdapter.RegisterFactory();
         _instanceId = ReadQueryParameter("instanceId", _instanceId);
