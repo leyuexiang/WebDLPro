@@ -89,7 +89,10 @@ export const COAL_TOPOLOGY_VARIANTS = Object.freeze([
     id: 'network-business-key-process', combinationKey: 'network+business+key-process',
     layerIds: Object.freeze(['network', 'business', 'key-process']),
     topologyPath: 'variants/network-business-key-process/topology.json',
-    sourceSha256: '4c3a1f9f21660ff44f25d5c48d7784b3dbb9f738947451b274c8646e187629ac', expectedPenCount: 159,
+    // 2026-10-16 最新燃煤V2.json：原始 SHA-256 为 9c77551f79fa65915e89380101ea592a8ebce98585bccdc2a4cf0c0a75ec4473。
+    // 资源已改为公共 WebP；本清单散列锁定归一后的 155 个图元文件，画布几何和图元顺序保持输入原样。
+    sourceSha256: '91f93dc2d25d97738eb40a55b7b54746188e9424ac19f65acd61867f7662e395',
+    expectedPenCount: 155,
     isDefault: true,
   },
 ] as const satisfies readonly CoalTopologyVariantManifestEntry[])

@@ -51,13 +51,14 @@ describe('燃煤拓扑独立数据与公共资源', () => {
 
   it('每份文件只使用公共设备图标和公共区域标题背景', async () => {
     installTopologyFetch()
-    // 八份燃煤文件的设备数来自逐文件显式清单，区域标题背景不计入设备。
+    // 设备数来自逐文件显式清单；最新三层组合输入只有五个区域背景图元。
     const expectedDeviceCounts = [30, 42, 0, 16, 42, 50, 16, 50]
+    const expectedTitleBackgroundCounts = [6, 6, 6, 6, 6, 6, 6, 5]
     for (const [index, variant] of COAL_TOPOLOGY_VARIANTS.entries()) {
       const data = await loadCoalTopologyPreviewData(variant.id)
       const manifest = getCoalTopologyResourceManifest(variant.id)
       expect(manifest.devicePenIds.size).toBe(expectedDeviceCounts[index])
-      expect(manifest.titleBackgroundPenIds.size).toBe(6)
+      expect(manifest.titleBackgroundPenIds.size).toBe(expectedTitleBackgroundCounts[index])
       for (const penId of manifest.devicePenIds) {
         const relativePath = getCoalTopologyPreviewIconPath(variant.id, penId)
         expect(relativePath).toMatch(/^icons\/normal\/[a-z0-9_]+\.webp$/)

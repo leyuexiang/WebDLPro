@@ -112,8 +112,10 @@ export const GAS_V3_TOPOLOGY_VARIANTS = Object.freeze([
     combinationKey: 'network+business+key-process',
     layerIds: Object.freeze(['network', 'business', 'key-process']),
     topologyPath: 'variants/network-business-key-process/topology.json',
-    sourceSha256: '9bc8ef0bbebaf0cc02acc46c989d6859c68d9fc73f472c72079d9a1a4c505483',
-    expectedPenCount: 144,
+    // 2026-10-16 最新燃气V3.json：原始 SHA-256 为 340bcab1166ce8c15a5e1772b1595ad103a0ed93e5d97ce10732e1263680001b。
+    // 资源已改为公共 WebP；本清单散列锁定归一后的 140 个图元文件，画布几何和图元顺序保持输入原样。
+    sourceSha256: '915101607eca89e0a8c826ed86246dd9e92c9fde704510fa5cb318175d48b916',
+    expectedPenCount: 140,
     isDefault: true,
   },
 ] as const satisfies readonly GasV3TopologyVariantManifestEntry[])

@@ -165,8 +165,11 @@ const verifiedSolarSceneNodeIdByTopologyNodeId = new Map([
   ['asset.solar-inverter', 'node.solar-inverter'],
 ])
 
-/** 楼宇三个前端映射按用户截图逐项登记；离线 Unity 工程未同步，本表不代替场景节点验收。 */
+/** 楼宇六个前端映射显式登记；离线 Unity 工程未同步，本表只定义后续场景配置编号。 */
 const buildingSceneNodeIdByTopologyNodeId = new Map([
+  ['system.building-hvac-building-automation', 'unit.building-hvac-automation.control'],
+  ['system.building-access-group-control-dispatch', 'unit.building-access-group-dispatch.control'],
+  ['system.building-smart-lighting-control', 'unit.building-smart-lighting.control'],
   ['asset.building-hvac-control', 'node.building-hvac-control'],
   ['asset.building-access-control', 'node.building-access-control'],
   ['asset.building-smart-lighting', 'node.building-smart-lighting'],
@@ -174,7 +177,48 @@ const buildingSceneNodeIdByTopologyNodeId = new Map([
 
 const buildingSceneNodeIds = Object.freeze([...buildingSceneNodeIdByTopologyNodeId.values()])
 
-/** 结构清单只登记中央选择与三维反查所需的三个节点，拓扑画面仍由新版 Meta2D JSON 完整绘制。 */
+/** 微电网默认三层拓扑中的六个设备层映射目标；中文名称含“控制器”不改变其设备分类。 */
+const microgridSceneNodeIdByTopologyNodeId = new Map([
+  ['asset.microgrid-wind-controller', 'node.microgrid-wind-controller'],
+  ['asset.microgrid-photovoltaic-controller', 'node.microgrid-photovoltaic-controller'],
+  ['asset.microgrid-diesel-generator-controller', 'node.microgrid-diesel-generator-controller'],
+  ['asset.microgrid-ats-controller', 'node.microgrid-ats-controller'],
+  ['asset.microgrid-switchgear', 'node.microgrid-switchgear'],
+  ['asset.microgrid-storage-converter', 'node.microgrid-storage-converter'],
+])
+
+const microgridSceneNodeIds = Object.freeze([...microgridSceneNodeIdByTopologyNodeId.values()])
+
+/** 默认网络层+业务层+关键环节层 JSON 负责实际绘制；结构清单登记六个双向选择节点。 */
+function createMicrogridTopology(manifestVersion) {
+  return {
+    topologyId: 'topology.microgrid.overview',
+    sceneId: 'microgrid',
+    title: '微电网总览',
+    configVersion: manifestVersion,
+    nodes: [
+      ['asset.microgrid-wind-controller', '风电控制器', 27, 'plc'],
+      ['asset.microgrid-photovoltaic-controller', '光伏控制器', 38, 'plc'],
+      ['asset.microgrid-diesel-generator-controller', '柴发控制器', 50, 'plc'],
+      ['asset.microgrid-switchgear', '开关柜', 62, 'circuit-breaker'],
+      ['asset.microgrid-storage-converter', '储能变流器', 74, 'generic'],
+      ['asset.microgrid-ats-controller', 'ATS控制器', 86, 'plc'],
+    ].map(([nodeId, title, x, iconKey]) => ({
+      nodeId,
+      title,
+      sceneNodeId: microgridSceneNodeIdByTopologyNodeId.get(nodeId),
+      iconKey,
+      x,
+      // 坐标取默认 JSON 图元中心并换算为百分比；此结构清单不替代 JSON 画布布局。
+      y: 75,
+      deviceStatus: 'normal',
+      doubleClickBehavior: 'emit-node',
+    })),
+    edges: [],
+  }
+}
+
+/** 结构清单登记六个双向交互节点；实际图形仍由各自完整的 Meta2D JSON 文件绘制。 */
 function createBuildingTopology(manifestVersion) {
   return {
     topologyId: 'topology.consumption.overview',
@@ -182,16 +226,19 @@ function createBuildingTopology(manifestVersion) {
     title: '用电总览',
     configVersion: manifestVersion,
     nodes: [
-      ['asset.building-hvac-control', '暖通空调调控', 18],
-      ['asset.building-access-control', '门禁', 50],
-      ['asset.building-smart-lighting', '智能照明', 82],
-    ].map(([nodeId, title, x]) => ({
+      ['system.building-hvac-building-automation', '暖通空调楼宇自控', 18, 'plc'],
+      ['system.building-access-group-control-dispatch', '门禁群控调度系统', 50, 'plc'],
+      ['system.building-smart-lighting-control', '智能照明控制系统', 82, 'plc'],
+      ['asset.building-hvac-control', '暖通空调调控', 18, 'generic'],
+      ['asset.building-access-control', '门禁', 50, 'generic'],
+      ['asset.building-smart-lighting', '智能照明', 82, 'generic'],
+    ].map(([nodeId, title, x, iconKey]) => ({
       nodeId,
       title,
       sceneNodeId: buildingSceneNodeIdByTopologyNodeId.get(nodeId),
-      iconKey: 'generic',
+      iconKey,
       x,
-      y: 72,
+      y: nodeId.startsWith('system.') ? 35 : 75,
       deviceStatus: 'normal',
       doubleClickBehavior: 'emit-node',
     })),
@@ -1109,6 +1156,10 @@ export async function createConfiguredPowerScenesManifest(releaseId, initialScen
   const windTopologyIndex = topologies.findIndex((topology) => topology.sceneId === 'wind-power')
   if (windTopologyIndex >= 0) topologies[windTopologyIndex] = windTopology
   else topologies.push(windTopology)
+  const microgridTopology = createMicrogridTopology(manifestVersion)
+  const microgridTopologyIndex = topologies.findIndex((topology) => topology.sceneId === 'microgrid')
+  if (microgridTopologyIndex >= 0) topologies[microgridTopologyIndex] = microgridTopology
+  else topologies.push(microgridTopology)
   const buildingTopology = createBuildingTopology(manifestVersion)
   /*
    * 合作方当前只从 workflowActions（流程动作摘要）生成可绑定菜单，因此六个新增场景必须登记稳定导航动作。
@@ -1313,11 +1364,13 @@ const addedSceneNavigations = [
     }
     const topologyId = `topology.${sceneId}.overview`
     const existingTopologyIndex = topologies.findIndex((item) => item.topologyId === topologyId)
-    // 风电、光伏和站类总览已登记稳定业务节点，不可被通用空占位清单覆盖。
+    // 风电、光伏、微电网和站类总览已登记稳定业务节点，不可被通用空占位清单覆盖。
     if (sceneId === 'wind-power') {
       topologies[existingTopologyIndex >= 0 ? existingTopologyIndex : topologies.length] = windTopology
     } else if (sceneId === 'consumption') {
       topologies[existingTopologyIndex >= 0 ? existingTopologyIndex : topologies.length] = buildingTopology
+    } else if (sceneId === 'microgrid') {
+      topologies[existingTopologyIndex >= 0 ? existingTopologyIndex : topologies.length] = microgridTopology
     } else if (stationTopologyBySceneId.has(sceneId)) {
       topologies[existingTopologyIndex >= 0 ? existingTopologyIndex : topologies.length] = stationTopologyBySceneId.get(sceneId)
     } else if (sceneId !== 'solar-power') {
@@ -1334,8 +1387,8 @@ const addedSceneNavigations = [
     if (!coalMapping) throw new Error('燃煤 Unity 映射缺失，无法生成联合清单。')
     return { ...coalMapping }
   })
-  // 风电登记十个总览交互目标，楼宇登记三个总览目标；全部来源于显式清单，不按标题补造编号。
-  for (const sceneId of ['wind-power', 'solar-power', 'consumption', 'step-up-substation', 'step-down-substation', 'distribution', 'converter-station', 'switching-station']) {
+  // 风电登记十个、楼宇登记六个、微电网默认三层组合登记六个交互目标；均来自显式清单。
+  for (const sceneId of ['wind-power', 'solar-power', 'consumption', 'microgrid', 'step-up-substation', 'step-down-substation', 'distribution', 'converter-station', 'switching-station']) {
     const mapping = unitySceneMappings.find((item) => item.sceneId === sceneId)
     if (mapping) {
       mapping.mappingVersion = unitySceneMappingVersion
@@ -1345,7 +1398,9 @@ const addedSceneNavigations = [
           ? [...verifiedSolarSceneNodeIdByTopologyNodeId.values()]
           : sceneId === 'consumption'
             ? [...buildingSceneNodeIds]
-          : (stationTopologyBySceneId.get(sceneId)?.nodes ?? []).map((node) => node.sceneNodeId)
+            : sceneId === 'microgrid'
+              ? [...microgridSceneNodeIds]
+              : (stationTopologyBySceneId.get(sceneId)?.nodes ?? []).map((node) => node.sceneNodeId)
       mapping.routeIds = []
     } else {
       unitySceneMappings.push({
@@ -1357,7 +1412,9 @@ const addedSceneNavigations = [
             ? [...verifiedSolarSceneNodeIdByTopologyNodeId.values()]
             : sceneId === 'consumption'
               ? [...buildingSceneNodeIds]
-            : (stationTopologyBySceneId.get(sceneId)?.nodes ?? []).map((node) => node.sceneNodeId),
+              : sceneId === 'microgrid'
+                ? [...microgridSceneNodeIds]
+                : (stationTopologyBySceneId.get(sceneId)?.nodes ?? []).map((node) => node.sceneNodeId),
         routeIds: [],
       })
     }

@@ -29,8 +29,9 @@ describe('燃气拓扑选中连线高亮', () => {
   it('过滤源数据中指向已删除连线的历史残留编号', () => {
     const index = createGasTopologyConnectedLineIndex(loadTopologyFixture().pens)
 
-    expect(index.get('c2bd2d5')).toEqual(['818d35f', '6138c4c', '46e767f', '169f421'])
-    expect(index.get('716def7b')).toEqual(['79be0126'])
+    // 最新燃气 JSON 已移除无效历史连接；这里只保留仍存在的两条关联线。
+    expect(index.get('c2bd2d5')).toEqual(['818d35f', '6138c4c'])
+    expect(index.get('716def7b')).toEqual(['4bff2ab9'])
     expect(index.get('15bf99f3')).toEqual(['5a88794a', 'ea557fd', '4bbcaa12', '6138c4c'])
   })
 })

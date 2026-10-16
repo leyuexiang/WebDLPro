@@ -109,6 +109,7 @@ const RESOURCE_MANIFEST_BY_VARIANT_ID: ReadonlyMap<CoalTopologyVariantId, CoalTo
     processNodePenIds: ['5f53cd9', '3d4287b3', '15d7b809', '03816b3', '763f84f3', '43ff96c3', 'b74313e', 'de248ac', '3cae9a3b', '821d281', '7132c655', '5f29f1da'],
   })],
   ['network-business-key-process', createResourceManifest({
+    // 2026-10-16 最新燃煤组合输入沿用 50 个设备图元的既有 WebP 映射，并只保留实际存在的五个区域底图图元。
     office: ['2ed519d', '8ff5f40', '788d56b', 'f3d558d', '16cd2900', '1b6ec53', '15f022', '7ecd2bcb', '7600456', '579309c', '088dc0'],
     desktop: ['fce5fc4', '29633cff', 'bff4ab7', 'b535735', '32f5afbd'],
     firewall: ['927cfac', '508798a0'], dcs: ['4fac15b8', '21136a0', '726aff31', '1eee410d', '52efcda', '5269b64a'],
@@ -116,7 +117,7 @@ const RESOURCE_MANIFEST_BY_VARIANT_ID: ReadonlyMap<CoalTopologyVariantId, CoalTo
     conveyor: ['174871cf'], desulfurization: ['88e3282', '19ada4a'], pump: ['5eedb48'],
     generator: ['c1ee89f'], boiler: ['4d87c9a3'], steam_turbine: ['69d36f83'],
     plc: ['6127ab04', '870bced', 'b6c2c58', '11d93d44'], router: ['d1f2037', '550b2585', 'd0c4a54', 'ec66216', 'e2e3c4a', '3806e5c8'],
-    titleBackgroundPenIds: ['53f2260e', '70f0fd4', '5c525eb1', '4d14b40f', '4a4eceda', '5c23ca8'],
+    titleBackgroundPenIds: ['53f2260e', '5c525eb1', '4d14b40f', '4a4eceda', '5c23ca8'],
     processNodePenIds: ['85cabfb', '2e3deb0', '400b2e', '5b595f', 'c8c3578', 'dc91da3', '21e09460', '6d77b386', '7b765f3b', '4c9274d9', '6cda614d', 'c4ff0d1'],
   })],
   ['process-detail-steam-turbine', createResourceManifest({

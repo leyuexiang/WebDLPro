@@ -7,7 +7,7 @@ import { LOCAL_PROCESS_CONFIG_VERSION } from '../src/config/process/config-versi
 import { createConfiguredPowerScenesManifest, createSelfTestPage } from '../scripts/build-gas-power-smoke-release.mjs'
 import { coalPowerEdgeColors } from '../scripts/coal-power-topology.mjs'
 
-/** 发布映射只允许使用显式编号清单；配电站目标编号按截图约定供后续 Unity 配置。 */
+/** 发布映射只允许使用显式编号清单；配电站与楼宇目标编号供后续离线 Unity 配置。 */
 const registeredMappings = Object.freeze([
   Object.freeze({ sceneId: 'gas-power', nodeId: 'system.gas-turbine-control', sceneNodeId: 'unit.gas-turbine.control' }),
   Object.freeze({ sceneId: 'gas-power', nodeId: 'system.gas-hrsg-control', sceneNodeId: 'unit.gas-hrsg.control' }),
@@ -27,6 +27,9 @@ const registeredMappings = Object.freeze([
   Object.freeze({ sceneId: 'coal-power', nodeId: 'system.coal-handling-ash-plc', sceneNodeId: 'node.coal-precipitator' }),
   Object.freeze({ sceneId: 'solar-power', nodeId: 'system.solar-inverter-control', sceneNodeId: 'unit.solar-inverter.control' }),
   Object.freeze({ sceneId: 'solar-power', nodeId: 'asset.solar-inverter', sceneNodeId: 'node.solar-inverter' }),
+  Object.freeze({ sceneId: 'consumption', nodeId: 'system.building-hvac-building-automation', sceneNodeId: 'unit.building-hvac-automation.control' }),
+  Object.freeze({ sceneId: 'consumption', nodeId: 'system.building-access-group-control-dispatch', sceneNodeId: 'unit.building-access-group-dispatch.control' }),
+  Object.freeze({ sceneId: 'consumption', nodeId: 'system.building-smart-lighting-control', sceneNodeId: 'unit.building-smart-lighting.control' }),
   Object.freeze({ sceneId: 'consumption', nodeId: 'asset.building-hvac-control', sceneNodeId: 'node.building-hvac-control' }),
   Object.freeze({ sceneId: 'consumption', nodeId: 'asset.building-access-control', sceneNodeId: 'node.building-access-control' }),
   Object.freeze({ sceneId: 'consumption', nodeId: 'asset.building-smart-lighting', sceneNodeId: 'node.building-smart-lighting' }),
@@ -35,6 +38,12 @@ const registeredMappings = Object.freeze([
   Object.freeze({ sceneId: 'distribution', nodeId: 'asset.distribution-transformer', sceneNodeId: 'node.distribution-transformer' }),
   Object.freeze({ sceneId: 'distribution', nodeId: 'asset.distribution-breaker', sceneNodeId: 'node.distribution-breaker' }),
   Object.freeze({ sceneId: 'distribution', nodeId: 'asset.distribution-instrument-transformer', sceneNodeId: 'node.distribution-instrument-transformer' }),
+  Object.freeze({ sceneId: 'microgrid', nodeId: 'asset.microgrid-wind-controller', sceneNodeId: 'node.microgrid-wind-controller' }),
+  Object.freeze({ sceneId: 'microgrid', nodeId: 'asset.microgrid-photovoltaic-controller', sceneNodeId: 'node.microgrid-photovoltaic-controller' }),
+  Object.freeze({ sceneId: 'microgrid', nodeId: 'asset.microgrid-diesel-generator-controller', sceneNodeId: 'node.microgrid-diesel-generator-controller' }),
+  Object.freeze({ sceneId: 'microgrid', nodeId: 'asset.microgrid-switchgear', sceneNodeId: 'node.microgrid-switchgear' }),
+  Object.freeze({ sceneId: 'microgrid', nodeId: 'asset.microgrid-storage-converter', sceneNodeId: 'node.microgrid-storage-converter' }),
+  Object.freeze({ sceneId: 'microgrid', nodeId: 'asset.microgrid-ats-controller', sceneNodeId: 'node.microgrid-ats-controller' }),
 ])
 
 /**
@@ -215,7 +224,7 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
     }))
   })
 
-  it('二十六对显式映射均可常数时间反查且不会产生额外猜测映射', async () => {
+  it('三十五对显式映射均可常数时间反查且不会产生额外猜测映射', async () => {
     const manifest = await createConfiguredPowerScenesManifest('dual-selection-reverse-index')
     const result = TopologyRegistry.create(manifest)
     expect(result.status).toBe('ready')
@@ -229,16 +238,36 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
     }
 
     const publishedMappedNodes = manifest.topologies
-      .filter((topology) => topology.filter === undefined && ['gas-power', 'coal-power', 'solar-power', 'consumption', 'distribution'].includes(topology.sceneId))
+      .filter((topology) => topology.filter === undefined && ['gas-power', 'coal-power', 'solar-power', 'consumption', 'distribution', 'microgrid'].includes(topology.sceneId))
       .flatMap((topology) => topology.nodes.filter((node) => node.sceneNodeId !== undefined))
     expect(publishedMappedNodes).toHaveLength(registeredMappings.length)
+    const microgridTopology = manifest.topologies.find((topology) => topology.sceneId === 'microgrid')
+    expect(manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'microgrid')?.sceneNodeIds).toEqual([
+      'node.microgrid-wind-controller',
+      'node.microgrid-photovoltaic-controller',
+      'node.microgrid-diesel-generator-controller',
+      'node.microgrid-ats-controller',
+      'node.microgrid-switchgear',
+      'node.microgrid-storage-converter',
+    ])
+    expect(microgridTopology?.nodes.map(({ nodeId, title, sceneNodeId }) => [nodeId, title, sceneNodeId])).toEqual([
+      ['asset.microgrid-wind-controller', '风电控制器', 'node.microgrid-wind-controller'],
+      ['asset.microgrid-photovoltaic-controller', '光伏控制器', 'node.microgrid-photovoltaic-controller'],
+      ['asset.microgrid-diesel-generator-controller', '柴发控制器', 'node.microgrid-diesel-generator-controller'],
+      ['asset.microgrid-switchgear', '开关柜', 'node.microgrid-switchgear'],
+      ['asset.microgrid-storage-converter', '储能变流器', 'node.microgrid-storage-converter'],
+      ['asset.microgrid-ats-controller', 'ATS控制器', 'node.microgrid-ats-controller'],
+    ])
     expect(manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'consumption')?.sceneNodeIds).toEqual([
+      'unit.building-hvac-automation.control',
+      'unit.building-access-group-dispatch.control',
+      'unit.building-smart-lighting.control',
       'node.building-hvac-control',
       'node.building-access-control',
       'node.building-smart-lighting',
     ])
     expect(manifest.topologies.find((topology) => topology.sceneId === 'consumption')?.nodes.map(({ title }) => title))
-      .toEqual(['暖通空调调控', '门禁', '智能照明'])
+      .toEqual(['暖通空调楼宇自控', '门禁群控调度系统', '智能照明控制系统', '暖通空调调控', '门禁', '智能照明'])
 
     // 用户截图定义的五项以设备级 nodeId 和 sceneNodeId 发布；Unity 节点由用户后续离线配置。
     expect(manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'distribution')?.sceneNodeIds).toEqual([

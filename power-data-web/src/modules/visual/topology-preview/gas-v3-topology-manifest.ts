@@ -154,6 +154,7 @@ export const GAS_V3_TOPOLOGY_RESOURCE_MANIFEST_BY_VARIANT_ID: ReadonlyMap<
     processNodePenIds: ['44ecb96', '1fa8c91c', 'eec3847', '3f6fc6cc', '12634ed3', '79cad056', '4cc36c85', '6346262', '0a8ffe5', '565e195', 'c8a3e4e'],
   })],
   ['network-business-key-process', createResourceManifest({
+    // 2026-10-16 最新燃气组合输入沿用 44 个设备图元的既有 WebP 映射，并只保留实际存在的五个区域底图图元。
     compressor: ['2ebebdf0'],
     dcs: ['4c65e23f', '1b4e10a', '365d2986', '0f354e'],
     desktop: ['7b5d6e17', '64a4077', 'f90c16e', '716def7b', '83f2b7', '1ef83a1', '55b71536', '77916030'],
@@ -169,7 +170,7 @@ export const GAS_V3_TOPOLOGY_RESOURCE_MANIFEST_BY_VARIANT_ID: ReadonlyMap<
     router: ['754c8e62', '726bf58', '15bf99f3', '10851356', '190cc5e'],
     server: ['2eec4aaf', '49493f', '442e9a24', '7aa4a9eb', '7803a76a', '57be1f3'],
     steam_turbine: ['0c51f9f'],
-    titleBackgroundPenIds: ['1a3039dc', 'f09357', '310bef6', '7b5be68', '443ebe4', '59c15d3'],
+    titleBackgroundPenIds: ['1a3039dc', '310bef6', '7b5be68', '443ebe4', '59c15d3'],
     processNodePenIds: ['ce327', 'a7c57f8', '21cf1afe', '71026287', '1b3e55a', '15d95230', '72628999', '355282b6', '6f26fffa', '152c0333', 'e5c55f9'],
   })],
   ['process-detail-gas-turbine', createResourceManifest({

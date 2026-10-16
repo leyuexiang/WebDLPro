@@ -74,24 +74,37 @@ describe('降压站拓扑独立数据与公共资源', () => {
     }
   })
 
-  it('三层完整图移除顶层组合并保持所有子图元世界坐标', async () => {
+  it('三层完整图移除顶层组合或保留平铺源图坐标', async () => {
     installTopologyFetch()
     const variantId = 'network-business-key-process'
     const variant = STEP_DOWN_SUBSTATION_TOPOLOGY_VARIANTS.find((entry) => entry.id === variantId)!
     const source = JSON.parse(readFileSync(resolve(topologyRoot, variant.topologyPath), 'utf8')) as Meta2dData
     const data = await loadStepDownSubstationTopologyPreviewData(variantId)
     const loadedById = new Map(data.pens.map((pen) => [pen.id, pen]))
-    const sourceRoot = source.pens.find((pen) => pen.name === 'combine' && !pen.parentId)!
+    const sourceRoot = source.pens.find((pen) => pen.name === 'combine' && !pen.parentId)
 
-    expect(loadedById.has(sourceRoot.id!)).toBe(false)
-    for (const sourcePen of source.pens.filter((pen) => pen.parentId === sourceRoot.id && pen.name !== 'combine')) {
-      const loadedPen = loadedById.get(sourcePen.id!)!
-      // 完整图的直接子图元包含设备、连线、背景和嵌套标题组，展平后均不得改变视觉位置。
-      expect(loadedPen.parentId).toBeUndefined()
-      expect(loadedPen.x).toBeCloseTo(sourceRoot.x! + sourcePen.x! * sourceRoot.width!)
-      expect(loadedPen.y).toBeCloseTo(sourceRoot.y! + sourcePen.y! * sourceRoot.height!)
-      expect(loadedPen.width).toBeCloseTo(sourcePen.width! * sourceRoot.width!)
-      expect(loadedPen.height).toBeCloseTo(sourcePen.height! * sourceRoot.height!)
+    if (sourceRoot) {
+      expect(loadedById.has(sourceRoot.id!)).toBe(false)
+      for (const sourcePen of source.pens.filter((pen) => pen.parentId === sourceRoot.id && pen.name !== 'combine')) {
+        const loadedPen = loadedById.get(sourcePen.id!)!
+        // 旧版组合源图展平后，直接子图元的视觉位置必须与组合坐标换算结果一致。
+        expect(loadedPen.parentId).toBeUndefined()
+        expect(loadedPen.x).toBeCloseTo(sourceRoot.x! + sourcePen.x! * sourceRoot.width!)
+        expect(loadedPen.y).toBeCloseTo(sourceRoot.y! + sourcePen.y! * sourceRoot.height!)
+        expect(loadedPen.width).toBeCloseTo(sourcePen.width! * sourceRoot.width!)
+        expect(loadedPen.height).toBeCloseTo(sourcePen.height! * sourceRoot.height!)
+      }
+    } else {
+      // 最新三层参考图已是平铺世界坐标，资源本地化和选择策略不得改动图元位置或顺序。
+      expect(data.pens.map((pen) => pen.id)).toEqual(source.pens.map((pen) => pen.id))
+      for (const sourcePen of source.pens) {
+        const loadedPen = loadedById.get(sourcePen.id!)!
+        expect(loadedPen.parentId).toBeUndefined()
+        expect(loadedPen.x).toBe(sourcePen.x)
+        expect(loadedPen.y).toBe(sourcePen.y)
+        expect(loadedPen.width).toBe(sourcePen.width)
+        expect(loadedPen.height).toBe(sourcePen.height)
+      }
     }
 
     const manifest = getStepDownSubstationTopologyResourceManifest(variantId)

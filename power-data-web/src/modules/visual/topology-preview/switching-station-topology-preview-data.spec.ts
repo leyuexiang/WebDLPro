@@ -74,24 +74,41 @@ describe('开关站拓扑独立数据与公共资源', () => {
     }
   })
 
-  it('三层完整图移除顶层组合并保持所有子图元世界坐标', async () => {
+  it('三层完整图移除组合框并保持源图位置', async () => {
     installTopologyFetch()
     const variantId = 'network-business-key-process'
     const variant = SWITCHING_STATION_TOPOLOGY_VARIANTS.find((entry) => entry.id === variantId)!
     const source = JSON.parse(readFileSync(resolve(topologyRoot, variant.topologyPath), 'utf8')) as Meta2dData
     const data = await loadSwitchingStationTopologyPreviewData(variantId)
     const loadedById = new Map(data.pens.map((pen) => [pen.id, pen]))
-    const sourceRoot = source.pens.find((pen) => pen.name === 'combine' && !pen.parentId)!
+    const sourceRoot = source.pens.find((pen) => pen.name === 'combine' && !pen.parentId)
 
-    expect(loadedById.has(sourceRoot.id!)).toBe(false)
-    for (const sourcePen of source.pens.filter((pen) => pen.parentId === sourceRoot.id && pen.name !== 'combine')) {
-      const loadedPen = loadedById.get(sourcePen.id!)!
-      // 完整图的直接子图元包含设备、连线、背景和嵌套标题组，展平后均不得改变视觉位置。
-      expect(loadedPen.parentId).toBeUndefined()
-      expect(loadedPen.x).toBeCloseTo(sourceRoot.x! + sourcePen.x! * sourceRoot.width!)
-      expect(loadedPen.y).toBeCloseTo(sourceRoot.y! + sourcePen.y! * sourceRoot.height!)
-      expect(loadedPen.width).toBeCloseTo(sourcePen.width! * sourceRoot.width!)
-      expect(loadedPen.height).toBeCloseTo(sourcePen.height! * sourceRoot.height!)
+    if (sourceRoot) expect(loadedById.has(sourceRoot.id!)).toBe(false)
+    const children = sourceRoot
+      ? source.pens.filter((pen) => pen.parentId === sourceRoot.id && pen.name !== 'combine')
+      : []
+    if (children.length > 0 && sourceRoot) {
+      for (const sourcePen of children) {
+        const loadedPen = loadedById.get(sourcePen.id!)!
+        // 有子图元的旧版组合需按父组合比例坐标换算成世界坐标。
+        expect(loadedPen.parentId).toBeUndefined()
+        expect(loadedPen.x).toBeCloseTo(sourceRoot.x! + sourcePen.x! * sourceRoot.width!)
+        expect(loadedPen.y).toBeCloseTo(sourceRoot.y! + sourcePen.y! * sourceRoot.height!)
+        expect(loadedPen.width).toBeCloseTo(sourcePen.width! * sourceRoot.width!)
+        expect(loadedPen.height).toBeCloseTo(sourcePen.height! * sourceRoot.height!)
+      }
+    } else {
+      // 当前参考图的组合框为空；其余图元应继续使用原世界坐标和原顺序。
+      const sourcePens = source.pens.filter((pen) => pen.name !== 'combine')
+      expect(data.pens.map((pen) => pen.id)).toEqual(sourcePens.map((pen) => pen.id))
+      for (const sourcePen of sourcePens) {
+        const loadedPen = loadedById.get(sourcePen.id!)!
+        expect(loadedPen.parentId).toBeUndefined()
+        expect(loadedPen.x).toBe(sourcePen.x)
+        expect(loadedPen.y).toBe(sourcePen.y)
+        expect(loadedPen.width).toBe(sourcePen.width)
+        expect(loadedPen.height).toBe(sourcePen.height)
+      }
     }
 
     const manifest = getSwitchingStationTopologyResourceManifest(variantId)

@@ -50,13 +50,14 @@ describe('燃气拓扑独立数据与公共资源', () => {
 
   it('每份文件只使用公共设备图标和公共区域标题背景', async () => {
     installTopologyFetch()
-    // 纠正后的网络＋业务文件含 37 台设备，与 6 个区域标题背景分别校验。
+    // 各版本按独立资源清单校验设备数；最新三层组合输入只有五个区域背景图元。
     const expectedDeviceCounts = [28, 37, 0, 14, 37, 44, 14, 44]
+    const expectedTitleBackgroundCounts = [6, 6, 6, 6, 6, 6, 6, 5]
     for (const [index, variant] of GAS_V3_TOPOLOGY_VARIANTS.entries()) {
       const data = await loadGasV3TopologyPreviewData(variant.id)
       const manifest = getGasV3TopologyResourceManifest(variant.id)
       expect(manifest.devicePenIds.size).toBe(expectedDeviceCounts[index])
-      expect(manifest.titleBackgroundPenIds.size).toBe(6)
+      expect(manifest.titleBackgroundPenIds.size).toBe(expectedTitleBackgroundCounts[index])
       for (const penId of manifest.devicePenIds) {
         const relativePath = getGasV3TopologyPreviewIconPath(variant.id, penId)
         expect(relativePath).toMatch(/^icons\/normal\/[a-z0-9_]+\.webp$/)

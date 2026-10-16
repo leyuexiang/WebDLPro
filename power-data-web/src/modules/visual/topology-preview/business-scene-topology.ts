@@ -10,6 +10,7 @@ import {
   getBuildingTopologyStatusIconUrl,
 } from './building-topology-runtime-bindings'
 import { DISTRIBUTION_TOPOLOGY_RUNTIME_BINDINGS } from './distribution-topology-runtime-bindings'
+import { getMicrogridTopologyRuntimeBindings } from './microgrid-topology-runtime-bindings'
 import type { SubstationTopologyRuntimeBinding } from './substation-topology-runtime-bindings'
 import {
   formatWindTopologyFilterSelection,
@@ -23,7 +24,7 @@ export const BUSINESS_SCENE_TOPOLOGY_SCENE_IDS = ['microgrid', 'distribution', '
 
 export type BusinessSceneTopologySceneId = (typeof BUSINESS_SCENE_TOPOLOGY_SCENE_IDS)[number]
 
-/** 配电站和楼宇图纸按完整 JSON 变体登记点击绑定；微电网仍为纯浏览场景。 */
+/** 配电站和楼宇图纸按完整 JSON 变体登记绑定；微电网只绑定默认三层组合图。 */
 const RUNTIME_BINDINGS_BY_SCENE: Partial<Record<BusinessSceneTopologySceneId, readonly SubstationTopologyRuntimeBinding[]>> = {
   distribution: DISTRIBUTION_TOPOLOGY_RUNTIME_BINDINGS,
 }
@@ -375,7 +376,9 @@ function createPreviewProfile(sceneId: BusinessSceneTopologySceneId): ManifestTo
     getStatusImage: sceneId === 'consumption' ? getBuildingTopologyStatusIconUrl : undefined,
     getRuntimeBindings: sceneId === 'consumption'
       ? getBuildingTopologyRuntimeBindings
-      : () => RUNTIME_BINDINGS_BY_SCENE[sceneId] ?? [],
+      : sceneId === 'microgrid'
+        ? getMicrogridTopologyRuntimeBindings
+        : () => RUNTIME_BINDINGS_BY_SCENE[sceneId] ?? [],
     runtimeBindings: RUNTIME_BINDINGS_BY_SCENE[sceneId],
   })
 }

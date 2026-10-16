@@ -11,6 +11,7 @@ import {
 import type { Pen } from '@meta2d/core'
 import { TOPOLOGY_SHARED_ASSET_ALIASES } from './topology-shared-assets'
 import { DISTRIBUTION_TOPOLOGY_RUNTIME_BINDINGS } from './distribution-topology-runtime-bindings'
+import { MICROGRID_TOPOLOGY_EQUIPMENT_NODE_IDS, getMicrogridTopologyRuntimeBindings } from './microgrid-topology-runtime-bindings'
 
 /** 用户提交的源文件哈希与图元数作为独立基准，防止输入文件漏项或变体串线。 */
 const SOURCE_CONTRACT = {
@@ -80,6 +81,32 @@ describe('新业务场景拓扑数据契约', () => {
     // 默认文件直接引用共享目录中的 WebP；PNG 源图和在线编辑器封面不进入前端拓扑 JSON。
     expect(topology.pens.filter((pen) => pen.image).every((pen) => /^(?:icons|background)\/.+\.webp$/i.test(pen.image!))).toBe(true)
     expect(JSON.stringify(topology)).not.toMatch(/\.png(?:$|[?#"])/i)
+  })
+
+  it('微电网只在默认组合中绑定六个设备层节点', () => {
+    const variant = BUSINESS_SCENE_TOPOLOGY_VARIANTS_BY_SCENE.microgrid.find((item) => item.isDefault)!
+    const path = resolve(process.cwd(), 'public/topology/microgrid-json-preview', variant.topologyPath)
+    const topology = JSON.parse(readFileSync(path, 'utf8')) as { pens: Pen[] }
+    const expected = [
+      { key: 'windController', title: '风电控制器', penId: '58845f75' },
+      { key: 'photovoltaicController', title: '光伏控制器', penId: 'ac4cdcc' },
+      { key: 'dieselGeneratorController', title: '柴发控制器', penId: '6eaf50f7' },
+      { key: 'atsController', title: 'ATS控制器', penId: '30ecc688' },
+      { key: 'switchgear', title: '开关柜', penId: 'a6a3147' },
+      { key: 'storageConverter', title: '储能变流器', penId: 'abf1410' },
+    ] as const
+    const expectedBindings = expected.map(({ key, penId }) => ({
+      penId,
+      ...MICROGRID_TOPOLOGY_EQUIPMENT_NODE_IDS[key],
+    }))
+
+    expect(getMicrogridTopologyRuntimeBindings(variant.id)).toEqual(expectedBindings)
+    for (const { title, penId } of expected) {
+      expect(topology.pens.find((pen) => pen.id === penId)?.text?.replace(/\n/g, '').trim()).toBe(title)
+    }
+    for (const otherVariant of BUSINESS_SCENE_TOPOLOGY_VARIANTS_BY_SCENE.microgrid.filter((item) => !item.isDefault)) {
+      expect(getMicrogridTopologyRuntimeBindings(otherVariant.id)).toEqual([])
+    }
   })
 
   it('为三个场景登记源文件提供的 24 个独立版本，且每场景只有一个明确默认版本', () => {

@@ -104,6 +104,7 @@ describe('拓扑公共设备图标', () => {
     installCoalTopologyFetch()
     const data = await loadCoalTopologyPreviewData()
     expect(data.pens.filter((pen) => pen.image?.includes('/topology/coal-json-preview/'))).toHaveLength(0)
-    expect(data.pens.filter((pen) => pen.image?.includes('/topology/shared/'))).toHaveLength(56)
+    // 当前燃煤 V2 文件包含 55 个有效图片图元，移除旧 PNG 元素后不再按旧文件数量锁定。
+    expect(data.pens.filter((pen) => pen.image?.includes('/topology/shared/'))).toHaveLength(55)
   })
 })

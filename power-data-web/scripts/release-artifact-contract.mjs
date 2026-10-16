@@ -90,6 +90,15 @@ const requiredOverviewSceneContract = Object.freeze({
     'action.overview.polling.stop',
   ]),
 })
+/** 微电网仅对默认网络层+业务层+关键环节层组合发布这六个设备节点映射。 */
+const requiredMicrogridEquipmentMappings = Object.freeze([
+  Object.freeze({ nodeId: 'asset.microgrid-wind-controller', title: '风电控制器', sceneNodeId: 'node.microgrid-wind-controller' }),
+  Object.freeze({ nodeId: 'asset.microgrid-photovoltaic-controller', title: '光伏控制器', sceneNodeId: 'node.microgrid-photovoltaic-controller' }),
+  Object.freeze({ nodeId: 'asset.microgrid-diesel-generator-controller', title: '柴发控制器', sceneNodeId: 'node.microgrid-diesel-generator-controller' }),
+  Object.freeze({ nodeId: 'asset.microgrid-switchgear', title: '开关柜', sceneNodeId: 'node.microgrid-switchgear' }),
+  Object.freeze({ nodeId: 'asset.microgrid-storage-converter', title: '储能变流器', sceneNodeId: 'node.microgrid-storage-converter' }),
+  Object.freeze({ nodeId: 'asset.microgrid-ats-controller', title: 'ATS控制器', sceneNodeId: 'node.microgrid-ats-controller' }),
+])
 const navigationOnlySceneIds = Object.freeze([])
 const deviceIdentifierSuffixes = new Set(['id', 'ids'])
 const deviceMappingSuffixes = new Set(['mapping', 'mappings'])
@@ -440,6 +449,29 @@ export async function validateReleaseArtifact(rootDirectory) {
       requiredOverviewSceneContract.supportedActionIds.some((actionId) => !overviewScene.supportedActionIds.includes(actionId))
     if (hasInvalidOverviewScene) {
       issues.push('结构清单必须登记无拓扑的总览场景条目并完整收录九个总览动作，防止平台在当前场景解析动作时失效。')
+    }
+
+    /**
+     * 微电网六项映射属于默认完整拓扑的绝对发布契约。结构清单和三维映射同时漏项时，
+     * 普通双向引用检查无法发现，因此按稳定业务编号、名称和 Unity 场景编号独立核对。
+     */
+    const microgridTopology = Array.isArray(topologyManifest.topologies)
+      ? topologyManifest.topologies.find((topology) => topology?.topologyId === 'topology.microgrid.overview' && topology?.sceneId === 'microgrid' && topology?.filter === undefined)
+      : undefined
+    const microgridMapping = Array.isArray(topologyManifest.unitySceneMappings)
+      ? topologyManifest.unitySceneMappings.find((mapping) => mapping?.sceneId === 'microgrid')
+      : undefined
+    const microgridNodesById = new Map((Array.isArray(microgridTopology?.nodes) ? microgridTopology.nodes : []).map((node) => [node?.nodeId, node]))
+    const hasInvalidMicrogridEquipmentMapping = !microgridTopology || !microgridMapping ||
+      !Array.isArray(microgridMapping.sceneNodeIds) || microgridMapping.sceneNodeIds.length !== requiredMicrogridEquipmentMappings.length ||
+      !Array.isArray(microgridMapping.routeIds) || microgridMapping.routeIds.length !== 0 ||
+      requiredMicrogridEquipmentMappings.some((contract) => {
+        const node = microgridNodesById.get(contract.nodeId)
+        return !node || node.title !== contract.title || node.sceneNodeId !== contract.sceneNodeId ||
+          node.doubleClickBehavior !== 'emit-node' || !microgridMapping.sceneNodeIds.includes(contract.sceneNodeId)
+      })
+    if (hasInvalidMicrogridEquipmentMapping) {
+      issues.push('微电网默认网络层+业务层+关键环节层拓扑必须完整发布六个设备节点及其固定二维、三维编号。')
     }
 
     /**

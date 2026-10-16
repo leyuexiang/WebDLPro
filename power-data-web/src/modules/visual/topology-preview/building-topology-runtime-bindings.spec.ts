@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { toProcessNodeId } from '@/config/process/identifiers'
 import {
   BUILDING_TOPOLOGY_NODE_IDS,
+  BUILDING_TOPOLOGY_SYSTEM_NODE_IDS,
   BUILDING_TOPOLOGY_SCENE_NODE_ID_BY_NODE_ID,
   getBuildingTopologyRuntimeBindings,
   getBuildingTopologyStatusIconUrl,
@@ -11,17 +12,46 @@ import {
 import { BUSINESS_SCENE_TOPOLOGY_VARIANTS_BY_SCENE } from './business-scene-topology'
 
 const EXPECTED_BINDINGS_BY_VARIANT = new Map<string, readonly (readonly [string, string, string])[]>([
-  ['architecture', [['42312320', 'asset.building-hvac-control', 'node.building-hvac-control'], ['8b80c2d', 'asset.building-smart-lighting', 'node.building-smart-lighting']]],
-  ['network', []],
+  ['architecture', [
+    ['d0b75', 'system.building-hvac-building-automation', 'unit.building-hvac-automation.control'],
+    ['42312320', 'asset.building-hvac-control', 'node.building-hvac-control'],
+    ['8b80c2d', 'asset.building-smart-lighting', 'node.building-smart-lighting'],
+    ['7ab900d7', 'system.building-smart-lighting-control', 'unit.building-smart-lighting.control'],
+  ]],
+  ['network', [
+    ['73874ef9', 'system.building-hvac-building-automation', 'unit.building-hvac-automation.control'],
+    ['340e210e', 'system.building-smart-lighting-control', 'unit.building-smart-lighting.control'],
+  ]],
   ['business', []],
-  ['key-process', [['5a232852', 'asset.building-hvac-control', 'node.building-hvac-control'], ['7de351ce', 'asset.building-smart-lighting', 'node.building-smart-lighting']]],
-  ['network-key-process', [['39eb5ed1', 'asset.building-hvac-control', 'node.building-hvac-control'], ['5890fe4f', 'asset.building-smart-lighting', 'node.building-smart-lighting']]],
-  ['network-business', []],
-  ['business-key-process', [['cf58f4e', 'asset.building-hvac-control', 'node.building-hvac-control'], ['ae15b2b', 'asset.building-smart-lighting', 'node.building-smart-lighting']]],
+  ['key-process', [
+    ['19302081', 'system.building-hvac-building-automation', 'unit.building-hvac-automation.control'],
+    ['5a232852', 'asset.building-hvac-control', 'node.building-hvac-control'],
+    ['7de351ce', 'asset.building-smart-lighting', 'node.building-smart-lighting'],
+    ['491d605', 'system.building-smart-lighting-control', 'unit.building-smart-lighting.control'],
+  ]],
+  ['network-key-process', [
+    ['3e24d70e', 'system.building-hvac-building-automation', 'unit.building-hvac-automation.control'],
+    ['39eb5ed1', 'asset.building-hvac-control', 'node.building-hvac-control'],
+    ['5890fe4f', 'asset.building-smart-lighting', 'node.building-smart-lighting'],
+    ['eff5466', 'system.building-smart-lighting-control', 'unit.building-smart-lighting.control'],
+  ]],
+  ['network-business', [
+    ['2ee5a087', 'system.building-hvac-building-automation', 'unit.building-hvac-automation.control'],
+    ['736daf4', 'system.building-smart-lighting-control', 'unit.building-smart-lighting.control'],
+  ]],
+  ['business-key-process', [
+    ['22063f6c', 'system.building-hvac-building-automation', 'unit.building-hvac-automation.control'],
+    ['cf58f4e', 'asset.building-hvac-control', 'node.building-hvac-control'],
+    ['ae15b2b', 'asset.building-smart-lighting', 'node.building-smart-lighting'],
+    ['72130944', 'system.building-smart-lighting-control', 'unit.building-smart-lighting.control'],
+  ]],
   ['network-business-key-process', [
+    ['7101900b', 'system.building-hvac-building-automation', 'unit.building-hvac-automation.control'],
     ['f765f99', 'asset.building-hvac-control', 'node.building-hvac-control'],
     ['81a3de2', 'asset.building-access-control', 'node.building-access-control'],
     ['74365219', 'asset.building-smart-lighting', 'node.building-smart-lighting'],
+    ['588de3c6', 'system.building-access-group-control-dispatch', 'unit.building-access-group-dispatch.control'],
+    ['7338607a', 'system.building-smart-lighting-control', 'unit.building-smart-lighting.control'],
   ]],
 ])
 
@@ -48,6 +78,9 @@ describe('楼宇拓扑逐变体三维绑定', () => {
     expect(BUILDING_TOPOLOGY_SCENE_NODE_ID_BY_NODE_ID.get(BUILDING_TOPOLOGY_NODE_IDS.hvac)).toBe('node.building-hvac-control')
     expect(BUILDING_TOPOLOGY_SCENE_NODE_ID_BY_NODE_ID.get(BUILDING_TOPOLOGY_NODE_IDS.access)).toBe('node.building-access-control')
     expect(BUILDING_TOPOLOGY_SCENE_NODE_ID_BY_NODE_ID.get(BUILDING_TOPOLOGY_NODE_IDS.lighting)).toBe('node.building-smart-lighting')
+    expect(BUILDING_TOPOLOGY_SCENE_NODE_ID_BY_NODE_ID.get(BUILDING_TOPOLOGY_SYSTEM_NODE_IDS.hvacAutomation)).toBe('unit.building-hvac-automation.control')
+    expect(BUILDING_TOPOLOGY_SCENE_NODE_ID_BY_NODE_ID.get(BUILDING_TOPOLOGY_SYSTEM_NODE_IDS.accessGroupDispatch)).toBe('unit.building-access-group-dispatch.control')
+    expect(BUILDING_TOPOLOGY_SCENE_NODE_ID_BY_NODE_ID.get(BUILDING_TOPOLOGY_SYSTEM_NODE_IDS.lightingControl)).toBe('unit.building-smart-lighting.control')
   })
 
   it('最新版组合图完整保留48个图元、截图节点名称和本地WebP资源', () => {
@@ -61,6 +94,9 @@ describe('楼宇拓扑逐变体三维绑定', () => {
     expect(penById.get('f765f99')?.text).toContain('暖通空调调控')
     expect(penById.get('81a3de2')?.text).toContain('门禁')
     expect(penById.get('74365219')?.text).toContain('智能照明')
+    expect(penById.get('7101900b')?.text).toContain('暖通空调楼宇自控')
+    expect(penById.get('588de3c6')?.text).toContain('门禁群控调度系统')
+    expect(penById.get('7338607a')?.text).toContain('智能照明控制系统')
     expect(penById.get('f765f99')?.image).toBe('icons/normal/building-hvac-control.webp')
     expect(penById.get('81a3de2')?.image).toBe('icons/normal/building-access-control.webp')
     expect(penById.get('74365219')?.image).toBe('icons/normal/building-smart-lighting.webp')
@@ -82,5 +118,8 @@ describe('楼宇拓扑逐变体三维绑定', () => {
       }
     }
     expect(getBuildingTopologyStatusIconUrl(toProcessNodeId('asset.building-unregistered'), 'normal')).toBeUndefined()
+    for (const nodeId of Object.values(BUILDING_TOPOLOGY_SYSTEM_NODE_IDS)) {
+      expect(getBuildingTopologyStatusIconUrl(nodeId, 'normal')).toBeUndefined()
+    }
   })
 })

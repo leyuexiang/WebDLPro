@@ -151,13 +151,12 @@ const RESOURCE_MANIFEST_BY_VARIANT_ID = new Map<
     processNodePenIds: ['220e4fc', 'b3a0d3', '599c15e', '6240fb4e', '8b440ac', '3ac2dfde'],
   })],
   ['network-business-key-process', createResourceManifest({
+    // 三层最新图仅保留实际出现的图元编号；旧版设备图元和标题编号已从默认映射移除。
     staticImagePenIdsByPath: {
       'icons/normal/firewall.webp': ['0b59ba2', '1d6dc46', '3a412a8', '9ddf8'],
       'icons/normal/desktop.webp': ['53787573', '4ff1e1f', '6f0a2c0', '3771b5aa', '476a2497', '3bb522e1'],
       'icons/normal/protection.webp': ['231062e0', '28846a8b', 'b896e48'],
       'icons/static/f6ce2eb85bb851727eb46af15e165bd4dc0c3d718b251ddf3dad5d59d546ca4a.webp': ['3094af3', '69ccc050'],
-      'icons/static/33c45e58ffbc78349129843cc7619e5a831aa08ac8175370f7f131d290ebf5b3.webp': ['2fda2aaa', '985e9a6'],
-      'icons/static/194a1218e43f8e81192c29054a52f65edeca7b517aaaf7bad21a0c9739f2a33f.webp': ['300aa5f', '478eb0df'],
       'icons/normal/server.webp': ['f21af61', '3d15ad6'],
       'icons/static/fc0d7f043c577c6c378f47d2dbdebba016d21fe1080819ffae5f14d4a7416a0d.webp': ['2d57f754'],
       'icons/static/3c55a879863799ca393401c68510aca17af14fdff71e330d1300e7ca5567e5fa.webp': ['7e74f5dd'],
@@ -168,7 +167,8 @@ const RESOURCE_MANIFEST_BY_VARIANT_ID = new Map<
       'icons/static/31e08369011912241004d9da628aa4ac3a80ba97a8abd2e83289e7a7515f4c8b.webp': ['a938209', '601f21c', 'b11d114'],
       'icons/normal/transformer.webp': ['74048c89', '3b0bb6bd'],
     },
-    titleBackgroundPenIds: ['a4ae075', '1e22435', 'cd8cecf', '61650b4', '11842d1', '54c6b28'],
+    // 只登记最新参考图内实际存在的五个区域标题背景。
+    titleBackgroundPenIds: ['a4ae075', '1e22435', 'cd8cecf', '61650b4', '54c6b28'],
     processNodePenIds: ['76d6e270', '706b723', '35cfc35', '75ee244d', 'ff086a5', 'c50d31c'],
   })],
 ])

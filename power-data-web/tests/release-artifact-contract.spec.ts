@@ -90,7 +90,17 @@ function createTopologyManifest() {
       sceneId,
       title: `${sceneId}总览`,
       configVersion: manifestVersion,
-      nodes: [],
+      nodes: sceneId === 'microgrid' ? [
+        ['asset.microgrid-wind-controller', '风电控制器', 'node.microgrid-wind-controller'],
+        ['asset.microgrid-photovoltaic-controller', '光伏控制器', 'node.microgrid-photovoltaic-controller'],
+        ['asset.microgrid-diesel-generator-controller', '柴发控制器', 'node.microgrid-diesel-generator-controller'],
+        ['asset.microgrid-switchgear', '开关柜', 'node.microgrid-switchgear'],
+        ['asset.microgrid-storage-converter', '储能变流器', 'node.microgrid-storage-converter'],
+        ['asset.microgrid-ats-controller', 'ATS控制器', 'node.microgrid-ats-controller'],
+      ].map(([nodeId, title, sceneNodeId], index) => ({
+        nodeId, title, sceneNodeId, iconKey: 'server', x: index * 10, y: 75,
+        deviceStatus: 'offline', doubleClickBehavior: 'emit-node',
+      })) : [],
       edges: [],
     }))],
     actions: [{
@@ -325,7 +335,18 @@ function createTopologyManifest() {
     }, ...navigationScenes.map(([sceneId]) => ({
       sceneId,
       mappingVersion: `mapping.${sceneId}.1`,
-      sceneNodeIds: sceneId === 'wind-power' ? ['node.wind-turbine', 'node.wind-gearbox'] : [],
+      sceneNodeIds: sceneId === 'wind-power'
+        ? ['node.wind-turbine', 'node.wind-gearbox']
+        : sceneId === 'microgrid'
+          ? [
+              'node.microgrid-wind-controller',
+              'node.microgrid-photovoltaic-controller',
+              'node.microgrid-diesel-generator-controller',
+              'node.microgrid-ats-controller',
+              'node.microgrid-switchgear',
+              'node.microgrid-storage-converter',
+            ]
+          : [],
       routeIds: [],
     }))],
   }
@@ -449,6 +470,25 @@ describe('发布产物输出标准', () => {
     const root = await createArtifact()
     try {
       expect(await validateReleaseArtifact(root)).toEqual([])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('微电网默认拓扑遗漏设备映射时独立阻断交付', async () => {
+    const root = await createArtifact()
+    try {
+      const manifestPath = path.join(root, 'scene-topology-manifest.json')
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+      const microgridTopology = manifest.topologies.find((topology: { sceneId?: string }) => topology.sceneId === 'microgrid')
+      microgridTopology.nodes = microgridTopology.nodes.filter((node: { nodeId?: string }) => node.nodeId !== 'asset.microgrid-wind-controller')
+      writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
+      // 重写完整性摘要，确保失败来自绝对映射契约，而非文件散列不匹配。
+      await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
+
+      expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
+        expect.stringContaining('微电网默认网络层+业务层+关键环节层拓扑必须完整发布六个设备节点'),
+      ]))
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

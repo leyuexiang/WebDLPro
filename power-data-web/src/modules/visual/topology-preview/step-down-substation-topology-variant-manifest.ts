@@ -40,7 +40,8 @@ export const STEP_DOWN_SUBSTATION_TOPOLOGY_VARIANTS = Object.freeze([
   { id: 'network-business', combinationKey: 'network+business', layerIds: Object.freeze(['network', 'business']), topologyPath: 'variants/network-business/topology.json', sourceSha256: '769ae7d323d9afd9c34e84e35c4b1458680495c3a745ce5bde29c2e21303a007', expectedPenCount: 87 },
   { id: 'network-key-process', combinationKey: 'network+key-process', layerIds: Object.freeze(['network', 'key-process']), topologyPath: 'variants/network-key-process/topology.json', sourceSha256: '091af616deb31ff2d413a6f057ef3deb826a1cc5400015b098b1b2bd0f81bfc4', expectedPenCount: 86 },
   { id: 'business-key-process', combinationKey: 'business+key-process', layerIds: Object.freeze(['business', 'key-process']), topologyPath: 'variants/business-key-process/topology.json', sourceSha256: 'd752629a719d37a72c02622deb70a78e751bd634c10f1a5e0adebe0d56ae5d37', expectedPenCount: 54 },
-  { id: 'network-business-key-process', combinationKey: 'network+business+key-process', layerIds: Object.freeze(['network', 'business', 'key-process']), topologyPath: 'variants/network-business-key-process/topology.json', sourceSha256: 'f7ec84b8f5371114774672fdf6e79c98530081d9cb5a031b34cb140de00c2f8b', expectedPenCount: 97, isDefault: true },
+  // 2026-10-16 按 降压站.json 更新，输入 SHA-256：ac0d27db58cf8259990f9942d3ca3a9774add15d3291e6ff70d1d7177a46e5fd；sourceSha256 锁定公共 WebP 本地化后的运行文件。
+  { id: 'network-business-key-process', combinationKey: 'network+business+key-process', layerIds: Object.freeze(['network', 'business', 'key-process']), topologyPath: 'variants/network-business-key-process/topology.json', sourceSha256: '83afde68eed6c07359b389a88cd9850468af8bdee68e3b7fd0963b375197582e', expectedPenCount: 93, isDefault: true },
 ] as const satisfies readonly StepDownSubstationTopologyVariantManifestEntry[])
 
 /** 两个索引在模块初始化时各构建一次，切层热路径不扫描清单或图元。 */
