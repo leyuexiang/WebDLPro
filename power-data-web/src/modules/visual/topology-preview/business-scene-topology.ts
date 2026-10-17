@@ -290,7 +290,13 @@ export async function loadBusinessSceneTopologyPreviewData(
   const cacheKey = `${sceneId}/${variantId}`
   let sourceData = sourceDataCache.get(cacheKey)
   if (!sourceData) {
-    const response = await fetch(getBusinessSceneTopologyPublicAssetUrl(sceneId, variant.topologyPath), {
+    const topologyUrl = getBusinessSceneTopologyPublicAssetUrl(sceneId, variant.topologyPath)
+    /**
+     * 正式环境允许浏览器缓存拓扑 JSON；将源文件版本散列放进地址，
+     * 让拓扑更新后使用独立缓存键，避免继续读取旧版本图元数组。
+     */
+    const cacheBustedTopologyUrl = `${topologyUrl}${topologyUrl.includes('?') ? '&' : '?'}v=${variant.sourceSha256}`
+    const response = await fetch(cacheBustedTopologyUrl, {
       signal,
       cache: import.meta.env.DEV ? 'no-store' : 'force-cache',
     })

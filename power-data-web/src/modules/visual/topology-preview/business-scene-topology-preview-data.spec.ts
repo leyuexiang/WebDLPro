@@ -1,0 +1,58 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import type { Meta2dData } from '@meta2d/core'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  BUSINESS_SCENE_TOPOLOGY_VARIANTS_BY_SCENE,
+  clearBusinessSceneTopologyPreviewDataCacheForTests,
+  loadBusinessSceneTopologyPreviewData,
+  type BusinessSceneTopologyVariantId,
+} from './business-scene-topology'
+
+const originalFetch = globalThis.fetch
+
+afterEach(() => {
+  clearBusinessSceneTopologyPreviewDataCacheForTests()
+  globalThis.fetch = originalFetch
+})
+
+describe('配电站拓扑源文件缓存版本', () => {
+  it('请求带源版本的默认拓扑，避开旧地址缓存中的 98 个图元', async () => {
+    const variant = BUSINESS_SCENE_TOPOLOGY_VARIANTS_BY_SCENE.distribution.find((item) => item.isDefault)!
+    const sourcePath = resolve(
+      process.cwd(),
+      'public/topology/distribution-json-preview',
+      variant.topologyPath,
+    )
+    const sourceData = JSON.parse(readFileSync(sourcePath, 'utf8')) as Meta2dData
+
+    // 复现同事遇到的缓存差异：无版本旧地址返回 98 个图元，版本化地址返回源文件中的 85 个。
+    const staleCachedData: Meta2dData = {
+      ...sourceData,
+      pens: [
+        ...sourceData.pens,
+        ...Array.from({ length: 13 }, (_, index) => ({
+          ...sourceData.pens[0]!,
+          id: `stale-cache-${index}`,
+        })),
+      ],
+    }
+    const requestedUrls: string[] = []
+    globalThis.fetch = vi.fn(async (input) => {
+      const requestedUrl = String(input)
+      requestedUrls.push(requestedUrl)
+      const responseData = requestedUrl.includes(`?v=${variant.sourceSha256}`)
+        ? sourceData
+        : staleCachedData
+      return new Response(JSON.stringify(responseData), { status: 200 })
+    }) as typeof fetch
+
+    const data = await loadBusinessSceneTopologyPreviewData('distribution', variant.id as BusinessSceneTopologyVariantId)
+
+    expect(sourceData.pens).toHaveLength(85)
+    expect(variant.expectedPenCount).toBe(85)
+    expect(requestedUrls).toHaveLength(1)
+    expect(requestedUrls[0]).toContain(`?v=${variant.sourceSha256}`)
+    expect(data.pens).toHaveLength(85)
+  })
+})

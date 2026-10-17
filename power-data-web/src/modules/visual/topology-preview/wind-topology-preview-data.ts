@@ -131,7 +131,13 @@ export async function loadWindTopologyPreviewData(
 
   let sourceData = sourceDataCache.get(variantId)
   if (!sourceData) {
-    const response = await fetch(getWindTopologyPreviewPublicAssetUrl(variant.topologyPath), {
+    const topologyUrl = getWindTopologyPreviewPublicAssetUrl(variant.topologyPath)
+    /**
+     * 生产环境允许浏览器缓存完整拓扑；将源 JSON 散列加入请求地址，
+     * 让同一路径的新拓扑使用独立缓存键，避免发布后继续读取旧版本图元数组。
+     */
+    const cacheBustedTopologyUrl = `${topologyUrl}${topologyUrl.includes('?') ? '&' : '?'}v=${variant.sourceSha256}`
+    const response = await fetch(cacheBustedTopologyUrl, {
       signal,
       cache: import.meta.env.DEV ? 'no-store' : 'force-cache',
     })

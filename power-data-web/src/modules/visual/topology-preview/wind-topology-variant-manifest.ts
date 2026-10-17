@@ -34,7 +34,7 @@ export interface WindTopologyVariantManifestEntry {
   readonly isDefault?: true
 }
 
-/** 用户确认的八份第二层整图；仅按组合键查表，禁止运行时合并图元。 */
+/** 八份第二层整图独立登记；图元数和源散列须与对应 JSON 一致，源散列也作为运行时缓存版本。 */
 export const WIND_TOPOLOGY_VARIANTS = [
   {
     "id": "architecture",
@@ -43,7 +43,7 @@ export const WIND_TOPOLOGY_VARIANTS = [
       "architecture"
     ],
     "topologyPath": "variants/architecture/topology.json",
-    "sourceSha256": "f2e2969943c38babc93b6bb02e8f818975126962e32bc3873b98365b36b32ceb",
+    "sourceSha256": "48ef274700ac7379c87f9e4f9520f64a16d6772fa3824ea1fec2d0e2c09af975",
     "expectedPenCount": 46
   },
   {

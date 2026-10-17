@@ -90,6 +90,19 @@ const requiredOverviewSceneContract = Object.freeze({
     'action.overview.polling.stop',
   ]),
 })
+/** 风电第二层只发布五个设备系统映射；风机和齿轮箱的既有第三层节点仍保留。 */
+const requiredWindEquipmentMappings = Object.freeze([
+  Object.freeze({ nodeId: 'asset.wind-pitch-system', title: '变桨系统', sceneNodeId: 'node.wind-pitch-system' }),
+  Object.freeze({ nodeId: 'asset.wind-converter-system', title: '变流系统', sceneNodeId: 'node.wind-converter-system' }),
+  Object.freeze({ nodeId: 'asset.wind-yaw-system', title: '偏航系统', sceneNodeId: 'node.wind-yaw-system' }),
+  Object.freeze({ nodeId: 'asset.wind-drivetrain-system', title: '传动系统', sceneNodeId: 'node.wind-drivetrain-system' }),
+  Object.freeze({ nodeId: 'asset.wind-brake-system', title: '刹车系统', sceneNodeId: 'node.wind-brake-system' }),
+])
+const requiredWindSceneNodeIds = Object.freeze([
+  ...requiredWindEquipmentMappings.map((mapping) => mapping.sceneNodeId),
+  'node.wind-turbine',
+  'node.wind-gearbox',
+])
 /** 微电网仅对默认网络层+业务层+关键环节层组合发布这六个设备节点映射。 */
 const requiredMicrogridEquipmentMappings = Object.freeze([
   Object.freeze({ nodeId: 'asset.microgrid-wind-controller', title: '风电控制器', sceneNodeId: 'node.microgrid-wind-controller' }),
@@ -449,6 +462,31 @@ export async function validateReleaseArtifact(rootDirectory) {
       requiredOverviewSceneContract.supportedActionIds.some((actionId) => !overviewScene.supportedActionIds.includes(actionId))
     if (hasInvalidOverviewScene) {
       issues.push('结构清单必须登记无拓扑的总览场景条目并完整收录九个总览动作，防止平台在当前场景解析动作时失效。')
+    }
+
+    /**
+     * 风电第二层只允许五个设备系统节点双向映射；五个控制层节点不进入清单。
+     * 同时锁定已有第三层目标，避免清理第二层控制映射时误删风机、齿轮箱详情绑定。
+     */
+    const windTopology = Array.isArray(topologyManifest.topologies)
+      ? topologyManifest.topologies.find((topology) => topology?.topologyId === 'topology.wind-power.overview' && topology?.sceneId === 'wind-power' && topology?.filter === undefined)
+      : undefined
+    const windMapping = Array.isArray(topologyManifest.unitySceneMappings)
+      ? topologyManifest.unitySceneMappings.find((mapping) => mapping?.sceneId === 'wind-power')
+      : undefined
+    const windNodesById = new Map((Array.isArray(windTopology?.nodes) ? windTopology.nodes : []).map((node) => [node?.nodeId, node]))
+    const hasInvalidWindEquipmentMapping = !windTopology || !windMapping ||
+      !Array.isArray(windTopology.nodes) || windTopology.nodes.length !== requiredWindEquipmentMappings.length ||
+      !Array.isArray(windMapping.sceneNodeIds) || windMapping.sceneNodeIds.length !== requiredWindSceneNodeIds.length ||
+      requiredWindSceneNodeIds.some((sceneNodeId, index) => windMapping.sceneNodeIds[index] !== sceneNodeId) ||
+      !Array.isArray(windMapping.routeIds) || windMapping.routeIds.length !== 0 ||
+      requiredWindEquipmentMappings.some((contract) => {
+        const node = windNodesById.get(contract.nodeId)
+        return !node || node.title !== contract.title || node.sceneNodeId !== contract.sceneNodeId ||
+          node.doubleClickBehavior !== 'emit-node'
+      })
+    if (hasInvalidWindEquipmentMapping) {
+      issues.push('风电总览只能发布五个设备系统节点映射，并保留风机和齿轮箱两个既有第三层节点；控制层节点不得绑定。')
     }
 
     /**

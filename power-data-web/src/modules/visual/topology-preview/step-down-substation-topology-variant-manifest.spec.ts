@@ -37,4 +37,13 @@ describe('降压站拓扑版本清单', () => {
     expect(STEP_DOWN_SUBSTATION_TOPOLOGY_VARIANTS.filter((variant) => 'isDefault' in variant))
       .toEqual([expect.objectContaining({ id: 'network-business-key-process' })])
   })
+
+  it('默认三层组合清空编辑器封面地址，图元图片统一使用公共 WebP', () => {
+    const variant = STEP_DOWN_SUBSTATION_TOPOLOGY_VARIANTS.find((entry) => 'isDefault' in entry)!
+    const data = JSON.parse(readFileSync(resolve(topologyRoot, variant.topologyPath), 'utf8')) as Meta2dData & { image?: string }
+
+    // 编辑器封面不属于画布拓扑；清空远端 PNG 地址，避免它被运行或打包链路误引用。
+    expect(data.image).toBe('')
+    expect(data.pens.filter((pen) => pen.image).every((pen) => /^(?:icons|background)\/.+\.webp$/i.test(pen.image!))).toBe(true)
+  })
 })

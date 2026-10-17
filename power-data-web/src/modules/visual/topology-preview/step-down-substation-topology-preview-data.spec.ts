@@ -20,7 +20,9 @@ const originalFetch = globalThis.fetch
 /** 测试只读取已导入本地文件，不依赖开发服务器或源压缩包路径。 */
 function installTopologyFetch(): void {
   globalThis.fetch = vi.fn(async (input) => {
-    const variant = STEP_DOWN_SUBSTATION_TOPOLOGY_VARIANTS.find((entry) => String(input).endsWith(entry.topologyPath))
+    // 查询串承载文件散列版本，测试夹具按 URL 路径匹配真实变体文件。
+    const requestedPath = new URL(String(input), 'http://localhost').pathname
+    const variant = STEP_DOWN_SUBSTATION_TOPOLOGY_VARIANTS.find((entry) => requestedPath.endsWith(entry.topologyPath))
     if (!variant) return new Response('', { status: 404 })
     return new Response(readFileSync(resolve(topologyRoot, variant.topologyPath), 'utf8'), { status: 200 })
   }) as typeof fetch
@@ -32,6 +34,33 @@ afterEach(() => {
 })
 
 describe('降压站拓扑独立数据与公共资源', () => {
+  it('默认三层组合请求使用新文件散列，避开旧版 93 图元缓存', async () => {
+    const variant = STEP_DOWN_SUBSTATION_TOPOLOGY_VARIANTS.find((entry) => 'isDefault' in entry)!
+    const source = JSON.parse(readFileSync(resolve(topologyRoot, variant.topologyPath), 'utf8')) as Meta2dData
+    const stale = {
+      ...source,
+      // 用八个唯一编号的旧版残留图元复现旧地址缓存返回 93 项的情形。
+      pens: [...source.pens, ...Array.from({ length: 8 }, (_, index) => ({
+        ...source.pens[0]!,
+        id: `stale-cache-${index}`,
+      }))],
+    } as Meta2dData
+    const requestedUrls: string[] = []
+    globalThis.fetch = vi.fn(async (input) => {
+      const requestedUrl = String(input)
+      requestedUrls.push(requestedUrl)
+      const responseData = requestedUrl.includes(`?v=${variant.sourceSha256}`) ? source : stale
+      return new Response(JSON.stringify(responseData), { status: 200 })
+    }) as typeof fetch
+
+    const data = await loadStepDownSubstationTopologyPreviewData(variant.id)
+
+    expect(source.pens).toHaveLength(85)
+    expect(requestedUrls).toHaveLength(1)
+    expect(requestedUrls[0]).toContain(`?v=${variant.sourceSha256}`)
+    expect(data.pens).toHaveLength(85)
+  })
+
   it('八份文件分别保留源布局并禁用模拟、联网和初始化脚本', async () => {
     installTopologyFetch()
     for (const variant of STEP_DOWN_SUBSTATION_TOPOLOGY_VARIANTS) {

@@ -97,7 +97,13 @@ export async function loadStepDownSubstationTopologyPreviewData(
 
   let sourceData = sourceDataCache.get(variantId)
   if (!sourceData) {
-    const response = await fetch(getStepDownSubstationTopologyPublicAssetUrl(variant.topologyPath), {
+    const topologyUrl = getStepDownSubstationTopologyPublicAssetUrl(variant.topologyPath)
+    /**
+     * 正式环境缓存完整拓扑文件；把该变体已校验的文件散列附到地址，
+     * 让同路径的新 JSON 使用新缓存键，避免加载旧图元数量和布局。
+     */
+    const cacheBustedTopologyUrl = `${topologyUrl}${topologyUrl.includes('?') ? '&' : '?'}v=${variant.sourceSha256}`
+    const response = await fetch(cacheBustedTopologyUrl, {
       signal,
       cache: import.meta.env.DEV ? 'no-store' : 'force-cache',
     })

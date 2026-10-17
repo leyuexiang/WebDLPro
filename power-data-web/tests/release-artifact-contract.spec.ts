@@ -100,6 +100,15 @@ function createTopologyManifest() {
       ].map(([nodeId, title, sceneNodeId], index) => ({
         nodeId, title, sceneNodeId, iconKey: 'server', x: index * 10, y: 75,
         deviceStatus: 'offline', doubleClickBehavior: 'emit-node',
+      })) : sceneId === 'wind-power' ? [
+        ['asset.wind-pitch-system', '变桨系统', 'node.wind-pitch-system'],
+        ['asset.wind-converter-system', '变流系统', 'node.wind-converter-system'],
+        ['asset.wind-yaw-system', '偏航系统', 'node.wind-yaw-system'],
+        ['asset.wind-drivetrain-system', '传动系统', 'node.wind-drivetrain-system'],
+        ['asset.wind-brake-system', '刹车系统', 'node.wind-brake-system'],
+      ].map(([nodeId, title, sceneNodeId], index) => ({
+        nodeId, title, sceneNodeId, iconKey: 'server', x: index * 10, y: 75,
+        deviceStatus: 'offline', doubleClickBehavior: 'emit-node',
       })) : [],
       edges: [],
     }))],
@@ -336,7 +345,15 @@ function createTopologyManifest() {
       sceneId,
       mappingVersion: `mapping.${sceneId}.1`,
       sceneNodeIds: sceneId === 'wind-power'
-        ? ['node.wind-turbine', 'node.wind-gearbox']
+        ? [
+            'node.wind-pitch-system',
+            'node.wind-converter-system',
+            'node.wind-yaw-system',
+            'node.wind-drivetrain-system',
+            'node.wind-brake-system',
+            'node.wind-turbine',
+            'node.wind-gearbox',
+          ]
         : sceneId === 'microgrid'
           ? [
               'node.microgrid-wind-controller',
@@ -488,6 +505,36 @@ describe('发布产物输出标准', () => {
 
       expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
         expect.stringContaining('微电网默认网络层+业务层+关键环节层拓扑必须完整发布六个设备节点'),
+      ]))
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('风电拓扑重新加入控制层绑定时阻断交付', async () => {
+    const root = await createArtifact()
+    try {
+      const manifestPath = path.join(root, 'scene-topology-manifest.json')
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+      const windTopology = manifest.topologies.find((topology: { sceneId?: string }) => topology.sceneId === 'wind-power')
+      const windMapping = manifest.unitySceneMappings.find((mapping: { sceneId?: string }) => mapping.sceneId === 'wind-power')
+      windTopology.nodes.push({
+        nodeId: 'system.wind-pitch-control',
+        title: '变桨控制',
+        sceneNodeId: 'unit.wind-pitch.control',
+        iconKey: 'server',
+        x: 0,
+        y: 35,
+        deviceStatus: 'offline',
+        doubleClickBehavior: 'emit-node',
+      })
+      windMapping.sceneNodeIds.unshift('unit.wind-pitch.control')
+      writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
+      // 重写摘要以隔离检查目标，证明绝对映射契约会拒绝多出的控制层节点。
+      await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
+
+      expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
+        expect.stringContaining('风电总览只能发布五个设备系统节点映射'),
       ]))
     } finally {
       rmSync(root, { recursive: true, force: true })

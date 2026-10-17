@@ -12,28 +12,8 @@ export interface WindTopologyRuntimeBinding {
 /** 当前筛选文件未出现目标节点时返回空绑定，不借用其它文件编号或按标题猜测。 */
 const UNBOUND: readonly WindTopologyRuntimeBinding[] = Object.freeze([])
 
-/** 图2确认的风电业务节点与 Unity 场景节点编号；两组重复图元共用同一语义映射。 */
+/** 当前只登记五个设备系统节点；每组重复图元共用相同业务编号与三维目标。 */
 const WIND_RUNTIME_NODE_IDS = Object.freeze({
-  pitchControl: {
-    nodeId: toProcessNodeId('system.wind-pitch-control'),
-    sceneNodeId: toSceneNodeId('unit.wind-pitch.control'),
-  },
-  converterControl: {
-    nodeId: toProcessNodeId('system.wind-converter-control'),
-    sceneNodeId: toSceneNodeId('unit.wind-converter.control'),
-  },
-  yawControl: {
-    nodeId: toProcessNodeId('system.wind-yaw-control'),
-    sceneNodeId: toSceneNodeId('unit.wind-yaw.control'),
-  },
-  drivetrainControl: {
-    nodeId: toProcessNodeId('system.wind-drivetrain-control'),
-    sceneNodeId: toSceneNodeId('unit.wind-drivetrain.control'),
-  },
-  brakeControl: {
-    nodeId: toProcessNodeId('system.wind-brake-control'),
-    sceneNodeId: toSceneNodeId('unit.wind-brake.control'),
-  },
   pitchSystem: {
     nodeId: toProcessNodeId('asset.wind-pitch-system'),
     sceneNodeId: toSceneNodeId('node.wind-pitch-system'),
@@ -69,53 +49,36 @@ function bindPens(
 }
 
 /**
- * 八份筛选文件各自登记图2对应节点的实际图元编号；重复绘制的同名节点共用同一业务与三维编号。
- * 没有出现对应业务文字的文件保持空映射，不通过位置、图标或其它文件的图元编号补造绑定。
+ * 八份筛选文件只登记五个设备系统节点的实际图元编号；控制层节点保留在画面中但不建立跨端映射。
+ * 重复绘制的同名系统节点共用同一业务与三维编号；其它文件不按标题、位置或图标补造映射。
  */
 const WIND_PEN_IDS_BY_VARIANT: Readonly<Record<WindTopologyVariantId, WindVariantPenIds>> = Object.freeze({
   architecture: {
-    pitchControl: ['b8d197d'],
-    yawControl: ['1ae02016'],
     drivetrainSystem: ['eca11c6'],
     brakeSystem: ['3518b49'],
   },
   network: {
-    pitchControl: ['a8f94f6', '288459b2'],
-    yawControl: ['b7884e6', '6a0e5a0e'],
     drivetrainSystem: ['6d463462', '7100f20'],
     brakeSystem: ['4e4e4b', '779c4bd9'],
   },
   business: {},
   'key-process': {
-    pitchControl: ['9396e06', '4d345e6'],
-    yawControl: ['15b49d26', '60369370'],
     drivetrainSystem: ['6bd3ecb9', '6ae5e42'],
     brakeSystem: ['7241f93e', '3790242'],
   },
   'network-business': {
-    pitchControl: ['51bc092', '406297f8'],
-    yawControl: ['1055adfd', '1e412298'],
     drivetrainSystem: ['ec6a59e', '5d39b66f'],
     brakeSystem: ['4a75cf4', '17d8b5c'],
   },
   'network-key-process': {
-    pitchControl: ['361789f0', '3f5581bd'],
-    yawControl: ['159a8d', '5a7b7f30'],
     drivetrainSystem: ['4d331569', '82b105'],
     brakeSystem: ['777e94bc', '40eac465'],
   },
   'business-key-process': {
-    pitchControl: ['6a0592cc', '6b12cd8'],
-    yawControl: ['2cdd2b5', '7a0b0af0'],
     drivetrainSystem: ['8d7675b', '17cee71'],
     brakeSystem: ['ccca65e', '7e8936'],
   },
   'network-business-key-process': {
-    pitchControl: ['28457c83', '26bfee5'],
-    converterControl: ['28e27ec2', '006f1fc'],
-    yawControl: ['27e09c2f', '49fe7d9'],
-    drivetrainControl: ['67fd9a', '7a8bb9bf'],
-    brakeControl: ['c8042a6', 'b4a3335'],
     pitchSystem: ['87f441c', 'd4ab511'],
     converterSystem: ['4996538', '5e9d380'],
     yawSystem: ['44940c8', 'a89f0ae'],

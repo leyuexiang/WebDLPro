@@ -44,6 +44,11 @@ const registeredMappings = Object.freeze([
   Object.freeze({ sceneId: 'microgrid', nodeId: 'asset.microgrid-switchgear', sceneNodeId: 'node.microgrid-switchgear' }),
   Object.freeze({ sceneId: 'microgrid', nodeId: 'asset.microgrid-storage-converter', sceneNodeId: 'node.microgrid-storage-converter' }),
   Object.freeze({ sceneId: 'microgrid', nodeId: 'asset.microgrid-ats-controller', sceneNodeId: 'node.microgrid-ats-controller' }),
+  Object.freeze({ sceneId: 'wind-power', nodeId: 'asset.wind-pitch-system', sceneNodeId: 'node.wind-pitch-system' }),
+  Object.freeze({ sceneId: 'wind-power', nodeId: 'asset.wind-converter-system', sceneNodeId: 'node.wind-converter-system' }),
+  Object.freeze({ sceneId: 'wind-power', nodeId: 'asset.wind-yaw-system', sceneNodeId: 'node.wind-yaw-system' }),
+  Object.freeze({ sceneId: 'wind-power', nodeId: 'asset.wind-drivetrain-system', sceneNodeId: 'node.wind-drivetrain-system' }),
+  Object.freeze({ sceneId: 'wind-power', nodeId: 'asset.wind-brake-system', sceneNodeId: 'node.wind-brake-system' }),
 ])
 
 /**
@@ -224,7 +229,7 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
     }))
   })
 
-  it('三十五对显式映射均可常数时间反查且不会产生额外猜测映射', async () => {
+  it('四十对显式映射均可常数时间反查且不会产生额外猜测映射', async () => {
     const manifest = await createConfiguredPowerScenesManifest('dual-selection-reverse-index')
     const result = TopologyRegistry.create(manifest)
     expect(result.status).toBe('ready')
@@ -238,7 +243,7 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
     }
 
     const publishedMappedNodes = manifest.topologies
-      .filter((topology) => topology.filter === undefined && ['gas-power', 'coal-power', 'solar-power', 'consumption', 'distribution', 'microgrid'].includes(topology.sceneId))
+      .filter((topology) => topology.filter === undefined && ['gas-power', 'coal-power', 'solar-power', 'consumption', 'distribution', 'microgrid', 'wind-power'].includes(topology.sceneId))
       .flatMap((topology) => topology.nodes.filter((node) => node.sceneNodeId !== undefined))
     expect(publishedMappedNodes).toHaveLength(registeredMappings.length)
     const microgridTopology = manifest.topologies.find((topology) => topology.sceneId === 'microgrid')
@@ -257,6 +262,23 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
       ['asset.microgrid-switchgear', '开关柜', 'node.microgrid-switchgear'],
       ['asset.microgrid-storage-converter', '储能变流器', 'node.microgrid-storage-converter'],
       ['asset.microgrid-ats-controller', 'ATS控制器', 'node.microgrid-ats-controller'],
+    ])
+    const windTopology = manifest.topologies.find((topology) => topology.sceneId === 'wind-power')
+    expect(manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'wind-power')?.sceneNodeIds).toEqual([
+      'node.wind-pitch-system',
+      'node.wind-converter-system',
+      'node.wind-yaw-system',
+      'node.wind-drivetrain-system',
+      'node.wind-brake-system',
+      'node.wind-turbine',
+      'node.wind-gearbox',
+    ])
+    expect(windTopology?.nodes.map(({ nodeId, title, sceneNodeId }) => [nodeId, title, sceneNodeId])).toEqual([
+      ['asset.wind-pitch-system', '变桨系统', 'node.wind-pitch-system'],
+      ['asset.wind-converter-system', '变流系统', 'node.wind-converter-system'],
+      ['asset.wind-yaw-system', '偏航系统', 'node.wind-yaw-system'],
+      ['asset.wind-drivetrain-system', '传动系统', 'node.wind-drivetrain-system'],
+      ['asset.wind-brake-system', '刹车系统', 'node.wind-brake-system'],
     ])
     expect(manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'consumption')?.sceneNodeIds).toEqual([
       'unit.building-hvac-automation.control',

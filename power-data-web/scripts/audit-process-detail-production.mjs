@@ -17,13 +17,8 @@ const productionRoots = Object.freeze([path.join(webProjectRoot, 'src')])
 const processDetailPathPattern = /(?:process-detail|processdetail)/i
 const productionSourceExtensionPattern = /\.(?:ts|vue|cs)$/i
 const testPathPattern = /(?:\.spec\.|\.test\.|[\\/]Tests?[\\/])/i
-/** 风电映射包含图2的十个总览目标与既有风机、齿轮箱两个第三层目标。 */
+/** 风电映射包含五个设备系统总览目标与既有风机、齿轮箱两个第三层目标。 */
 const expectedWindSceneNodeIds = Object.freeze([
-  'unit.wind-pitch.control',
-  'unit.wind-converter.control',
-  'unit.wind-yaw.control',
-  'unit.wind-drivetrain.control',
-  'unit.wind-brake.control',
   'node.wind-pitch-system',
   'node.wind-converter-system',
   'node.wind-yaw-system',
@@ -32,13 +27,8 @@ const expectedWindSceneNodeIds = Object.freeze([
   'node.wind-turbine',
   'node.wind-gearbox',
 ])
-/** 绝对契约：风电总览十个业务节点及 Unity 编号必须与用户提供的图2一致。 */
+/** 绝对契约：风电总览只发布五个设备系统编号；控制层节点不得混入绑定清单。 */
 const expectedWindOverviewNodeMappings = Object.freeze([
-  Object.freeze({ nodeId: 'system.wind-pitch-control', sceneNodeId: 'unit.wind-pitch.control' }),
-  Object.freeze({ nodeId: 'system.wind-converter-control', sceneNodeId: 'unit.wind-converter.control' }),
-  Object.freeze({ nodeId: 'system.wind-yaw-control', sceneNodeId: 'unit.wind-yaw.control' }),
-  Object.freeze({ nodeId: 'system.wind-drivetrain-control', sceneNodeId: 'unit.wind-drivetrain.control' }),
-  Object.freeze({ nodeId: 'system.wind-brake-control', sceneNodeId: 'unit.wind-brake.control' }),
   Object.freeze({ nodeId: 'asset.wind-pitch-system', sceneNodeId: 'node.wind-pitch-system' }),
   Object.freeze({ nodeId: 'asset.wind-converter-system', sceneNodeId: 'node.wind-converter-system' }),
   Object.freeze({ nodeId: 'asset.wind-yaw-system', sceneNodeId: 'node.wind-yaw-system' }),

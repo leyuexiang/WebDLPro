@@ -271,13 +271,8 @@ function createSolarPowerTopology(manifestVersion) {
   }
 }
 
-/** 图2确认的风电十类业务节点；默认组合图的左右重复图元共用这些稳定业务与 Unity 编号。 */
+/** 风电总览只发布五个设备系统映射；控制层图元保留在 JSON 画面中，不写入节点绑定清单。 */
 const windOverviewNodeDefinitions = Object.freeze([
-  Object.freeze({ nodeId: 'system.wind-pitch-control', title: '变桨控制', sceneNodeId: 'unit.wind-pitch.control', iconKey: 'plc', x: 10, y: 35 }),
-  Object.freeze({ nodeId: 'system.wind-converter-control', title: '变流控制', sceneNodeId: 'unit.wind-converter.control', iconKey: 'plc', x: 30, y: 35 }),
-  Object.freeze({ nodeId: 'system.wind-yaw-control', title: '偏航控制', sceneNodeId: 'unit.wind-yaw.control', iconKey: 'plc', x: 50, y: 35 }),
-  Object.freeze({ nodeId: 'system.wind-drivetrain-control', title: '传动控制', sceneNodeId: 'unit.wind-drivetrain.control', iconKey: 'plc', x: 70, y: 35 }),
-  Object.freeze({ nodeId: 'system.wind-brake-control', title: '刹车控制', sceneNodeId: 'unit.wind-brake.control', iconKey: 'plc', x: 90, y: 35 }),
   Object.freeze({ nodeId: 'asset.wind-pitch-system', title: '变桨系统', sceneNodeId: 'node.wind-pitch-system', iconKey: 'generic', x: 10, y: 75 }),
   Object.freeze({ nodeId: 'asset.wind-converter-system', title: '变流系统', sceneNodeId: 'node.wind-converter-system', iconKey: 'generic', x: 30, y: 75 }),
   Object.freeze({ nodeId: 'asset.wind-yaw-system', title: '偏航系统', sceneNodeId: 'node.wind-yaw-system', iconKey: 'generic', x: 50, y: 75 }),
@@ -285,14 +280,14 @@ const windOverviewNodeDefinitions = Object.freeze([
   Object.freeze({ nodeId: 'asset.wind-brake-system', title: '刹车系统', sceneNodeId: 'node.wind-brake-system', iconKey: 'generic', x: 90, y: 75 }),
 ])
 
-/** 场景映射同时登记十个总览节点与两个已发布的第三层设备，供正反向选择校验使用。 */
+/** 场景映射登记五个设备系统与两个既有第三层设备，控制层编号不进入三维映射。 */
 const verifiedWindSceneNodeIds = Object.freeze([
   ...windOverviewNodeDefinitions.map((node) => node.sceneNodeId),
   'node.wind-turbine',
   'node.wind-gearbox',
 ])
 
-/** 结构清单为中央状态与跨端映射登记十个节点；画面仍由独立 Meta2D JSON 完整绘制。 */
+/** 结构清单仅登记五个可跨端选择的系统节点；完整画面仍由独立 Meta2D JSON 绘制。 */
 function createWindPowerTopology(manifestVersion) {
   return {
     topologyId: 'topology.wind-power.overview',
@@ -1151,7 +1146,7 @@ export async function createConfiguredPowerScenesManifest(releaseId, initialScen
   const solarTopology = createSolarPowerTopology(manifestVersion)
   if (solarTopologyIndex >= 0) topologies[solarTopologyIndex] = solarTopology
   else topologies.push(solarTopology)
-  // 风电总览清单登记十个业务节点；具体画面与图元编号仍由公共画布读取三层组合 JSON。
+  // 风电总览清单登记五个设备系统映射；控制层图元仍由公共画布从组合 JSON 绘制。
   const windTopology = createWindPowerTopology(manifestVersion)
   const windTopologyIndex = topologies.findIndex((topology) => topology.sceneId === 'wind-power')
   if (windTopologyIndex >= 0) topologies[windTopologyIndex] = windTopology
@@ -1387,7 +1382,7 @@ const addedSceneNavigations = [
     if (!coalMapping) throw new Error('燃煤 Unity 映射缺失，无法生成联合清单。')
     return { ...coalMapping }
   })
-  // 风电登记十个、楼宇登记六个、微电网默认三层组合登记六个交互目标；均来自显式清单。
+  // 风电登记五个系统映射，楼宇和微电网各登记六个交互目标；均来自显式清单。
   for (const sceneId of ['wind-power', 'solar-power', 'consumption', 'microgrid', 'step-up-substation', 'step-down-substation', 'distribution', 'converter-station', 'switching-station']) {
     const mapping = unitySceneMappings.find((item) => item.sceneId === sceneId)
     if (mapping) {
