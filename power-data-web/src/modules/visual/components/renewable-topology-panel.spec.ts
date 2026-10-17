@@ -2,11 +2,15 @@
 import { createRenderer, h, markRaw, nextTick, reactive } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import TopologyPanel from './TopologyPanel.vue'
-import { toTopologyKey } from '@/config/process/identifiers'
+import { toProcessNodeId, toTopologyKey } from '@/config/process/identifiers'
 import type { TopologyDefinition } from '@/config/process/types'
 import { getProcessDetailTopologyDataContext } from '../topology/process-detail-topology-contexts'
 
-const engine = vi.hoisted(() => ({ fit: vi.fn(), open: vi.fn(), destroy: vi.fn() }))
+const engine = vi.hoisted(() => ({
+  fit: vi.fn(), open: vi.fn(), destroy: vi.fn(), active: vi.fn(), inactive: vi.fn(),
+  find: vi.fn((penId: string) => penId === '87f441c' ? [{ id: penId, text: '变桨系统' }] : []),
+  listeners: new Map<string, (event?: { pen?: { id?: string; name?: string } }) => void>(),
+}))
 vi.mock('@meta2d/core', () => ({
   LockState: { DisableEdit: 1 },
   Meta2d: class {
@@ -14,7 +18,12 @@ vi.mock('@meta2d/core', () => ({
     fitView = engine.fit
     open = engine.open
     destroy = engine.destroy
-    on() {} off() {} lock() {} resize() {}
+    active = engine.active
+    inactive = engine.inactive
+    find = engine.find
+    on(eventName: string, listener: (event?: { pen?: { id?: string; name?: string } }) => void) { engine.listeners.set(eventName, listener) }
+    off(eventName: string) { engine.listeners.delete(eventName) }
+    lock() {} resize() {}
   },
 }))
 vi.mock('../topology-preview/solar-topology-preview-data', () => ({ loadSolarTopologyPreviewData: async () => ({ pens: [] }) }))
@@ -100,6 +109,7 @@ let frames: Map<number, FrameRequestCallback>
 let dispose: (() => void) | undefined
 beforeEach(() => {
   vi.clearAllMocks()
+  engine.listeners.clear()
   frames = new Map()
   let frameId = 0
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frames.set(++frameId, callback); return frameId })
@@ -113,6 +123,37 @@ async function settle() {
 }
 
 describe('风电正式面板第三层拓扑', () => {
+  it('把系统节点点击和空白清选交给统一运行时，并把三维反选回放到当前画布', async () => {
+    const root = element('root')
+    let panel: InstanceType<typeof TopologyPanel> | null = null
+    const selectedNodes: Array<string | undefined> = []
+    const clearSelection = vi.fn()
+    const topology = { topologyKey: toTopologyKey('topology.wind-power.overview'), title: '风电', configVersion: 'test', nodes: [], edges: [] } as TopologyDefinition
+    const app = renderer.createApp({ render: () => h(TopologyPanel, {
+      ref: (value: unknown) => { panel = value as InstanceType<typeof TopologyPanel> },
+      topology,
+      selectedNodeIds: [],
+      selectedRouteIds: [],
+      onSelectNode: (nodeId: string | undefined) => selectedNodes.push(nodeId),
+      onClearSelection: clearSelection,
+    }) })
+    app.mount(root); dispose = () => app.unmount()
+    await settle()
+
+    /** 默认三层文件中的变桨系统 penId 必须贯穿画布、风电包装层和正式面板。 */
+    engine.listeners.get('click')?.({ pen: { id: '87f441c', name: 'image' } })
+    expect(selectedNodes).toEqual(['asset.wind-pitch-system'])
+
+    /** 空白点击也必须上送，公共聚焦协调器据此清除 Unity 当前选择。 */
+    engine.listeners.get('click')?.({})
+    expect(clearSelection).toHaveBeenCalledOnce()
+
+    /** 三维反选通过面板受控端口回放到当前 JSON 的全部镜像图元，不再次发正向事件。 */
+    panel!.getCanvasController()!.setSelection([toProcessNodeId('asset.wind-pitch-system')], [])
+    expect(engine.active).toHaveBeenLastCalledWith([{ id: '87f441c', text: '变桨系统' }], false)
+    expect(selectedNodes).toHaveLength(1)
+  })
+
   it('风机、齿轮箱和总览在同一画布切换，暂停期间只恢复最后的上下文', async () => {
     const root = element('root')
     const state = reactive({ suspended: false })
