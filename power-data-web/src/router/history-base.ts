@@ -8,6 +8,8 @@ const KNOWN_ROUTE_SUFFIXES = Object.freeze([
   '/gas-v3-topology-json-preview',
   '/coal-topology-json-preview',
   '/wind-topology-json-preview',
+  // 风电第三层共用此预览入口；遗漏时会把完整预览路径误当部署目录，继而重定向到嵌入壳。
+  '/wind-process-detail-topology-preview',
   '/solar-topology-json-preview',
   '/step-up-substation-topology-json-preview',
   '/step-down-substation-topology-json-preview',

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { toSceneId, toSceneNodeId } from '../src/config/scene-topology/identifiers'
+import { toActionId, toSceneId, toSceneNodeId } from '../src/config/scene-topology/identifiers'
 import { TopologyRegistry } from '../src/config/scene-topology/topology-registry'
 import { validateSceneTopologyManifest } from '../src/config/scene-topology/validator'
 import { LOCAL_PROCESS_CONFIG_VERSION } from '../src/config/process/config-version'
@@ -75,7 +75,36 @@ function readManifestBaseTitle(title: string): string {
 }
 
 describe('燃气、燃煤与光伏联合场景清单', () => {
-  it('本地自测可见按钮恰好覆盖全部公开动作，包含风机和齿轮箱关键环节', async () => {
+  it('合作方可发现偏航第三层入口，且固定参数与三维目录一致', async () => {
+    const manifest = await createConfiguredPowerScenesManifest('wind-yaw-published-action-regression')
+    const result = TopologyRegistry.create(manifest)
+    expect(result.status).toBe('ready')
+    if (result.status !== 'ready') return
+
+    // 使用合作方真实读取的联合清单创建注册表，防止只补节点映射却仍查不到公开动作。
+    const actionId = toActionId('action.wind-power.yaw-system')
+    expect(result.registry.getAction(actionId)).toEqual(expect.objectContaining({
+      title: '进入偏航系统控制模拟',
+      targetSceneId: 'wind-power',
+      targetViewMode: 'process-detail',
+      processDetailId: 'process-detail.wind-power.yaw-system',
+      unityAction: { type: 'enterProcessDetail', processDetailId: 'process-detail.wind-power.yaw-system' },
+    }))
+    expect(manifest.scenes.find((scene) => scene.sceneId === 'wind-power')?.supportedActionIds).toContain(actionId)
+    // 固定编号来自现有 ProcessDetailCatalog（关键环节目录），不能从图标或节点名称猜测资源。
+    expect(manifest.processDetails.find((detail) => detail.processDetailId === 'process-detail.wind-power.yaw-system'))
+      .toEqual(expect.objectContaining({
+        sceneId: 'wind-power',
+        processId: 'wind-power-generation',
+        stepId: 'yaw-system',
+        resourceId: 'process-detail-resource.wind-power.yaw-system',
+        cameraPoseId: 'camera-pose.wind-power.yaw-system',
+        stateNodeId: 'node.wind-yaw-system',
+      }))
+    expect(createSelfTestPage(manifest.manifestVersion)).toContain('data-action-id="action.wind-power.yaw-system"')
+  })
+
+  it('本地自测可见按钮恰好覆盖全部公开动作，包含风机、齿轮箱和偏航关键环节', async () => {
     const manifest = await createConfiguredPowerScenesManifest('self-test-complete-action-coverage')
     const page = createSelfTestPage(manifest.manifestVersion)
     // 只读取真实按钮的动作属性，不能让脚本白名单中的标识掩盖页面缺少入口的问题。
@@ -94,7 +123,7 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
     expect(() => createSelfTestPage(manifest.manifestVersion, 'invalid-scene')).toThrow('只能是 gas-power 或 coal-power')
   })
 
-  it('在同一原子清单中装配三场景总览和十六项已核验第三层', async () => {
+  it('在同一原子清单中装配三场景总览和十七项已核验第三层', async () => {
     const manifest = await createConfiguredPowerScenesManifest('dual-selection-contract', 'coal-power')
 
     expect(validateSceneTopologyManifest(manifest)).toEqual([])
@@ -105,7 +134,7 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
     expect(manifest.actions.filter((action) => action.targetSceneId === 'coal-power')).toHaveLength(2)
     expect(manifest.actions.filter((action) => action.targetSceneId === 'solar-power')).toHaveLength(2)
     // 调度中心总览已纳入公开动作，固定数量必须与绝对发布契约保持一致。
-    expect(manifest.actions).toHaveLength(37)
+    expect(manifest.actions).toHaveLength(38)
     const dispatchScene = manifest.scenes.find((scene) => scene.sceneId === 'dispatch')
     const dispatchAction = manifest.actions.find((action) => action.actionId === 'action.dispatch.overview')
     const dispatchMapping = manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'dispatch')
@@ -172,12 +201,21 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
       cameraPoseId: 'camera-pose.wind-power.gearbox',
       stateNodeId: 'node.wind-gearbox',
       topologyDataContextId: 'process-detail.wind-power.gearbox',
+    }, {
+      sceneId: 'wind-power',
+      processId: 'wind-power-generation',
+      stepId: 'yaw-system',
+      processDetailId: 'process-detail.wind-power.yaw-system',
+      resourceId: 'process-detail-resource.wind-power.yaw-system',
+      cameraPoseId: 'camera-pose.wind-power.yaw-system',
+      stateNodeId: 'node.wind-yaw-system',
+      topologyDataContextId: 'process-detail.wind-power.yaw-system',
     }])
     expect(manifest.processDetails.filter((detail) => detail.sceneId === 'step-up-substation')).toHaveLength(3)
     expect(manifest.processDetails.filter((detail) => detail.sceneId === 'step-down-substation')).toHaveLength(3)
     expect(manifest.processDetails.filter((detail) => detail.sceneId === 'converter-station')).toHaveLength(3)
-    expect(manifest.processDetails).toHaveLength(16)
-    expect(manifest.processDetails.filter((detail) => detail.sceneId === 'wind-power')).toHaveLength(2)
+    expect(manifest.processDetails).toHaveLength(17)
+    expect(manifest.processDetails.filter((detail) => detail.sceneId === 'wind-power')).toHaveLength(3)
     expect(manifest.processDetails.filter((detail) => detail.sceneId === 'switching-station')).toHaveLength(2)
 
     const gasOverview = manifest.topologies.find((topology) => topology.topologyId === 'topology.gas-power.overview')
@@ -354,7 +392,7 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
         'action.solar-power.inverter',
       ])
       /**
-       * 合作方菜单只消费动作清单；风电已登记总览、风机和齿轮箱两个并列控制模拟，开关站登记总览、母线保护和线路保护，另外三个变电场景各登记三项保护关键环节。
+       * 合作方菜单只消费动作清单；风电已登记总览、风机、齿轮箱和偏航三个并列控制模拟，开关站登记总览、母线保护和线路保护，另外三个变电场景各登记三项保护关键环节。
        * processSteps（流程步骤）字段必须不存在，防止导航兼容层被误解为控制器已实现的工艺能力。
        */
       for (const sceneId of ['wind-power']) {
@@ -363,6 +401,7 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
           actionId,
           'action.wind-power.wind-turbine',
           'action.wind-power.gearbox',
+          'action.wind-power.yaw-system',
         ])
         expect(manifest.unitySceneMappings.find((mapping) => mapping.sceneId === sceneId)).not.toHaveProperty('processSteps')
         expect(manifest.actions.find((action) => action.actionId === actionId)).toEqual(expect.objectContaining({

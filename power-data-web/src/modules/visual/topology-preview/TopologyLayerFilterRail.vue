@@ -23,7 +23,7 @@ const emit = defineEmits<{
   change: [filterId: FilterId, checked: boolean]
 }>()
 
-/** 每次打开拓扑时默认收起筛选面板，只保留固定在侧边的展开按钮。 */
+/** 每次打开拓扑时默认收起筛选面板，展开按钮紧随全屏按钮显示在画布右上方。 */
 const isExpanded = ref(false)
 /** 生成稳定且不重复的面板编号，供侧边按钮声明对应的筛选区域。 */
 const filterPanelId = `topology-layer-filter-panel-${useId()}`
@@ -110,30 +110,34 @@ function isChecked(option: TopologyLayerFilterRailOption<FilterId>): boolean {
  * 面板被收起时同步从辅助技术树和键盘焦点顺序移除，避免隐藏内容仍可交互。
  */
 .topology-layer-filter-drawer {
-  /* 面板含边框与内边距共 23 像素；面板和按钮共用右边界，不相互预留横向空带。 */
-  --topology-filter-panel-width: 23px;
+  /* 全屏按钮顶部为 8 像素，入口再间隔 8 像素；折叠按钮保留原有 32:42 的宽高比例。 */
+  --topology-filter-top: calc(var(--topology-control-inline-size) + 16px);
+  --topology-filter-toggle-height: calc(var(--topology-control-inline-size) * 1.3125);
   position: absolute;
   z-index: 20;
   /* 公共筛选属于画布控件，固定贴住承载画布右边界，不随图元缩放或居中留白移动。 */
-  top: 48px;
+  top: var(--topology-filter-top);
   right: 0;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 8px;
-  width: 32px;
+  width: var(--topology-control-inline-size);
   /* 面板可在低矮画布内收缩滚动，按钮始终保留完整高度与底部 8 像素的安全距离。 */
-  max-block-size: calc(100% - 56px);
+  max-block-size: calc(100% - var(--topology-filter-top) - 8px);
   pointer-events: none;
 }
 
 .topology-layer-filter-rail {
-  position: relative;
+  /* 收起时脱离竖列排版，使展开按钮回到全屏按钮下方；保留原节点供侧滑和筛选状态复用。 */
+  position: absolute;
+  top: 0;
+  right: 0;
   display: grid;
   flex: 0 1 auto;
   justify-items: center;
   gap: 1px;
-  inline-size: var(--topology-filter-panel-width);
+  inline-size: var(--topology-control-inline-size);
   min-block-size: 0;
   box-sizing: border-box;
   padding: 4px 3px;
@@ -144,7 +148,7 @@ function isChecked(option: TopologyLayerFilterRailOption<FilterId>): boolean {
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
   color: #d6deeb;
   font: 11px/14px "Microsoft YaHei", sans-serif;
-  /* 隐藏时保留排版尺寸，按钮不会跳位；透明区域不接收输入，辅助技术由 aria-hidden 与 inert 隔离。 */
+  /* 隐藏面板不占布局、不接收输入；辅助技术和键盘焦点由 aria-hidden 与 inert 同步隔离。 */
   visibility: hidden;
   opacity: 0;
   pointer-events: none;
@@ -155,6 +159,8 @@ function isChecked(option: TopologyLayerFilterRailOption<FilterId>): boolean {
 }
 
 .topology-layer-filter-drawer--expanded .topology-layer-filter-rail {
+  /* 展开时回到竖列排版，折叠按钮自然跟随面板底部；同一右边界始终保持不变。 */
+  position: relative;
   visibility: visible;
   opacity: 1;
   pointer-events: auto;
@@ -165,16 +171,16 @@ function isChecked(option: TopologyLayerFilterRailOption<FilterId>): boolean {
 .topology-layer-filter-drawer__toggle {
   position: relative;
   z-index: 1;
-  /* 面板与按钮按竖列排版，展开和收起均保持物理右侧零偏移，不遮挡筛选文字。 */
+  /* 宽度与筛选条一致，高度按原比例缩放；随面板显隐自动换位，始终保持物理右侧零偏移。 */
   right: 0;
   display: grid;
-  flex: 0 0 42px;
-  width: 32px;
-  height: 42px;
+  flex: 0 0 var(--topology-filter-toggle-height);
+  width: var(--topology-control-inline-size);
+  height: var(--topology-filter-toggle-height);
   padding: 0;
   place-items: center;
   border: 1px solid rgba(148, 163, 184, 0.62);
-  border-radius: 5px 0 0 5px;
+  border-radius: calc(var(--topology-control-inline-size) * 0.15625) 0 0 calc(var(--topology-control-inline-size) * 0.15625);
   background: rgba(16, 19, 27, 0.94);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
   color: #d6deeb;
@@ -196,8 +202,9 @@ function isChecked(option: TopologyLayerFilterRailOption<FilterId>): boolean {
 }
 
 .topology-layer-filter-drawer__chevron {
-  inline-size: 16px;
-  block-size: 16px;
+  /* 原图标为 16/32 的按钮宽度，按钮缩窄后同步缩放，保持箭头比例。 */
+  inline-size: calc(var(--topology-control-inline-size) * 0.5);
+  block-size: calc(var(--topology-control-inline-size) * 0.5);
   fill: none;
   stroke: currentColor;
   stroke-linecap: round;

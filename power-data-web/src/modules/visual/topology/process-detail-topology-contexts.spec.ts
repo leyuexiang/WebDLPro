@@ -16,12 +16,16 @@ describe('第三层关键环节拓扑数据上下文', () => {
       ['process-detail.step-down-substation.transformer-protection', ['process-detail/protection/transformer-protection/topology.json', 37, 'cebf00fc7b375ff7bff26e29da3d722edc378f825d75813f384825b9a24f5431']],
       ['process-detail.step-down-substation.busbar-protection', ['process-detail/protection/busbar-protection/topology.json', 35, '0b6ed18b48c7039cf3f0079642f1b9d2197c9a2890fd5a28d50839eca7161eb4']],
       ['process-detail.step-down-substation.line-protection', ['process-detail/protection/line-protection/topology.json', 34, 'e635617e600c787442823d0887c79bc581bbb244a63a9dc1c51d732be6b2c08c']],
-      ['process-detail.wind-power.wind-turbine', ['process-detail/wind-power/wind-turbine/topology.json', 40, '246826daf501f12ca1ff88b28179976bf2bcff8837ce50767ba0e7c17fb9525c']],
-      ['process-detail.wind-power.gearbox', ['process-detail/wind-power/gearbox/topology.json', 15, 'bb6ed25e5f473e9276ac9370aaea19fa825ec49467f331e913d4ecd05ed4185a']],
+      ['process-detail.wind-power.wind-turbine', ['process-detail/wind-power/wind-turbine/topology.json', 40, '5770f9e3c402c04b081291850bc7dd32a5688ba4c398c3e866b3dc1525720fa4']],
+      ['process-detail.wind-power.gearbox', ['process-detail/wind-power/gearbox/topology.json', 20, '1f3de2f9cb1f4e7ea86daa836c9c5f189fa059c5bf33c7d9d49866e66512c9fc']],
+      ['process-detail.wind-power.yaw-system', ['process-detail/wind-power/yaw-system/topology.json', 15, '86767c78df1d0ea12ed8b34e3ed8834caa0ba27d13a0dbd6e2011ac175d7dddd']],
     ])
 
-    for (const context of PROCESS_DETAIL_TOPOLOGY_DATA_CONTEXTS.filter((item) => expected.has(item.contextId))) {
-      const item = expected.get(context.contextId)!
+    // 从应有清单出发逐项检查，避免上下文整体漏登记时被 filter 静默跳过。
+    for (const [contextId, item] of expected) {
+      const context = getProcessDetailTopologyDataContext(contextId)
+      expect(context).toBeDefined()
+      if (!context) continue
       const file = resolve(root, item[0])
       const bytes = readFileSync(file)
       const data = JSON.parse(bytes.toString('utf8')) as { pens: readonly { id?: string; parentId?: string }[] }

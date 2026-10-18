@@ -18,4 +18,13 @@ describe('嵌入壳网页历史基础路径', () => {
   it('绝对构建前缀不应被发布包规则改写', () => {
     expect(resolveRouterHistoryBase('/power/', '/shell/embed')).toBe('/power/')
   })
+
+  it.each([
+    ['/wind-process-detail-topology-preview', '/'],
+    ['/shell/wind-process-detail-topology-preview', '/shell/'],
+    ['/platform/shell/wind-process-detail-topology-preview', '/platform/shell/'],
+  ])('风电第三层预览 %s 应解析到部署目录 %s，避免误跳嵌入壳', (pathname, expectedBase) => {
+    // 同时覆盖根部署和合作方嵌入目录，防止只在开发服务中能打开、相对构建后却错误重定向。
+    expect(resolveRouterHistoryBase('./', pathname)).toBe(expectedBase)
+  })
 })

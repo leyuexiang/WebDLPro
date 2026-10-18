@@ -176,6 +176,7 @@ export async function auditProcessDetailProduction(releaseId = 'process-detail-s
   const solarDetailAction = manifest.actions.find((action) => action.actionId === 'action.solar-power.inverter')
   const windTurbineDetailAction = manifest.actions.find((action) => action.actionId === 'action.wind-power.wind-turbine')
   const windGearboxDetailAction = manifest.actions.find((action) => action.actionId === 'action.wind-power.gearbox')
+  const windYawDetailAction = manifest.actions.find((action) => action.actionId === 'action.wind-power.yaw-system')
   const gasMapping = manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'gas-power')
   const coalMapping = manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'coal-power')
   const solarMapping = manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'solar-power')
@@ -184,9 +185,10 @@ export async function auditProcessDetailProduction(releaseId = 'process-detail-s
   if (gasDetails.length !== 1 || gasDetails[0]?.processDetailId !== 'process-detail.gas-power.gas-turbine' ||
       coalDetails.length !== 1 || coalDetails[0]?.processDetailId !== 'process-detail.coal-power.steam-turbine' ||
       solarDetails.length !== 1 || solarDetails[0]?.processDetailId !== 'process-detail.solar-power.inverter' ||
-      windDetails.length !== 2 ||
+      windDetails.length !== 3 ||
       !windDetails.some((detail) => detail.processDetailId === 'process-detail.wind-power.wind-turbine') ||
-      !windDetails.some((detail) => detail.processDetailId === 'process-detail.wind-power.gearbox')) {
+      !windDetails.some((detail) => detail.processDetailId === 'process-detail.wind-power.gearbox') ||
+      !windDetails.some((detail) => detail.processDetailId === 'process-detail.wind-power.yaw-system')) {
     issues.push({ code: 'process-detail.catalog-not-approved', file: 'power-data-web/scripts/build-gas-power-smoke-release.mjs' })
   }
   if (!gasDetailAction || gasDetailAction.targetViewMode !== 'process-detail' ||
@@ -205,7 +207,11 @@ export async function auditProcessDetailProduction(releaseId = 'process-detail-s
       !windGearboxDetailAction || windGearboxDetailAction.targetViewMode !== 'process-detail' ||
       Object.prototype.hasOwnProperty.call(windGearboxDetailAction, 'targetTopologyId') ||
       windGearboxDetailAction.processDetailId !== 'process-detail.wind-power.gearbox' ||
-      windGearboxDetailAction.unityAction?.type !== 'enterProcessDetail') {
+      windGearboxDetailAction.unityAction?.type !== 'enterProcessDetail' ||
+      !windYawDetailAction || windYawDetailAction.targetViewMode !== 'process-detail' ||
+      Object.prototype.hasOwnProperty.call(windYawDetailAction, 'targetTopologyId') ||
+      windYawDetailAction.processDetailId !== 'process-detail.wind-power.yaw-system' ||
+      windYawDetailAction.unityAction?.type !== 'enterProcessDetail') {
     issues.push({ code: 'process-detail.action-uses-legacy-path', file: 'power-data-web/scripts/build-gas-power-smoke-release.mjs' })
   }
   if (!windMapping || windMapping.sceneNodeIds?.length !== expectedWindSceneNodeIds.length ||

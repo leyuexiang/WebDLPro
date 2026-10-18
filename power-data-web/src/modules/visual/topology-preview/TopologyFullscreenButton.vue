@@ -49,22 +49,25 @@ onBeforeUnmount(() => document.removeEventListener('fullscreenchange', synchroni
 </template>
 
 <style scoped>
-/* 绝对定位在宿主拓扑右上角；图层筛选公共轨会使用更大的顶部偏移，避免按钮遮挡。 */
+/*
+ * 与公共筛选条共用宽度并贴住画布物理右边界；正方形比例和原有图标比例保持不变。
+ * 筛选入口以“顶部 8 像素 + 本按钮高度 + 间隔 8 像素”定位，无须查询或监听按钮尺寸。
+ */
 .topology-fullscreen-button {
   position: absolute;
   z-index: 22;
   inset-block-start: 8px;
-  inset-inline-end: 8px;
+  right: 0;
   display: grid;
-  inline-size: 32px;
-  block-size: 32px;
+  inline-size: var(--topology-control-inline-size);
+  block-size: var(--topology-control-inline-size);
   place-items: center;
   padding: 0;
   border: 1px solid rgba(148, 163, 184, 0.65);
-  border-radius: 5px;
+  border-radius: calc(var(--topology-control-inline-size) * 0.15625);
   background: rgba(16, 19, 27, 0.92);
   color: #d6deeb;
-  font: 20px/1 sans-serif;
+  font: calc(var(--topology-control-inline-size) * 0.625)/1 sans-serif;
   cursor: pointer;
 }
 

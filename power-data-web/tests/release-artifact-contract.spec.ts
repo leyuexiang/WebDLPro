@@ -12,7 +12,7 @@ import {
 const webProjectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 /**
- * 生成发布门禁需要的最小联合结构清单。夹具保留当前三十七项公开动作和十个新增导航目标场景，
+ * 生成发布门禁需要的最小联合结构清单。夹具保留当前三十八项公开动作和十个新增导航目标场景，
  * 使正向用例本身不能再把“只有燃气、燃煤动作”的旧清单当成合格发布基线。
  */
 function createTopologyManifest() {
@@ -54,7 +54,7 @@ function createTopologyManifest() {
           : sceneId === 'switching-station'
             ? [`action.${sceneId}.overview`, 'action.switching-station.busbar-protection', 'action.switching-station.line-protection']
             : sceneId === 'wind-power'
-              ? ['action.wind-power.overview', 'action.wind-power.wind-turbine', 'action.wind-power.gearbox']
+              ? ['action.wind-power.overview', 'action.wind-power.wind-turbine', 'action.wind-power.gearbox', 'action.wind-power.yaw-system']
               : [`action.${sceneId}.overview`],
     })), {
       sceneId: 'overview',
@@ -216,6 +216,16 @@ function createTopologyManifest() {
       unityAction: { type: 'enterProcessDetail', processDetailId: 'process-detail.wind-power.gearbox' },
       failurePolicy: 'keep-current-context',
       configVersion: manifestVersion,
+    }, {
+      actionId: 'action.wind-power.yaw-system',
+      title: '进入偏航系统控制模拟',
+      targetSceneId: 'wind-power',
+      targetViewMode: 'process-detail',
+      processDetailId: 'process-detail.wind-power.yaw-system',
+      allowedParameters: [],
+      unityAction: { type: 'enterProcessDetail', processDetailId: 'process-detail.wind-power.yaw-system' },
+      failurePolicy: 'keep-current-context',
+      configVersion: manifestVersion,
     }, ...navigationScenes.map(([sceneId, title]) => ({
       actionId: `action.${sceneId}.overview`,
       title: `进入${title}总览`,
@@ -303,6 +313,15 @@ function createTopologyManifest() {
       cameraPoseId: 'camera-pose.wind-power.gearbox',
       stateNodeId: 'node.wind-gearbox',
       topologyDataContextId: 'process-detail.wind-power.gearbox',
+    }, {
+      sceneId: 'wind-power',
+      processId: 'wind-power-generation',
+      stepId: 'yaw-system',
+      processDetailId: 'process-detail.wind-power.yaw-system',
+      resourceId: 'process-detail-resource.wind-power.yaw-system',
+      cameraPoseId: 'camera-pose.wind-power.yaw-system',
+      stateNodeId: 'node.wind-yaw-system',
+      topologyDataContextId: 'process-detail.wind-power.yaw-system',
     }, ...['step-up-substation', 'step-down-substation', 'converter-station'].flatMap((sceneId) => {
       const nodePrefix = sceneId === 'converter-station' ? 'converter' : sceneId === 'step-up-substation' ? 'step-up' : 'step-down'
       return [
@@ -399,7 +418,7 @@ function createReleaseManifest() {
       unityLargeResourcePaths: ['unity/Build/', 'unity/SceneBundles/', 'unity/ProcessDetailBundles/'],
     },
     excludedCapabilities: ['route-mapping', 'other-eight-scene-content'],
-    // 合作方动作菜单读取该摘要；从当前十六项第三层结构生成相同公开投影，避免测试夹具手工维护时再次漏项。
+    // 合作方动作菜单读取该摘要；从当前十七项第三层结构生成相同公开投影，避免测试夹具手工维护时再次漏项。
     workflowActions: createTopologyManifest().actions.map((action) => ({
       actionId: action.actionId,
       title: action.title,
@@ -485,6 +504,55 @@ async function createArtifact() {
 }
 
 describe('发布产物输出标准', () => {
+  it('偏航动作在结构清单和合作方摘要同时漏项时仍独立阻断交付', async () => {
+    const root = await createArtifact()
+    try {
+      const manifestPath = path.join(root, 'scene-topology-manifest.json')
+      const releasePath = path.join(root, 'release-manifest.json')
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+      const release = JSON.parse(readFileSync(releasePath, 'utf8'))
+      const missingId = 'action.wind-power.yaw-system'
+      // 同时清除反向引用，模拟两份清单自洽但共同漏发布偏航的真实故障。
+      manifest.actions = manifest.actions.filter((action: { actionId: string }) => action.actionId !== missingId)
+      release.workflowActions = release.workflowActions.filter((action: { actionId: string }) => action.actionId !== missingId)
+      const wind = manifest.scenes.find((scene: { sceneId: string }) => scene.sceneId === 'wind-power')
+      wind.supportedActionIds = wind.supportedActionIds.filter((id: string) => id !== missingId)
+      writeFileSync(manifestPath, JSON.stringify(manifest), 'utf8')
+      writeFileSync(releasePath, JSON.stringify(release), 'utf8')
+      await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
+      expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
+        expect.stringContaining('三十八项公开动作'),
+        expect.stringContaining('偏航入口不能仅以设备节点映射代替'),
+      ]))
+    } finally { rmSync(root, { recursive: true, force: true }) }
+  })
+
+  it.each(['resourceId', 'cameraPoseId', 'stateNodeId', 'topologyDataContextId'])('偏航目录缺少 %s 时阻断交付', async (field) => {
+    const root = await createArtifact()
+    try {
+      const manifestPath = path.join(root, 'scene-topology-manifest.json')
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+      const yaw = manifest.processDetails.find((detail: { processDetailId: string }) => detail.processDetailId === 'process-detail.wind-power.yaw-system')
+      delete yaw[field]
+      writeFileSync(manifestPath, JSON.stringify(manifest), 'utf8')
+      await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
+      expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
+        expect.stringContaining('共十七项'),
+      ]))
+    } finally { rmSync(root, { recursive: true, force: true }) }
+  })
+
+  it('偏航专属二维文件未复制到最终目录时阻断交付', async () => {
+    const root = await createArtifact()
+    try {
+      rmSync(path.join(root, 'shell', 'topology', 'process-detail', 'wind-power', 'yaw-system', 'topology.json'))
+      await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
+      expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
+        expect.stringContaining('第三层拓扑文件缺失：process-detail/wind-power/yaw-system/topology.json'),
+      ]))
+    } finally { rmSync(root, { recursive: true, force: true }) }
+  })
+
   it('合作方联调包通过来源、绑定能力和不可变摘要门禁', async () => {
     const root = await createArtifact()
     try {
@@ -642,7 +710,7 @@ describe('发布产物输出标准', () => {
       await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
 
       expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
-        expect.stringContaining('完整发布当前三十七项公开动作'),
+        expect.stringContaining('完整发布当前三十八项公开动作'),
       ]))
     } finally {
       rmSync(root, { recursive: true, force: true })
@@ -723,7 +791,7 @@ describe('发布产物输出标准', () => {
       await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
 
       expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
-        expect.stringContaining('完整发布当前三十七项公开动作'),
+        expect.stringContaining('完整发布当前三十八项公开动作'),
       ]))
     } finally {
       rmSync(root, { recursive: true, force: true })

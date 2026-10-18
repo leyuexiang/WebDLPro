@@ -5,12 +5,14 @@ import { getProcessDetailTopologyDataContext } from '@/modules/visual/topology/p
 import ManifestTopologyJsonPreview from './ManifestTopologyJsonPreview.vue'
 import { WIND_TOPOLOGY_PREVIEW_PROFILE } from './wind-topology-preview-profile'
 
-const CONTEXT_IDS = ['process-detail.wind-power.wind-turbine', 'process-detail.wind-power.gearbox'] as const
+/** 预览入口与正式第三层共用三份显式上下文，不根据查询参数拼接资源路径。 */
+const CONTEXT_IDS = ['process-detail.wind-power.wind-turbine', 'process-detail.wind-power.gearbox', 'process-detail.wind-power.yaw-system'] as const
 type WindProcessDetailContextId = (typeof CONTEXT_IDS)[number]
 
 const TITLES: Readonly<Record<WindProcessDetailContextId, string>> = Object.freeze({
   'process-detail.wind-power.wind-turbine': '风机',
   'process-detail.wind-power.gearbox': '风电齿轮箱',
+  'process-detail.wind-power.yaw-system': '偏航系统',
 })
 
 const route = useRoute()
@@ -70,7 +72,8 @@ const initialContext = getProcessDetailTopologyDataContext(activeContextId.value
 .wind-detail-preview__switch {
   position: absolute;
   inset-block-start: 12px;
-  inset-inline-start: 50%;
+  /* 风机完整图的主控制器位于顶部中央；切换器使用左上空白处，避免遮挡图元且不挤压画布。 */
+  inset-inline-start: 12px;
   z-index: 40;
   display: flex;
   gap: 2px;
@@ -78,7 +81,6 @@ const initialContext = getProcessDetailTopologyDataContext(activeContextId.value
   border: 1px solid rgba(148, 163, 184, 0.48);
   border-radius: 6px;
   background: rgba(15, 23, 32, 0.92);
-  transform: translateX(-50%);
 }
 
 .wind-detail-preview__switch button {

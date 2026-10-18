@@ -120,7 +120,8 @@ const PROCESS_DETAIL_TOPOLOGY_CONTEXTS: readonly TopologyDataContext[] = Object.
     contextId: 'process-detail.wind-power.wind-turbine',
     renderer: 'manifest-json',
     topologyPath: 'process-detail/wind-power/wind-turbine/topology.json',
-    sourceSha256: '246826daf501f12ca1ff88b28179976bf2bcff8837ce50767ba0e7c17fb9525c',
+    // 最新风机完整图仍为四十个顶层图元；文字与装饰来源已更新，必须以新散列隔离同数量旧缓存。
+    sourceSha256: '5770f9e3c402c04b081291850bc7dd32a5688ba4c398c3e866b3dc1525720fa4',
     expectedPenCount: 40,
     bindings: Object.freeze([]),
   }),
@@ -128,7 +129,17 @@ const PROCESS_DETAIL_TOPOLOGY_CONTEXTS: readonly TopologyDataContext[] = Object.
     contextId: 'process-detail.wind-power.gearbox',
     renderer: 'manifest-json',
     topologyPath: 'process-detail/wind-power/gearbox/topology.json',
-    sourceSha256: 'bb6ed25e5f473e9276ac9370aaea19fa825ec49467f331e913d4ecd05ed4185a',
+    // 齿轮箱专属新输入共二十个源图元，原组合没有子图元，无需展平；子设备未提供独立三维绑定。
+    sourceSha256: '1f3de2f9cb1f4e7ea86daa836c9c5f189fa059c5bf33c7d9d49866e66512c9fc',
+    expectedPenCount: 20,
+    bindings: Object.freeze([]),
+  }),
+  Object.freeze({
+    contextId: 'process-detail.wind-power.yaw-system',
+    renderer: 'manifest-json',
+    // 用户提供的偏航专属完整图；五个子设备没有独立三维编号，不借用整机编号制造子设备映射。
+    topologyPath: 'process-detail/wind-power/yaw-system/topology.json',
+    sourceSha256: '86767c78df1d0ea12ed8b34e3ed8834caa0ba27d13a0dbd6e2011ac175d7dddd',
     expectedPenCount: 15,
     bindings: Object.freeze([]),
   }),

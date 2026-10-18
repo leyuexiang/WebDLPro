@@ -347,8 +347,8 @@ const coalProcessDetails = Object.freeze([
 ])
 
 /**
- * 风电当前已完成两个并列的第三层控制模拟：风机和齿轮箱。
- * 偏航系统控制模拟尚未提供 Prefab，因此不创建目录占位、不发布动作。
+ * 风电发布风机、齿轮箱和偏航三个并列的第三层入口。
+ * 偏航固定编号取自现有 ProcessDetailCatalog；节点映射不能代替公开动作登记。
  */
 const windProcessDetails = Object.freeze([
   Object.freeze({
@@ -371,7 +371,24 @@ const windProcessDetails = Object.freeze([
     stateNodeId: 'node.wind-gearbox',
     topologyDataContextId: 'process-detail.wind-power.gearbox',
   }),
+  Object.freeze({
+    sceneId: 'wind-power',
+    processId: 'wind-power-generation',
+    stepId: 'yaw-system',
+    processDetailId: 'process-detail.wind-power.yaw-system',
+    resourceId: 'process-detail-resource.wind-power.yaw-system',
+    cameraPoseId: 'camera-pose.wind-power.yaw-system',
+    stateNodeId: 'node.wind-yaw-system',
+    topologyDataContextId: 'process-detail.wind-power.yaw-system',
+  }),
 ])
+
+/** 标题按稳定步骤编号显式查表，新增偏航时不能落入原先“非风机即齿轮箱”的二选一分支。 */
+const windProcessDetailTitleByStepId = Object.freeze({
+  'wind-turbine': '进入风机控制模拟',
+  gearbox: '进入齿轮箱控制模拟',
+  'yaw-system': '进入偏航系统控制模拟',
+})
 
 /** 光伏逆变器已具备正式预制体、相机位、故障状态节点和独立二维数据，按稳定编号登记第三层目录。 */
 const solarProcessDetails = Object.freeze([
@@ -1261,7 +1278,7 @@ const addedSceneNavigations = [
   }))
   const windProcessDetailActions = windProcessDetails.map((detail) => ({
     actionId: `action.${detail.sceneId}.${detail.stepId}`,
-    title: detail.stepId === 'wind-turbine' ? '进入风机控制模拟' : '进入齿轮箱控制模拟',
+    title: windProcessDetailTitleByStepId[detail.stepId],
     targetSceneId: detail.sceneId,
     targetViewMode: 'process-detail',
     processDetailId: detail.processDetailId,
@@ -1457,7 +1474,7 @@ const addedSceneNavigations = [
 }
 
 /**
- * 三十七项公开动作由全局、八个首屏区域（六区域高亮+轮询开关）、十二个业务总览、两个风电控制模拟、四个变电场景保护环节和三个发电关键环节组成。
+ * 三十八项公开动作由全局、八个首屏区域（六区域高亮+轮询开关）、十二个业务总览、两个风电控制模拟、十一个变电站保护环节和四个发电关键环节组成。
  * 页面中的状态按钮只通过第二版外层协议提交完整设备状态快照；它们不直连 Unity，也不伪造
  * 拓扑图元。每次提交同时携带燃气轮机和燃煤汽轮机两个 nodeId，确保切换场景或层级后仍能观察
  * 同一份权威状态在二维拓扑、沙盘和关键环节模型中的投影结果。
@@ -1510,9 +1527,10 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
       </div>
       <div class="test-controls__scene-actions" aria-label="新增场景跳转操作">
         <button type="button" data-action-id="action.wind-power.overview" disabled>风电场景</button>
-        <!-- 两项风电关键环节复用公共动作处理器，确保可见入口与正式清单同步且无需内部视图捷径。 -->
+        <!-- 三项风电关键环节均走公开流程触发入口，按钮、白名单和发布清单同步维护。 -->
         <button type="button" data-action-id="action.wind-power.wind-turbine" disabled>风机关键</button>
         <button type="button" data-action-id="action.wind-power.gearbox" disabled>齿轮箱关键</button>
+        <button type="button" data-action-id="action.wind-power.yaw-system" disabled>偏航关键</button>
         <button type="button" data-action-id="action.solar-power.overview" disabled>光伏场景</button>
         <button type="button" data-action-id="action.solar-power.inverter" disabled>光伏关键</button>
         <button type="button" data-action-id="action.step-up-substation.overview" disabled>升压站场景</button>
@@ -1593,10 +1611,11 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
         const commandButtons = [...actionButtons, ...deviceStateButtons];
          // 仅用于校验新增场景返回的稳定视图；实际跳转与合作方一致，全部通过动作标识触发。
          const allowedSceneIds = new Set(['wind-power', 'solar-power', 'step-up-substation', 'step-down-substation', 'converter-station', 'switching-station']);
-         // 第三层稳定视图必须命中联合清单中的十六个关键环节；风电当前开放风机和齿轮箱两个并列控制模拟。
+         // 第三层稳定视图必须命中联合清单中的十七个关键环节；风电包含风机、齿轮箱和偏航三项。
          const allowedProcessDetailIds = new Set([
            'process-detail.wind-power.wind-turbine',
            'process-detail.wind-power.gearbox',
+           'process-detail.wind-power.yaw-system',
            'process-detail.gas-power.gas-turbine',
            'process-detail.coal-power.steam-turbine',
            'process-detail.solar-power.inverter',
@@ -1630,6 +1649,7 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
           'action.wind-power.overview',
           'action.wind-power.wind-turbine',
           'action.wind-power.gearbox',
+          'action.wind-power.yaw-system',
           'action.solar-power.overview',
           'action.solar-power.inverter',
           'action.step-up-substation.overview',
@@ -1730,7 +1750,7 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
         }
 
         /**
-         * 仅向当前已协商的嵌入壳发送清单中登记的三十七项动作之一，并携带最近稳定上下文版本。
+         * 仅向当前已协商的嵌入壳发送清单中登记的三十八项动作之一，并携带最近稳定上下文版本。
          * 版本不匹配由壳返回明确冲突，页面不会绕过事务直接切换拓扑或调用 Unity 方法。
          */
         function triggerWorkflow(actionId) {
