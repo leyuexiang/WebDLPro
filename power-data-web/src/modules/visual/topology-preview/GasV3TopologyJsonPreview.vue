@@ -61,7 +61,7 @@ function syncZoomPercent(): void {
 function fitTopologyToViewport(): void {
   if (!meta2d || loadingState.value !== 'ready') return
   clearTopologyTooltip()
-  // 公共筛选框已隐藏，四边不再为其预留空间；用零边距让当前组合拓扑在完整画布内居中适配。
+  // 公共筛选抽屉默认收起且展开时覆盖画布，不为筛选控件预留边距，保持组合拓扑完整居中。
   meta2d.fitView(true, [0, 0, 0, 0])
   syncZoomPercent()
 }

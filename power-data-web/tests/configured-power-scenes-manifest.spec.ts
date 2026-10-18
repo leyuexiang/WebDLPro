@@ -83,6 +83,7 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
     const visibleActionIds = Array.from(page.matchAll(/<button\b[^>]*\bdata-action-id="([^"]+)"/g), (match) => match[1])
     expect(visibleActionIds.sort()).toEqual(manifest.actions.map((action) => action.actionId).sort())
     expect(page).toContain('覆盖当前发布清单的全部公开动作')
+    expect(page).toContain('data-action-id="action.dispatch.overview"')
   })
 
   it('光伏发布场景只选择运行时登记，自测页仍从沙盘开始', async () => {
@@ -103,8 +104,26 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
     expect(manifest.actions.filter((action) => action.targetSceneId === 'gas-power')).toHaveLength(2)
     expect(manifest.actions.filter((action) => action.targetSceneId === 'coal-power')).toHaveLength(2)
     expect(manifest.actions.filter((action) => action.targetSceneId === 'solar-power')).toHaveLength(2)
-    // 配电站总览已纳入公开动作，固定数量必须与绝对发布契约保持一致。
-    expect(manifest.actions).toHaveLength(36)
+    // 调度中心总览已纳入公开动作，固定数量必须与绝对发布契约保持一致。
+    expect(manifest.actions).toHaveLength(37)
+    const dispatchScene = manifest.scenes.find((scene) => scene.sceneId === 'dispatch')
+    const dispatchAction = manifest.actions.find((action) => action.actionId === 'action.dispatch.overview')
+    const dispatchMapping = manifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'dispatch')
+    expect(dispatchScene).toEqual(expect.objectContaining({
+      title: '调度中心',
+      defaultTopologyId: 'topology.dispatch.overview',
+      topologyIds: ['topology.dispatch.overview'],
+      supportedActionIds: ['action.dispatch.overview'],
+    }))
+    expect(dispatchAction).toEqual(expect.objectContaining({
+      targetSceneId: 'dispatch',
+      targetViewMode: 'business',
+      targetTopologyId: 'topology.dispatch.overview',
+      unityAction: { type: 'none' },
+      allowedParameters: [],
+    }))
+    expect(dispatchMapping).toEqual(expect.objectContaining({ sceneId: 'dispatch', sceneNodeIds: [], routeIds: [] }))
+    expect(manifest.processDetails.some((detail) => detail.sceneId === 'dispatch')).toBe(false)
     expect(manifest.actions.find((action) => action.actionId === 'action.scene.overview')).toEqual({
       actionId: 'action.scene.overview',
       title: '返回全局总览',

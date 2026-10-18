@@ -1157,7 +1157,7 @@ export async function createConfiguredPowerScenesManifest(releaseId, initialScen
   else topologies.push(microgridTopology)
   const buildingTopology = createBuildingTopology(manifestVersion)
   /*
-   * 合作方当前只从 workflowActions（流程动作摘要）生成可绑定菜单，因此六个新增场景必须登记稳定导航动作。
+   * 合作方当前只从 workflowActions（流程动作摘要）生成可绑定菜单，因此所有公开入口都登记稳定导航动作。
    * 这些动作复用原子视图事务且 unityAction（Unity动作）固定为 none（无动作），不会伪造控制器未声明的工艺步骤。
    */
 const addedSceneNavigations = [
@@ -1170,6 +1170,8 @@ const addedSceneNavigations = [
     { sceneId: 'switching-station', title: '开关站', actionId: 'action.switching-station.overview', actionTitle: '进入开关站总览' },
     { sceneId: 'microgrid', title: '微电网', actionId: 'action.microgrid.overview', actionTitle: '进入微电网总览' },
     { sceneId: 'consumption', title: '用电', actionId: 'action.consumption.overview', actionTitle: '进入用电总览' },
+    // 调度中心只提供二维拓扑入口；沿用 dispatch 场景标识，不声明流程步骤或三维节点映射。
+    { sceneId: 'dispatch', title: '调度中心', actionId: 'action.dispatch.overview', actionTitle: '进入调度中心总览' },
   ]
   // 站类场景拓扑显式携带二维—三维映射，不依赖标题、数组顺序或图元编号推断目标。
   // 配电站五个 sceneNodeId 按本次截图定义为后续 Unity 配置约定，不代表本地 Unity 场景现状。
@@ -1455,7 +1457,7 @@ const addedSceneNavigations = [
 }
 
 /**
- * 三十三项公开动作由全局、八个首屏区域（六区域高亮+轮询开关）、六个业务总览、两个风电控制模拟、四个变电场景保护环节和三个发电关键环节组成。
+ * 三十七项公开动作由全局、八个首屏区域（六区域高亮+轮询开关）、十二个业务总览、两个风电控制模拟、四个变电场景保护环节和三个发电关键环节组成。
  * 页面中的状态按钮只通过第二版外层协议提交完整设备状态快照；它们不直连 Unity，也不伪造
  * 拓扑图元。每次提交同时携带燃气轮机和燃煤汽轮机两个 nodeId，确保切换场景或层级后仍能观察
  * 同一份权威状态在二维拓扑、沙盘和关键环节模型中的投影结果。
@@ -1472,7 +1474,7 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <!-- 使用空数据站点图标，避免本地联调浏览器自动请求不存在的 /favicon.ico 并产生与业务无关的 404。 -->
     <link rel="icon" href="data:," />
-    <title>燃气、燃煤、光伏三场景全链路自测包（含变电场景）</title>
+    <title>电力多场景全链路自测包（含调度中心与变电场景）</title>
     <style>
       html, body, #visualization-shell { inline-size: 100%; block-size: 100%; margin: 0; overflow: hidden; background: #061323; }
       #visualization-shell { display: block; border: 0; }
@@ -1495,9 +1497,9 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
   </head>
   <body>
     <!-- 仅承载嵌入壳；真实 Unity iframe 由壳内唯一宿主创建，外层测试页绝不直连 Unity。 -->
-    <iframe id="visualization-shell" title="燃气发电场景与拓扑嵌入壳" allow="fullscreen"></iframe>
+    <iframe id="visualization-shell" title="电力场景与拓扑嵌入壳" allow="fullscreen"></iframe>
     <section class="test-controls" aria-label="多场景外部消息测试操作">
-      <span class="test-controls__title">燃气、燃煤、光伏三场景全链路自测（含升压站、降压站、换流站、开关站）</span>
+      <span class="test-controls__title">电力多场景全链路自测（含调度中心、风电、光伏和四个变电场景）</span>
       <p class="test-controls__hint">通过公开 workflow.trigger（流程触发）覆盖当前发布清单的全部公开动作；状态按钮用于观察绑定设备在正常/故障之间切换后的二维、三维效果。</p>
       <div class="test-controls__actions" aria-label="视图链路操作">
         <button type="button" data-action-id="action.scene.overview" disabled>沙盘</button>
@@ -1520,6 +1522,8 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
         <button type="button" data-action-id="action.switching-station.overview" disabled>开关站场景</button>
         <button type="button" data-action-id="action.microgrid.overview" disabled>微电网场景</button>
         <button type="button" data-action-id="action.consumption.overview" disabled>用电场景</button>
+        <!-- 合作方验收按公开 workflow.trigger 调度中心动作进入拓扑，不调用 Unity 控制器能力。 -->
+        <button type="button" data-action-id="action.dispatch.overview" disabled>调度中心场景</button>
       </div>
       <div class="test-controls__detail-actions" aria-label="变电场景关键环节跳转操作">
         <button type="button" data-action-id="action.step-up-substation.transformer-protection" disabled>升压站变压保护</button>
@@ -1634,6 +1638,7 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
           'action.switching-station.overview',
           'action.microgrid.overview',
           'action.consumption.overview',
+          'action.dispatch.overview',
           'action.step-up-substation.transformer-protection',
           'action.step-up-substation.busbar-protection',
           'action.step-up-substation.line-protection',
@@ -1725,7 +1730,7 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
         }
 
         /**
-         * 仅向当前已协商的嵌入壳发送清单中登记的三十三项动作之一，并携带最近稳定上下文版本。
+         * 仅向当前已协商的嵌入壳发送清单中登记的三十七项动作之一，并携带最近稳定上下文版本。
          * 版本不匹配由壳返回明确冲突，页面不会绕过事务直接切换拓扑或调用 Unity 方法。
          */
         function triggerWorkflow(actionId) {
@@ -1844,7 +1849,7 @@ export function createSelfTestPage(manifestVersion, initialSceneId = 'gas-power'
             } else if (stableViewMode === 'business' && allowedSceneIds.has(message.payload.sceneId) &&
               message.payload.topologyId === 'topology.' + message.payload.sceneId + '.overview' &&
               message.payload.actionId === 'action.' + message.payload.sceneId + '.overview') {
-              // 新增场景必须由公开动作成功提交；动作本身保持 none，不虚构流程步骤、关键环节或三维能力。
+              // 导航场景必须由公开动作成功提交；动作保持 none，不虚构流程步骤、关键环节或三维节点能力。
               status.textContent = '新增场景 ' + message.payload.sceneId + ' 已稳定提交（当前为场景浏览入口）。';
             } else {
               status.textContent = '失败：收到不属于本轮链路的稳定视图。';
@@ -2415,7 +2420,7 @@ function createReadme(releaseConfiguration, sourceNodeCount, sourceEdgeCount, ma
     ? `
 ## 浏览器手动测试入口
 
-打开同目录的 \`self-test.html\`，不要只打开根入口。页面会先初始化全局沙盘，提供${publishedSceneCount}个已发布场景和${workflowActionCount}个流程动作按钮，覆盖燃气、燃煤、风电、光伏及四个变电场景的总览与关键环节。
+打开同目录的 \`self-test.html\`，不要只打开根入口。页面会先初始化全局沙盘，提供${publishedSceneCount}个已发布场景和${workflowActionCount}个流程动作按钮，覆盖燃气、燃煤、风电、光伏、调度中心及四个变电场景的总览与关键环节。
 页面同时提供燃气轮机、燃煤汽轮机和光伏逆变器绑定设备的“正常/故障”切换；变电场景的完整正常、告警、故障、离线四态由平台按稳定 \`nodeId\`（节点标识）状态快照验收。进入任一关键环节后，使用“播放”“停止”按钮验收当前模型动态。
 加载失败测试应使用缺少第三层资源的专用内部构建；页面会显示受控错误码并保留上一稳定视图，不向正式协议注入模拟失败参数。
 `
@@ -2613,7 +2618,7 @@ async function main() {
     deploymentMode: releaseConfiguration.packageType === 'local-test' ? 'local-loopback' : 'independent-service-iframe',
     platformArtifactPatchingAllowed: false,
     // 发布范围按最终清单声明已发布总览及四个变电场景的十一项关键环节，避免继续沿用旧三项关键环节摘要。
-    scope: 'published-overviews-with-four-substation-scenes-and-eleven-process-details',
+    scope: 'published-overviews-including-dispatch-center-with-four-substation-scenes-and-eleven-process-details',
     unityReleaseId,
     runtimeIdentity: {
       buildId: unityReleaseId,

@@ -55,4 +55,28 @@ describe('配电站拓扑源文件缓存版本', () => {
     expect(requestedUrls[0]).toContain(`?v=${variant.sourceSha256}`)
     expect(data.pens).toHaveLength(85)
   })
+
+  it('调度中心通过版本化地址加载完整三层文件，并仅把空组合容器从运行时移除', async () => {
+    const variant = BUSINESS_SCENE_TOPOLOGY_VARIANTS_BY_SCENE.dispatch.find((item) => item.isDefault)!
+    const sourcePath = resolve(
+      process.cwd(),
+      'public/topology/dispatch-json-preview',
+      variant.topologyPath,
+    )
+    const sourceData = JSON.parse(readFileSync(sourcePath, 'utf8')) as Meta2dData
+    const requestedUrls: string[] = []
+    globalThis.fetch = vi.fn(async (input) => {
+      requestedUrls.push(String(input))
+      return new Response(JSON.stringify(sourceData), { status: 200 })
+    }) as typeof fetch
+
+    const data = await loadBusinessSceneTopologyPreviewData('dispatch', variant.id as BusinessSceneTopologyVariantId)
+
+    expect(variant.expectedPenCount).toBe(94)
+    expect(data.pens).toHaveLength(93)
+    expect(data.pens.some((pen) => pen.id === 'a15a085')).toBe(false)
+    expect(requestedUrls).toHaveLength(1)
+    expect(requestedUrls[0]).toContain(`?v=${variant.sourceSha256}`)
+    expect(data.pens.filter((pen) => pen.image).every((pen) => pen.image?.startsWith('/topology/shared/'))).toBe(true)
+  })
 })

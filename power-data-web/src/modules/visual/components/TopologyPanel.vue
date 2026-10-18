@@ -84,7 +84,7 @@ const usesConverterStationOverviewCanvas = computed(() => (
 const usesSwitchingStationOverviewCanvas = computed(() => (
   String(props.topology.topologyKey) === 'topology.switching-station.overview'
 ))
-/** 三个新增业务场景共享一个清单式画布包装层，场景键只选数据集，不复制画布。 */
+/** 四个清单式业务场景共享同一画布包装层，场景键只选数据集，不复制画布。 */
 const businessSceneTopologyId = computed(() => resolveBusinessSceneTopologySceneId(String(props.topology.topologyKey)))
 const usesBusinessSceneOverviewCanvas = computed(() => businessSceneTopologyId.value !== undefined)
 /** 窄端口画布只暴露视口和受控选择；四个站类的图元映射来自显式发布清单，不从标题推断。 */
@@ -373,7 +373,7 @@ watch(() => String(props.topology.topologyKey), () => {
       @clear-selection="emit('clearSelection')"
       @ready-change="handleNarrowCanvasReady"
     />
-    <!-- 微电网、配电站和楼宇从逐文件清单读取 JSON，坐标归一化和筛选仍走公共 Meta2D 画布。 -->
+    <!-- 微电网、配电站、楼宇和调度中心从逐文件清单读取 JSON，复用公共 Meta2D 画布；调度只保留二维局部点击。 -->
     <BusinessSceneTopologyJsonPreview
       v-else-if="usesBusinessSceneOverviewCanvas"
       ref="jsonOverviewCanvas"

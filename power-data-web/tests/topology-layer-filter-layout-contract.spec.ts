@@ -34,7 +34,7 @@ const defaultTopologyVariants = [
   }),
 ]
 
-/** 所有当前第二层实现都必须移除隐藏筛选轨的旧视口避让量，完整使用画布宽度。 */
+/** 所有当前第二层实现都移除筛选轨的旧视口避让量，完整使用画布宽度。 */
 const fullCanvasFitSources = [
   'GasV3TopologyJsonPreview.vue',
   'GasV3TopologyRuntimeCanvas.vue',
@@ -44,14 +44,25 @@ const fullCanvasFitSources = [
   'ManifestTopologyJsonPreview.vue',
 ] as const
 
-/** 公共组件保证所有当前及后续拓扑筛选框都隐藏，画布使用清单中的组合默认项。 */
+/** 公共组件默认收起筛选面板并保留贴边按钮，画布使用清单中的组合默认项。 */
 describe('公共拓扑默认展示与筛选框', () => {
   const railSource = readFileSync(`${basePath}/TopologyLayerFilterRail.vue`, 'utf8')
 
-  it('公共筛选框从画布、键盘焦点和辅助技术树中统一隐藏', () => {
+  it('面板默认收起并从辅助技术树隔离，筛选面板与按钮共用画布右边界', () => {
+    expect(railSource).toContain('const isExpanded = ref(false)')
+    expect(railSource).toContain(':aria-hidden="!isExpanded"')
+    expect(railSource).toContain(':inert="!isExpanded"')
+
     const railRule = railSource.match(/\.topology-layer-filter-rail\s*\{([^}]*)\}/s)?.[1] ?? ''
-    const displayDeclarations = [...railRule.matchAll(/display:\s*([^;]+);/g)]
-    expect(displayDeclarations.at(-1)?.[1]?.trim()).toBe('none')
+    expect(railRule).toContain('visibility: hidden')
+    expect(railRule).toContain('pointer-events: none')
+
+    const drawerRule = railSource.match(/\.topology-layer-filter-drawer\s*\{([^}]*)\}/s)?.[1] ?? ''
+    const toggleRule = railSource.match(/\.topology-layer-filter-drawer__toggle\s*\{([^}]*)\}/s)?.[1] ?? ''
+    expect(drawerRule).toContain('right: 0')
+    expect(drawerRule).toContain('flex-direction: column')
+    expect(drawerRule).toContain('gap: 8px')
+    expect(toggleRule).toContain('right: 0')
   })
 
   it.each(defaultTopologyVariants)('%s 首屏固定加载网络层、业务层和关键环节层组合', (_scene, variant) => {
@@ -60,7 +71,7 @@ describe('公共拓扑默认展示与筛选框', () => {
     expect(variant.layerIds).toEqual(['network', 'business', 'key-process'])
   })
 
-  it.each(fullCanvasFitSources)('%s 不再为已隐藏的筛选框保留右侧空白', (file) => {
+  it.each(fullCanvasFitSources)('%s 不为可收起的筛选框保留右侧空白', (file) => {
     const source = readFileSync(`${basePath}/${file}`, 'utf8')
     expect(source).toContain('meta2d.fitView(true, [0, 0, 0, 0])')
     expect(source).not.toContain('meta2d.fitView(true, [0, 24, 0, 0])')

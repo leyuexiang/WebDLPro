@@ -45,6 +45,9 @@ const SOURCE_CONTRACT = {
     ['business-key-process', 32, 'a396e48c91b42235db242bce38c1c730cdfd434acb9b3b355857e89e9de4f3f1'],
     ['network-business-key-process', 48, '31273101e1bbb458134a41fec86e77471eb945f03d75058a54195192eb556f05'],
   ],
+  dispatch: [
+    ['network-business-key-process', 94, 'b2235a0ca3a7bb484b4c926519cfd016ae75517c2c4887498a926ca9ce797ef8'],
+  ],
 } as const
 
 describe('新业务场景拓扑数据契约', () => {
@@ -52,6 +55,7 @@ describe('新业务场景拓扑数据契约', () => {
     expect(resolveBusinessSceneTopologySceneId('topology.microgrid.overview')).toBe('microgrid')
     expect(resolveBusinessSceneTopologySceneId('topology.distribution.overview')).toBe('distribution')
     expect(resolveBusinessSceneTopologySceneId('topology.consumption.overview')).toBe('consumption')
+    expect(resolveBusinessSceneTopologySceneId('topology.dispatch.overview')).toBe('dispatch')
     expect(resolveBusinessSceneTopologySceneId('topology.unknown.overview')).toBeUndefined()
   })
 
@@ -109,14 +113,13 @@ describe('新业务场景拓扑数据契约', () => {
     }
   })
 
-  it('为三个场景登记源文件提供的 24 个独立版本，且每场景只有一个明确默认版本', () => {
-    // 配电站也登记了八种来源筛选版本，须与微电网和用能侧一起逐项校验。
-    expect(BUSINESS_SCENE_TOPOLOGY_SCENE_IDS).toEqual(['microgrid', 'distribution', 'consumption'])
+  it('逐项核对三类八版本场景和仅提供完整组合的调度中心源文件', () => {
+    expect(BUSINESS_SCENE_TOPOLOGY_SCENE_IDS).toEqual(['microgrid', 'distribution', 'consumption', 'dispatch'])
 
     for (const sceneId of BUSINESS_SCENE_TOPOLOGY_SCENE_IDS) {
       const variants = BUSINESS_SCENE_TOPOLOGY_VARIANTS_BY_SCENE[sceneId]
       const source = SOURCE_CONTRACT[sceneId]
-      expect(variants).toHaveLength(8)
+      expect(variants).toHaveLength(source.length)
       expect(variants.filter((variant) => variant.isDefault)).toHaveLength(1)
       expect(variants.find((variant) => variant.isDefault)?.id).toBe('network-business-key-process')
       expect(variants.map((variant) => variant.id)).toEqual(source.map(([id]) => id))
@@ -146,6 +149,47 @@ describe('新业务场景拓扑数据契约', () => {
         }
       }
     }
+  })
+
+  it('调度中心使用唯一默认三层组合、局部点击和公共 WebP，不登记任何业务或三维绑定', () => {
+    const variant = BUSINESS_SCENE_TOPOLOGY_VARIANTS_BY_SCENE.dispatch[0]!
+    const topologyPath = resolve(
+      process.cwd(),
+      'public/topology/dispatch-json-preview',
+      variant.topologyPath,
+    )
+    const topology = JSON.parse(readFileSync(topologyPath, 'utf8')) as {
+      image?: string
+      pens: Pen[]
+      enableMock?: boolean
+      initJs?: string
+      dataPoints?: unknown[]
+      networks?: unknown[]
+    }
+    const profile = getBusinessSceneTopologyPreviewProfile('dispatch')
+    const imagePaths = topology.pens.flatMap((pen) => pen.image ? [pen.image] : [])
+
+    expect(variant.layerIds).toEqual(['network', 'business', 'key-process'])
+    expect(variant.combinationKey).toBe('network+business+key-process')
+    expect(profile.sceneLabel).toBe('调度中心')
+    expect(profile.selectionDelivery).toBe('local')
+    expect(profile.getRuntimeBindings?.(variant.id)).toEqual([])
+    expect(variant.processPenIds).toEqual([])
+    expect(topology.pens).toHaveLength(94)
+    expect(variant.expectedRuntimePenCount).toBe(93)
+    expect(topology.pens.filter((pen) => pen.name === 'combine')).toEqual([
+      expect.objectContaining({ id: 'a15a085' }),
+    ])
+    expect(variant.flattenedCombines).toEqual([{ id: 'a15a085', directChildCount: 0 }])
+    expect(profile.resolveVariant(profile.createDefaultSelection())?.id).toBe(variant.id)
+    expect(imagePaths.every((image) => /^(?:icons|background)\/.+\.webp$/i.test(image))).toBe(true)
+    expect(imagePaths.every((image) => existsSync(resolve(process.cwd(), 'public/topology/shared', image)))).toBe(true)
+    expect(topology.image).toBe('')
+    expect(topology.enableMock).toBe(false)
+    expect(topology.initJs).toBe('')
+    expect(topology.dataPoints).toEqual([])
+    expect(topology.networks).toEqual([])
+    expect(JSON.stringify(topology)).not.toMatch(/\.(?:png|jpe?g)(?:$|[?#"])/i)
   })
 
   it.each(BUSINESS_SCENE_TOPOLOGY_SCENE_IDS)('%s 的全部版本移除整图选择父级且保持源图几何位置', (sceneId) => {
@@ -184,20 +228,27 @@ describe('新业务场景拓扑数据契约', () => {
     }
   })
 
-  it.each(BUSINESS_SCENE_TOPOLOGY_SCENE_IDS)('%s uses the supplied standalone files for filters and combinations', (sceneId) => {
+  it.each(BUSINESS_SCENE_TOPOLOGY_SCENE_IDS)('%s resolves only explicitly registered filter combinations', (sceneId) => {
     const profile = getBusinessSceneTopologyPreviewProfile(sceneId)
     const defaultSelection = profile.createDefaultSelection()
     expect(profile.resolveVariant(defaultSelection)?.id).toBe('network-business-key-process')
 
     const architecture = profile.toggleFilter(defaultSelection, 'architecture', true)
     expect([...architecture]).toEqual(['architecture'])
-    expect(profile.resolveVariant(architecture)?.id).toBe('architecture')
 
     const networkAndBusiness = profile.toggleFilter(
       profile.toggleFilter(new Set(), 'network', true),
       'business',
       true,
     )
+    if (sceneId === 'dispatch') {
+      // 调度中心只提供完整三层组合；缺失的单层和双层文件必须显示为未登记，不得由完整图裁剪生成。
+      expect(profile.resolveVariant(architecture)).toBeUndefined()
+      expect(profile.resolveVariant(networkAndBusiness)).toBeUndefined()
+      return
+    }
+
+    expect(profile.resolveVariant(architecture)?.id).toBe('architecture')
     expect(profile.resolveVariant(networkAndBusiness)?.id).toBe('network-business')
   })
 })

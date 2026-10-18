@@ -104,8 +104,13 @@ public static class BuildFullPipeline
 
         EditorUtility.DisplayProgressBar("全流程构建", "[2/3] 前端打包（typecheck + Vite 构建 + 资产复制）…", 0.5f);
 
-        var arguments = new StringBuilder($"scripts/{FrontendScriptPath}")
-            .Append($" --package-type {packageType}")
+        // 前端发布脚本以当前工作目录作为 power-data-web 根目录；从 Unity 项目根目录运行会令
+        // 清单、产物目录和前端依赖的相对路径全部偏移，因此必须切换到前端项目目录执行。
+        string frontendRoot = Path.Combine(projectRoot, FrontendRelativeRoot);
+        // RunNodeProcess 会把 FrontendScriptPath 作为 Node 的脚本入口；此处只追加发布参数，
+        // 避免再次把脚本路径放入参数列表，导致参数解析器把它当成未知发布选项。
+        var arguments = new StringBuilder()
+            .Append($"--package-type {packageType}")
             .Append($" --release-id {frontendReleaseId}")
             .Append($" --unity-release-id {unityReleaseId}");
         if (port > 0) arguments.Append($" --port {port}");
@@ -115,7 +120,7 @@ public static class BuildFullPipeline
         if (packageType != "local-test") arguments.Append(" --listen-host 0.0.0.0");
 
         string frontendOutput = RunNodeProcess(
-            projectRoot, FrontendScriptPath, arguments.ToString(),
+            frontendRoot, FrontendScriptPath, arguments.ToString(),
             out int frontendExitCode);
 
         if (frontendExitCode != 0)
@@ -156,7 +161,11 @@ public static class BuildFullPipeline
 
     private static string Truncate(string text, int maxLength)
     {
-        return string.IsNullOrEmpty(text) || text.Length <= maxLength ? text : text.Substring(0, maxLength) + "…";
+        if (string.IsNullOrEmpty(text) || text.Length <= maxLength) return text;
+
+        // 构建日志开头通常是已通过的清单校验报告，真正的失败原因更常出现在末尾；
+        // 对话框长度受限时保留尾部日志，避免只显示 valid（有效）报告而隐藏退出码来源。
+        return "（前置日志已省略，以下为末尾错误信息）\n" + text.Substring(text.Length - maxLength);
     }
 
     /// <summary>启动 Node 子进程执行脚本，注入 PATH 并清除 NODE_ENV，同步等待完成。</summary>

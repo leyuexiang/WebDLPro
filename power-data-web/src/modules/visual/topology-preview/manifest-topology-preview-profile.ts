@@ -40,6 +40,8 @@ export interface ManifestTopologyPreviewProfile {
   readonly sceneLabel: string
   readonly defaultVariantId: string
   readonly filterGroups: readonly ManifestTopologyPreviewFilterGroup[]
+  /** 二维选中事件的出口策略；local（本地）只更新画布外观，不触发上层或 Unity 选择协议。 */
+  readonly selectionDelivery?: 'coordinated' | 'local'
   /** 正式发布用的 penId → nodeId → sceneNodeId 清单；预览层不得自行推导绑定。 */
   readonly runtimeBindings?: readonly SubstationTopologyRuntimeBinding[]
   /** 多份筛选文件的图元编号不同，由场景模块按当前完整文件返回专属绑定。 */

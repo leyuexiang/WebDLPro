@@ -19,8 +19,8 @@ import {
   type WindTopologyFilterId,
 } from './wind-topology-layer-filter'
 
-/** 三个 Unity（统一引擎）新场景在前端拓扑中的稳定场景键。 */
-export const BUSINESS_SCENE_TOPOLOGY_SCENE_IDS = ['microgrid', 'distribution', 'consumption'] as const
+/** 清单式业务场景在前端拓扑中的稳定键；调度中心只参与二维展示，不绑定 Unity（统一引擎）。 */
+export const BUSINESS_SCENE_TOPOLOGY_SCENE_IDS = ['microgrid', 'distribution', 'consumption', 'dispatch'] as const
 
 export type BusinessSceneTopologySceneId = (typeof BUSINESS_SCENE_TOPOLOGY_SCENE_IDS)[number]
 
@@ -55,6 +55,7 @@ const SCENE_ID_BY_TOPOLOGY_KEY: ReadonlyMap<string, BusinessSceneTopologySceneId
   ['topology.microgrid.overview', 'microgrid'],
   ['topology.distribution.overview', 'distribution'],
   ['topology.consumption.overview', 'consumption'],
+  ['topology.dispatch.overview', 'dispatch'],
 ])
 
 /** 供公共面板按稳定拓扑编号路由到新场景画布。 */
@@ -360,7 +361,15 @@ function createPreviewProfile(sceneId: BusinessSceneTopologySceneId): ManifestTo
   if (!defaultVariant) throw new Error(`${sceneId} 拓扑必须且只能登记一个默认版本。`)
 
   return Object.freeze({
-    sceneLabel: sceneId === 'microgrid' ? '微电网' : sceneId === 'distribution' ? '配电站' : '楼宇',
+    sceneLabel: sceneId === 'microgrid'
+      ? '微电网'
+      : sceneId === 'distribution'
+        ? '配电站'
+        : sceneId === 'dispatch'
+          ? '调度中心'
+          : '楼宇',
+    // 调度图元只作二维局部选中和连线高亮，禁止把点击或空白取消事件送入三维选择链路。
+    ...(sceneId === 'dispatch' ? { selectionDelivery: 'local' as const } : {}),
     defaultVariantId: defaultVariant.id,
     filterGroups: FILTER_GROUPS,
     createDefaultSelection: () => new Set<string>(defaultVariant.layerIds),
@@ -394,6 +403,7 @@ const PREVIEW_PROFILE_BY_SCENE: Readonly<Record<BusinessSceneTopologySceneId, Ma
   microgrid: createPreviewProfile('microgrid'),
   distribution: createPreviewProfile('distribution'),
   consumption: createPreviewProfile('consumption'),
+  dispatch: createPreviewProfile('dispatch'),
 })
 
 /** 新场景正式面板通过稳定键读取预构建 profile，不回退到运行时标题识别。 */

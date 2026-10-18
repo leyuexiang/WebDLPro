@@ -88,6 +88,14 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '开关站拓扑图 JSON 预览' },
   },
   {
+    path: '/dispatch-topology-json-preview',
+    name: 'dispatch-topology-json-preview',
+    // 调度中心独立预览复用统一清单画布，点击只保留二维选中和连线高亮。
+    component: () => import('@/modules/visual/topology-preview/BusinessSceneTopologyJsonPreview.vue'),
+    props: { sceneId: 'dispatch' },
+    meta: { title: '调度中心拓扑图 JSON 预览' },
+  },
+  {
     path: '/:pathMatch(.*)*',
     // 对历史地址采取收敛跳转，而不是渲染旧页面或权限提示页。
     redirect: '/embed',

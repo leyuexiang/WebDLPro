@@ -3,6 +3,13 @@ import type { ProcessNodeId } from '@/config/process/identifiers'
 
 const DISABLED_PEN_LOCK = 10 as LockState
 
+/** 只有显式标为 local 的场景才截断外部事件，其它既有拓扑继续使用统一选择协调器。 */
+export function shouldForwardManifestTopologySelection(
+  selectionDelivery: 'coordinated' | 'local' | undefined,
+): boolean {
+  return selectionDelivery !== 'local'
+}
+
 /** 可选中图元仍可能没有业务节点编号；三维映射缺失不改变二维命中结果。 */
 export type ManifestTopologyClickSelection =
   | { readonly kind: 'select'; readonly pen: Pen; readonly nodeId?: ProcessNodeId }

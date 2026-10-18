@@ -12,7 +12,7 @@ import {
 const webProjectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 /**
- * 生成发布门禁需要的最小联合结构清单。夹具保留当前三十六项公开动作和九个动作目标场景，
+ * 生成发布门禁需要的最小联合结构清单。夹具保留当前三十七项公开动作和十个新增导航目标场景，
  * 使正向用例本身不能再把“只有燃气、燃煤动作”的旧清单当成合格发布基线。
  */
 function createTopologyManifest() {
@@ -27,6 +27,7 @@ function createTopologyManifest() {
     ['switching-station', '开关站'],
     ['microgrid', '微电网'],
     ['consumption', '用电'],
+    ['dispatch', '调度中心'],
   ]
   return {
     manifestVersion,
@@ -344,6 +345,7 @@ function createTopologyManifest() {
     }, ...navigationScenes.map(([sceneId]) => ({
       sceneId,
       mappingVersion: `mapping.${sceneId}.1`,
+      processSteps: [],
       sceneNodeIds: sceneId === 'wind-power'
         ? [
             'node.wind-pitch-system',
@@ -640,7 +642,7 @@ describe('发布产物输出标准', () => {
       await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
 
       expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
-        expect.stringContaining('完整发布当前三十六项公开动作'),
+        expect.stringContaining('完整发布当前三十七项公开动作'),
       ]))
     } finally {
       rmSync(root, { recursive: true, force: true })
@@ -686,6 +688,25 @@ describe('发布产物输出标准', () => {
     }
   })
 
+  it('调度中心导航被补入未核验三维节点时阻断交付', async () => {
+    const root = await createArtifact()
+    try {
+      const topologyManifest = createTopologyManifest()
+      const dispatchMapping = topologyManifest.unitySceneMappings.find((mapping) => mapping.sceneId === 'dispatch')
+      if (!dispatchMapping) throw new Error('测试夹具缺少调度中心空映射契约。')
+      // 调度中心尚无三维映射；新增任意 Unity 节点都应被仅导航场景绝对门禁拒绝。
+      dispatchMapping.sceneNodeIds = ['node.dispatch-unverified']
+      writeFileSync(path.join(root, 'scene-topology-manifest.json'), `${JSON.stringify(topologyManifest, null, 2)}\n`, 'utf8')
+      await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
+
+      expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
+        expect.stringContaining('仅导航场景必须发布无三维流程副作用的总览导航'),
+      ]))
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it('全局总览动作使用旧标识时阻断交付', async () => {
     const root = await createArtifact()
     try {
@@ -702,7 +723,7 @@ describe('发布产物输出标准', () => {
       await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
 
       expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
-        expect.stringContaining('完整发布当前三十六项公开动作'),
+        expect.stringContaining('完整发布当前三十七项公开动作'),
       ]))
     } finally {
       rmSync(root, { recursive: true, force: true })

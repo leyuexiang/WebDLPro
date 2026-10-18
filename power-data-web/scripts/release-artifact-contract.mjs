@@ -30,7 +30,7 @@ const requiredUnityEventCapabilities = Object.freeze([
   'ready', 'ack', 'commandResult', 'sceneLoadProgress', 'sceneChanged', 'objectSelected', 'selectionCleared', 'disposed',
 ])
 /**
- * 当前合作方以动作摘要生成全部可绑定入口，因此三十六项公开动作属于发布契约本身，不能只做两份清单的相对一致性检查。
+ * 当前合作方以动作摘要生成全部可绑定入口，因此三十七项公开动作属于发布契约本身，不能只做两份清单的相对一致性检查。
  * 目标、视图和三维动作类型一并固定，防止生成器与摘要同时回退，或把普通场景导航误写成未实现的流程能力。
  */
 const requiredPublishedActionContracts = Object.freeze([
@@ -59,6 +59,7 @@ const requiredPublishedActionContracts = Object.freeze([
   { actionId: 'action.switching-station.overview', targetSceneId: 'switching-station', targetViewMode: 'business', targetTopologyId: 'topology.switching-station.overview', unityActionType: 'resetScene' },
   { actionId: 'action.microgrid.overview', targetSceneId: 'microgrid', targetViewMode: 'business', targetTopologyId: 'topology.microgrid.overview', unityActionType: 'none' },
   { actionId: 'action.consumption.overview', targetSceneId: 'consumption', targetViewMode: 'business', targetTopologyId: 'topology.consumption.overview', unityActionType: 'none' },
+  { actionId: 'action.dispatch.overview', targetSceneId: 'dispatch', targetViewMode: 'business', targetTopologyId: 'topology.dispatch.overview', unityActionType: 'none' },
   { actionId: 'action.step-up-substation.transformer-protection', targetSceneId: 'step-up-substation', targetViewMode: 'process-detail', processDetailId: 'process-detail.step-up-substation.transformer-protection', unityActionType: 'enterProcessDetail' },
   { actionId: 'action.step-up-substation.busbar-protection', targetSceneId: 'step-up-substation', targetViewMode: 'process-detail', processDetailId: 'process-detail.step-up-substation.busbar-protection', unityActionType: 'enterProcessDetail' },
   { actionId: 'action.step-up-substation.line-protection', targetSceneId: 'step-up-substation', targetViewMode: 'process-detail', processDetailId: 'process-detail.step-up-substation.line-protection', unityActionType: 'enterProcessDetail' },
@@ -112,7 +113,8 @@ const requiredMicrogridEquipmentMappings = Object.freeze([
   Object.freeze({ nodeId: 'asset.microgrid-storage-converter', title: '储能变流器', sceneNodeId: 'node.microgrid-storage-converter' }),
   Object.freeze({ nodeId: 'asset.microgrid-ats-controller', title: 'ATS控制器', sceneNodeId: 'node.microgrid-ats-controller' }),
 ])
-const navigationOnlySceneIds = Object.freeze([])
+// 调度中心只交付二维拓扑导航；其 Unity 映射必须保留空节点、流程步骤和路线数组。
+const navigationOnlySceneIds = Object.freeze(['dispatch'])
 const deviceIdentifierSuffixes = new Set(['id', 'ids'])
 const deviceMappingSuffixes = new Set(['mapping', 'mappings'])
 const bindingMetadataSuffixes = new Set(['count', 'revision'])
@@ -418,7 +420,7 @@ export async function validateReleaseArtifact(rootDirectory) {
     const requiredActionIds = new Set(requiredPublishedActionContracts.map((contract) => contract.actionId))
     if (publishedActions.length !== requiredPublishedActionContracts.length || actionById.size !== requiredPublishedActionContracts.length ||
         [...actionById.keys()].some((actionId) => !requiredActionIds.has(actionId)) || hasInvalidPublishedAction) {
-       issues.push('结构清单必须完整发布当前三十六项公开动作及其固定目标，禁止两份清单同时回退或伪造三维流程能力。')
+       issues.push('结构清单必须完整发布当前三十七项公开动作及其固定目标，禁止两份清单同时回退或伪造三维流程能力。')
     }
 
     /**
@@ -528,7 +530,9 @@ export async function validateReleaseArtifact(rootDirectory) {
       return !scene || scene.defaultTopologyId !== topologyId || !Array.isArray(scene.topologyIds) ||
         scene.topologyIds.length !== 1 || scene.topologyIds[0] !== topologyId ||
         !Array.isArray(scene.supportedActionIds) || scene.supportedActionIds.length !== 1 || scene.supportedActionIds[0] !== actionId ||
-        !mapping
+        !mapping || !Array.isArray(mapping.sceneNodeIds) || mapping.sceneNodeIds.length !== 0 ||
+        !Array.isArray(mapping.processSteps) || mapping.processSteps.length !== 0 ||
+        !Array.isArray(mapping.routeIds) || mapping.routeIds.length !== 0
     })
     const processDetails = Array.isArray(topologyManifest.processDetails) ? topologyManifest.processDetails : []
     if (hasInvalidNavigationScene || processDetails.some((detail) => navigationOnlySceneIds.includes(detail?.sceneId))) {

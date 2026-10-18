@@ -1,7 +1,10 @@
 import type { LockState, Pen } from '@meta2d/core'
 import { describe, expect, it } from 'vitest'
 import { toProcessNodeId } from '@/config/process/identifiers'
-import { resolveManifestTopologyClickSelection } from './manifest-topology-click-selection'
+import {
+  resolveManifestTopologyClickSelection,
+  shouldForwardManifestTopologySelection,
+} from './manifest-topology-click-selection'
 
 const SELECTABLE_LOCK = 1 as LockState
 const DISABLED_LOCK = 10 as LockState
@@ -11,6 +14,12 @@ function createPen(id: string, locked: LockState, name = 'gif'): Pen {
 }
 
 describe('清单拓扑统一点击选择', () => {
+  it('默认把选择送入统一场景协调器，调度中心等本地模式截断外部事件', () => {
+    expect(shouldForwardManifestTopologySelection(undefined)).toBe(true)
+    expect(shouldForwardManifestTopologySelection('coordinated')).toBe(true)
+    expect(shouldForwardManifestTopologySelection('local')).toBe(false)
+  })
+
   it('有业务映射的可选图元继续提交节点编号', () => {
     const nodeId = toProcessNodeId('system.demo-control')
     const pen = createPen('mapped-device', SELECTABLE_LOCK)

@@ -12,6 +12,7 @@ describe('嵌入壳网页历史基础路径', () => {
     expect(resolveRouterHistoryBase('.', '/shell/step-down-substation-topology-json-preview')).toBe('/shell/')
     expect(resolveRouterHistoryBase('.', '/shell/converter-station-topology-json-preview')).toBe('/shell/')
     expect(resolveRouterHistoryBase('.', '/shell/switching-station-topology-json-preview')).toBe('/shell/')
+    expect(resolveRouterHistoryBase('.', '/shell/dispatch-topology-json-preview')).toBe('/shell/')
   })
 
   it('绝对构建前缀不应被发布包规则改写', () => {

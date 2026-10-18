@@ -200,8 +200,8 @@ describe('燃气总览发布契约', () => {
     }
     expect(() => createHostPage('invalid-entry-contract-test', 'unknown-package')).toThrow('未知包类型')
 
-    // 内部自测页从沙盘开始，十个可见入口全部使用合作方实际消费的流程动作协议。
-    expect(selfTestPage).toContain('燃气、燃煤、光伏三场景全链路自测')
+    // 内部自测页从沙盘开始，所有可见入口都使用合作方实际消费的流程动作协议。
+    expect(selfTestPage).toContain('电力多场景全链路自测包（含调度中心与变电场景）')
     expect(selfTestPage).toContain("sceneId: 'overview'")
     expect(selfTestPage).toContain('data-action-id="action.scene.overview" disabled>沙盘</button>')
     expect(selfTestPage).toContain('data-action-id="action.gas-power.overview"')
@@ -211,6 +211,7 @@ describe('燃气总览发布契约', () => {
     for (const sceneId of ['wind-power', 'solar-power', 'step-up-substation', 'step-down-substation', 'converter-station', 'switching-station']) {
       expect(selfTestPage).toContain(`data-action-id="action.${sceneId}.overview"`)
     }
+    expect(selfTestPage).toContain('data-action-id="action.dispatch.overview"')
     /**
      * 单独检查共享按钮处理函数，确保本地自测不再用另一套 view.open（视图打开）捷径掩盖合作方动作清单问题。
      * 场景、拓扑和无 Unity 副作用映射均由已验证结构清单解析，页面只提交稳定 actionId（动作标识）。

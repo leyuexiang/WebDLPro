@@ -7,7 +7,10 @@ import type {
   ManifestTopologyPreviewProfile,
   ManifestTopologyPreviewVariant,
 } from './manifest-topology-preview-profile'
-import { resolveManifestTopologyClickSelection } from './manifest-topology-click-selection'
+import {
+  resolveManifestTopologyClickSelection,
+  shouldForwardManifestTopologySelection,
+} from './manifest-topology-click-selection'
 import type { TopologyDataContext } from '@/modules/visual/topology/topology-runtime'
 import type { ProcessNodeId, RouteId } from '@/config/process/identifiers'
 import type { TopologyDeviceStatus } from '@/config/process/types'
@@ -116,7 +119,7 @@ function fitTopologyToViewport(): void {
   if (!meta2d || disposed || props.suspended || loadingState.value !== 'ready') return
   if (!canvasHost.value?.clientWidth || !canvasHost.value?.clientHeight) return
   clearTopologyTooltip()
-  // 公共筛选框已隐藏，四边不再为其预留空间；用零边距让当前组合拓扑在完整画布内居中适配。
+  // 公共筛选抽屉默认收起且展开时覆盖画布，不为筛选控件预留边距，保持组合拓扑完整居中。
   meta2d.fitView(true, [0, 0, 0, 0])
   syncZoomPercent()
 }
@@ -256,14 +259,16 @@ function applySelectionVisual(pens: readonly Pen[], render = true): void {
 
 function handleCanvasClick(event?: Meta2dPointerEvent): void {
   const selection = resolveManifestTopologyClickSelection(event?.pen, nodeIdByPenId.value)
+  const shouldForwardSelection = shouldForwardManifestTopologySelection(props.profile.selectionDelivery)
   if (selection.kind === 'select') {
-    // 每个可选图元先更新二维高亮，再沿同一选择事件向外提交；无业务编号时由统一聚焦协调器清理三维。
+    // 所有场景先更新二维高亮；需要场景联动的拓扑再送入统一协调器，纯二维场景在此结束。
     applySelectionVisual([selection.pen])
-    emit('selectNode', selection.nodeId)
+    if (shouldForwardSelection) emit('selectNode', selection.nodeId)
     return
   }
   applySelectionVisual([])
-  emit('clearSelection')
+  // 本地清空只恢复当前图的连线源样式，绝不清除或改写外部三维选择状态。
+  if (shouldForwardSelection) emit('clearSelection')
 }
 
 /** 三维反向选择只命中当前第三层或第二层文件已登记的全部图元，不发送回 Unity，避免选择回环。 */

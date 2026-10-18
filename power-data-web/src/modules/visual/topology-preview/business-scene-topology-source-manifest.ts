@@ -688,5 +688,29 @@ export const BUSINESS_SCENE_TOPOLOGY_SOURCE_MANIFEST = {
       ],
       "isDefault": true
     }
+  ],
+  /** 调度中心当前只提供完整三层组合源图；图元点击仅留在二维画布，不登记业务或三维绑定。 */
+  "dispatch": [
+    {
+      "id": "network-business-key-process",
+      "combinationKey": "network+business+key-process",
+      "layerIds": [
+        "network",
+        "business",
+        "key-process"
+      ],
+      "topologyPath": "variants/network-business-key-process/topology.json",
+      "sourceSha256": "b2235a0ca3a7bb484b4c926519cfd016ae75517c2c4887498a926ca9ce797ef8",
+      "expectedPenCount": 94,
+      "expectedRuntimePenCount": 93,
+      "flattenedCombines": [
+        {
+          "id": "a15a085",
+          "directChildCount": 0
+        }
+      ],
+      "processPenIds": [],
+      "isDefault": true
+    }
   ]
 } as const
