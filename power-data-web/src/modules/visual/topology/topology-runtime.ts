@@ -1,4 +1,4 @@
-import type { NodeId, RouteId, SceneId, SceneNodeId, TopologyId, TransitionId } from '@/config/scene-topology/identifiers'
+import type { NodeId, ProcessDetailId, RouteId, SceneId, SceneNodeId, TopologyId, TransitionId } from '@/config/scene-topology/identifiers'
 import type { DeviceVisualStatus, TopologyDefinition } from '@/config/scene-topology/types'
 import type { TopologyRegistry } from '@/config/scene-topology/topology-registry'
 import { TopologyDeviceStateCache, type TopologyNodeStateApplyResult, type TopologyNodeStateBatch } from '@/modules/visual/topology/topology-device-state-cache'
@@ -22,9 +22,8 @@ export interface TopologyDataContext {
   readonly sourceSha256: string
   readonly expectedPenCount: number
   /**
-   * 第三层图元到正式业务节点及三维节点的绑定；未提供三维节点的图元只能二维显示。
-   * `nodeId` 是中央选择状态和第二层拓扑共用的业务主键，`sceneNodeId` 是已审核的 Unity 节点，
-   * 两者均由源清单显式登记，运行时不按标题、坐标或数组顺序推断。
+   * 第三层图元到正式业务节点的显式绑定；`sceneNodeId` 是可选 Unity 目标，缺失时仍可让合作方上报二维状态。
+   * `nodeId` 是跨端稳定业务主键，`sceneNodeId` 只在确有三维对应时添加；运行时不按标题、坐标或数组顺序推断。
    */
   readonly bindings: readonly { readonly penId: string; readonly nodeId: string; readonly sceneNodeId?: string }[]
 }
@@ -81,6 +80,8 @@ export class TopologyRuntime {
   private activeTopology: PreparedTopology | undefined
   /** 活动拓扑保持第二层定义时，单独记录第三层状态节点筛选，避免实时批次把全场景状态扩散到细节模型。 */
   private activeProcessDetailStateNodeId: SceneNodeId | undefined
+  /** 记录当前第三层数据目录项，二维缓存据此显示详情专属状态；该编号不作为 Unity 映射。 */
+  private activeProcessDetailId: ProcessDetailId | undefined
   private disposed = false
 
   public constructor(
@@ -133,6 +134,7 @@ export class TopologyRuntime {
       // 业务层激活必须清除第三层独立文件，避免返回第二层后仍显示关键环节 JSON。
       this.canvas.setTopologyDataContext?.(undefined)
       this.activeProcessDetailStateNodeId = undefined
+      this.activeProcessDetailId = undefined
       const restoredViewState = this.viewStateByTopologyId.get(prepared.topologyId)
       /*
        * 首次激活没有用户产生的视口快照，不能伪造 { 缩放: 1, 平移: 0 } 并下发给画布。
@@ -181,10 +183,19 @@ export class TopologyRuntime {
     context: TopologyDataContext,
   ): boolean {
     if (this.disposed || !this.activeTopology || this.activeTopology.sceneId !== sceneId) return false
+    const detail = this.registry.getProcessDetailByTopologyDataContextId(context.contextId)
+    if (!detail || detail.sceneId !== sceneId || detail.stateNodeId !== stateNodeId) return false
+    if (detail.topologyNodes) {
+      // 发布目录与二维图元绑定必须覆盖同一组 nodeId，避免合作方清单漏掉浏览器实际显示的状态节点。
+      const publishedNodeIds = new Set(detail.topologyNodes.map((node) => node.nodeId))
+      const contextNodeIds = new Set(context.bindings.map((binding) => binding.nodeId))
+      if (publishedNodeIds.size !== contextNodeIds.size || [...publishedNodeIds].some((nodeId) => !contextNodeIds.has(nodeId))) return false
+    }
     try {
       this.canvas.setTopologyDataContext?.(context)
       this.activeProcessDetailStateNodeId = stateNodeId
-      this.deviceStateCache.setActiveContext(sceneId, this.activeTopology.topologyId, stateNodeId)
+      this.activeProcessDetailId = detail.processDetailId
+      this.deviceStateCache.setActiveContext(sceneId, this.activeTopology.topologyId, stateNodeId, detail.processDetailId)
       this.canvas.setNodeStatuses(this.deviceStateCache.getActiveTopologyNodeStatuses())
       return true
     } catch {
@@ -199,6 +210,7 @@ export class TopologyRuntime {
   public activateProcessDetailStateOnly(sceneId: SceneId, stateNodeId: SceneNodeId): boolean {
     if (this.disposed || !this.activeTopology || this.activeTopology.sceneId !== sceneId) return false
     this.activeProcessDetailStateNodeId = stateNodeId
+    this.activeProcessDetailId = undefined
     this.deviceStateCache.setActiveContext(sceneId, this.activeTopology.topologyId, stateNodeId)
     this.canvas.setNodeStatuses(this.deviceStateCache.getActiveTopologyNodeStatuses())
     return true
@@ -213,6 +225,7 @@ export class TopologyRuntime {
     const previousTopology = this.activeTopology
     if (!previousTopology) {
       this.activeProcessDetailStateNodeId = undefined
+      this.activeProcessDetailId = undefined
       this.deviceStateCache.setActiveContext(undefined, undefined)
       return true
     }
@@ -228,6 +241,7 @@ export class TopologyRuntime {
       this.canvas.setSelection([], [])
       this.canvas.setTopologyDataContext?.(undefined)
       this.activeProcessDetailStateNodeId = undefined
+      this.activeProcessDetailId = undefined
       this.activeTopology = undefined
       this.deviceStateCache.setActiveContext(undefined, undefined)
       return true
@@ -253,6 +267,7 @@ export class TopologyRuntime {
       this.cacheActiveViewState(previousTopology.topologyId)
       this.canvas.setTopologyDataContext?.(undefined)
       this.activeProcessDetailStateNodeId = stateNodeId
+      this.activeProcessDetailId = undefined
       this.activeTopology = undefined
       this.deviceStateCache.setActiveContext(sceneId, undefined, stateNodeId)
       return true
@@ -268,6 +283,7 @@ export class TopologyRuntime {
    */
   public retargetProcessDetail(sceneId: SceneId, stateNodeId: SceneNodeId): boolean {
     if (this.disposed || this.activeTopology) return false
+    this.activeProcessDetailId = undefined
     this.deviceStateCache.setActiveContext(sceneId, undefined, stateNodeId)
     return true
   }
@@ -310,7 +326,12 @@ export class TopologyRuntime {
      * 缓存而不会生成 Unity 状态命令。
      */
     if (this.activeTopology) {
-      this.deviceStateCache.setActiveContext(this.activeTopology.sceneId, this.activeTopology.topologyId, this.activeProcessDetailStateNodeId)
+      this.deviceStateCache.setActiveContext(
+        this.activeTopology.sceneId,
+        this.activeTopology.topologyId,
+        this.activeProcessDetailStateNodeId,
+        this.activeProcessDetailId,
+      )
     }
     return this.deviceStateCache.apply(batch, (candidate) => {
       /*
@@ -348,6 +369,7 @@ export class TopologyRuntime {
     this.disposed = true
     this.activeTopology = undefined
     this.activeProcessDetailStateNodeId = undefined
+    this.activeProcessDetailId = undefined
     this.preparedByTopologyId.clear()
     this.viewStateByTopologyId.clear()
     this.deviceStateCache.dispose()
@@ -412,6 +434,8 @@ export class TopologyRuntime {
       } else {
         this.canvas.setSelection([], [])
       }
+      // 回退画布显示的是第二层源图，因此清除第三层专属状态筛选，避免详情状态残留到总图。
+      this.activeProcessDetailId = undefined
       this.deviceStateCache.setActiveContext(previousTopology.sceneId, previousTopology.topologyId, this.activeProcessDetailStateNodeId)
       this.canvas.setNodeStatuses(this.deviceStateCache.getActiveTopologyNodeStatuses())
     } catch {

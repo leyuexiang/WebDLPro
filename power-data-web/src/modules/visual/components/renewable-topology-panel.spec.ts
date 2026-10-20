@@ -30,6 +30,8 @@ vi.mock('../topology-preview/solar-topology-preview-data', () => ({ loadSolarTop
 vi.mock('../topology-preview/wind-topology-preview-data', () => ({ loadWindTopologyPreviewData: async () => ({ pens: [], source: 'overview' }) }))
 vi.mock('../topology-preview/wind-process-detail-topology-data', () => ({
   loadWindProcessDetailTopologyData: async (context: { contextId: string }) => ({ pens: [], source: context.contextId }),
+  // 该面板测试只验证组件换源，不渲染第三层设备状态；保留风电配置的状态图函数接口。
+  getWindProcessDetailStatusImageUrl: () => undefined,
 }))
 vi.mock('../topology-preview/step-up-substation-topology-preview-data', () => ({
   loadStepUpSubstationTopologyPreviewData: async () => ({ pens: [] }),

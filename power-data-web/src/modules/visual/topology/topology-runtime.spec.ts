@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
-import { SCENE_IDS, toNodeId, toSceneId, toSceneNodeId, toTopologyId, toTransitionId } from '@/config/scene-topology/identifiers'
+import { SCENE_IDS, toCameraPoseId, toNodeId, toProcessDetailId, toProcessDetailResourceId, toProcessId, toSceneId, toSceneNodeId, toStepId, toTopologyId, toTransitionId } from '@/config/scene-topology/identifiers'
 import { TopologyRegistry } from '@/config/scene-topology/topology-registry'
 import { TopologyRuntime, type TopologyCanvasPort } from '@/modules/visual/topology/topology-runtime'
+
+const windSceneNodeId = toSceneNodeId('scene-node.wind-turbine')
+const windAngleSensorNodeId = toNodeId('asset.wind-yaw-angle-sensor')
 
 /** 生成九场景注册表测试数据；只验证运行时边界，不声明任何真实设备或三维资源映射。 */
 function createRegistry(): TopologyRegistry {
@@ -46,7 +49,24 @@ function createRegistry(): TopologyRegistry {
       { topologyId: 'gas-power.detail', sceneId: 'gas-power', title: '燃气测试明细拓扑', configVersion: version, nodes: [], edges: [] },
     ],
     actions: [],
-    unitySceneMappings: SCENE_IDS.map((sceneId) => ({ sceneId, mappingVersion: version, sceneNodeIds: sceneId === 'gas-power' ? [gasSceneNodeId, passiveSceneNodeId] : [], routeIds: [] })),
+    // 该第三层节点具备合作方二维状态编号，但不声明独立 sceneNodeId。
+    processDetails: [{
+      sceneId: 'wind-power',
+      processId: toProcessId('wind-power-generation'),
+      stepId: toStepId('yaw-system'),
+      processDetailId: toProcessDetailId('process-detail.wind-power.yaw-system'),
+      resourceId: toProcessDetailResourceId('process-detail-resource.wind-power.yaw-system'),
+      cameraPoseId: toCameraPoseId('camera-pose.wind-power.yaw-system'),
+      stateNodeId: windSceneNodeId,
+      topologyDataContextId: 'process-detail.wind-power.yaw-system',
+      topologyNodes: [{ nodeId: windAngleSensorNodeId, title: '角度传感器' }],
+    }],
+    unitySceneMappings: SCENE_IDS.map((sceneId) => ({
+      sceneId,
+      mappingVersion: version,
+      sceneNodeIds: sceneId === 'gas-power' ? [gasSceneNodeId, passiveSceneNodeId] : sceneId === 'wind-power' ? [windSceneNodeId] : [],
+      routeIds: [],
+    })),
   })
   if (result.status !== 'ready') throw new Error('测试清单必须通过注册表校验。')
   return result.registry
@@ -79,6 +99,36 @@ describe('单画布多拓扑运行时', () => {
     expect(canvas.restoreViewState).not.toHaveBeenCalled()
     expect(canvas.setSelection).toHaveBeenLastCalledWith([], [])
     expect(runtime.getActiveTopology()?.topologyId).toBe(toTopologyId('gas-power.detail'))
+  })
+
+  it('进入对应第三层上下文后接收专属二维状态且不生成 Unity 状态', () => {
+    const canvas = createCanvas()
+    const runtime = new TopologyRuntime(createRegistry(), canvas)
+    const sceneId = toSceneId('wind-power')
+    const topologyId = toTopologyId('wind-power.overview')
+    const transitionId = toTransitionId('transition.wind-detail-status')
+    const prepared = runtime.prepare(sceneId, topologyId, transitionId)
+    expect(runtime.activate(prepared!, transitionId)).toBe(true)
+
+    const context = {
+      contextId: 'process-detail.wind-power.yaw-system',
+      renderer: 'manifest-json' as const,
+      topologyPath: 'process-detail/wind-power/yaw-system/topology.json',
+      sourceSha256: 'a'.repeat(64),
+      expectedPenCount: 1,
+      bindings: [{ penId: '5221dc0', nodeId: windAngleSensorNodeId }],
+    }
+    expect(runtime.activateProcessDetail(sceneId, windSceneNodeId, context)).toBe(true)
+    const result = runtime.applyDeviceStates({ sourceRevision: 1, items: [{
+      nodeId: windAngleSensorNodeId,
+      deviceStatus: 'alarm',
+      statusUpdatedAt: '2026-10-20T09:00:00.000+08:00',
+    }] })
+
+    expect(result.activeTopologyNodeStatuses).toEqual(new Map([[windAngleSensorNodeId, 'alarm']]))
+    expect(result.activeSceneNodeStatuses).toEqual(new Map())
+    expect(runtime.getActiveSceneNodeStatuses()).toEqual(new Map())
+    expect(canvas.setNodeStatuses).toHaveBeenLastCalledWith(new Map([[windAngleSensorNodeId, 'alarm']]))
   })
 
   it('旧事务或跨场景准备结果不能激活并覆盖当前画布', () => {

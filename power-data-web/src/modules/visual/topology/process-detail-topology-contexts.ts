@@ -113,7 +113,7 @@ function createProtectionTopologyContexts(): readonly TopologyDataContext[] {
  * 第三层关键环节 JSON 的显式上下文清单。
  *
  * 图元编号只在对应文件内有效，不能与总览或其他关键环节文件混用；
- * 每项绑定均由参考 JSON 和现有业务节点逐项核对，未核对的控制装置保持未绑定。
+ * 每项绑定均由参考 JSON 逐项核对。无 sceneNodeId 的条目只接收合作方状态并更新二维第三层，不映射 Unity。
  */
 const PROCESS_DETAIL_TOPOLOGY_CONTEXTS: readonly TopologyDataContext[] = Object.freeze([
   Object.freeze({
@@ -123,7 +123,11 @@ const PROCESS_DETAIL_TOPOLOGY_CONTEXTS: readonly TopologyDataContext[] = Object.
     // 最新风机完整图仍为四十个顶层图元；文字与装饰来源已更新，必须以新散列隔离同数量旧缓存。
     sourceSha256: '5770f9e3c402c04b081291850bc7dd32a5688ba4c398c3e866b3dc1525720fa4',
     expectedPenCount: 40,
-    bindings: Object.freeze([]),
+    bindings: Object.freeze([
+      // 这两个系统节点在风机专属图中单独向合作方开放状态编号；它们不绑定同名第二层节点或 Unity 节点。
+      Object.freeze({ penId: 'bb18bd', nodeId: 'asset.wind-turbine-yaw-system' }),
+      Object.freeze({ penId: 'c236be3', nodeId: 'asset.wind-turbine-drivetrain-system' }),
+    ]),
   }),
   Object.freeze({
     contextId: 'process-detail.wind-power.gearbox',
@@ -132,7 +136,10 @@ const PROCESS_DETAIL_TOPOLOGY_CONTEXTS: readonly TopologyDataContext[] = Object.
     // 齿轮箱专属新输入共二十个源图元，原组合没有子图元，无需展平；子设备未提供独立三维绑定。
     sourceSha256: '1f3de2f9cb1f4e7ea86daa836c9c5f189fa059c5bf33c7d9d49866e66512c9fc',
     expectedPenCount: 20,
-    bindings: Object.freeze([]),
+    bindings: Object.freeze([
+      // 润滑油装置只绑定齿轮箱第三层业务编号，没有独立 Unity 节点映射。
+      Object.freeze({ penId: 'a7d5ad8', nodeId: 'asset.wind-gearbox-lubrication-unit' }),
+    ]),
   }),
   Object.freeze({
     contextId: 'process-detail.wind-power.yaw-system',
@@ -141,7 +148,10 @@ const PROCESS_DETAIL_TOPOLOGY_CONTEXTS: readonly TopologyDataContext[] = Object.
     topologyPath: 'process-detail/wind-power/yaw-system/topology.json',
     sourceSha256: '86767c78df1d0ea12ed8b34e3ed8834caa0ba27d13a0dbd6e2011ac175d7dddd',
     expectedPenCount: 15,
-    bindings: Object.freeze([]),
+    bindings: Object.freeze([
+      // 角度传感器使用独立平台状态编号，不借用偏航系统整机 Unity 节点。
+      Object.freeze({ penId: '5221dc0', nodeId: 'asset.wind-yaw-angle-sensor' }),
+    ]),
   }),
   Object.freeze({
     contextId: 'process-detail.gas-power.gas-turbine',

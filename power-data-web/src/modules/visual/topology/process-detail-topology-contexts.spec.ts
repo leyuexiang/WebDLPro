@@ -88,8 +88,42 @@ describe('第三层关键环节拓扑数据上下文', () => {
         sceneNodeId: 'node.step-up-transformer',
       }),
     ]))
-    for (const contextItem of PROCESS_DETAIL_TOPOLOGY_DATA_CONTEXTS.filter((item) => item.renderer === 'manifest-json')) {
+    for (const contextItem of PROCESS_DETAIL_TOPOLOGY_DATA_CONTEXTS.filter((item) => item.contextId.includes('substation') || item.contextId.includes('converter-station') || item.contextId.includes('switching-station'))) {
       expect(contextItem.bindings.every((binding) => binding.nodeId && binding.sceneNodeId)).toBe(true)
+    }
+  })
+
+  it('风电第三层四个合作方状态节点分别绑定对应图元且不声明 Unity 节点', () => {
+    const topologyRoot = resolve(process.cwd(), 'public/topology')
+    const expectedBindings = new Map<string, readonly { penId: string; nodeId: string }[]>([
+      ['process-detail.wind-power.wind-turbine', [
+        { penId: 'bb18bd', nodeId: 'asset.wind-turbine-yaw-system' },
+        { penId: 'c236be3', nodeId: 'asset.wind-turbine-drivetrain-system' },
+      ]],
+      ['process-detail.wind-power.gearbox', [
+        { penId: 'a7d5ad8', nodeId: 'asset.wind-gearbox-lubrication-unit' },
+      ]],
+      ['process-detail.wind-power.yaw-system', [
+        { penId: '5221dc0', nodeId: 'asset.wind-yaw-angle-sensor' },
+      ]],
+    ])
+    const titleByNodeId = new Map([
+      ['asset.wind-turbine-yaw-system', '偏航系统'],
+      ['asset.wind-turbine-drivetrain-system', '传动系统'],
+      ['asset.wind-gearbox-lubrication-unit', '润滑油装置'],
+      ['asset.wind-yaw-angle-sensor', '角度传感器'],
+    ])
+
+    for (const [contextId, bindings] of expectedBindings) {
+      const context = getProcessDetailTopologyDataContext(contextId)
+      expect(context?.bindings).toEqual(bindings)
+      expect(context?.bindings.every((binding) => binding.sceneNodeId === undefined)).toBe(true)
+      if (!context) continue
+      const source = JSON.parse(readFileSync(resolve(topologyRoot, context.topologyPath), 'utf8')) as { pens: readonly { id?: string; text?: string }[] }
+      for (const binding of bindings) {
+        const penText = source.pens.find((pen) => pen.id === binding.penId)?.text ?? ''
+        expect(penText.replace(/\s+/g, '')).toContain(titleByNodeId.get(binding.nodeId))
+      }
     }
   })
 

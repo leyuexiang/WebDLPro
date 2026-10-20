@@ -155,6 +155,17 @@ export interface ProcessDetailDefinition {
   stateNodeId: SceneNodeId
   /** 第三层专属 JSON 数据上下文；缺失时不允许前端猜测或复用其他关键环节文件。 */
   topologyDataContextId?: string
+  /**
+   * 第三层独立拓扑中可由合作方按 nodeId 绑定并上报状态的节点目录。
+   * 此目录只作用于对应关键环节的二维画布，不声明 sceneNodeId，也不会产生 Unity 映射。
+   */
+  topologyNodes?: readonly ProcessDetailTopologyNodeDefinition[]
+}
+
+/** 关键环节专属二维状态节点；仅公开稳定编号和显示名，不包含三维目标或图片路径。 */
+export interface ProcessDetailTopologyNodeDefinition {
+  nodeId: NodeId
+  title: string
 }
 
 /** 说明节点只在单份内容内部唯一，不拥有正式节点标识、设备状态或三维映射。 */

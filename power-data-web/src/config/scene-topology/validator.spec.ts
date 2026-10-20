@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import {
   toActionId,
+  toCameraPoseId,
   SCENE_IDS,
   toNodeId,
+  toProcessDetailId,
+  toProcessDetailResourceId,
+  toProcessId,
   toRouteId,
   toSceneId,
   toSceneNodeId,
+  toStepId,
   toTopologyId,
   toUnityRuntimeKey,
   toUnitySceneKey,
@@ -117,6 +122,37 @@ function issueCodes(manifest: unknown): readonly string[] {
 describe('场景拓扑节点协议清单校验', () => {
   it('接受九场景闭集和节点主键清单', () => {
     expect(validateSceneTopologyManifest(createValidManifest())).toEqual([])
+  })
+
+  it('接受第三层专属状态节点，并拒绝编号冲突或 Unity 映射字段', () => {
+    const base = createValidManifest()
+    const manifest: SceneTopologyManifest = {
+      ...base,
+      processDetails: [{
+        sceneId: toSceneId('gas-power'),
+        processId: toProcessId('gas-power-generation'),
+        stepId: toStepId('gas-turbine'),
+        processDetailId: toProcessDetailId('process-detail.gas-power.gas-turbine'),
+        resourceId: toProcessDetailResourceId('process-detail-resource.gas-power.gas-turbine'),
+        cameraPoseId: toCameraPoseId('camera-pose.gas-power.gas-turbine'),
+        stateNodeId: toSceneNodeId('scene-node.gas.turbine'),
+        topologyDataContextId: 'process-detail.gas-power.gas-turbine',
+        topologyNodes: [{ nodeId: toNodeId('asset.gas-turbine-detail-sensor'), title: '燃机详情传感器' }],
+      }],
+    }
+    expect(validateSceneTopologyManifest(manifest)).toEqual([])
+
+    const sceneBound = structuredClone(manifest) as unknown as Record<string, unknown>
+    const details = sceneBound.processDetails as Array<Record<string, unknown>>
+    const detailNodes = details[0]!.topologyNodes as Array<Record<string, unknown>>
+    detailNodes[0]!.sceneNodeId = 'scene-node.gas.turbine'
+    expect(issueCodes(sceneBound)).toContain('process-detail.topology-node-scene-binding')
+
+    const colliding = structuredClone(manifest) as unknown as Record<string, unknown>
+    const collidingDetails = colliding.processDetails as Array<Record<string, unknown>>
+    const collidingNodes = collidingDetails[0]!.topologyNodes as Array<Record<string, unknown>>
+    collidingNodes[0]!.nodeId = 'node.gas.turbine'
+    expect(issueCodes(colliding)).toContain('process-detail.topology-node-id-collision')
   })
 
   it('接受总览重点区域，并拒绝未绑定锚点或关键环节区域声明', () => {

@@ -192,6 +192,10 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
       cameraPoseId: 'camera-pose.wind-power.wind-turbine',
       stateNodeId: 'node.wind-turbine',
       topologyDataContextId: 'process-detail.wind-power.wind-turbine',
+      topologyNodes: [
+        { nodeId: 'asset.wind-turbine-yaw-system', title: '偏航系统' },
+        { nodeId: 'asset.wind-turbine-drivetrain-system', title: '传动系统' },
+      ],
     }, {
       sceneId: 'wind-power',
       processId: 'wind-power-generation',
@@ -201,6 +205,9 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
       cameraPoseId: 'camera-pose.wind-power.gearbox',
       stateNodeId: 'node.wind-gearbox',
       topologyDataContextId: 'process-detail.wind-power.gearbox',
+      topologyNodes: [
+        { nodeId: 'asset.wind-gearbox-lubrication-unit', title: '润滑油装置' },
+      ],
     }, {
       sceneId: 'wind-power',
       processId: 'wind-power-generation',
@@ -210,6 +217,9 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
       cameraPoseId: 'camera-pose.wind-power.yaw-system',
       stateNodeId: 'node.wind-yaw-system',
       topologyDataContextId: 'process-detail.wind-power.yaw-system',
+      topologyNodes: [
+        { nodeId: 'asset.wind-yaw-angle-sensor', title: '角度传感器' },
+      ],
     }])
     expect(manifest.processDetails.filter((detail) => detail.sceneId === 'step-up-substation')).toHaveLength(3)
     expect(manifest.processDetails.filter((detail) => detail.sceneId === 'step-down-substation')).toHaveLength(3)

@@ -261,7 +261,7 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
 
   const topologiesById = new Map<string, UnknownRecord>()
   const topologyNodesByRef = new Map<string, UnknownRecord>()
-  /** 只统计来源拓扑中的节点定义；过滤视图引用同一节点不构成第二次定义。 */
+  /** 拓扑来源节点与关键环节专属状态节点共用全局编号空间；过滤视图不构成第二次定义。 */
   const sourceNodeIds = new Set<string>()
   /** 同一场景三维节点最多反向对应一个逻辑节点，保证 Unity 反选结果确定。 */
   const nodeIdBySceneNodeReference = new Map<string, string>()
@@ -616,6 +616,7 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
   const processDetailResourceIds = new Set<string>()
   const processDetailCameraPoseIds = new Set<string>()
   const processDetailStepReferences = new Set<string>()
+  const processDetailTopologyContextIds = new Set<string>()
   for (const item of processDetailItems) {
     if (!isRecord(item) || !validateIdentifier(item.processDetailId, '关键环节标识', issues)) {
       appendIssue(issues, 'process-detail.shape', '关键环节目录项缺少有效稳定标识。')
@@ -639,7 +640,29 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
     }
     validateIdentifier(item.stateNodeId, '关键环节状态节点标识', issues)
     if (item.topologyDataContextId !== undefined) {
-      validateIdentifier(item.topologyDataContextId, '关键环节拓扑数据上下文标识', issues)
+      if (validateIdentifier(item.topologyDataContextId, '关键环节拓扑数据上下文标识', issues)) {
+        const contextId = String(item.topologyDataContextId)
+        if (processDetailTopologyContextIds.has(contextId)) appendIssue(issues, 'process-detail.duplicate-topology-context', '关键环节拓扑数据上下文标识重复。')
+        processDetailTopologyContextIds.add(contextId)
+      }
+    }
+    if (item.topologyNodes !== undefined) {
+      const detailNodeIds = new Set<string>()
+      for (const nodeItem of readArray(item, 'topologyNodes', issues, 'process-detail.topology-nodes')) {
+        if (!isRecord(nodeItem) || !validateIdentifier(nodeItem.nodeId, '关键环节拓扑节点标识', issues)) {
+          appendIssue(issues, 'process-detail.topology-node-shape', '关键环节拓扑节点缺少有效稳定标识。')
+          continue
+        }
+        const nodeId = String(nodeItem.nodeId)
+        if (detailNodeIds.has(nodeId)) appendIssue(issues, 'process-detail.duplicate-topology-node', '同一关键环节内拓扑节点标识重复。')
+        detailNodeIds.add(nodeId)
+        if (sourceNodeIds.has(nodeId)) appendIssue(issues, 'process-detail.topology-node-id-collision', '关键环节拓扑节点标识必须与其他来源节点全局唯一。')
+        sourceNodeIds.add(nodeId)
+        hasNonEmptyString(nodeItem, 'title', issues, 'process-detail.topology-node-title')
+        if (nodeItem.sceneNodeId !== undefined) {
+          appendIssue(issues, 'process-detail.topology-node-scene-binding', '关键环节专属拓扑节点不得声明 Unity 场景节点映射。')
+        }
+      }
     }
     const stepReference = `${String(item.sceneId)}:${String(item.processId)}:${String(item.stepId)}`
     if (processDetailStepReferences.has(stepReference)) appendIssue(issues, 'process-detail.duplicate-step', '同一场景的关键环节流程步骤组合重复。')

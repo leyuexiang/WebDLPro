@@ -1,4 +1,5 @@
 import type { ManifestTopologyPreviewProfile } from './manifest-topology-preview-profile'
+import { getWindProcessDetailStatusImageUrl } from './wind-process-detail-topology-data'
 import { loadWindTopologyPreviewData } from './wind-topology-preview-data'
 import { getWindTopologyRuntimeBindings } from './wind-topology-runtime-bindings'
 import { getWindTopologyTooltipContent } from './wind-topology-tooltip'
@@ -31,6 +32,7 @@ export const WIND_TOPOLOGY_PREVIEW_PROFILE: ManifestTopologyPreviewProfile = Obj
     selected as ReadonlySet<WindTopologyFilterId>,
   ),
   getRuntimeBindings: (variantId: string) => getWindTopologyRuntimeBindings(variantId as WindTopologyVariantId),
+  getStatusImage: getWindProcessDetailStatusImageUrl,
   loadData: (variantId: string, signal?: AbortSignal) => loadWindTopologyPreviewData(variantId as never, signal),
   loadDataContext: loadWindProcessDetailTopologyData,
   getTooltipContent: getWindTopologyTooltipContent,

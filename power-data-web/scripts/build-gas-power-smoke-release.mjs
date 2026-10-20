@@ -360,6 +360,11 @@ const windProcessDetails = Object.freeze([
     cameraPoseId: 'camera-pose.wind-power.wind-turbine',
     stateNodeId: 'node.wind-turbine',
     topologyDataContextId: 'process-detail.wind-power.wind-turbine',
+    // 第三层可上报节点只用于合作方按 nodeId 绑定二维状态，不声明 Unity 场景节点映射。
+    topologyNodes: Object.freeze([
+      Object.freeze({ nodeId: 'asset.wind-turbine-yaw-system', title: '偏航系统' }),
+      Object.freeze({ nodeId: 'asset.wind-turbine-drivetrain-system', title: '传动系统' }),
+    ]),
   }),
   Object.freeze({
     sceneId: 'wind-power',
@@ -370,6 +375,10 @@ const windProcessDetails = Object.freeze([
     cameraPoseId: 'camera-pose.wind-power.gearbox',
     stateNodeId: 'node.wind-gearbox',
     topologyDataContextId: 'process-detail.wind-power.gearbox',
+    // 润滑油装置作为齿轮箱详情专属二维状态节点，状态不会映射到 Unity。
+    topologyNodes: Object.freeze([
+      Object.freeze({ nodeId: 'asset.wind-gearbox-lubrication-unit', title: '润滑油装置' }),
+    ]),
   }),
   Object.freeze({
     sceneId: 'wind-power',
@@ -380,6 +389,10 @@ const windProcessDetails = Object.freeze([
     cameraPoseId: 'camera-pose.wind-power.yaw-system',
     stateNodeId: 'node.wind-yaw-system',
     topologyDataContextId: 'process-detail.wind-power.yaw-system',
+    // 角度传感器状态仅作用于偏航详情二维图，与偏航整机 Unity 节点分开。
+    topologyNodes: Object.freeze([
+      Object.freeze({ nodeId: 'asset.wind-yaw-angle-sensor', title: '角度传感器' }),
+    ]),
   }),
 ])
 

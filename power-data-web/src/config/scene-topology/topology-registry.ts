@@ -12,14 +12,16 @@ export interface RegisteredNodeTopologyTarget {
 }
 
 /**
- * 结构清单加载时由来源节点一次性派生的状态投影。
- * 状态热路径只读取该索引，不重复扫描拓扑节点；过滤视图和总图共享同一个逻辑 nodeId。
+ * 结构清单加载时由第二层来源节点和第三层状态目录一次性派生的投影。
+ * 状态热路径只读取该索引，不重复扫描清单；过滤视图和总图共享同一个逻辑 nodeId。
  */
 export interface RegisteredNodeStateProjection {
   nodeId: NodeId
   sceneId: SceneId
   topologyTargets: readonly RegisteredNodeTopologyTarget[]
   sceneNodeIds: readonly SceneNodeId[]
+  /** 存在时表示该节点只在对应第三层二维画布显示状态，不参与第二层或 Unity 投影。 */
+  processDetailId?: ProcessDetailId
 }
 
 /** 注册失败时只返回清单校验问题，禁止从半份配置构建临时拓扑索引。 */
@@ -99,6 +101,8 @@ export class TopologyRegistry {
   /** 第三层目录在清单装载时一次建立索引，进入热路径只执行常数时间精确查询。 */
   private readonly processDetailById: ReadonlyMap<ProcessDetailId, ProcessDetailDefinition>
   private readonly processDetailsBySceneId: ReadonlyMap<SceneId, readonly ProcessDetailDefinition[]>
+  /** 通过经过校验的上下文编号反查第三层目录，防止二维状态节点跨关键环节串显。 */
+  private readonly processDetailByTopologyDataContextId: ReadonlyMap<string, ProcessDetailDefinition>
   /** 每个逻辑节点的二维目标和可选三维目标在加载时派生，避免每份状态快照重复解析拓扑。 */
   private readonly nodeStateProjectionByNodeId: ReadonlyMap<NodeId, RegisteredNodeStateProjection>
   /** 三维反向选择使用“场景 + 三维节点”复合键一次索引，禁止按对象名称或设备编号猜测。 */
@@ -121,6 +125,9 @@ export class TopologyRegistry {
     this.actionById = new Map(manifest.actions.map((action) => [action.actionId, action]))
     const processDetails = manifest.processDetails ?? []
     this.processDetailById = new Map(processDetails.map((detail) => [detail.processDetailId, Object.freeze(detail)]))
+    this.processDetailByTopologyDataContextId = new Map(processDetails.flatMap((detail) => detail.topologyDataContextId
+      ? [[detail.topologyDataContextId, Object.freeze(detail)] as const]
+      : []))
     const mutableDetailsBySceneId = new Map<SceneId, ProcessDetailDefinition[]>()
     for (const detail of processDetails) {
       const entries = mutableDetailsBySceneId.get(detail.sceneId) ?? []
@@ -152,7 +159,7 @@ export class TopologyRegistry {
       }
     }
 
-    const projections = manifest.topologies.flatMap((topology) => topology.filter
+    const topologyProjections = manifest.topologies.flatMap((topology) => topology.filter
       ? []
       : topology.nodes.map((node): readonly [NodeId, RegisteredNodeStateProjection] => [node.nodeId, {
           nodeId: node.nodeId,
@@ -160,6 +167,15 @@ export class TopologyRegistry {
           topologyTargets: topologyTargetsByNodeId.get(node.nodeId) ?? [],
           sceneNodeIds: node.sceneNodeId ? [node.sceneNodeId] : [],
         }]))
+    const processDetailProjections = processDetails.flatMap((detail) => (detail.topologyNodes ?? []).map((node): readonly [NodeId, RegisteredNodeStateProjection] => [node.nodeId, {
+      nodeId: node.nodeId,
+      sceneId: detail.sceneId,
+      // 第三层专属节点是状态入口，不挂接任何第二层拓扑或三维节点。
+      topologyTargets: [],
+      sceneNodeIds: [],
+      processDetailId: detail.processDetailId,
+    }]))
+    const projections = [...topologyProjections, ...processDetailProjections]
     this.nodeStateProjectionByNodeId = new Map(projections)
     this.nodeIdBySceneNodeReference = new Map(
       projections.flatMap(([nodeId, projection]) => projection.sceneNodeIds.map((sceneNodeId) => [
@@ -218,6 +234,11 @@ export class TopologyRegistry {
   /** 只按稳定关键环节编号读取目录项；未知编号不会按步骤、标题或模型名回退。 */
   public getProcessDetail(processDetailId: ProcessDetailId): ProcessDetailDefinition | undefined {
     return this.processDetailById.get(processDetailId)
+  }
+
+  /** 按独立上下文编号读取关键环节，供运行时精确限定该文件可显示的专属状态节点。 */
+  public getProcessDetailByTopologyDataContextId(contextId: string): ProcessDetailDefinition | undefined {
+    return this.processDetailByTopologyDataContextId.get(contextId)
   }
 
   /** 返回场景明确登记的零到多个第三层入口，顺序沿用发布清单且不暴露可写数组。 */

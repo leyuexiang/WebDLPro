@@ -1,4 +1,4 @@
-import type { NodeId, SceneId, SceneNodeId, TopologyId } from '@/config/scene-topology/identifiers'
+import type { NodeId, ProcessDetailId, SceneId, SceneNodeId, TopologyId } from '@/config/scene-topology/identifiers'
 import type { DeviceVisualStatus } from '@/config/scene-topology/types'
 import type { RegisteredNodeStateProjection, TopologyRegistry } from '@/config/scene-topology/topology-registry'
 
@@ -72,7 +72,7 @@ export interface TopologyDeviceStateCacheOptions {
 
 /**
  * 完整节点状态快照到二维、三维稳定标识的有限投影缓存。
- * 清单加载时已经预建 `nodeId → 二维目标 + 可选三维目标` 索引，因此热路径只遍历本批节点及其直接目标；
+ * 清单加载时已经预建 `nodeId → 二维目标/第三层归属 + 可选三维目标` 索引，因此热路径只遍历本批节点及其直接目标；
  * 权威节点表从不做最近最少使用淘汰，只有可由权威表重建的派生快照受八份容量限制。
  */
 export class TopologyDeviceStateCache {
@@ -87,6 +87,8 @@ export class TopologyDeviceStateCache {
    * 未设置时表示第二层业务场景，需要按场景投影全部显式登记的三维节点。
    */
   private activeSceneNodeIdFilter: SceneNodeId | undefined
+  /** 当前画布若载入第三层文件，只显示目录中归属该关键环节的状态节点。 */
+  private activeProcessDetailId: ProcessDetailId | undefined
   private snapshotSequence = 0
   private disposed = false
 
@@ -105,17 +107,20 @@ export class TopologyDeviceStateCache {
 
   /**
    * 激活上下文只决定本次返回和派生缓存保护范围，不会创建场景、画布或 Unity（统一引擎）对象。
-   * `sceneNodeIdFilter` 仅供第三层独立模型使用，必须来自已经校验的清单状态节点，不能由模型名或页面参数推断。
+   * `sceneNodeIdFilter` 仅供第三层独立模型使用，必须来自已经校验的清单状态节点，不能由模型名或页面参数推断；
+   * `processDetailId` 限定第三层二维状态节点，仅在当前详情上下文生效，不写入 Unity 投影。
    */
   public setActiveContext(
     sceneId: SceneId | undefined,
     topologyId: TopologyId | undefined,
     sceneNodeIdFilter?: SceneNodeId,
+    processDetailId?: ProcessDetailId,
   ): void {
     if (this.disposed) return
     this.activeSceneId = sceneId
     this.activeTopologyId = topologyId
     this.activeSceneNodeIdFilter = sceneId ? sceneNodeIdFilter : undefined
+    this.activeProcessDetailId = sceneId && topologyId ? processDetailId : undefined
   }
 
   /**
@@ -141,7 +146,10 @@ export class TopologyDeviceStateCache {
     this.snapshotSequence += 1
     this.nodeStatusesByTopologyId.clear()
     this.sceneNodeStatusesBySceneId.clear()
-    this.seedActiveSnapshots(prepared.result.activeTopologyNodeStatuses, prepared.result.activeSceneNodeStatuses)
+    this.seedActiveSnapshots(
+      this.activeTopologyId ? this.buildTopologyProjection(this.latestStateByNodeId, this.activeTopologyId) : new Map(),
+      prepared.result.activeSceneNodeStatuses,
+    )
 
     return {
       ...prepared.result,
@@ -181,7 +189,17 @@ export class TopologyDeviceStateCache {
 
   /** 无活动拓扑时明确返回空快照，禁止按默认拓扑或标题猜测当前画布。 */
   public getActiveTopologyNodeStatuses(): ReadonlyMap<NodeId, DeviceVisualStatus> {
-    return this.activeTopologyId ? this.getTopologyNodeStatuses(this.activeTopologyId) : new Map()
+    if (!this.activeTopologyId) return new Map()
+    const statuses = new Map(this.getTopologyNodeStatuses(this.activeTopologyId))
+    if (!this.activeProcessDetailId) return statuses
+    // 细节节点仅叠加到当前画布的即时结果，不写进第二层拓扑快照缓存，避免切换详情后串显。
+    for (const [nodeId, state] of this.latestStateByNodeId) {
+      const projection = this.registry.getNodeStateProjection(nodeId)
+      if (projection?.processDetailId !== this.activeProcessDetailId || projection.sceneId !== this.activeSceneId) continue
+      if (state.deviceStatus === 'normal') statuses.delete(nodeId)
+      else statuses.set(nodeId, state.deviceStatus)
+    }
+    return statuses
   }
 
   /** 无活动场景时明确返回空快照，禁止把其他场景三维状态误投到当前 Unity。 */
@@ -219,6 +237,7 @@ export class TopologyDeviceStateCache {
     this.activeSceneId = undefined
     this.activeTopologyId = undefined
     this.activeSceneNodeIdFilter = undefined
+    this.activeProcessDetailId = undefined
   }
 
   /** 单次遍历归一完整快照；同一节点重复出现时 Map（映射）无条件以数组最后一项覆盖。 */
@@ -259,7 +278,7 @@ export class TopologyDeviceStateCache {
       ? this.buildSceneProjection(this.latestStateByNodeId, this.activeSceneId, this.activeSceneNodeIdFilter).statuses
       : new Map<SceneNodeId, DeviceVisualStatus>()
     const activeTopologyNodeStatuses = this.activeTopologyId
-      ? this.buildTopologyProjection(nextStateByNodeId, this.activeTopologyId)
+      ? this.buildActiveTopologyProjection(nextStateByNodeId, this.activeTopologyId)
       : new Map<NodeId, DeviceVisualStatus>()
     const activeSceneProjection = this.activeSceneId
       ? this.buildSceneProjection(nextStateByNodeId, this.activeSceneId, this.activeSceneNodeIdFilter)
@@ -306,6 +325,22 @@ export class TopologyDeviceStateCache {
         if (target.topologyId !== topologyId || target.configuredStatus === state.deviceStatus) continue
         statuses.set(target.nodeId, state.deviceStatus)
       }
+    }
+    return statuses
+  }
+
+  /** 在正常拓扑投影上叠加当前关键环节节点，不污染按 topologyId 缓存的第二层状态快照。 */
+  private buildActiveTopologyProjection(
+    states: ReadonlyMap<NodeId, CachedNodeState>,
+    topologyId: TopologyId,
+  ): Map<NodeId, DeviceVisualStatus> {
+    const statuses = this.buildTopologyProjection(states, topologyId)
+    if (!this.activeProcessDetailId) return statuses
+    for (const [nodeId, state] of states) {
+      const projection = this.registry.getNodeStateProjection(nodeId)
+      if (projection?.processDetailId !== this.activeProcessDetailId || projection.sceneId !== this.activeSceneId) continue
+      if (state.deviceStatus === 'normal') statuses.delete(nodeId)
+      else statuses.set(nodeId, state.deviceStatus)
     }
     return statuses
   }

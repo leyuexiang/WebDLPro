@@ -608,6 +608,30 @@ export async function validateReleaseArtifact(rootDirectory) {
         solarInverterDetail.topologyDataContextId !== 'process-detail.solar-power.inverter') {
       issues.push('结构清单必须发布风电三项控制模拟、既有三项第三层目录、三个变电场景各三项保护关键环节及开关站两项保护关键环节，共十七项。')
     }
+    const expectedWindProcessDetailNodes = new Map([
+      ['process-detail.wind-power.wind-turbine', [
+        { nodeId: 'asset.wind-turbine-yaw-system', title: '偏航系统' },
+        { nodeId: 'asset.wind-turbine-drivetrain-system', title: '传动系统' },
+      ]],
+      ['process-detail.wind-power.gearbox', [
+        { nodeId: 'asset.wind-gearbox-lubrication-unit', title: '润滑油装置' },
+      ]],
+      ['process-detail.wind-power.yaw-system', [
+        { nodeId: 'asset.wind-yaw-angle-sensor', title: '角度传感器' },
+      ]],
+    ])
+    const hasExpectedWindNodeDirectory = [...expectedWindProcessDetailNodes].every(([processDetailId, expectedNodes]) => {
+      const detail = processDetails.find((item) => item?.processDetailId === processDetailId)
+      const nodes = Array.isArray(detail?.topologyNodes) ? detail.topologyNodes : []
+      return nodes.length === expectedNodes.length && expectedNodes.every((expectedNode, index) => {
+        const actualNode = nodes[index]
+        return actualNode?.nodeId === expectedNode.nodeId && actualNode?.title === expectedNode.title &&
+          Object.keys(actualNode).sort().join(',') === 'nodeId,title'
+      })
+    })
+    if (!hasExpectedWindNodeDirectory) {
+      issues.push('风电三个关键环节必须公布四个专属二维状态节点，编号与名称固定，且不得包含 Unity 场景节点映射。')
+    }
     const expectedSubstationDetails = [
       ['step-up-substation', 'transformer-protection', 'node.step-up-transformer'],
       ['step-up-substation', 'busbar-protection', 'unit.step-up-protection.control'],

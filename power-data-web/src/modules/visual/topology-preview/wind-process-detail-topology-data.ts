@@ -1,4 +1,7 @@
 import { LockState, type Meta2dData } from '@meta2d/core'
+import type { ProcessNodeId } from '@/config/process/identifiers'
+import { toProcessNodeId } from '@/config/process/identifiers'
+import type { TopologyDeviceStatus } from '@/config/process/types'
 import type { TopologyDataContext } from '@/modules/visual/topology/topology-runtime'
 import { getTopologySharedPublicAssetUrl } from './topology-shared-assets'
 
@@ -9,7 +12,7 @@ const PATH_BY_CONTEXT = new Map([
 ])
 /**
  * 按当前完整文件登记可单独命中的设备和工艺节点；相同图元编号跨文件不代表同一业务设备。
- * 风机十一设备及三个工艺节点、齿轮箱七项和偏航六项只开放二维交互，不推测子设备三维编号。
+ * 风机设备、齿轮箱设备和偏航设备仅四个经发布清单声明的节点接收合作方状态，且均不推测独立 Unity 编号。
  * 公共提示层还会检查图片字段，因此三个工艺矩形可选、高亮但不会生成设备状态提示。
  */
 const SELECTABLE_PEN_IDS_BY_CONTEXT: ReadonlyMap<string, ReadonlySet<string>> = new Map([
@@ -40,6 +43,43 @@ const IMAGE_MAP: Readonly<Record<string, string>> = Object.freeze({
   '/cloud/2026/09/09/20/01a08639-799b-7a65-8a8f-e31e02cb35fe.png': 'icons/static/e2e275e4a94ef6d9f2313aee8ee7857b2ba21ac4d323bd53378144dc47169f7f.webp',
   '/cloud/2026/09/09/20/01a08639-15ae-7ed0-9ab4-539dee85ade1.png': 'icons/static/cd8655f8bcede28c1a381160c4a696c93556459006d8fd8c2583a261b312d755.webp',
 })
+
+/** 仅给本次登记的四个第三层节点提供四态图；路径复用已存在且与源 JSON 图元类型一致的公共 WebP。 */
+const WIND_PROCESS_DETAIL_STATUS_PATHS: ReadonlyMap<ProcessNodeId, Readonly<Record<TopologyDeviceStatus, string>>> = new Map<ProcessNodeId, Readonly<Record<TopologyDeviceStatus, string>>>([
+  [toProcessNodeId('asset.wind-turbine-yaw-system'), Object.freeze({
+    normal: 'icons/static/def6155598057373934ea3668fa58a2ed4cf26f9d1722fae22f6a06af732859a.webp',
+    alarm: 'icons/alarm/wind-yaw-system.webp',
+    fault: 'icons/fault/wind-yaw-system.webp',
+    offline: 'icons/offline/wind-yaw-system.webp',
+  })],
+  [toProcessNodeId('asset.wind-turbine-drivetrain-system'), Object.freeze({
+    normal: 'icons/normal/gearbox.webp',
+    alarm: 'icons/alarm/gearbox.webp',
+    fault: 'icons/fault/gearbox.webp',
+    offline: 'icons/offline/gearbox.webp',
+  })],
+  [toProcessNodeId('asset.wind-gearbox-lubrication-unit'), Object.freeze({
+    normal: 'icons/normal/gearbox.webp',
+    alarm: 'icons/alarm/gearbox.webp',
+    fault: 'icons/fault/gearbox.webp',
+    offline: 'icons/offline/gearbox.webp',
+  })],
+  [toProcessNodeId('asset.wind-yaw-angle-sensor'), Object.freeze({
+    normal: 'icons/normal/gearbox.webp',
+    alarm: 'icons/alarm/gearbox.webp',
+    fault: 'icons/fault/gearbox.webp',
+    offline: 'icons/offline/gearbox.webp',
+  })],
+])
+
+/** 查询明确登记的第三层节点状态图，不按节点标题、文件或图元编号猜测资源。 */
+export function getWindProcessDetailStatusImageUrl(
+  nodeId: ProcessNodeId,
+  status: TopologyDeviceStatus,
+): string | undefined {
+  const relativePath = WIND_PROCESS_DETAIL_STATUS_PATHS.get(nodeId)?.[status]
+  return relativePath ? getTopologySharedPublicAssetUrl(relativePath) : undefined
+}
 
 /**
  * 相对发布时由入口脚本定位 shell 目录；附带原文件散列作为缓存版本，

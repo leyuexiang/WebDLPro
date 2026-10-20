@@ -5,6 +5,7 @@ import { getProcessDetailTopologyDataContext } from '../topology/process-detail-
 import { resolveManifestTopologyClickSelection } from './manifest-topology-click-selection'
 import { createGasTopologyConnectedLineIndex, resolveGasTopologyConnectedLineIds } from './gas-topology-connection-highlight'
 import { getWindTopologyTooltipContent } from './wind-topology-tooltip'
+import { toProcessNodeId } from '@/config/process/identifiers'
 
 // 加载器只消费锁定枚举；隔离引擎的浏览器初始化，避免无窗口单测提前访问 location。
 vi.mock('@meta2d/core', () => ({ LockState: { DisableEdit: 1, Disable: 10 } }))
@@ -18,6 +19,16 @@ beforeEach(() => vi.resetModules())
 afterEach(() => vi.unstubAllGlobals())
 
 describe('偏航专属第三层拓扑', () => {
+  it('四个合作方状态节点只使用已登记的公共四态 WebP 图', async () => {
+    const { getWindProcessDetailStatusImageUrl } = await import('./wind-process-detail-topology-data')
+    expect(getWindProcessDetailStatusImageUrl(toProcessNodeId('asset.wind-turbine-yaw-system'), 'alarm')).toContain('/icons/alarm/wind-yaw-system.webp')
+    expect(getWindProcessDetailStatusImageUrl(toProcessNodeId('asset.wind-turbine-drivetrain-system'), 'fault')).toContain('/icons/fault/gearbox.webp')
+    expect(getWindProcessDetailStatusImageUrl(toProcessNodeId('asset.wind-gearbox-lubrication-unit'), 'offline')).toContain('/icons/offline/gearbox.webp')
+    expect(getWindProcessDetailStatusImageUrl(toProcessNodeId('asset.wind-yaw-angle-sensor'), 'normal')).toContain('/icons/normal/gearbox.webp')
+    expect(getWindProcessDetailStatusImageUrl(toProcessNodeId('asset.wind-yaw-angle-sensor'), 'alarm')).toContain('/icons/alarm/gearbox.webp')
+    expect(getWindProcessDetailStatusImageUrl(toProcessNodeId('asset.wind-pitch-system'), 'alarm')).toBeUndefined()
+  })
+
   it('原样保留十五个图元及布局，只使用公共 WebP，并允许无三维绑定设备独立二维选中', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(sourceText))
     vi.stubGlobal('fetch', fetchMock)
@@ -33,7 +44,8 @@ describe('偏航专属第三层拓扑', () => {
       if (!deviceIds.includes(pen.id!)) continue
       expect(resolveManifestTopologyClickSelection(pen, new Map())).toEqual({ kind: 'select', pen })
     }
-    expect(context.bindings).toEqual([])
+    expect(context.bindings).toEqual([{ penId: '5221dc0', nodeId: 'asset.wind-yaw-angle-sensor' }])
+    expect(context.bindings[0]?.sceneNodeId).toBeUndefined()
     expect(data).toEqual(expect.objectContaining({ enableMock: false, dataPoints: [], networks: [], initJs: '' }))
     expect(fetchMock.mock.calls[0]?.[0]).toContain(`?v=${context.sourceSha256}`)
   })
@@ -98,7 +110,8 @@ describe('齿轮箱最新第三层拓扑', () => {
         expect(getWindTopologyTooltipContent(pen)).toBeUndefined()
       }
     }
-    expect(gearboxContext.bindings).toEqual([])
+    expect(gearboxContext.bindings).toEqual([{ penId: 'a7d5ad8', nodeId: 'asset.wind-gearbox-lubrication-unit' }])
+    expect(gearboxContext.bindings[0]?.sceneNodeId).toBeUndefined()
     expect(data.pens.find((pen) => pen.id === '229c868c')?.text?.trim()).toBe('太阳能')
     expect((data as Meta2dData & { image?: string }).image).toBeUndefined()
     expect(fetchMock).toHaveBeenCalledTimes(1)
@@ -151,7 +164,11 @@ describe('风机最新第三层拓扑', () => {
       else expect(getWindTopologyTooltipContent(pen)).toBeUndefined()
     }
     // 第二层五系统绑定不属于本关键环节文件，工艺矩形和十一设备均不能被自动推导为整机三维节点。
-    expect(turbineContext.bindings).toEqual([])
+    expect(turbineContext.bindings).toEqual([
+      { penId: 'bb18bd', nodeId: 'asset.wind-turbine-yaw-system' },
+      { penId: 'c236be3', nodeId: 'asset.wind-turbine-drivetrain-system' },
+    ])
+    expect(turbineContext.bindings.every((binding) => binding.sceneNodeId === undefined)).toBe(true)
   })
 
   it('主控制器及工艺矩形共用源文件连线索引，不增加图元或改写线条样式', async () => {

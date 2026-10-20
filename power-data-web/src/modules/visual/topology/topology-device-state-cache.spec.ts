@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { SCENE_IDS, toNodeId, toRouteId, toSceneId, toSceneNodeId, toTopologyId, toUnityRuntimeKey, toUnitySceneKey } from '@/config/scene-topology/identifiers'
+import { SCENE_IDS, toCameraPoseId, toNodeId, toProcessDetailId, toProcessDetailResourceId, toProcessId, toRouteId, toSceneId, toSceneNodeId, toStepId, toTopologyId, toUnityRuntimeKey, toUnitySceneKey } from '@/config/scene-topology/identifiers'
 import { TopologyRegistry } from '@/config/scene-topology/topology-registry'
 import { TopologyDeviceStateCache } from '@/modules/visual/topology/topology-device-state-cache'
 
@@ -16,6 +16,10 @@ const unknownNodeId = toNodeId('node.unknown')
 const primarySceneNodeId = toSceneNodeId('scene-node.gas.primary')
 const standbySceneNodeId = toSceneNodeId('scene-node.gas.standby')
 const windSceneNodeId = toSceneNodeId('scene-node.wind.primary')
+const windYawProcessDetailId = toProcessDetailId('process-detail.wind-power.yaw-system')
+const windGearboxProcessDetailId = toProcessDetailId('process-detail.wind-power.gearbox')
+const windAngleSensorNodeId = toNodeId('asset.wind-yaw-angle-sensor')
+const windLubricationNodeId = toNodeId('asset.wind-gearbox-lubrication-unit')
 
 /**
  * 注册表只保存 nodeId 到二维/三维目标的静态关系。
@@ -59,6 +63,30 @@ function createRegistry(): TopologyRegistry {
     scenes,
     topologies,
     actions: [],
+    processDetails: [
+      {
+        sceneId: windSceneId,
+        processId: toProcessId('wind-power-generation'),
+        stepId: toStepId('yaw-system'),
+        processDetailId: windYawProcessDetailId,
+        resourceId: toProcessDetailResourceId('process-detail-resource.wind-power.yaw-system'),
+        cameraPoseId: toCameraPoseId('camera-pose.wind-power.yaw-system'),
+        stateNodeId: windSceneNodeId,
+        topologyDataContextId: 'process-detail.wind-power.yaw-system',
+        topologyNodes: [{ nodeId: windAngleSensorNodeId, title: '角度传感器' }],
+      },
+      {
+        sceneId: windSceneId,
+        processId: toProcessId('wind-power-generation'),
+        stepId: toStepId('gearbox'),
+        processDetailId: windGearboxProcessDetailId,
+        resourceId: toProcessDetailResourceId('process-detail-resource.wind-power.gearbox'),
+        cameraPoseId: toCameraPoseId('camera-pose.wind-power.gearbox'),
+        stateNodeId: windSceneNodeId,
+        topologyDataContextId: 'process-detail.wind-power.gearbox',
+        topologyNodes: [{ nodeId: windLubricationNodeId, title: '润滑油装置' }],
+      },
+    ],
     unitySceneMappings: scenes.map((scene) => ({ sceneId: scene.sceneId, mappingVersion: scene.sceneMappingVersion, sceneNodeIds: scene.sceneId === gasSceneId ? [primarySceneNodeId, standbySceneNodeId] : scene.sceneId === windSceneId ? [windSceneNodeId] : [], routeIds: [] })),
   })
   if (result.status !== 'ready') throw new Error(`节点状态缓存夹具无效：${result.issues.map((issue) => issue.code).join(',')}`)
@@ -101,6 +129,38 @@ describe('拓扑节点状态完整快照缓存', () => {
     cache.apply({ sourceRevision: 3, items: [{ nodeId: primaryNodeId, deviceStatus: 'alarm', statusUpdatedAt: '2026-08-11T12:00:00.000+08:00' }] })
     expect(cache.getTopologyNodeStatuses(gasDetailId)).toEqual(new Map([[primaryNodeId, 'alarm']]))
     expect(cache.getSceneNodeStatuses(gasSceneId)).toEqual(new Map([[primarySceneNodeId, 'alarm']]))
+  })
+
+  it('只将当前关键环节的专属节点状态投影到第三层二维画布且不生成 Unity 状态', () => {
+    const registry = createRegistry()
+    const angleProjection = registry.getNodeStateProjection(windAngleSensorNodeId)
+    expect(angleProjection).toMatchObject({
+      sceneId: windSceneId,
+      topologyTargets: [],
+      sceneNodeIds: [],
+      processDetailId: windYawProcessDetailId,
+    })
+
+    const cache = new TopologyDeviceStateCache(registry)
+    cache.setActiveContext(windSceneId, windOverviewId, windSceneNodeId, windYawProcessDetailId)
+    const snapshot = cache.apply({ sourceRevision: 4, items: [
+      { nodeId: windNodeId, deviceStatus: 'alarm', statusUpdatedAt: '2026-08-11T12:00:00.000+08:00' },
+      { nodeId: windAngleSensorNodeId, deviceStatus: 'fault', statusUpdatedAt: '2026-08-11T12:00:01.000+08:00' },
+      { nodeId: windLubricationNodeId, deviceStatus: 'offline', statusUpdatedAt: '2026-08-11T12:00:02.000+08:00' },
+    ] })
+    expect(snapshot.activeTopologyNodeStatuses).toEqual(new Map([
+      [windNodeId, 'alarm'],
+      [windAngleSensorNodeId, 'fault'],
+    ]))
+    expect(snapshot.activeSceneNodeStatuses).toEqual(new Map([[windSceneNodeId, 'alarm']]))
+    expect(cache.getTopologyNodeStatuses(windOverviewId)).toEqual(new Map([[windNodeId, 'alarm']]))
+
+    cache.setActiveContext(windSceneId, windOverviewId, windSceneNodeId, windGearboxProcessDetailId)
+    expect(cache.getActiveTopologyNodeStatuses()).toEqual(new Map([
+      [windNodeId, 'alarm'],
+      [windLubricationNodeId, 'offline'],
+    ]))
+    expect(cache.getActiveSceneNodeStatuses()).toEqual(new Map([[windSceneNodeId, 'alarm']]))
   })
 
   it('容量超限和释放不会交换权威表', () => {

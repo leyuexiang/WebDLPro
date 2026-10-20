@@ -304,6 +304,10 @@ function createTopologyManifest() {
       cameraPoseId: 'camera-pose.wind-power.wind-turbine',
       stateNodeId: 'node.wind-turbine',
       topologyDataContextId: 'process-detail.wind-power.wind-turbine',
+      topologyNodes: [
+        { nodeId: 'asset.wind-turbine-yaw-system', title: '偏航系统' },
+        { nodeId: 'asset.wind-turbine-drivetrain-system', title: '传动系统' },
+      ],
     }, {
       sceneId: 'wind-power',
       processId: 'wind-power-generation',
@@ -313,6 +317,7 @@ function createTopologyManifest() {
       cameraPoseId: 'camera-pose.wind-power.gearbox',
       stateNodeId: 'node.wind-gearbox',
       topologyDataContextId: 'process-detail.wind-power.gearbox',
+      topologyNodes: [{ nodeId: 'asset.wind-gearbox-lubrication-unit', title: '润滑油装置' }],
     }, {
       sceneId: 'wind-power',
       processId: 'wind-power-generation',
@@ -322,6 +327,7 @@ function createTopologyManifest() {
       cameraPoseId: 'camera-pose.wind-power.yaw-system',
       stateNodeId: 'node.wind-yaw-system',
       topologyDataContextId: 'process-detail.wind-power.yaw-system',
+      topologyNodes: [{ nodeId: 'asset.wind-yaw-angle-sensor', title: '角度传感器' }],
     }, ...['step-up-substation', 'step-down-substation', 'converter-station'].flatMap((sceneId) => {
       const nodePrefix = sceneId === 'converter-station' ? 'converter' : sceneId === 'step-up-substation' ? 'step-up' : 'step-down'
       return [
@@ -538,6 +544,36 @@ describe('发布产物输出标准', () => {
       await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
       expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
         expect.stringContaining('共十七项'),
+      ]))
+    } finally { rmSync(root, { recursive: true, force: true }) }
+  })
+
+  it('风电关键环节缺少任一二维状态节点时阻断交付', async () => {
+    const root = await createArtifact()
+    try {
+      const manifestPath = path.join(root, 'scene-topology-manifest.json')
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+      const turbine = manifest.processDetails.find((detail: { processDetailId: string }) => detail.processDetailId === 'process-detail.wind-power.wind-turbine')
+      turbine.topologyNodes = turbine.topologyNodes.filter((node: { nodeId: string }) => node.nodeId !== 'asset.wind-turbine-yaw-system')
+      writeFileSync(manifestPath, JSON.stringify(manifest), 'utf8')
+      await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
+      expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
+        expect.stringContaining('风电三个关键环节必须公布四个专属二维状态节点'),
+      ]))
+    } finally { rmSync(root, { recursive: true, force: true }) }
+  })
+
+  it('风电第三层专属节点不得附加 Unity 场景节点映射', async () => {
+    const root = await createArtifact()
+    try {
+      const manifestPath = path.join(root, 'scene-topology-manifest.json')
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+      const yaw = manifest.processDetails.find((detail: { processDetailId: string }) => detail.processDetailId === 'process-detail.wind-power.yaw-system')
+      yaw.topologyNodes[0].sceneNodeId = 'node.wind-yaw-system'
+      writeFileSync(manifestPath, JSON.stringify(manifest), 'utf8')
+      await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
+      expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
+        expect.stringContaining('风电三个关键环节必须公布四个专属二维状态节点'),
       ]))
     } finally { rmSync(root, { recursive: true, force: true }) }
   })

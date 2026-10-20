@@ -43,7 +43,7 @@ const protectionTopologyContracts = Object.freeze(
 
 /**
  * 十七项第三层上下文复用显式登记的不可变拓扑合同。散列锁定经过验收的原始文件，图元数量用于提供更直观的
- * 结构诊断，显式绑定图元则保证二维状态投影不会在文件仍可解析时静默失效。
+ * 结构诊断，显式绑定图元则保证合作方二维状态投影不会在文件仍可解析时静默失效。
  */
 export const processDetailTopologyContracts = Object.freeze([
   Object.freeze({
@@ -52,7 +52,7 @@ export const processDetailTopologyContracts = Object.freeze([
     // 新旧文件均有四十个图元，发布门禁同时锁定内容散列，不能仅比较数量。
     sourceSha256: '5770f9e3c402c04b081291850bc7dd32a5688ba4c398c3e866b3dc1525720fa4',
     expectedPenCount: 40,
-    bindingPenIds: Object.freeze([]),
+    bindingPenIds: Object.freeze(['bb18bd', 'c236be3']),
   }),
   Object.freeze({
     contextId: 'process-detail.wind-power.gearbox',
@@ -60,14 +60,14 @@ export const processDetailTopologyContracts = Object.freeze([
     // 与运行时上下文共同锁定本次完整输入，阻断旧十五图元文件进入新产物。
     sourceSha256: '1f3de2f9cb1f4e7ea86daa836c9c5f189fa059c5bf33c7d9d49866e66512c9fc',
     expectedPenCount: 20,
-    bindingPenIds: Object.freeze([]),
+    bindingPenIds: Object.freeze(['a7d5ad8']),
   }),
   Object.freeze({
     contextId: 'process-detail.wind-power.yaw-system',
     topologyPath: 'process-detail/wind-power/yaw-system/topology.json',
     sourceSha256: '86767c78df1d0ea12ed8b34e3ed8834caa0ba27d13a0dbd6e2011ac175d7dddd',
     expectedPenCount: 15,
-    bindingPenIds: Object.freeze([]),
+    bindingPenIds: Object.freeze(['5221dc0']),
   }),
   Object.freeze({
     contextId: 'process-detail.gas-power.gas-turbine',
