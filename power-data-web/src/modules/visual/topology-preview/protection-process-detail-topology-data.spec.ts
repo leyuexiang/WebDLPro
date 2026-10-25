@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { getProcessDetailTopologyDataContext } from '../topology/process-detail-topology-contexts'
+import { getProcessDetailTopologyDataContext, PROCESS_DETAIL_TOPOLOGY_DATA_CONTEXTS } from '../topology/process-detail-topology-contexts'
+import { toProcessNodeId } from '@/config/process/identifiers'
 
 vi.mock('@meta2d/core', () => ({ LockState: { DisableEdit: 1, Disable: 2 } }))
 
@@ -31,5 +32,50 @@ describe('保护关键环节公共拓扑数据', () => {
     // 公共图片别名必须像第二层一样生效，避免源文件路径绕开部署地址生成器。
     expect(images).toContain('/topology/shared/background/flow-light-3.webp')
     expect(images.every((url) => url?.includes('/topology/shared/'))).toBe(true)
+  })
+
+  it('十一份保护上下文均把断路器交给合作方且不声明 Unity 映射', () => {
+    const contexts = PROCESS_DETAIL_TOPOLOGY_DATA_CONTEXTS.filter((context) => context.contextId.includes('substation') || context.contextId.includes('converter-station') || context.contextId.includes('switching-station'))
+    expect(contexts).toHaveLength(11)
+    for (const context of contexts) {
+      const breakerBindings = context.bindings.filter((binding) => binding.nodeId.includes('-protection-breaker'))
+      expect(breakerBindings).toHaveLength(1)
+      expect(breakerBindings[0]?.sceneNodeId).toBeUndefined()
+    }
+  })
+
+  it('断路器四态只引用公共 WebP 资源', async () => {
+    const { getProtectionProcessDetailStatusImageUrl } = await import('./protection-process-detail-topology-data')
+    for (const status of ['normal', 'alarm', 'fault', 'offline'] as const) {
+      const image = getProtectionProcessDetailStatusImageUrl(toProcessNodeId('asset.step-up-line-protection-breaker'), status)
+      expect(image).toContain(`/topology/shared/icons/${status}/`)
+      expect(image).toMatch(/\.webp$/)
+    }
+  })
+
+  it('第二层四类保护控制节点四态均可切换公共 WebP 且不依赖 Unity 映射', async () => {
+    const { getProtectionProcessDetailStatusImageUrl } = await import('./protection-process-detail-topology-data')
+    const controlNodeIds = [
+      'system.step-up-transformer-protection',
+      'system.step-up-busbar-protection',
+      'system.step-up-line-protection',
+      'system.step-up-capacitor-protection',
+      'system.step-down-transformer-protection',
+      'system.step-down-busbar-protection',
+      'system.step-down-line-protection',
+      'system.step-down-capacitor-protection',
+      'system.converter-transformer-protection',
+      'system.converter-busbar-protection',
+      'system.converter-line-protection',
+      'system.converter-capacitor-protection',
+      'system.switching-busbar-protection',
+      'system.switching-line-protection',
+      'system.switching-capacitor-protection',
+    ]
+    for (const nodeId of controlNodeIds) {
+      const image = getProtectionProcessDetailStatusImageUrl(toProcessNodeId(nodeId), 'fault')
+      expect(image).toContain('/topology/shared/icons/fault/')
+      expect(image).toMatch(/\.webp$/)
+    }
   })
 })

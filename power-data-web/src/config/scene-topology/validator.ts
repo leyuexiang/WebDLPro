@@ -263,6 +263,8 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
   const topologyNodesByRef = new Map<string, UnknownRecord>()
   /** 拓扑来源节点与关键环节专属状态节点共用全局编号空间；过滤视图不构成第二次定义。 */
   const sourceNodeIds = new Set<string>()
+  /** 第三层状态聚合目标必须是同场景第二层来源节点，不能指向另一个第三层节点。 */
+  const sourceTopologyNodeIdsBySceneId = new Map<string, Set<string>>()
   /** 同一场景三维节点最多反向对应一个逻辑节点，保证 Unity 反选结果确定。 */
   const nodeIdBySceneNodeReference = new Map<string, string>()
   /** 三维状态目标按场景限制为500个，避免一次完整快照产生无界 Unity 投影。 */
@@ -335,6 +337,9 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
       if (item.filter === undefined) {
         if (sourceNodeIds.has(nodeId)) appendIssue(issues, 'topology.duplicate-source-node', '同一联动资源内来源节点标识必须全局唯一。')
         sourceNodeIds.add(nodeId)
+        const sceneSourceNodeIds = sourceTopologyNodeIdsBySceneId.get(sceneId as string) ?? new Set<string>()
+        sceneSourceNodeIds.add(nodeId)
+        sourceTopologyNodeIdsBySceneId.set(sceneId as string, sceneSourceNodeIds)
       }
       const topologyNodeReference = `${topologyId}:${nodeId}`
       topologyNodesByRef.set(topologyNodeReference, nodeItem)
@@ -659,6 +664,13 @@ export function validateSceneTopologyManifest(input: unknown): readonly SceneTop
         if (sourceNodeIds.has(nodeId)) appendIssue(issues, 'process-detail.topology-node-id-collision', '关键环节拓扑节点标识必须与其他来源节点全局唯一。')
         sourceNodeIds.add(nodeId)
         hasNonEmptyString(nodeItem, 'title', issues, 'process-detail.topology-node-title')
+        if (nodeItem.statusTargetNodeId !== undefined) {
+          if (!validateIdentifier(nodeItem.statusTargetNodeId, '关键环节状态聚合目标标识', issues)) {
+            appendIssue(issues, 'process-detail.topology-node-target-shape', '关键环节状态聚合目标必须是有效稳定节点标识。')
+          } else if (!sourceTopologyNodeIdsBySceneId.get(String(item.sceneId))?.has(String(nodeItem.statusTargetNodeId))) {
+            appendIssue(issues, 'process-detail.topology-node-target-reference', '关键环节状态聚合目标必须引用同场景第二层来源节点。')
+          }
+        }
         if (nodeItem.sceneNodeId !== undefined) {
           appendIssue(issues, 'process-detail.topology-node-scene-binding', '关键环节专属拓扑节点不得声明 Unity 场景节点映射。')
         }

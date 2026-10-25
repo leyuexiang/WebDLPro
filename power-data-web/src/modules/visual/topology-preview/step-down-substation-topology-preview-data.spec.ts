@@ -34,12 +34,12 @@ afterEach(() => {
 })
 
 describe('降压站拓扑独立数据与公共资源', () => {
-  it('默认三层组合请求使用新文件散列，避开旧版 93 图元缓存', async () => {
+  it('默认三层组合请求使用新文件散列，避开旧版缓存图元', async () => {
     const variant = STEP_DOWN_SUBSTATION_TOPOLOGY_VARIANTS.find((entry) => 'isDefault' in entry)!
     const source = JSON.parse(readFileSync(resolve(topologyRoot, variant.topologyPath), 'utf8')) as Meta2dData
     const stale = {
       ...source,
-      // 用八个唯一编号的旧版残留图元复现旧地址缓存返回 93 项的情形。
+      // 用八个唯一编号的旧版残留图元复现旧地址缓存返回额外图元的情形。
       pens: [...source.pens, ...Array.from({ length: 8 }, (_, index) => ({
         ...source.pens[0]!,
         id: `stale-cache-${index}`,
@@ -55,10 +55,12 @@ describe('降压站拓扑独立数据与公共资源', () => {
 
     const data = await loadStepDownSubstationTopologyPreviewData(variant.id)
 
-    expect(source.pens).toHaveLength(85)
+    expect(source.pens).toHaveLength(97)
     expect(requestedUrls).toHaveLength(1)
     expect(requestedUrls[0]).toContain(`?v=${variant.sourceSha256}`)
-    expect(data.pens).toHaveLength(85)
+    // 源文件校验仍以 97 个图元为准；运行时只移除源文件中的组合容器。
+    const sourceCombineCount = source.pens.filter((pen) => pen.name === 'combine').length
+    expect(data.pens).toHaveLength(variant.expectedPenCount - sourceCombineCount)
   })
 
   it('八份文件分别保留源布局并禁用模拟、联网和初始化脚本', async () => {

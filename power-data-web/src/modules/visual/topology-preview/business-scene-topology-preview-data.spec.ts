@@ -17,7 +17,7 @@ afterEach(() => {
 })
 
 describe('配电站拓扑源文件缓存版本', () => {
-  it('请求带源版本的默认拓扑，避开旧地址缓存中的 98 个图元', async () => {
+  it('请求带源版本的默认拓扑，避开旧地址缓存中的额外图元', async () => {
     const variant = BUSINESS_SCENE_TOPOLOGY_VARIANTS_BY_SCENE.distribution.find((item) => item.isDefault)!
     const sourcePath = resolve(
       process.cwd(),
@@ -26,7 +26,7 @@ describe('配电站拓扑源文件缓存版本', () => {
     )
     const sourceData = JSON.parse(readFileSync(sourcePath, 'utf8')) as Meta2dData
 
-    // 复现同事遇到的缓存差异：无版本旧地址返回 98 个图元，版本化地址返回源文件中的 85 个。
+    // 复现旧地址缓存差异：无版本地址返回额外图元，版本化地址返回最新源文件。
     const staleCachedData: Meta2dData = {
       ...sourceData,
       pens: [
@@ -49,11 +49,11 @@ describe('配电站拓扑源文件缓存版本', () => {
 
     const data = await loadBusinessSceneTopologyPreviewData('distribution', variant.id as BusinessSceneTopologyVariantId)
 
-    expect(sourceData.pens).toHaveLength(85)
-    expect(variant.expectedPenCount).toBe(85)
+    expect(sourceData.pens).toHaveLength(91)
+    expect(variant.expectedPenCount).toBe(91)
     expect(requestedUrls).toHaveLength(1)
     expect(requestedUrls[0]).toContain(`?v=${variant.sourceSha256}`)
-    expect(data.pens).toHaveLength(85)
+    expect(data.pens).toHaveLength(91)
   })
 
   it('调度中心通过版本化地址加载完整三层文件，并仅把空组合容器从运行时移除', async () => {
@@ -72,8 +72,8 @@ describe('配电站拓扑源文件缓存版本', () => {
 
     const data = await loadBusinessSceneTopologyPreviewData('dispatch', variant.id as BusinessSceneTopologyVariantId)
 
-    expect(variant.expectedPenCount).toBe(94)
-    expect(data.pens).toHaveLength(93)
+    expect(variant.expectedPenCount).toBe(90)
+    expect(data.pens).toHaveLength(89)
     expect(data.pens.some((pen) => pen.id === 'a15a085')).toBe(false)
     expect(requestedUrls).toHaveLength(1)
     expect(requestedUrls[0]).toContain(`?v=${variant.sourceSha256}`)

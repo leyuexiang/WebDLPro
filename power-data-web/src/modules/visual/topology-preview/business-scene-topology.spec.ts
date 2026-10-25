@@ -23,7 +23,7 @@ const SOURCE_CONTRACT = {
     ['network-key-process', 58, 'debffa4a234a9135f12d3981e9d294b94cc62a63cc6fcbaac670c2f4d15cbf3f'],
     ['network-business', 60, 'ef5803a9a47b00f0d38d7cd70518427705e4cfeb8d135fc27bf57e32614b6e73'],
     ['business-key-process', 49, '99c4a92e3ae73cf36280299460c16d37ac9b91b294b83037009ee3775846fef3'],
-    ['network-business-key-process', 79, '8e5056ebb00da3095ce9f8709c048bd4fa5f9e995c93b928d96932cbb911c67a'],
+    ['network-business-key-process', 73, '2d2357cb3137811fa981f5b7b31e0fdea22a27ad198073cfb00b3aa5f5cc37a3'],
   ],
   distribution: [
     ['architecture', 56, '31cb4d7b991c4389809844cf20c2511b0f2b59147c4be6355b3ab334131a6e73'],
@@ -33,7 +33,7 @@ const SOURCE_CONTRACT = {
     ['network-key-process', 76, 'f2bfddad4c6d03193d4041eb25fcfeec26e64b394a19fb6753d477e72bb157bd'],
     ['network-business', 87, 'ea111ca170273108a8e886ed6a5f7336d8d3ef923f86df61f2312dbf05813772'],
     ['business-key-process', 55, 'b3794b4684842ddd6a6a98b5e1550e2f779849c6ab13f8e8a038110154bd0db4'],
-    ['network-business-key-process', 85, '06d9a7650b68ac58432c0bb66b0c5b8cd6c76e6bcbbd74a62500649353f31e0a'],
+    ['network-business-key-process', 91, '847860315722bd7e179e1fa6ebc9de9098b3baa47843f86cfca05feba4a2bf03'],
   ],
   consumption: [
     ['architecture', 38, 'f0c1477c06a84cda9ad24894b1aae9e146eea1b808876273fca9e16d2069992b'],
@@ -43,10 +43,10 @@ const SOURCE_CONTRACT = {
     ['network-key-process', 50, '583e4881a6f29da66b57aabbf244a45b5527f7bcf2c3659669a1f1ecbccb8589'],
     ['network-business', 51, '5ff080b707b35a859aea0ccc595d4045c970b8840ebaa11a448662dfcc48e6c9'],
     ['business-key-process', 32, 'a396e48c91b42235db242bce38c1c730cdfd434acb9b3b355857e89e9de4f3f1'],
-    ['network-business-key-process', 48, '31273101e1bbb458134a41fec86e77471eb945f03d75058a54195192eb556f05'],
+    ['network-business-key-process', 46, 'd76fdfce2aa042fd4b1a32260b5bac2423dc774678b8434387b82d2108fcb05e'],
   ],
   dispatch: [
-    ['network-business-key-process', 94, 'b2235a0ca3a7bb484b4c926519cfd016ae75517c2c4887498a926ca9ce797ef8'],
+    ['network-business-key-process', 90, 'c9cb9deb60f39e933182372c611b8fb0f74c62d134380315be38076905afbfdf'],
   ],
 } as const
 
@@ -59,17 +59,15 @@ describe('新业务场景拓扑数据契约', () => {
     expect(resolveBusinessSceneTopologySceneId('topology.unknown.overview')).toBeUndefined()
   })
 
-  it('配电站默认组合按截图标签将重复图元绑定到五个后续 Unity 目标编号', () => {
+  it('配电站默认组合按最新标签将设备图元绑定到既有 Unity 目标编号', () => {
     const variant = BUSINESS_SCENE_TOPOLOGY_VARIANTS_BY_SCENE.distribution.find((item) => item.isDefault)!
     const path = resolve(process.cwd(), 'public/topology/distribution-json-preview', variant.topologyPath)
     const topology = JSON.parse(readFileSync(path, 'utf8')) as { pens: Pen[] }
     const bindingsByPenId = new Map(DISTRIBUTION_TOPOLOGY_RUNTIME_BINDINGS.map((binding) => [binding.penId, binding]))
     const expected = [
-      { title: '保护装置', image: 'icons/normal/protection-device.webp', nodeId: 'asset.distribution-protection', sceneNodeId: 'node.distribution-protection', penIds: ['1406260e', '1508d7f'] },
-      { title: '测控装置', image: 'icons/normal/measurement-device.webp', nodeId: 'asset.distribution-measurement', sceneNodeId: 'node.distribution-measurement', penIds: ['175412f5', '99f85e3'] },
-      { title: '配电变压器', image: 'icons/normal/distribution-transformer.webp', nodeId: 'asset.distribution-transformer', sceneNodeId: 'node.distribution-transformer', penIds: ['6db2600f', 'cb0cbf4'] },
-      { title: '断路器', image: 'icons/normal/distribution-breaker.webp', nodeId: 'asset.distribution-breaker', sceneNodeId: 'node.distribution-breaker', penIds: ['a1a5b54', '4f0d6e4a'] },
-      { title: '互感器', image: 'icons/normal/instrument-transformer.webp', nodeId: 'asset.distribution-instrument-transformer', sceneNodeId: 'node.distribution-instrument-transformer', penIds: ['c1499f9', '67b16fb'] },
+      { title: '配电变压器', image: 'icons/normal/distribution-transformer.webp', nodeId: 'asset.distribution-transformer', sceneNodeId: 'node.distribution-transformer', penIds: ['b00911e', 'd67ba1d'] },
+      { title: '断路器', image: 'icons/normal/distribution-breaker.webp', nodeId: 'asset.distribution-breaker', sceneNodeId: 'node.distribution-breaker', penIds: ['1726489c', '7da34bf'] },
+      { title: '互感器', image: 'icons/normal/instrument-transformer.webp', nodeId: 'asset.distribution-instrument-transformer', sceneNodeId: 'node.distribution-instrument-transformer', penIds: ['4e063acc', '79ce2a6'] },
     ] as const
 
     for (const item of expected) {
@@ -85,6 +83,23 @@ describe('新业务场景拓扑数据契约', () => {
     // 默认文件直接引用共享目录中的 WebP；PNG 源图和在线编辑器封面不进入前端拓扑 JSON。
     expect(topology.pens.filter((pen) => pen.image).every((pen) => /^(?:icons|background)\/.+\.webp$/i.test(pen.image!))).toBe(true)
     expect(JSON.stringify(topology)).not.toMatch(/\.png(?:$|[?#"])/i)
+  })
+
+  it('配电站全部筛选源文件的绑定图元均真实存在，阻止旧版图元编号残留', () => {
+    const sourcePenIds = new Set<string>()
+    for (const variant of BUSINESS_SCENE_TOPOLOGY_VARIANTS_BY_SCENE.distribution) {
+      const path = resolve(process.cwd(), 'public/topology/distribution-json-preview', variant.topologyPath)
+      const topology = JSON.parse(readFileSync(path, 'utf8')) as { pens: readonly { id?: string }[] }
+      for (const pen of topology.pens) {
+        if (pen.id) sourcePenIds.add(pen.id)
+      }
+    }
+
+    // 绑定表与筛选文件共用同一批显式图元编号；任何旧版编号都会在这里被阻断，
+    // 避免点击不存在的图元时错误地向业务状态或三维场景发送选择事件。
+    for (const binding of DISTRIBUTION_TOPOLOGY_RUNTIME_BINDINGS) {
+      expect(sourcePenIds.has(binding.penId), `配电站绑定图元 ${binding.penId} 不存在于当前源文件`).toBe(true)
+    }
   })
 
   it('微电网只在默认组合中绑定六个设备层节点', () => {
@@ -135,6 +150,8 @@ describe('新业务场景拓扑数据契约', () => {
         expect(data.pens).toHaveLength(variant.expectedPenCount)
         expect(new Set(data.pens.map((pen) => pen.id)).size).toBe(data.pens.length)
         expect(data.pens.every((pen) => [pen.x, pen.y, pen.width, pen.height].every(Number.isFinite))).toBe(true)
+        // 本次更新的默认三层源图已清理封面 PNG；历史筛选变体仍由别的发布批次维护，避免扩大替换范围。
+        if (variant.isDefault) expect(JSON.stringify(data)).not.toMatch(/\.png(?:$|[?#\"])/i)
 
         for (const pen of data.pens.filter((item) => item.image)) {
           expect(pen.image).toMatch(/^(assets|background|icons)\//)
@@ -175,8 +192,8 @@ describe('新业务场景拓扑数据契约', () => {
     expect(profile.selectionDelivery).toBe('local')
     expect(profile.getRuntimeBindings?.(variant.id)).toEqual([])
     expect(variant.processPenIds).toEqual([])
-    expect(topology.pens).toHaveLength(94)
-    expect(variant.expectedRuntimePenCount).toBe(93)
+    expect(topology.pens).toHaveLength(90)
+    expect(variant.expectedRuntimePenCount).toBe(89)
     expect(topology.pens.filter((pen) => pen.name === 'combine')).toEqual([
       expect.objectContaining({ id: 'a15a085' }),
     ])

@@ -39,7 +39,7 @@ describe('光伏拓扑版本清单', () => {
     expect(detail).toEqual(expect.objectContaining({
       id: 'process-detail-solar-inverter',
       isProcessDetail: true,
-      expectedPenCount: 19,
+      expectedPenCount: 18,
     }))
     expect(detail).not.toHaveProperty('layerIds')
     expect(detail).not.toHaveProperty('combinationKey')

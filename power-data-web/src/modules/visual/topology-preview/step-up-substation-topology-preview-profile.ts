@@ -10,7 +10,7 @@ import {
 import { loadStepUpSubstationTopologyPreviewData } from './step-up-substation-topology-preview-data'
 import { getStepUpSubstationTopologyTooltipContent } from './step-up-substation-topology-tooltip'
 import { STEP_UP_SUBSTATION_TOPOLOGY_RUNTIME_BINDINGS } from './step-up-substation-topology-runtime-bindings'
-import { loadProtectionProcessDetailTopologyData } from './protection-process-detail-topology-data'
+import { getProtectionProcessDetailStatusImageUrl, loadProtectionProcessDetailTopologyData } from './protection-process-detail-topology-data'
 
 /** 升压站业务模块只提供清单能力，画布生命周期与风电共用同一实现。 */
 export const STEP_UP_SUBSTATION_TOPOLOGY_PREVIEW_PROFILE: ManifestTopologyPreviewProfile = Object.freeze({
@@ -18,6 +18,7 @@ export const STEP_UP_SUBSTATION_TOPOLOGY_PREVIEW_PROFILE: ManifestTopologyPrevie
   defaultVariantId: 'network-business-key-process',
   filterGroups: STEP_UP_SUBSTATION_TOPOLOGY_FILTER_GROUPS,
   runtimeBindings: STEP_UP_SUBSTATION_TOPOLOGY_RUNTIME_BINDINGS,
+  getStatusImage: getProtectionProcessDetailStatusImageUrl,
   createDefaultSelection: () => createDefaultStepUpSubstationTopologyFilterSelection(),
   toggleFilter: (current: ReadonlySet<string>, filterId: string, checked: boolean) => toggleStepUpSubstationTopologyFilter(
     current as ReadonlySet<StepUpSubstationTopologyFilterId>,

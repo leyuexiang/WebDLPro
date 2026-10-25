@@ -20,6 +20,8 @@ export interface RegisteredNodeStateProjection {
   sceneId: SceneId
   topologyTargets: readonly RegisteredNodeTopologyTarget[]
   sceneNodeIds: readonly SceneNodeId[]
+  /** 状态聚合目标的三维节点，仅用于派生状态投影，不参与 Unity 反向选择索引。 */
+  derivedSceneNodeIds?: readonly SceneNodeId[]
   /** 存在时表示该节点只在对应第三层二维画布显示状态，不参与第二层或 Unity 投影。 */
   processDetailId?: ProcessDetailId
 }
@@ -167,12 +169,21 @@ export class TopologyRegistry {
           topologyTargets: topologyTargetsByNodeId.get(node.nodeId) ?? [],
           sceneNodeIds: node.sceneNodeId ? [node.sceneNodeId] : [],
         }]))
+    const topologyProjectionByNodeId = new Map(topologyProjections)
     const processDetailProjections = processDetails.flatMap((detail) => (detail.topologyNodes ?? []).map((node): readonly [NodeId, RegisteredNodeStateProjection] => [node.nodeId, {
       nodeId: node.nodeId,
       sceneId: detail.sceneId,
-      // 第三层专属节点是状态入口，不挂接任何第二层拓扑或三维节点。
-      topologyTargets: [],
+      // 第三层断路器只作为合作方状态入口；若清单声明聚合目标，则把状态投影到第二层断路器。
+      // 该目标来自已校验的同场景来源节点，不需要在每次状态更新时重新解析拓扑。
+      topologyTargets: node.statusTargetNodeId
+        ? topologyTargetsByNodeId.get(node.statusTargetNodeId) ?? []
+        : [],
+      // 这里不是第三层节点的 Unity 映射：状态沿 statusTargetNodeId 继承第二层节点的三维目标，
+      // 让合作方上报的第三层状态驱动原有 Unity 断路器，不增加第三层场景节点编号。
       sceneNodeIds: [],
+      derivedSceneNodeIds: node.statusTargetNodeId
+        ? topologyProjectionByNodeId.get(node.statusTargetNodeId)?.sceneNodeIds ?? []
+        : [],
       processDetailId: detail.processDetailId,
     }]))
     const projections = [...topologyProjections, ...processDetailProjections]

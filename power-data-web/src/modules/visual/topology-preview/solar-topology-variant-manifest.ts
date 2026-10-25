@@ -22,7 +22,8 @@ export const SOLAR_TOPOLOGY_VARIANTS = [
   { id: 'network-key-process', combinationKey: 'network+key-process', layerIds: ['network', 'key-process'], topologyPath: 'variants/network-key-process/topology.json', sourceSha256: '4408545bb1ab7cf9d48a65e475e76ecc8536314f29c4a647f2317239be8a9b31', expectedPenCount: 96 },
   { id: 'business-key-process', combinationKey: 'business+key-process', layerIds: ['business', 'key-process'], topologyPath: 'variants/business-key-process/topology.json', sourceSha256: '9baa6c3ab00f7a43d074c09e2282e6f4534c6d3e37c2e5c3b4b1d3253e769f4b', expectedPenCount: 100 },
   /** 2026-10-14 用户提供的最新光伏全图参考，原样对应网络、业务、关键环节组合。 */
-  { id: 'network-business-key-process', combinationKey: 'network+business+key-process', layerIds: ['network', 'business', 'key-process'], topologyPath: 'variants/network-business-key-process/topology.json', sourceSha256: '277fc9088618b56613c5ace30aa5b1d48a7f3d48ada988d095207ace1785727f', expectedPenCount: 122, isDefault: true },
+  // 2026-10-21 光伏总图以用户提供的“光伏-new.json”为唯一来源。
+  { id: 'network-business-key-process', combinationKey: 'network+business+key-process', layerIds: ['network', 'business', 'key-process'], topologyPath: 'variants/network-business-key-process/topology.json', sourceSha256: '6d030f17f56ce7ed8c53725e2e3283c7e3a32f987e4ffef2dc842a45db49ddcd', expectedPenCount: 97, isDefault: true },
 ] as const satisfies readonly SolarTopologyVariantManifestEntry[]
 
 /** 逆变器关键环节只加载本次压缩包审核通过的唯一完整文件，不拼接第二层图元。 */
@@ -31,8 +32,9 @@ export const SOLAR_PROCESS_DETAIL_VARIANTS: readonly SolarProcessDetailVariantMa
     id: 'process-detail-solar-inverter',
     // 发布目录以 solar-json-preview 为基准回退一层，最终定位到 shell/topology/process-detail。
     topologyPath: '../process-detail/solar-power/inverter/topology.json',
-    sourceSha256: '6391b1212c07664721cbccfea4bb9d5f7ef06487655b08fbf09d4b09e9018686',
-    expectedPenCount: 19,
+    // 2026-10-21 光伏逆变器关键环节以用户提供的“光 逆变器关键环节.json”为唯一来源。
+    sourceSha256: '392c1bee67b66723fe0fb06f438637a34c85a763f6da72596309740cac2a2e88',
+    expectedPenCount: 18,
     isProcessDetail: true,
   }),
 ])

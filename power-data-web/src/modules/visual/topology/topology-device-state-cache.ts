@@ -3,6 +3,25 @@ import type { DeviceVisualStatus } from '@/config/scene-topology/types'
 import type { RegisteredNodeStateProjection, TopologyRegistry } from '@/config/scene-topology/topology-registry'
 
 /**
+ * 同一第二层断路器收到多个第三层保护状态时的确定性优先级。
+ * 正常最低；异常之间故障最高、告警次之、离线再次之，避免 Map（映射）写入顺序改变画面状态。
+ */
+const TOPOLOGY_STATUS_PRIORITY: Readonly<Record<DeviceVisualStatus, number>> = Object.freeze({
+  normal: 0,
+  offline: 1,
+  alarm: 2,
+  fault: 3,
+})
+
+function mergeTopologyStatus(
+  current: DeviceVisualStatus | undefined,
+  next: DeviceVisualStatus,
+): DeviceVisualStatus {
+  if (!current) return next
+  return TOPOLOGY_STATUS_PRIORITY[next] > TOPOLOGY_STATUS_PRIORITY[current] ? next : current
+}
+
+/**
  * 协议入口已经完成节点编号、四态和带时区时间校验，缓存只接收强类型数据。
  * 缓存不得把未知枚举推断为离线，也不得再次用业务时间决定快照新旧。
  */
@@ -323,7 +342,8 @@ export class TopologyDeviceStateCache {
       if (!projection) continue
       for (const target of projection.topologyTargets) {
         if (target.topologyId !== topologyId || target.configuredStatus === state.deviceStatus) continue
-        statuses.set(target.nodeId, state.deviceStatus)
+        // 第三层断路器共享同一个第二层目标时只保留最高优先级异常；所有来源正常时不写入覆盖表。
+        statuses.set(target.nodeId, mergeTopologyStatus(statuses.get(target.nodeId), state.deviceStatus))
       }
     }
     return statuses
@@ -375,11 +395,33 @@ export class TopologyDeviceStateCache {
     sceneNodeIdFilter: SceneNodeId | undefined,
   ): void {
     for (const sceneNodeId of projection.sceneNodeIds) {
-      // 第三层只接收目录中明确登记的状态节点，禁止把同一业务场景的其他设备状态扩散到独立模型。
-      if (sceneNodeIdFilter && sceneNodeId !== sceneNodeIdFilter) continue
-      statuses.set(sceneNodeId, state.deviceStatus)
+      this.appendSceneTarget(sceneNodeId, state, statuses, updates, sceneNodeIdFilter)
+    }
+    // 聚合目标单独遍历，避免为每个状态快照创建合并数组；其结果不会进入 Unity 反向选择索引。
+    if (projection.derivedSceneNodeIds) {
+      for (const sceneNodeId of projection.derivedSceneNodeIds) {
+        this.appendSceneTarget(sceneNodeId, state, statuses, updates, sceneNodeIdFilter)
+      }
+    }
+  }
+
+  /** 将一个三维目标按异常优先级写入状态和增量更新，保持多来源状态顺序无关。 */
+  private appendSceneTarget(
+    sceneNodeId: SceneNodeId,
+    state: CachedNodeState,
+    statuses: Map<SceneNodeId, DeviceVisualStatus>,
+    updates: Map<SceneNodeId, TopologySceneNodeVisualStateUpdate>,
+    sceneNodeIdFilter: SceneNodeId | undefined,
+  ): void {
+    // 第三层只接收目录中明确登记的状态节点，禁止把同一业务场景的其他设备状态扩散到独立模型。
+    if (sceneNodeIdFilter && sceneNodeId !== sceneNodeIdFilter) return
+    const currentStatus = statuses.get(sceneNodeId)
+    const mergedStatus = mergeTopologyStatus(currentStatus, state.deviceStatus)
+    statuses.set(sceneNodeId, mergedStatus)
+    // 同一 Unity 目标可能同时收到第二层直接状态和第三层派生状态；更新详情必须与最终优先级一致。
+    if (!updates.has(sceneNodeId) || mergedStatus === state.deviceStatus) {
       updates.set(sceneNodeId, {
-        visualState: state.deviceStatus,
+        visualState: mergedStatus,
         statusUpdatedAt: state.statusUpdatedAt,
         sourceRevision: state.sourceRevision,
       })

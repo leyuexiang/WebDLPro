@@ -1,6 +1,48 @@
 import { LockState, type Meta2dData, type Pen } from '@meta2d/core'
 import type { TopologyDataContext } from '@/modules/visual/topology/topology-runtime'
+import type { TopologyDeviceStatus } from '@/config/process/types'
+import type { ProcessNodeId } from '@/config/process/identifiers'
 import { getTopologySharedPublicAssetUrl } from './topology-shared-assets'
+
+/**
+ * 断路器正常态使用公共断路器 WebP；公共目录暂未提供断路器专属异常图，异常态使用同目录保护装置四态 WebP，
+ * 以保证状态变化可见且不回退到历史 PNG。资源路径集中登记，构建时可逐项核验。
+ */
+const PROTECTION_NODE_STATUS_PATHS = Object.freeze({
+  normal: 'icons/normal/distribution-breaker.webp',
+  alarm: 'icons/alarm/protection.webp',
+  fault: 'icons/fault/protection.webp',
+  offline: 'icons/offline/protection.webp',
+})
+
+/** 第二层四类控制保护节点也需要显示合作方状态，且它们没有 Unity 三维映射。 */
+const PROTECTION_CONTROL_STATUS_NODE_IDS = new Set([
+  'system.step-up-transformer-protection',
+  'system.step-up-busbar-protection',
+  'system.step-up-line-protection',
+  'system.step-up-capacitor-protection',
+  'system.step-down-transformer-protection',
+  'system.step-down-busbar-protection',
+  'system.step-down-line-protection',
+  'system.step-down-capacitor-protection',
+  'system.converter-transformer-protection',
+  'system.converter-busbar-protection',
+  'system.converter-line-protection',
+  'system.converter-capacitor-protection',
+  'system.switching-busbar-protection',
+  'system.switching-line-protection',
+  'system.switching-capacitor-protection',
+])
+
+/** 返回站类第二层和第三层断路器、四类保护控制节点的公共状态资源；其他节点沿用源图图片。 */
+export function getProtectionProcessDetailStatusImageUrl(
+  nodeId: ProcessNodeId,
+  status: TopologyDeviceStatus,
+): string | undefined {
+  return nodeId.includes('breaker') || PROTECTION_CONTROL_STATUS_NODE_IDS.has(nodeId)
+    ? getTopologySharedPublicAssetUrl(PROTECTION_NODE_STATUS_PATHS[status])
+    : undefined
+}
 
 /** 关键环节源副本按共享文件路径缓存；十一个逻辑上下文不会重复请求、解析同一份 JSON。 */
 const sourceDataByPath = new Map<string, Meta2dData>()

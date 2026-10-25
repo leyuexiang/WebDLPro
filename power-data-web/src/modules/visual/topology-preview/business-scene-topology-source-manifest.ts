@@ -234,27 +234,11 @@ export const BUSINESS_SCENE_TOPOLOGY_SOURCE_MANIFEST = {
         "key-process"
       ],
       "topologyPath": "variants/network-business-key-process/topology.json",
-      "sourceSha256": "8e5056ebb00da3095ce9f8709c048bd4fa5f9e995c93b928d96932cbb911c67a",
-      "expectedPenCount": 79,
-      "expectedRuntimePenCount": 75,
-      "flattenedCombines": [
-        {
-          "id": "f5323bc",
-          "directChildCount": 64
-        },
-        {
-          "id": "5f9a8ad5",
-          "directChildCount": 1
-        },
-        {
-          "id": "6f383601",
-          "directChildCount": 7
-        },
-        {
-          "id": "308e0b",
-          "directChildCount": 6
-        }
-      ],
+      // 微电网最新总览源图已由导出器直接写成画布坐标，保留 73 个源图元并继续使用原六项绑定。
+      "sourceSha256": "2d2357cb3137811fa981f5b7b31e0fdea22a27ad198073cfb00b3aa5f5cc37a3",
+      "expectedPenCount": 73,
+      "expectedRuntimePenCount": 73,
+      "flattenedCombines": [],
       "processPenIds": [
         "3451fb7",
         "40bc26a1",
@@ -443,9 +427,9 @@ export const BUSINESS_SCENE_TOPOLOGY_SOURCE_MANIFEST = {
         "key-process"
       ],
       "topologyPath": "variants/network-business-key-process/topology.json",
-      "sourceSha256": "06d9a7650b68ac58432c0bb66b0c5b8cd6c76e6bcbbd74a62500649353f31e0a",
-      "expectedPenCount": 85,
-      "expectedRuntimePenCount": 85,
+      "sourceSha256": "847860315722bd7e179e1fa6ebc9de9098b3baa47843f86cfca05feba4a2bf03",
+      "expectedPenCount": 91,
+      "expectedRuntimePenCount": 91,
       "flattenedCombines": [],
       "processPenIds": [
         "61d434d9",
@@ -677,9 +661,10 @@ export const BUSINESS_SCENE_TOPOLOGY_SOURCE_MANIFEST = {
         "key-process"
       ],
       "topologyPath": "variants/network-business-key-process/topology.json",
-      "sourceSha256": "31273101e1bbb458134a41fec86e77471eb945f03d75058a54195192eb556f05",
-      "expectedPenCount": 48,
-      "expectedRuntimePenCount": 48,
+      // 楼宇最新总览源图调整了节点名称和图元集合；六项绑定仍按既有 penId 保持不变。
+      "sourceSha256": "d76fdfce2aa042fd4b1a32260b5bac2423dc774678b8434387b82d2108fcb05e",
+      "expectedPenCount": 46,
+      "expectedRuntimePenCount": 46,
       "flattenedCombines": [],
       "processPenIds": [
         "c3964cf",
@@ -689,7 +674,11 @@ export const BUSINESS_SCENE_TOPOLOGY_SOURCE_MANIFEST = {
       "isDefault": true
     }
   ],
-  /** 调度中心当前只提供完整三层组合源图；图元点击仅留在二维画布，不登记业务或三维绑定。 */
+  /**
+   * 调度中心 2026-10-22 输入只提供完整三层组合源图：源图 90 个图元，
+   * 展平唯一空组合容器后保留 89 个运行时图元；图元点击仅留在二维画布，
+   * 不登记业务或三维绑定。
+   */
   "dispatch": [
     {
       "id": "network-business-key-process",
@@ -700,9 +689,9 @@ export const BUSINESS_SCENE_TOPOLOGY_SOURCE_MANIFEST = {
         "key-process"
       ],
       "topologyPath": "variants/network-business-key-process/topology.json",
-      "sourceSha256": "b2235a0ca3a7bb484b4c926519cfd016ae75517c2c4887498a926ca9ce797ef8",
-      "expectedPenCount": 94,
-      "expectedRuntimePenCount": 93,
+      "sourceSha256": "c9cb9deb60f39e933182372c611b8fb0f74c62d134380315be38076905afbfdf",
+      "expectedPenCount": 90,
+      "expectedRuntimePenCount": 89,
       "flattenedCombines": [
         {
           "id": "a15a085",

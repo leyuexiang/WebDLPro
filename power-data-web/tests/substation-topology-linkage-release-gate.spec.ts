@@ -20,7 +20,7 @@ const SUBSTATION_SCENE_IDS = [
 ] as const
 
 /**
- * 变电第三层发布门禁：同时核对发布清单、源 JSON、图元绑定和三维节点绑定。
+ * 变电第三层发布门禁：同时核对发布清单、源 JSON、图元绑定和已有三维映射。
  * 这里故意不按标题、数组位置或文件名推断映射，避免拓扑图改版后悄悄丢失联动。
  */
 describe('变电第三层拓扑双向联动发布门禁', () => {
@@ -48,7 +48,7 @@ describe('变电第三层拓扑双向联动发布门禁', () => {
     }
   })
 
-  it('每个第三层上下文的源 JSON、图元编号和显式三维映射必须一致', () => {
+  it('每个第三层上下文的源 JSON、图元编号和显式映射必须一致', () => {
     const contextKeys = new Set<string>()
     for (const context of PROCESS_DETAIL_TOPOLOGY_DATA_CONTEXTS.filter((item) => item.contextId.includes('substation') || item.contextId.includes('station'))) {
       contextKeys.add(context.contextId)
@@ -64,7 +64,9 @@ describe('变电第三层拓扑双向联动发布门禁', () => {
       for (const binding of context.bindings) {
         expect(penIds.has(binding.penId)).toBe(true)
         expect(binding.nodeId).toBeTruthy()
-        expect(binding.sceneNodeId).toBeTruthy()
+        // 第三层断路器是合作方独立状态节点，不绑定 Unity；保护装置、互感器和变压器继续核对原三维映射。
+        if (binding.nodeId.includes('-protection-breaker')) expect(binding.sceneNodeId).toBeUndefined()
+        else expect(binding.sceneNodeId).toBeTruthy()
       }
     }
 

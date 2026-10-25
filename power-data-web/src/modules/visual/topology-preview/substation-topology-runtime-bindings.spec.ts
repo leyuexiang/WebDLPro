@@ -111,3 +111,68 @@ describe.each(scenarioFixtures)('$label 测控/保护装置映射', (fixture) =>
     }
   })
 })
+
+/** 第二层四类保护控制图元的合作方编号必须来自最新默认 JSON，且不能带 Unity 映射。 */
+const partnerControlFixtures = [
+  {
+    label: '升压站', directory: 'step-up-substation-json-preview',
+    nodes: [
+      ['system.step-up-transformer-protection', '变压器保护', ['4030a3f7', 'b896e48']],
+      ['system.step-up-busbar-protection', '母线保护', ['51a13e4f', '69ccc050']],
+      ['system.step-up-line-protection', '线路保护', ['577d774', '358597c2']],
+      ['system.step-up-capacitor-protection', '电容器保护', ['f94f960', '80b9d96']],
+    ],
+  },
+  {
+    label: '降压站', directory: 'step-down-substation-json-preview',
+    nodes: [
+      ['system.step-down-transformer-protection', '变压器保护', ['356e332', '46b3d33']],
+      ['system.step-down-busbar-protection', '母线保护', ['6fd12ae', '3935f07']],
+      ['system.step-down-line-protection', '线路保护', ['ba7f628', '75fc187']],
+      ['system.step-down-capacitor-protection', '电容器保护', ['53f3d7cb', 'f8fe6cd']],
+    ],
+  },
+  {
+    label: '换流站', directory: 'converter-station-json-preview',
+    nodes: [
+      ['system.converter-transformer-protection', '变压器保护', ['38a26897', '7cca61b4']],
+      ['system.converter-busbar-protection', '母线保护', ['fdcb31', '3e577b76']],
+      ['system.converter-line-protection', '线路保护', ['60a47ba', '6480cfeb']],
+      ['system.converter-capacitor-protection', '电容器保护', ['25a7b089', '47f9c06']],
+    ],
+  },
+  {
+    label: '开关站', directory: 'switching-station-json-preview',
+    nodes: [
+      ['system.switching-busbar-protection', '母线保护', ['438a4677', '6103cbf']],
+      ['system.switching-line-protection', '线路保护', ['6d2f0789', '3cdc168', '262bb611']],
+      ['system.switching-capacitor-protection', '电容器保护', ['9be06bf', '64bc9380']],
+    ],
+  },
+] as const
+
+describe.each(partnerControlFixtures)('$label 合作方保护控制节点映射', (fixture) => {
+  it('绑定最新默认图元并保持无 Unity sceneNodeId', () => {
+    const bindingModule = fixture.label === '升压站'
+      ? STEP_UP_SUBSTATION_TOPOLOGY_RUNTIME_BINDINGS
+      : fixture.label === '降压站'
+        ? STEP_DOWN_SUBSTATION_TOPOLOGY_RUNTIME_BINDINGS
+        : fixture.label === '换流站'
+          ? CONVERTER_STATION_TOPOLOGY_RUNTIME_BINDINGS
+          : SWITCHING_STATION_TOPOLOGY_RUNTIME_BINDINGS
+    const bindingByPenId = new Map(bindingModule.map((binding) => [binding.penId, binding]))
+    const data = JSON.parse(readFileSync(resolve(
+      process.cwd(), 'public/topology', fixture.directory, 'variants/network-business-key-process/topology.json',
+    ), 'utf8')) as { pens: Array<{ id?: string; text?: string }> }
+    const sourcePenIds = new Set(data.pens.flatMap((pen) => pen.id ? [pen.id] : []))
+
+    for (const [nodeId, title, penIds] of fixture.nodes) {
+      for (const penId of penIds) {
+        const binding = bindingByPenId.get(penId)
+        expect(sourcePenIds.has(penId), `${fixture.label}/${penId} 必须存在于最新默认 JSON`).toBe(true)
+        expect(binding?.nodeId).toBe(nodeId)
+        expect(binding?.sceneNodeId, `${fixture.label}/${title} 不得声明 Unity 映射`).toBeUndefined()
+      }
+    }
+  })
+})

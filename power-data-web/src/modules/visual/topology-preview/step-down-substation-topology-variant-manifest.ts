@@ -40,8 +40,9 @@ export const STEP_DOWN_SUBSTATION_TOPOLOGY_VARIANTS = Object.freeze([
   { id: 'network-business', combinationKey: 'network+business', layerIds: Object.freeze(['network', 'business']), topologyPath: 'variants/network-business/topology.json', sourceSha256: '769ae7d323d9afd9c34e84e35c4b1458680495c3a745ce5bde29c2e21303a007', expectedPenCount: 87 },
   { id: 'network-key-process', combinationKey: 'network+key-process', layerIds: Object.freeze(['network', 'key-process']), topologyPath: 'variants/network-key-process/topology.json', sourceSha256: '091af616deb31ff2d413a6f057ef3deb826a1cc5400015b098b1b2bd0f81bfc4', expectedPenCount: 86 },
   { id: 'business-key-process', combinationKey: 'business+key-process', layerIds: Object.freeze(['business', 'key-process']), topologyPath: 'variants/business-key-process/topology.json', sourceSha256: 'd752629a719d37a72c02622deb70a78e751bd634c10f1a5e0adebe0d56ae5d37', expectedPenCount: 54 },
-  // 2026-10-17 按 降压站 (1).json 更新；输入 SHA-256：95c2de583523b056cf92347f9cba2e5120aef6ffb9cc50853149086bdc56e255；运行散列锁定公共 WebP 本地化后的实际文件。
-  { id: 'network-business-key-process', combinationKey: 'network+business+key-process', layerIds: Object.freeze(['network', 'business', 'key-process']), topologyPath: 'variants/network-business-key-process/topology.json', sourceSha256: '47e7400ecc59cbede9de98f5b7f997b9975f1ae517e940cd9a0fd1e7d88c736f', expectedPenCount: 85, isDefault: true },
+  // 2026-10-22 按最新“降压站.json”更新；源文件 SHA-256：164b09d8bcf200524810ed163f5926a8cb5fe9bc2a5049221c267cee8225c01e。
+  // 运行文件已将源包图片显式本地化为公共 WebP，散列和图元数锁定本次可发布输入。
+  { id: 'network-business-key-process', combinationKey: 'network+business+key-process', layerIds: Object.freeze(['network', 'business', 'key-process']), topologyPath: 'variants/network-business-key-process/topology.json', sourceSha256: '67430ddc6a4565f73ab3f0231d045856bb3e135962db98e98ded70baeafa26e1', expectedPenCount: 97, isDefault: true },
 ] as const satisfies readonly StepDownSubstationTopologyVariantManifestEntry[])
 
 /** 两个索引在模块初始化时各构建一次，切层热路径不扫描清单或图元。 */

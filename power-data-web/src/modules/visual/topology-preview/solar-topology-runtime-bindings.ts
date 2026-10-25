@@ -10,7 +10,7 @@ export interface SolarTopologyRuntimeBinding {
   readonly sceneNodeId?: SceneNodeId
 }
 
-/** 光伏三维场景中已登记的两个稳定业务节点；控制节点负责聚焦，设备节点负责模型状态。 */
+/** 光伏三维场景中的稳定业务节点；控制节点负责聚焦，设备节点负责模型状态。 */
 const SOLAR_INVERTER_CONTROL_NODE_ID = toProcessNodeId('system.solar-inverter-control')
 const SOLAR_INVERTER_NODE_ID = toProcessNodeId('asset.solar-inverter')
 const SOLAR_INVERTER_CONTROL_SCENE_NODE_ID = toSceneNodeId('unit.solar-inverter.control')
@@ -54,11 +54,12 @@ const SOLAR_TOPOLOGY_RUNTIME_BINDINGS_BY_VARIANT_ID: ReadonlyMap<SolarTopologyVa
     ...bindDevice(['f007964', '7c754099']),
   ])],
   ['network-business-key-process', Object.freeze([
-    ...bindControl(['49e49f47', '7ca1b67a']),
+    // 最新总图的“网关”是当前文件中唯一真实存在的控制层图元，沿用第三层网关的控制业务节点。
+    ...bindControl(['d2e1410']),
     ...bindDevice(['6940ceef', 'ebd260c']),
   ])],
   ['process-detail-solar-inverter', Object.freeze([
-    // 第三层控制器与实体逆变器只绑定压缩包中逐项核验的两个稳定图元，主控制器保持静态未绑定。
+    // 第三层网关与实体逆变器只绑定来源文件中逐项核验的两个稳定图元。
     ...bindControl(['df25e45']),
     ...bindDevice(['2cf7b170']),
   ])],

@@ -206,6 +206,7 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
       stateNodeId: 'node.wind-gearbox',
       topologyDataContextId: 'process-detail.wind-power.gearbox',
       topologyNodes: [
+        { nodeId: 'asset.wind-gearbox-cooling-fan', title: '散热风扇' },
         { nodeId: 'asset.wind-gearbox-lubrication-unit', title: '润滑油装置' },
       ],
     }, {
@@ -227,6 +228,27 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
     expect(manifest.processDetails).toHaveLength(17)
     expect(manifest.processDetails.filter((detail) => detail.sceneId === 'wind-power')).toHaveLength(3)
     expect(manifest.processDetails.filter((detail) => detail.sceneId === 'switching-station')).toHaveLength(2)
+    const expectedProtectionParentBySceneId = new Map([
+      ['step-up-substation', 'asset.step-up-breaker'],
+      ['step-down-substation', 'asset.step-down-breaker'],
+      ['converter-station', 'asset.converter-breaker'],
+      ['switching-station', 'asset.switching-breaker'],
+    ])
+    for (const detail of manifest.processDetails.filter((item) => expectedProtectionParentBySceneId.has(item.sceneId))) {
+      const nodes = detail.topologyNodes ?? []
+      expect(nodes).toHaveLength(1)
+      expect(nodes[0]).toMatchObject({
+        nodeId: `asset.${detail.sceneId === 'converter-station' ? 'converter' : detail.sceneId === 'step-up-substation' ? 'step-up' : detail.sceneId === 'step-down-substation' ? 'step-down' : 'switching'}-${detail.stepId}-breaker`,
+        title: '断路器',
+        statusTargetNodeId: expectedProtectionParentBySceneId.get(detail.sceneId),
+      })
+      expect(nodes[0]).not.toHaveProperty('sceneNodeId')
+    }
+    const secondLevelBreakerNodeIds = new Set([
+      'asset.step-up-breaker', 'asset.step-down-breaker', 'asset.converter-breaker', 'asset.switching-breaker',
+    ])
+    expect(manifest.processDetails.flatMap((detail) => detail.topologyNodes ?? [])
+      .some((node) => secondLevelBreakerNodeIds.has(node.nodeId))).toBe(false)
 
     const gasOverview = manifest.topologies.find((topology) => topology.topologyId === 'topology.gas-power.overview')
     const coalOverview = manifest.topologies.find((topology) => topology.topologyId === 'topology.coal-power.overview')
@@ -374,6 +396,43 @@ describe('燃气、燃煤与光伏联合场景清单', () => {
         ['asset.distribution-breaker', '断路器', 'node.distribution-breaker'],
         ['asset.distribution-instrument-transformer', '互感器', 'node.distribution-instrument-transformer'],
       ])
+
+    // 升压站、降压站、换流站的四类控制保护节点只进入合作方状态清单，不进入 Unity 映射。
+    const partnerControlNodesByScene = {
+      'step-up-substation': [
+        ['system.step-up-transformer-protection', '变压器保护'],
+        ['system.step-up-busbar-protection', '母线保护'],
+        ['system.step-up-line-protection', '线路保护'],
+        ['system.step-up-capacitor-protection', '电容器保护'],
+      ],
+      'step-down-substation': [
+        ['system.step-down-transformer-protection', '变压器保护'],
+        ['system.step-down-busbar-protection', '母线保护'],
+        ['system.step-down-line-protection', '线路保护'],
+        ['system.step-down-capacitor-protection', '电容器保护'],
+      ],
+      'converter-station': [
+        ['system.converter-transformer-protection', '变压器保护'],
+        ['system.converter-busbar-protection', '母线保护'],
+        ['system.converter-line-protection', '线路保护'],
+        ['system.converter-capacitor-protection', '电容器保护'],
+      ],
+      'switching-station': [
+        ['system.switching-busbar-protection', '母线保护'],
+        ['system.switching-line-protection', '线路保护'],
+        ['system.switching-capacitor-protection', '电容器保护'],
+      ],
+    } as const
+    for (const [sceneId, expectedNodes] of Object.entries(partnerControlNodesByScene)) {
+      const topology = manifest.topologies.find((item) => item.sceneId === sceneId && item.filter === undefined)
+      const mapping = manifest.unitySceneMappings.find((item) => item.sceneId === sceneId)
+      const nodesById = new Map(topology?.nodes.map((node) => [node.nodeId, node]))
+      for (const [nodeId, title] of expectedNodes) {
+        expect(nodesById.get(nodeId)).toEqual(expect.objectContaining({ nodeId, title, doubleClickBehavior: 'emit-node' }))
+        expect(nodesById.get(nodeId)).not.toHaveProperty('sceneNodeId')
+        expect(mapping?.sceneNodeIds).not.toContain(nodeId)
+      }
+    }
   })
 
   it('发布场景选择只改变运行时入口别名而不裁剪另一场景内容', async () => {

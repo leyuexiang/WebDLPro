@@ -1,4 +1,4 @@
-import { createSubstationTopologyRuntimeBindingIndex, stationNode, type SubstationTopologyRuntimeBinding } from './substation-topology-runtime-bindings'
+import { bindPartnerNode, createSubstationTopologyRuntimeBindingIndex, stationNode, type SubstationTopologyRuntimeBinding } from './substation-topology-runtime-bindings'
 
 /**
  * 将同一业务节点在所有筛选组合中的图元编号汇聚到同一映射。
@@ -7,25 +7,28 @@ import { createSubstationTopologyRuntimeBindingIndex, stationNode, type Substati
 const bindNode = (nodeId: string, sceneNodeId: string, penIds: readonly string[]): readonly SubstationTopologyRuntimeBinding[] =>
   penIds.map((penId) => ({ penId, ...stationNode(nodeId, sceneNodeId) }))
 
-/** 降压站全部拓扑变体的测控装置、保护装置图元分别共享对应业务/三维映射。 */
+/** 降压站全部拓扑变体的控制层图元和设备层图元分别共享既有业务/三维映射。 */
 export const STEP_DOWN_SUBSTATION_TOPOLOGY_RUNTIME_BINDINGS: readonly SubstationTopologyRuntimeBinding[] = Object.freeze([
+  // 最新总览 JSON 的四类保护图元只向合作方提供二维状态，不声明 Unity 三维节点映射。
+  ...bindPartnerNode('system.step-down-transformer-protection', ['356e332', '46b3d33']),
+  ...bindPartnerNode('system.step-down-busbar-protection', ['6fd12ae', '3935f07']),
+  ...bindPartnerNode('system.step-down-line-protection', ['ba7f628', '75fc187']),
+  ...bindPartnerNode('system.step-down-capacitor-protection', ['53f3d7cb', 'f8fe6cd']),
   ...bindNode('system.step-down-protection-control', 'unit.step-down-protection.control', [
     // 只有拓扑里的“保护装置”图元对应 Unity 保护控制节点；“继电保护系统”不属于此映射。
     '5b87c90', '2c3ac67', '6dfae588', '61a4dc09', '4c564407',
-    '74daf9c7', 'a16bf10', 'a6511c3', 'db6141b', '38653c0', 'a88dc8',
+    '74daf9c7', 'a16bf10', 'a6511c3', 'db6141b',
     '2c805a80', '97b3e90',
   ]),
   ...bindNode('system.step-down-measurement-control', 'unit.step-down-measurement.control', [
     // 测控装置：取消架构层或切换任意组合后仍复用同一三维测控节点。
     '54d935f', '680d2e39', '1100064a', '7e3f840b', 'c6e09d8',
-    '40e39ff', '14434136', 'b00df55', '10e628dd', '4e50604', 'aa56328',
+    '40e39ff', '14434136', 'b00df55', '10e628dd',
     'd5465e1', 'a032f60',
   ]),
-  { penId: '244aced6', ...stationNode('asset.step-down-transformer', 'node.step-down-transformer') },
-  { penId: '394405c6', ...stationNode('asset.step-down-transformer', 'node.step-down-transformer') },
-  { penId: '1c9afaea', ...stationNode('asset.step-down-breaker', 'node.step-down-breaker') },
-  { penId: 'cc43205', ...stationNode('asset.step-down-breaker', 'node.step-down-breaker') },
-  { penId: '35598cd', ...stationNode('asset.step-down-instrument-transformer', 'node.step-down-instrument-transformer') },
-  { penId: 'b54dd30', ...stationNode('asset.step-down-instrument-transformer', 'node.step-down-instrument-transformer') },
+  // 设备层绑定沿用原业务节点和 Unity 节点，只替换为最新 JSON 中的设备图元编号。
+  ...bindNode('asset.step-down-transformer', 'node.step-down-transformer', ['4f2c9f16', '4967f9']),
+  ...bindNode('asset.step-down-breaker', 'node.step-down-breaker', ['d1c4ea5', '1ffdedd']),
+  ...bindNode('asset.step-down-instrument-transformer', 'node.step-down-instrument-transformer', ['1c61f472', '5d78e39']),
 ])
 export const STEP_DOWN_SUBSTATION_TOPOLOGY_RUNTIME_BINDING_INDEX = createSubstationTopologyRuntimeBindingIndex(STEP_DOWN_SUBSTATION_TOPOLOGY_RUNTIME_BINDINGS)

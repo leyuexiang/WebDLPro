@@ -40,8 +40,9 @@ export const CONVERTER_STATION_TOPOLOGY_VARIANTS = Object.freeze([
   { id: 'network-business', combinationKey: 'network+business', layerIds: Object.freeze(['network', 'business']), topologyPath: 'variants/network-business/topology.json', sourceSha256: '3da3f8cfa01619eebf83284c7932b13114c0e9f091fca4046e8052fd298a0153', expectedPenCount: 93 },
   { id: 'network-key-process', combinationKey: 'network+key-process', layerIds: Object.freeze(['network', 'key-process']), topologyPath: 'variants/network-key-process/topology.json', sourceSha256: '33f36f402c289cf005656954f48a68a885f03597b44ff27ec2cf315defe30777', expectedPenCount: 96 },
   { id: 'business-key-process', combinationKey: 'business+key-process', layerIds: Object.freeze(['business', 'key-process']), topologyPath: 'variants/business-key-process/topology.json', sourceSha256: '137225baceadb5642b431b242f024471c88a6e7ef73f7f87682139868b3f509f', expectedPenCount: 63 },
-  // 2026-10-16 按 换流站.json 更新；输入 SHA-256：f8971bec1a6903dfb4bb901fff9a8f9b477d1315b58ddcfbb78f6caf86800bc6；清单散列锁定 WebP 本地化后的运行文件。
-  { id: 'network-business-key-process', combinationKey: 'network+business+key-process', layerIds: Object.freeze(['network', 'business', 'key-process']), topologyPath: 'variants/network-business-key-process/topology.json', sourceSha256: '5a2d6f5a0f4af269abe43a772406f56813352882f308c2ba5c8586275b00681f', expectedPenCount: 96, isDefault: true },
+  // 2026-10-22 按最新“换流站.json”更新；源文件 SHA-256：6f395346b4f4714946ec45157943fe1742e11b008fd6ce289c8aaa9eda19c21d。
+  // 运行文件已将源包图片显式本地化为公共 WebP，散列和图元数锁定本次可发布输入。
+  { id: 'network-business-key-process', combinationKey: 'network+business+key-process', layerIds: Object.freeze(['network', 'business', 'key-process']), topologyPath: 'variants/network-business-key-process/topology.json', sourceSha256: '573ab5842da3cd5b9d0e7506f49ab046c937020360d64c280fd729c968c687bb', expectedPenCount: 102, isDefault: true },
 ] as const satisfies readonly ConverterStationTopologyVariantManifestEntry[])
 
 /** 两个索引在模块初始化时各构建一次，切层热路径不扫描清单或图元。 */

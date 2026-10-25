@@ -83,20 +83,20 @@ describe('楼宇拓扑逐变体三维绑定', () => {
     expect(BUILDING_TOPOLOGY_SCENE_NODE_ID_BY_NODE_ID.get(BUILDING_TOPOLOGY_SYSTEM_NODE_IDS.lightingControl)).toBe('unit.building-smart-lighting.control')
   })
 
-  it('最新版组合图完整保留48个图元、截图节点名称和本地WebP资源', () => {
+  it('最新版组合图完整保留46个图元、参考文件节点名称和本地WebP资源', () => {
     const variant = BUSINESS_SCENE_TOPOLOGY_VARIANTS_BY_SCENE.consumption.find(({ id }) => id === 'network-business-key-process')!
     const path = resolve(process.cwd(), 'public/topology/consumption-json-preview', variant.topologyPath)
     const data = JSON.parse(readFileSync(path, 'utf8')) as { pens: { id: string; name: string; text?: string; image?: string }[] }
     const penById = new Map(data.pens.map((pen) => [pen.id, pen]))
 
-    expect(data.pens).toHaveLength(48)
+    expect(data.pens).toHaveLength(46)
     expect(data.pens.filter(({ name }) => name === 'combine')).toHaveLength(0)
-    expect(penById.get('f765f99')?.text).toContain('暖通空调调控')
+    expect(penById.get('f765f99')?.text).toContain('暖通空调')
     expect(penById.get('81a3de2')?.text).toContain('门禁')
     expect(penById.get('74365219')?.text).toContain('智能照明')
-    expect(penById.get('7101900b')?.text).toContain('暖通空调楼宇自控')
-    expect(penById.get('588de3c6')?.text).toContain('门禁群控调度系统')
-    expect(penById.get('7338607a')?.text).toContain('智能照明控制系统')
+    expect(penById.get('7101900b')?.text).toContain('DDC模块')
+    expect(penById.get('588de3c6')?.text).toContain('DDC模块')
+    expect(penById.get('7338607a')?.text).toContain('DDC模块')
     expect(penById.get('f765f99')?.image).toBe('icons/normal/building-hvac-control.webp')
     expect(penById.get('81a3de2')?.image).toBe('icons/normal/building-access-control.webp')
     expect(penById.get('74365219')?.image).toBe('icons/normal/building-smart-lighting.webp')

@@ -375,8 +375,9 @@ const windProcessDetails = Object.freeze([
     cameraPoseId: 'camera-pose.wind-power.gearbox',
     stateNodeId: 'node.wind-gearbox',
     topologyDataContextId: 'process-detail.wind-power.gearbox',
-    // 润滑油装置作为齿轮箱详情专属二维状态节点，状态不会映射到 Unity。
+    // 齿轮箱两个节点均来自当前专属 JSON 的真实 penId，只提供合作方二维状态，不映射 Unity。
     topologyNodes: Object.freeze([
+      Object.freeze({ nodeId: 'asset.wind-gearbox-cooling-fan', title: '散热风扇' }),
       Object.freeze({ nodeId: 'asset.wind-gearbox-lubrication-unit', title: '润滑油装置' }),
     ]),
   }),
@@ -420,7 +421,8 @@ const solarProcessDetails = Object.freeze([
 
 /**
  * 四个变电站类场景复用三份正式保护拓扑；开关站按产品要求只开放母线保护和线路保护。
- * 拓扑文件和 penId 绑定已存在于 process-detail-topology-contexts.ts；这里仅登记公开合同字段，Unity 资源仍需由对应场景目录确认。
+ * 拓扑文件和 penId 绑定已存在于 process-detail-topology-contexts.ts；这里登记第三层断路器的合作方节点目录。
+ * 第三层断路器不声明 sceneNodeId，第二层断路器仍保留在 stationTopologyBySceneId 中供 Unity 绑定。
  */
 const substationProtectionStepDefinitions = Object.freeze({
   'step-up-substation': Object.freeze([
@@ -443,6 +445,33 @@ const substationProtectionStepDefinitions = Object.freeze({
     ['line-protection', '线路保护', 'node.switching-breaker'],
   ]),
 })
+const substationProtectionBreakerNodeIds = Object.freeze({
+  'step-up-substation': Object.freeze({
+    'transformer-protection': 'asset.step-up-transformer-protection-breaker',
+    'busbar-protection': 'asset.step-up-busbar-protection-breaker',
+    'line-protection': 'asset.step-up-line-protection-breaker',
+  }),
+  'step-down-substation': Object.freeze({
+    'transformer-protection': 'asset.step-down-transformer-protection-breaker',
+    'busbar-protection': 'asset.step-down-busbar-protection-breaker',
+    'line-protection': 'asset.step-down-line-protection-breaker',
+  }),
+  'converter-station': Object.freeze({
+    'transformer-protection': 'asset.converter-transformer-protection-breaker',
+    'busbar-protection': 'asset.converter-busbar-protection-breaker',
+    'line-protection': 'asset.converter-line-protection-breaker',
+  }),
+  'switching-station': Object.freeze({
+    'busbar-protection': 'asset.switching-busbar-protection-breaker',
+    'line-protection': 'asset.switching-line-protection-breaker',
+  }),
+})
+const substationBreakerNodeIds = Object.freeze({
+  'step-up-substation': 'asset.step-up-breaker',
+  'step-down-substation': 'asset.step-down-breaker',
+  'converter-station': 'asset.converter-breaker',
+  'switching-station': 'asset.switching-breaker',
+})
 const substationProtectionProcessDetails = Object.freeze(
   Object.entries(substationProtectionStepDefinitions).flatMap(([sceneId, definitions]) => definitions.map(([stepId, _title, stateNodeId]) => Object.freeze({
     sceneId,
@@ -453,6 +482,12 @@ const substationProtectionProcessDetails = Object.freeze(
     cameraPoseId: `camera-pose.${sceneId}.${stepId}`,
     stateNodeId,
     topologyDataContextId: `process-detail.${sceneId}.${stepId}`,
+    // 第三层断路器作为合作方状态入口，状态聚合到第二层断路器；不携带 sceneNodeId，避免进入 Unity 清单。
+    topologyNodes: [{
+      nodeId: substationProtectionBreakerNodeIds[sceneId][stepId],
+      title: '断路器',
+      statusTargetNodeId: substationBreakerNodeIds[sceneId],
+    }],
   }))),
 )
 
@@ -1207,6 +1242,11 @@ const addedSceneNavigations = [
   // 配电站五个 sceneNodeId 按本次截图定义为后续 Unity 配置约定，不代表本地 Unity 场景现状。
   const substationTopologyNodes = {
     'step-up-substation': [
+      // 四类保护属于第二层控制层：合作方按稳定 nodeId 上报状态，但不对应 Unity 节点。
+      ['system.step-up-transformer-protection', '变压器保护', undefined, 'plc', 10, 35],
+      ['system.step-up-busbar-protection', '母线保护', undefined, 'plc', 30, 35],
+      ['system.step-up-line-protection', '线路保护', undefined, 'plc', 50, 35],
+      ['system.step-up-capacitor-protection', '电容器保护', undefined, 'plc', 70, 35],
       ['system.step-up-protection-control', '升压站保护控制', 'unit.step-up-protection.control', 'plc', 25, 35],
       ['system.step-up-measurement-control', '升压站测量控制', 'unit.step-up-measurement.control', 'instrument', 75, 35],
       ['asset.step-up-transformer', '升压站主变压器', 'node.step-up-transformer', 'transformer', 20, 72],
@@ -1221,6 +1261,11 @@ const addedSceneNavigations = [
       ['asset.distribution-instrument-transformer', '互感器', 'node.distribution-instrument-transformer', 'transformer', 80, 72],
     ],
     'step-down-substation': [
+      // 四类保护属于第二层控制层：合作方按稳定 nodeId 上报状态，但不对应 Unity 节点。
+      ['system.step-down-transformer-protection', '变压器保护', undefined, 'plc', 10, 35],
+      ['system.step-down-busbar-protection', '母线保护', undefined, 'plc', 30, 35],
+      ['system.step-down-line-protection', '线路保护', undefined, 'plc', 50, 35],
+      ['system.step-down-capacitor-protection', '电容器保护', undefined, 'plc', 70, 35],
       ['system.step-down-protection-control', '降压站保护控制', 'unit.step-down-protection.control', 'plc', 20, 35],
       ['system.step-down-measurement-control', '降压站测量控制', 'unit.step-down-measurement.control', 'instrument', 80, 35],
       ['asset.step-down-transformer', '降压站主变压器', 'node.step-down-transformer', 'transformer', 15, 72],
@@ -1228,6 +1273,11 @@ const addedSceneNavigations = [
       ['asset.step-down-instrument-transformer', '降压站仪用变压器', 'node.step-down-instrument-transformer', 'transformer', 85, 72],
     ],
     'converter-station': [
+      // 四类保护属于第二层控制层：合作方按稳定 nodeId 上报状态，但不对应 Unity 节点。
+      ['system.converter-transformer-protection', '变压器保护', undefined, 'plc', 10, 30],
+      ['system.converter-busbar-protection', '母线保护', undefined, 'plc', 30, 30],
+      ['system.converter-line-protection', '线路保护', undefined, 'plc', 50, 30],
+      ['system.converter-capacitor-protection', '电容器保护', undefined, 'plc', 70, 30],
       ['system.converter-valve-control', '换流站阀组控制', 'unit.converter-valve-control.control', 'plc', 15, 30],
       ['system.converter-protection-control', '换流站保护控制', 'unit.converter-protection.control', 'plc', 50, 30],
       ['system.converter-measurement-control', '换流站测量控制', 'unit.converter-measurement.control', 'instrument', 85, 30],
@@ -1237,6 +1287,10 @@ const addedSceneNavigations = [
       ['asset.converter-instrument-transformer', '换流站仪用变压器', 'node.converter-instrument-transformer', 'transformer', 90, 72],
     ],
     'switching-station': [
+      // 三类保护属于第二层控制层：合作方按稳定 nodeId 上报状态，但不对应 Unity 节点。
+      ['system.switching-busbar-protection', '母线保护', undefined, 'plc', 10, 35],
+      ['system.switching-line-protection', '线路保护', undefined, 'plc', 40, 35],
+      ['system.switching-capacitor-protection', '电容器保护', undefined, 'plc', 70, 35],
       ['system.switching-protection-control', '开关站保护控制', 'unit.switching-protection.control', 'plc', 25, 35],
       ['system.switching-measurement-control', '开关站测量控制', 'unit.switching-measurement.control', 'instrument', 75, 35],
       ['asset.switching-breaker', '开关站断路器', 'node.switching-breaker', 'breaker', 35, 72],
@@ -1251,7 +1305,7 @@ const addedSceneNavigations = [
       title: `${scenes.find((scene) => scene.sceneId === sceneId)?.title ?? sceneId}总览`,
       configVersion: manifestVersion,
       nodes: definitions.map(([nodeId, title, sceneNodeId, iconKey, x, y]) => ({
-        nodeId, title, sceneNodeId, iconKey, x, y,
+        nodeId, title, ...(sceneNodeId ? { sceneNodeId } : {}), iconKey, x, y,
         deviceStatus: 'normal', doubleClickBehavior: 'emit-node', metricKeys: [],
       })),
       edges: [],
@@ -1427,7 +1481,7 @@ const addedSceneNavigations = [
             ? [...buildingSceneNodeIds]
             : sceneId === 'microgrid'
               ? [...microgridSceneNodeIds]
-              : (stationTopologyBySceneId.get(sceneId)?.nodes ?? []).map((node) => node.sceneNodeId)
+              : (stationTopologyBySceneId.get(sceneId)?.nodes ?? []).flatMap((node) => node.sceneNodeId ? [node.sceneNodeId] : [])
       mapping.routeIds = []
     } else {
       unitySceneMappings.push({
@@ -1441,7 +1495,7 @@ const addedSceneNavigations = [
               ? [...buildingSceneNodeIds]
               : sceneId === 'microgrid'
                 ? [...microgridSceneNodeIds]
-                : (stationTopologyBySceneId.get(sceneId)?.nodes ?? []).map((node) => node.sceneNodeId),
+                : (stationTopologyBySceneId.get(sceneId)?.nodes ?? []).flatMap((node) => node.sceneNodeId ? [node.sceneNodeId] : []),
         routeIds: [],
       })
     }

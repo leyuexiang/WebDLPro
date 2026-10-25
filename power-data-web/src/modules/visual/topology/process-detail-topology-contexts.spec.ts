@@ -12,11 +12,11 @@ describe('第三层关键环节拓扑数据上下文', () => {
     const expected = new Map<string, readonly [string, number, string]>([
       ['process-detail.gas-power.gas-turbine', ['process-detail/gas-power/gas-turbine/topology.json', 32, '30652c2a8a2b5bf0af76c70501baa94e2ece57edb57fd35d164486546103b9ba']],
       ['process-detail.coal-power.steam-turbine', ['process-detail/coal-power/steam-turbine/topology.json', 45, '5c7262f198f4b4443d863d07a8b39f5bd0d9d841cb03d820b5535c736c78a79c']],
-      ['process-detail.solar-power.inverter', ['process-detail/solar-power/inverter/topology.json', 19, '6391b1212c07664721cbccfea4bb9d5f7ef06487655b08fbf09d4b09e9018686']],
-      ['process-detail.step-down-substation.transformer-protection', ['process-detail/protection/transformer-protection/topology.json', 37, 'cebf00fc7b375ff7bff26e29da3d722edc378f825d75813f384825b9a24f5431']],
-      ['process-detail.step-down-substation.busbar-protection', ['process-detail/protection/busbar-protection/topology.json', 35, '0b6ed18b48c7039cf3f0079642f1b9d2197c9a2890fd5a28d50839eca7161eb4']],
-      ['process-detail.step-down-substation.line-protection', ['process-detail/protection/line-protection/topology.json', 34, 'e635617e600c787442823d0887c79bc581bbb244a63a9dc1c51d732be6b2c08c']],
-      ['process-detail.wind-power.wind-turbine', ['process-detail/wind-power/wind-turbine/topology.json', 40, '5770f9e3c402c04b081291850bc7dd32a5688ba4c398c3e866b3dc1525720fa4']],
+      ['process-detail.solar-power.inverter', ['process-detail/solar-power/inverter/topology.json', 18, '392c1bee67b66723fe0fb06f438637a34c85a763f6da72596309740cac2a2e88']],
+      ['process-detail.step-down-substation.transformer-protection', ['process-detail/protection/transformer-protection/topology.json', 45, 'f212e9bc772af3ee832707337d8ad852a515d8431806396899718959f056b4cf']],
+      ['process-detail.step-down-substation.busbar-protection', ['process-detail/protection/busbar-protection/topology.json', 30, 'c161e398a4a2ca6ae14a1fc08c2942ba02c89cb38e38aedf05e70d46ff75d648']],
+      ['process-detail.step-down-substation.line-protection', ['process-detail/protection/line-protection/topology.json', 39, 'f4edf30234dc7dd90b1bda72576adbe7a1a8e32dea6c41b95b37aa62c6cadc3b']],
+      ['process-detail.wind-power.wind-turbine', ['process-detail/wind-power/wind-turbine/topology.json', 35, '41c4f6eb12126401c67207b85683ce4c2dea786af69b457c84d36b8c6184ef4c']],
       ['process-detail.wind-power.gearbox', ['process-detail/wind-power/gearbox/topology.json', 20, '1f3de2f9cb1f4e7ea86daa836c9c5f189fa059c5bf33c7d9d49866e66512c9fc']],
       ['process-detail.wind-power.yaw-system', ['process-detail/wind-power/yaw-system/topology.json', 15, '86767c78df1d0ea12ed8b34e3ed8834caa0ba27d13a0dbd6e2011ac175d7dddd']],
     ])
@@ -48,7 +48,10 @@ describe('第三层关键环节拓扑数据上下文', () => {
     const bindingKeys = protectionContexts.flatMap((context) => context.bindings.map((binding) => `${context.contextId}:${binding.penId}`))
     expect(new Set(bindingKeys).size).toBe(bindingKeys.length)
     for (const context of protectionContexts) {
-      expect(context.bindings.every((binding) => binding.nodeId && binding.sceneNodeId)).toBe(true)
+      expect(context.bindings.filter((binding) => binding.nodeId.includes('-protection-breaker'))
+        .every((binding) => binding.sceneNodeId === undefined)).toBe(true)
+      expect(context.bindings.filter((binding) => !binding.nodeId.includes('-protection-breaker'))
+        .every((binding) => binding.nodeId && binding.sceneNodeId)).toBe(true)
     }
   })
 
@@ -78,9 +81,9 @@ describe('第三层关键环节拓扑数据上下文', () => {
     const context = getProcessDetailTopologyDataContext('process-detail.step-up-substation.transformer-protection')!
     expect(context.bindings).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        penId: '13641187',
-        nodeId: 'system.step-up-measurement-control',
-        sceneNodeId: 'unit.step-up-measurement.control',
+        penId: '4d08c079',
+        nodeId: 'system.step-up-protection-control',
+        sceneNodeId: 'unit.step-up-protection.control',
       }),
       expect.objectContaining({
         penId: '2afc53b',
@@ -88,19 +91,52 @@ describe('第三层关键环节拓扑数据上下文', () => {
         sceneNodeId: 'node.step-up-transformer',
       }),
     ]))
+    expect(context.bindings.filter((binding) => binding.nodeId === 'system.step-up-protection-control')).toHaveLength(6)
+    expect(context.bindings.some((binding) => binding.penId === '13641187')).toBe(false)
     for (const contextItem of PROCESS_DETAIL_TOPOLOGY_DATA_CONTEXTS.filter((item) => item.contextId.includes('substation') || item.contextId.includes('converter-station') || item.contextId.includes('switching-station'))) {
-      expect(contextItem.bindings.every((binding) => binding.nodeId && binding.sceneNodeId)).toBe(true)
+      const breakerBindings = contextItem.bindings.filter((binding) => binding.nodeId.includes('-protection-breaker'))
+      expect(breakerBindings).toHaveLength(1)
+      expect(breakerBindings[0]?.sceneNodeId).toBeUndefined()
+      expect(contextItem.bindings.filter((binding) => !binding.nodeId.includes('-protection-breaker'))
+        .every((binding) => binding.sceneNodeId !== undefined)).toBe(true)
     }
   })
 
-  it('风电第三层四个合作方状态节点分别绑定对应图元且不声明 Unity 节点', () => {
+  it('母线保护最新图元仍沿用断路器业务绑定并按保护装置语义登记', () => {
+    const context = getProcessDetailTopologyDataContext('process-detail.step-up-substation.busbar-protection')!
+    expect(context.bindings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ penId: '9ca0194', nodeId: 'asset.step-up-busbar-protection-breaker' }),
+      expect.objectContaining({ penId: '369ffe7d', nodeId: 'asset.step-up-instrument-transformer', sceneNodeId: 'node.step-up-instrument-transformer' }),
+    ]))
+    expect(context.bindings.filter((binding) => binding.nodeId === 'system.step-up-protection-control')).toHaveLength(2)
+  })
+
+  it('线路保护最新图元保留断路器绑定并覆盖五个保护装置图元', () => {
+    const context = getProcessDetailTopologyDataContext('process-detail.step-up-substation.line-protection')!
+    expect(context.bindings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ penId: '740db66c', nodeId: 'asset.step-up-line-protection-breaker' }),
+      expect.objectContaining({ penId: '7a69ba60', nodeId: 'asset.step-up-instrument-transformer', sceneNodeId: 'node.step-up-instrument-transformer' }),
+    ]))
+    expect(context.bindings.filter((binding) => binding.nodeId === 'system.step-up-protection-control')).toHaveLength(5)
+  })
+
+  it('风电第三层五个合作方状态节点分别绑定对应图元且不声明 Unity 节点', () => {
     const topologyRoot = resolve(process.cwd(), 'public/topology')
     const expectedBindings = new Map<string, readonly { penId: string; nodeId: string }[]>([
       ['process-detail.wind-power.wind-turbine', [
-        { penId: 'bb18bd', nodeId: 'asset.wind-turbine-yaw-system' },
-        { penId: 'c236be3', nodeId: 'asset.wind-turbine-drivetrain-system' },
+        { penId: '4e8f84e0', nodeId: 'asset.wind-turbine-yaw-system' },
+        { penId: 'ff8e8e2', nodeId: 'asset.wind-turbine-yaw-system' },
+        { penId: 'e1cb52b', nodeId: 'asset.wind-turbine-yaw-system' },
+        { penId: 'f6eb29d', nodeId: 'asset.wind-turbine-yaw-system' },
+        { penId: '4af3bcb7', nodeId: 'asset.wind-turbine-yaw-system' },
+        { penId: '2167a855', nodeId: 'asset.wind-turbine-drivetrain-system' },
+        { penId: '49b8df2', nodeId: 'asset.wind-turbine-drivetrain-system' },
+        { penId: '7e83956', nodeId: 'asset.wind-turbine-drivetrain-system' },
+        { penId: '76259d', nodeId: 'asset.wind-turbine-drivetrain-system' },
+        { penId: 'a0a7e97', nodeId: 'asset.wind-turbine-drivetrain-system' },
       ]],
       ['process-detail.wind-power.gearbox', [
+        { penId: '310a9d42', nodeId: 'asset.wind-gearbox-cooling-fan' },
         { penId: 'a7d5ad8', nodeId: 'asset.wind-gearbox-lubrication-unit' },
       ]],
       ['process-detail.wind-power.yaw-system', [
@@ -108,10 +144,13 @@ describe('第三层关键环节拓扑数据上下文', () => {
       ]],
     ])
     const titleByNodeId = new Map([
-      ['asset.wind-turbine-yaw-system', '偏航系统'],
-      ['asset.wind-turbine-drivetrain-system', '传动系统'],
+      ['asset.wind-gearbox-cooling-fan', '散热风扇'],
       ['asset.wind-gearbox-lubrication-unit', '润滑油装置'],
       ['asset.wind-yaw-angle-sensor', '角度传感器'],
+    ])
+    const titleByPenId = new Map([
+      ['4e8f84e0', '制动器'], ['ff8e8e2', '电机'], ['e1cb52b', '减速机'], ['f6eb29d', '液压站'], ['4af3bcb7', '角度传感器'],
+      ['2167a855', '主轴'], ['49b8df2', '联轴器'], ['7e83956', '齿轮箱'], ['76259d', '发电机'], ['a0a7e97', '刹车盘'],
     ])
 
     for (const [contextId, bindings] of expectedBindings) {
@@ -122,7 +161,8 @@ describe('第三层关键环节拓扑数据上下文', () => {
       const source = JSON.parse(readFileSync(resolve(topologyRoot, context.topologyPath), 'utf8')) as { pens: readonly { id?: string; text?: string }[] }
       for (const binding of bindings) {
         const penText = source.pens.find((pen) => pen.id === binding.penId)?.text ?? ''
-        expect(penText.replace(/\s+/g, '')).toContain(titleByNodeId.get(binding.nodeId))
+        const expectedTitle = titleByPenId.get(binding.penId) ?? titleByNodeId.get(binding.nodeId)
+        expect(penText.replace(/\s+/g, '')).toContain(expectedTitle)
       }
     }
   })

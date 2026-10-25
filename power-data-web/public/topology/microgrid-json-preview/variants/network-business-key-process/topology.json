@@ -1,192 +1,56 @@
 {
-  "x": -48,
-  "y": 33,
+  "x": -52,
+  "y": 13,
   "scale": 0.6052083333333333,
   "pens": [
     {
-      "id": "f5323bc",
-      "name": "combine",
-      "x": 61.31738280950725,
-      "y": 119.0656521270032,
-      "ex": 1223.3173828095123,
-      "ey": 769.6646104603378,
-      "width": 1162.000000000005,
-      "height": 650.5989583333346,
-      "center": {
-        "x": 642.3173828095098,
-        "y": 444.3651312936705
-      },
-      "children": [
-        "7b0a884",
-        "5f9a8ad5",
-        "314221f7",
-        "8f27d46",
-        "0e5e5ab",
-        "3e235de0",
-        "14fbadee",
-        "58845f75",
-        "ac4cdcc",
-        "6eaf50f7",
-        "a6a3147",
-        "abf1410",
-        "30ecc688",
-        "17097ec8",
-        "51828752",
-        "a297c60",
-        "6fbbb88f",
-        "4c8a815",
-        "f1cd782",
-        "68df26",
-        "f64d786",
-        "fd6b772",
-        "19f22ed",
-        "19364",
-        "6239215",
-        "3ee7d2d",
-        "6c3a2b7",
-        "2508b825",
-        "ef7833e",
-        "b16f740",
-        "824c6f1",
-        "4710e00e",
-        "42d33a06",
-        "1f9c4eb4",
-        "8d86b4c",
-        "1bb96f8",
-        "43b548c",
-        "241c3b7",
-        "2df43f7b",
-        "2a5e86a3",
-        "6e32509",
-        "a4dc7a3",
-        "43d5c25",
-        "3451fb7",
-        "40bc26a1",
-        "5026136",
-        "64455435",
-        "e893cf3",
-        "fa1adb7",
-        "040d6da",
-        "2bedebf2",
-        "fb17791",
-        "c054954",
-        "68f532",
-        "432e9b8",
-        "f0cb687",
-        "66ac78d",
-        "2ac13fb0",
-        "31c35bf3",
-        "ff5d225",
-        "70d3f420",
-        "02c17bc",
-        "752ee6fa",
-        "05e5044"
-      ],
-      "lineWidth": 1,
-      "fontSize": 12,
-      "lineHeight": 1.5,
-      "anchors": [
-        {
-          "x": 0.5,
-          "y": 0,
-          "id": "0",
-          "penId": "f5323bc"
-        },
-        {
-          "x": 1,
-          "y": 0.5,
-          "id": "1",
-          "penId": "f5323bc"
-        },
-        {
-          "x": 0.5,
-          "y": 1,
-          "id": "2",
-          "penId": "f5323bc"
-        },
-        {
-          "x": 0,
-          "y": 0.5,
-          "id": "3",
-          "penId": "f5323bc"
-        }
-      ],
-      "rotate": 0,
-      "lineAnimateImages": [],
-      "globalAlpha": 1,
-      "dash": 0,
-      "tags": [],
-      "bkType": 0,
-      "textType": 0,
-      "iconType": 0,
-      "animations": [],
-      "whiteSpace": "break-all",
-      "ellipsis": false,
-      "shadow": false,
-      "progress": 0
-    },
-    {
       "anchors": [
         {
           "id": "0",
-          "penId": "7b0a884",
+          "penId": "bc029e5",
           "x": 0.5,
           "y": 0
         },
         {
           "id": "1",
-          "penId": "7b0a884",
+          "penId": "bc029e5",
           "x": 1,
           "y": 0.5
         },
         {
           "id": "2",
-          "penId": "7b0a884",
+          "penId": "bc029e5",
           "x": 0.5,
           "y": 1
         },
         {
           "id": "3",
-          "penId": "7b0a884",
+          "penId": "bc029e5",
           "x": 0,
           "y": 0.5
         }
       ],
       "animations": [],
-      "background": "rgba(255, 156, 110, 1)",
-      "bkType": 1,
+      "bkType": 0,
       "borderRadius": 0,
       "center": {
-        "x": 712.0848381805863,
-        "y": 362.91026170135615
+        "x": 642.5269359682152,
+        "y": 391.9245737050722
       },
       "children": [],
-      "color": "rgba(255, 255, 255, 1)",
-      "connectedLines": [
-        {
-          "anchor": "0",
-          "lineAnchor": "be052b8",
-          "lineId": "b16f740"
-        }
-      ],
-      "dash": 1,
+      "dash": 0,
       "ellipsis": false,
-      "ex": 0.7349030465923196,
-      "ey": 0.4416488918505492,
-      "fontSize": 20,
-      "fontWeight": "normal",
+      "ex": 1223.5269359682175,
+      "ey": 441.85426120507225,
+      "fontSize": 36,
+      "fontWeight": "bold",
       "globalAlpha": 1,
-      "gradientColors": "linear-gradient(180deg,rgba(242, 230, 53, 0.23) 0%,rgba(220, 194, 73, 0.72) 100%)",
-      "height": 0.10486892714746505,
+      "gradientColors": "linear-gradient(90deg,rgba(189, 49, 30, 1) 0%,rgb(73, 106, 220) 100%)",
+      "height": 99.85937500000011,
       "iconType": 0,
-      "id": "7b0a884",
+      "id": "bc029e5",
       "lineAnimateImages": [],
       "lineCap": "butt",
-      "lineDash": [
-        5,
-        5
-      ],
-      "lineGradientColors": "linear-gradient(90deg,rgb(241, 29, 0) 0%,rgba(220, 115, 73, 1) 100%)",
       "lineHeight": 1.5,
       "lineWidth": 1,
       "locked": 0,
@@ -198,225 +62,16 @@
       },
       "rotate": 0,
       "shadow": false,
-      "shadowBlur": 0,
-      "shadowColor": "",
-      "shadowOffsetX": 0,
-      "shadowOffsetY": 0,
       "strokeType": false,
       "tags": [],
       "text": "",
-      "textBaseline": "top",
-      "textColor": "rgba(255, 255, 255, 1)",
+      "textAlign": "left",
       "textType": 0,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.3446272722556113,
-      "x": 0.39027577433670835,
-      "y": 0.33677996470308413,
-      "parentId": "f5323bc"
-    },
-    {
-      "anchors": [
-        {
-          "id": "0",
-          "penId": "5f9a8ad5",
-          "x": 0.5,
-          "y": 0
-        },
-        {
-          "id": "1",
-          "penId": "5f9a8ad5",
-          "x": 1,
-          "y": 0.5
-        },
-        {
-          "id": "2",
-          "penId": "5f9a8ad5",
-          "x": 0.5,
-          "y": 1
-        },
-        {
-          "id": "3",
-          "penId": "5f9a8ad5",
-          "x": 0,
-          "y": 0.5
-        }
-      ],
-      "animations": [],
-      "bkType": 0,
-      "center": {
-        "x": 639.3559432208208,
-        "y": 434.9872392628222
-      },
-      "children": [
-        "6f383601"
-      ],
-      "dash": 0,
-      "ellipsis": false,
-      "ex": 1,
-      "ey": 1,
-      "fontSize": 12,
-      "globalAlpha": 1,
-      "height": 1,
-      "iconType": 0,
-      "id": "5f9a8ad5",
-      "lineAnimateImages": [],
-      "lineHeight": 1.5,
-      "lineWidth": 1,
-      "locked": 0,
-      "name": "combine",
-      "progress": 0,
-      "rotate": 0,
-      "shadow": false,
-      "tags": [],
-      "textType": 0,
-      "visible": true,
-      "whiteSpace": "break-all",
-      "width": 1,
-      "x": 0,
-      "y": 0,
-      "parentId": "f5323bc"
-    },
-    {
-      "anchors": [
-        {
-          "id": "0",
-          "penId": "6f383601",
-          "x": 0.5,
-          "y": 0
-        },
-        {
-          "id": "1",
-          "penId": "6f383601",
-          "x": 1,
-          "y": 0.5
-        },
-        {
-          "id": "2",
-          "penId": "6f383601",
-          "x": 0.5,
-          "y": 1
-        },
-        {
-          "id": "3",
-          "penId": "6f383601",
-          "x": 0,
-          "y": 0.5
-        }
-      ],
-      "animations": [],
-      "bkType": 0,
-      "center": {
-        "x": 612.6106156943346,
-        "y": -24.69186525187621
-      },
-      "children": [
-        "308e0b",
-        "12aa42c9",
-        "d1943f5",
-        "13ef3654",
-        "c24459b",
-        "568f15ef",
-        "f5278b0"
-      ],
-      "dash": 0,
-      "ellipsis": false,
-      "ex": 1,
-      "ey": 1,
-      "fontSize": 12,
-      "globalAlpha": 1,
-      "height": 1,
-      "iconType": 0,
-      "id": "6f383601",
-      "lineAnimateImages": [],
-      "lineHeight": 1.5,
-      "lineWidth": 1,
-      "locked": 0,
-      "name": "combine",
-      "parentId": "5f9a8ad5",
-      "progress": 0,
-      "props": {
-        "custom": []
-      },
-      "rotate": 0,
-      "shadow": false,
-      "tags": [],
-      "textType": 0,
-      "visible": true,
-      "whiteSpace": "break-all",
-      "width": 1,
-      "x": 0,
-      "y": 0
-    },
-    {
-      "anchors": [
-        {
-          "id": "0",
-          "penId": "308e0b",
-          "x": 0.5,
-          "y": 0
-        },
-        {
-          "id": "1",
-          "penId": "308e0b",
-          "x": 1,
-          "y": 0.5
-        },
-        {
-          "id": "2",
-          "penId": "308e0b",
-          "x": 0.5,
-          "y": 1
-        },
-        {
-          "id": "3",
-          "penId": "308e0b",
-          "x": 0,
-          "y": 0.5
-        }
-      ],
-      "animations": [],
-      "bkType": 0,
-      "center": {
-        "x": 650.4103934250691,
-        "y": 104.86291887533696
-      },
-      "children": [
-        "51f2680",
-        "08b4eb4",
-        "533871d5",
-        "bc029e5",
-        "5b96d33e",
-        "e5a7884"
-      ],
-      "dash": 0,
-      "ellipsis": false,
-      "ex": 1,
-      "ey": 1,
-      "fontSize": 36,
-      "globalAlpha": 1,
-      "height": 1,
-      "iconType": 0,
-      "id": "308e0b",
-      "lineAnimateImages": [],
-      "lineHeight": 1.5,
-      "lineWidth": 1,
-      "locked": 0,
-      "name": "combine",
-      "parentId": "6f383601",
-      "progress": 0,
-      "props": {
-        "custom": []
-      },
-      "rotate": 0,
-      "shadow": false,
-      "tags": [],
-      "textType": 0,
-      "visible": true,
-      "whiteSpace": "break-all",
-      "width": 1,
-      "x": 0,
-      "y": 0
+      "width": 1162.0000000000045,
+      "x": 61.52693596821295,
+      "y": 341.99488620507213
     },
     {
       "anchors": [
@@ -455,19 +110,19 @@
       "bkType": 0,
       "borderRadius": 0,
       "center": {
-        "x": 3597.134604088169,
-        "y": -66.10502876171836
+        "x": 642.5269359682152,
+        "y": 723.2761362050732
       },
       "children": [],
       "connectedLines": [],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.9999999999999997,
-      "ey": 0.9999999999999999,
+      "ex": 1223.5269359682175,
+      "ey": 780.7709278717399,
       "fontSize": 36,
       "fontWeight": "bold",
       "globalAlpha": 1,
-      "height": 0.17674418604651154,
+      "height": 114.98958333333351,
       "iconType": 0,
       "id": "51f2680",
       "lineAnimateImages": [],
@@ -476,7 +131,6 @@
       "lineWidth": 1,
       "locked": 0,
       "name": "rectangle",
-      "parentId": "308e0b",
       "progress": 0,
       "props": {
         "look": true,
@@ -491,9 +145,9 @@
       "textType": 0,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.9999999999999997,
-      "x": 0,
-      "y": 0.8232558139534883
+      "width": 1162.0000000000045,
+      "x": 61.52693596821295,
+      "y": 665.7813445384064
     },
     {
       "anchors": [
@@ -526,18 +180,18 @@
       "bkType": 0,
       "borderRadius": 0,
       "center": {
-        "x": 3597.134604088169,
-        "y": -137.01648709505187
+        "x": 642.5269359682152,
+        "y": 617.3646778717398
       },
       "children": [],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.9999999999999997,
-      "ey": 0.8232558139534882,
+      "ex": 1223.5269359682175,
+      "ey": 665.7813445384065,
       "fontSize": 36,
       "fontWeight": "bold",
       "globalAlpha": 1,
-      "height": 0.14883720930232547,
+      "height": 96.83333333333346,
       "iconType": 0,
       "id": "08b4eb4",
       "lineAnimateImages": [],
@@ -546,7 +200,6 @@
       "lineWidth": 1,
       "locked": 0,
       "name": "rectangle",
-      "parentId": "308e0b",
       "progress": 0,
       "props": {
         "look": true,
@@ -561,9 +214,9 @@
       "textType": 0,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.9999999999999997,
-      "x": 0,
-      "y": 0.6744186046511628
+      "width": 1162.0000000000045,
+      "x": 61.52693596821295,
+      "y": 568.948011205073
     },
     {
       "anchors": [
@@ -596,8 +249,8 @@
       "bkType": 0,
       "borderRadius": 0,
       "center": {
-        "x": 3597.134604088169,
-        "y": -211.98002876171876
+        "x": 642.5269359682152,
+        "y": 505.4011362050726
       },
       "children": [],
       "connectedLines": [
@@ -614,12 +267,12 @@
       ],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.9999999999999997,
-      "ey": 0.6744186046511624,
+      "ex": 1223.5269359682175,
+      "ey": 568.9480112050727,
       "fontSize": 36,
       "fontWeight": "bold",
       "globalAlpha": 1,
-      "height": 0.19534883720930216,
+      "height": 127.09375000000017,
       "iconType": 0,
       "id": "533871d5",
       "lineAnimateImages": [],
@@ -628,7 +281,6 @@
       "lineWidth": 1,
       "locked": 0,
       "name": "rectangle",
-      "parentId": "308e0b",
       "progress": 0,
       "props": {
         "look": true,
@@ -643,159 +295,9 @@
       "textType": 0,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.9999999999999997,
-      "x": 0,
-      "y": 0.47906976744186025
-    },
-    {
-      "anchors": [
-        {
-          "id": "0",
-          "penId": "bc029e5",
-          "x": 0.5,
-          "y": 0
-        },
-        {
-          "id": "1",
-          "penId": "bc029e5",
-          "x": 1,
-          "y": 0.5
-        },
-        {
-          "id": "2",
-          "penId": "bc029e5",
-          "x": 0.5,
-          "y": 1
-        },
-        {
-          "id": "3",
-          "penId": "bc029e5",
-          "x": 0,
-          "y": 0.5
-        }
-      ],
-      "animations": [],
-      "bkType": 0,
-      "borderRadius": 0,
-      "center": {
-        "x": 3597.134604088169,
-        "y": -287.95659126171904
-      },
-      "children": [],
-      "dash": 0,
-      "ellipsis": false,
-      "ex": 0.9999999999999997,
-      "ey": 0.4790697674418598,
-      "fontSize": 36,
-      "fontWeight": "bold",
-      "globalAlpha": 1,
-      "gradientColors": "linear-gradient(90deg,rgba(189, 49, 30, 1) 0%,rgb(73, 106, 220) 100%)",
-      "height": 0.1534883720930231,
-      "iconType": 0,
-      "id": "bc029e5",
-      "lineAnimateImages": [],
-      "lineCap": "butt",
-      "lineHeight": 1.5,
-      "lineWidth": 1,
-      "locked": 0,
-      "name": "rectangle",
-      "parentId": "308e0b",
-      "progress": 0,
-      "props": {
-        "look": true,
-        "text": true
-      },
-      "rotate": 0,
-      "shadow": false,
-      "strokeType": false,
-      "tags": [],
-      "text": "",
-      "textAlign": "left",
-      "textType": 0,
-      "visible": true,
-      "whiteSpace": "break-all",
-      "width": 0.9999999999999997,
-      "x": 0,
-      "y": 0.32558139534883673
-    },
-    {
-      "anchors": [
-        {
-          "id": "0",
-          "penId": "5b96d33e",
-          "x": 0.5,
-          "y": 0
-        },
-        {
-          "id": "1",
-          "penId": "5b96d33e",
-          "x": 1,
-          "y": 0.5
-        },
-        {
-          "id": "2",
-          "penId": "5b96d33e",
-          "x": 0.5,
-          "y": 1
-        },
-        {
-          "id": "3",
-          "penId": "5b96d33e",
-          "x": 0,
-          "y": 0.5
-        }
-      ],
-      "animations": [
-        {
-          "lineAnimateTargetType": 0,
-          "name": "动画1",
-          "temType": "id"
-        }
-      ],
-      "bkType": 0,
-      "borderRadius": 0,
-      "canvasLayer": 2,
-      "center": {
-        "x": 3597.134604088169,
-        "y": -361.90711209505236
-      },
-      "children": [],
-      "dash": 0,
-      "ellipsis": false,
-      "ex": 0.9999999999999997,
-      "ey": 0.325581395348837,
-      "fontSize": 36,
-      "fontWeight": "bold",
-      "globalAlpha": 1,
-      "height": 0.1860465116279069,
-      "iconType": 0,
-      "id": "5b96d33e",
-      "image": "",
-      "lineAnimateImages": [],
-      "lineCap": "butt",
-      "lineHeight": 1.5,
-      "lineWidth": 1,
-      "locked": 0,
-      "name": "rectangle",
-      "parentId": "308e0b",
-      "progress": 0,
-      "props": {
-        "image": true,
-        "look": true,
-        "text": true
-      },
-      "rotate": 0,
-      "shadow": false,
-      "strokeType": false,
-      "tags": [],
-      "text": "",
-      "textAlign": "left",
-      "textType": 0,
-      "visible": true,
-      "whiteSpace": "break-all",
-      "width": 0.9999999999999997,
-      "x": 0,
-      "y": 0.1395348837209301
+      "width": 1162.0000000000045,
+      "x": 61.52693596821295,
+      "y": 441.85426120507253
     },
     {
       "anchors": [
@@ -828,18 +330,18 @@
       "bkType": 0,
       "borderRadius": 0,
       "center": {
-        "x": 3597.134604088169,
-        "y": -432.8185704283858
+        "x": 642.5269359682152,
+        "y": 236.08342787173876
       },
       "children": [],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.9999999999999997,
-      "ey": 0.1395348837209301,
+      "ex": 1223.5269359682175,
+      "ey": 341.99488620507213,
       "fontSize": 36,
       "fontWeight": "bold",
       "globalAlpha": 1,
-      "height": 0.1395348837209301,
+      "height": 211.82291666666677,
       "iconType": 0,
       "id": "e5a7884",
       "lineAnimateImages": [],
@@ -848,7 +350,6 @@
       "lineWidth": 1,
       "locked": 0,
       "name": "rectangle",
-      "parentId": "308e0b",
       "progress": 0,
       "props": {
         "look": true,
@@ -863,9 +364,9 @@
       "textType": 0,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.9999999999999997,
-      "x": 0,
-      "y": 0
+      "width": 1162.0000000000045,
+      "x": 61.52693596821295,
+      "y": 130.1719695384054
     },
     {
       "anchors": [
@@ -898,28 +399,27 @@
       "bkType": 0,
       "canvasLayer": 2,
       "center": {
-        "x": 144.39297379085872,
-        "y": -157.14184623753664
+        "x": 136.50951633400513,
+        "y": 267.3021002588658
       },
       "children": [],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.12103694657508716,
-      "ey": 0.13301632133010727,
+      "ex": 202.17186788846487,
+      "ey": 290.54766630377196,
       "fontSize": 36,
       "fontWeight": "bold",
       "globalAlpha": 1,
-      "height": 0.07145897099022504,
+      "height": 46.491132089812396,
       "iconType": 0,
       "id": "12aa42c9",
-      "image": "background/flow-light-3.png",
+      "image": "background/flow-light-3.webp",
       "imageRatio": true,
       "lineAnimateImages": [],
       "lineHeight": 1.5,
       "lineWidth": 1,
       "locked": 0,
       "name": "gif",
-      "parentId": "6f383601",
       "props": {
         "image": true,
         "text": true
@@ -928,91 +428,20 @@
       "shadow": false,
       "strokeType": false,
       "tags": [],
-      "text": "企业办公网\n\n",
+      "text": "企业层\n\n",
       "textType": 0,
       "toGif": true,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.11301609561869097,
-      "x": 0.008020850956396191,
-      "y": 0.061557350339882244,
+      "width": 131.3247031089195,
+      "x": 70.84716477954537,
+      "y": 244.05653421395957,
       "zIndex": 31
     },
     {
       "anchors": [
         {
           "id": "0",
-          "penId": "d1943f5",
-          "x": 0.5,
-          "y": 0
-        },
-        {
-          "id": "1",
-          "penId": "d1943f5",
-          "x": 1,
-          "y": 0.5
-        },
-        {
-          "id": "2",
-          "penId": "d1943f5",
-          "x": 0.5,
-          "y": 1
-        },
-        {
-          "id": "3",
-          "penId": "d1943f5",
-          "x": 0,
-          "y": 0.5
-        }
-      ],
-      "animations": [],
-      "bkType": 0,
-      "canvasLayer": 2,
-      "center": {
-        "x": 144.39297379085872,
-        "y": -38.44713133008683
-      },
-      "children": [],
-      "dash": 0,
-      "ellipsis": false,
-      "ex": 0.12103694657508716,
-      "ey": 0.315455462043635,
-      "fontSize": 36,
-      "fontWeight": "bold",
-      "globalAlpha": 1,
-      "height": 0.07145897099022504,
-      "iconType": 0,
-      "id": "d1943f5",
-      "image": "background/flow-light-3.png",
-      "imageRatio": true,
-      "lineAnimateImages": [],
-      "lineHeight": 1.5,
-      "lineWidth": 1,
-      "locked": 0,
-      "name": "gif",
-      "parentId": "6f383601",
-      "props": {
-        "image": true,
-        "text": true
-      },
-      "rotate": 0,
-      "shadow": false,
-      "strokeType": false,
-      "tags": [],
-      "text": "非工业军事区\n\n",
-      "textType": 0,
-      "toGif": true,
-      "visible": true,
-      "whiteSpace": "break-all",
-      "width": 0.11301609561869097,
-      "x": 0.008020850956396191,
-      "y": 0.24399649105340995,
-      "zIndex": 32
-    },
-    {
-      "anchors": [
-        {
-          "id": "0",
           "penId": "13ef3654",
           "x": 0.5,
           "y": 0
@@ -1040,28 +469,27 @@
       "bkType": 0,
       "canvasLayer": 2,
       "center": {
-        "x": 144.39297379085872,
-        "y": 67.29055919912322
+        "x": 136.50951633400513,
+        "y": 417.89908902885895
       },
       "children": [],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.12103694657508716,
-      "ey": 0.4779790707504219,
+      "ex": 202.17186788846487,
+      "ey": 441.1446550737652,
       "fontSize": 36,
       "fontWeight": "bold",
       "globalAlpha": 1,
-      "height": 0.07145897099022504,
+      "height": 46.491132089812396,
       "iconType": 0,
       "id": "13ef3654",
-      "image": "background/flow-light-3.png",
+      "image": "background/flow-light-3.webp",
       "imageRatio": true,
       "lineAnimateImages": [],
       "lineHeight": 1.5,
       "lineWidth": 1,
       "locked": 0,
       "name": "gif",
-      "parentId": "6f383601",
       "props": {
         "image": true,
         "text": true
@@ -1075,9 +503,9 @@
       "toGif": true,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.11301609561869097,
-      "x": 0.008020850956396191,
-      "y": 0.4065200997601969,
+      "width": 131.3247031089195,
+      "x": 70.84716477954537,
+      "y": 394.65352298395277,
       "zIndex": 33
     },
     {
@@ -1117,8 +545,8 @@
       "bkType": 0,
       "canvasLayer": 2,
       "center": {
-        "x": 854.560693190418,
-        "y": 351.79437098618536
+        "x": 857.7316859378126,
+        "y": 372.2785804284359
       },
       "children": [],
       "connectedLines": [
@@ -1130,15 +558,15 @@
       ],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.7242645223490498,
-      "ey": 0.40747763912168883,
+      "ex": 903.1223109378126,
+      "ey": 395.27649709510257,
       "fontSize": 24,
       "fontWeight": "normal",
       "globalAlpha": 1,
-      "height": 0.07069767441860471,
+      "height": 45.995833333333465,
       "iconType": 0,
       "id": "314221f7",
-      "image": "assets/data-server.png",
+      "image": "icons/normal/server.webp",
       "imageRatio": true,
       "isBottom": true,
       "lineAnimateImages": [],
@@ -1159,11 +587,10 @@
       "textType": 0,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.07812499999999967,
-      "x": 0.6461395223490501,
-      "y": 0.33677996470308413,
-      "zIndex": 6,
-      "parentId": "f5323bc"
+      "width": 90.78125000000001,
+      "x": 812.3410609378126,
+      "y": 349.2806637617691,
+      "zIndex": 6
     },
     {
       "anchors": [
@@ -1202,8 +629,8 @@
       "bkType": 0,
       "canvasLayer": 2,
       "center": {
-        "x": 564.7411884072367,
-        "y": 351.79437098618536
+        "x": 567.9121811546315,
+        "y": 372.2785804284359
       },
       "children": [],
       "connectedLines": [
@@ -1215,15 +642,15 @@
       ],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.4748501464599106,
-      "ey": 0.40747763912168883,
+      "ex": 613.3028061546315,
+      "ey": 395.27649709510257,
       "fontSize": 24,
       "fontWeight": "normal",
       "globalAlpha": 1,
-      "height": 0.07069767441860471,
+      "height": 45.995833333333465,
       "iconType": 0,
       "id": "8f27d46",
-      "image": "assets/operator.png",
+      "image": "icons/normal/office.webp",
       "imageRatio": true,
       "isBottom": true,
       "lineAnimateImages": [],
@@ -1244,11 +671,10 @@
       "textType": 0,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.07812499999999967,
-      "x": 0.3967251464599109,
-      "y": 0.33677996470308413,
-      "zIndex": 8,
-      "parentId": "f5323bc"
+      "width": 90.78125000000001,
+      "x": 522.5215561546315,
+      "y": 349.2806637617691,
+      "zIndex": 8
     },
     {
       "anchors": [
@@ -1281,28 +707,27 @@
       "bkType": 0,
       "canvasLayer": 2,
       "center": {
-        "x": 144.39297379085872,
-        "y": 183.20688181814631
+        "x": 136.50951633400513,
+        "y": 533.8154116478821
       },
       "children": [],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.12103694657508716,
-      "ey": 0.6561476969590629,
+      "ex": 202.17186788846487,
+      "ey": 557.0609776927882,
       "fontSize": 36,
       "fontWeight": "bold",
       "globalAlpha": 1,
-      "height": 0.07145897099022504,
+      "height": 46.491132089812396,
       "iconType": 0,
       "id": "c24459b",
-      "image": "background/flow-light-3.png",
+      "image": "background/flow-light-3.webp",
       "imageRatio": true,
       "lineAnimateImages": [],
       "lineHeight": 1.5,
       "lineWidth": 1,
       "locked": 0,
       "name": "gif",
-      "parentId": "6f383601",
       "props": {
         "image": true,
         "text": true
@@ -1311,14 +736,14 @@
       "shadow": false,
       "strokeType": false,
       "tags": [],
-      "text": "现场控制\n与保护\n\n",
+      "text": "控制层\n\n",
       "textType": 0,
       "toGif": true,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.11301609561869097,
-      "x": 0.008020850956396191,
-      "y": 0.5846887259688379,
+      "width": 131.3247031089195,
+      "x": 70.84716477954537,
+      "y": 510.5698456029759,
       "zIndex": 34
     },
     {
@@ -1352,8 +777,8 @@
       "bkType": 0,
       "canvasLayer": 2,
       "center": {
-        "x": 1134.7227569077445,
-        "y": 136.3462866258023
+        "x": 1137.8937496551393,
+        "y": 156.8304960680528
       },
       "children": [],
       "connectedLines": [
@@ -1365,15 +790,15 @@
       ],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.9783886807403224,
-      "ey": 0.08195071998866903,
+      "ex": 1198.4145829884726,
+      "ey": 183.48902259770026,
       "fontSize": 20,
       "fontWeight": "normal",
       "globalAlpha": 1,
-      "height": 0.08195071998866903,
+      "height": 53.31705305929486,
       "iconType": 0,
       "id": "0e5e5ab",
-      "image": "assets/firewall-compact.png",
+      "image": "icons/normal/firewall.webp",
       "imageRatio": true,
       "isBottom": true,
       "lineAnimateImages": [],
@@ -1396,10 +821,9 @@
       "textType": 0,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.10416666666666632,
-      "x": 0.8742220140736561,
-      "y": 0,
-      "parentId": "f5323bc"
+      "width": 121.04166666666679,
+      "x": 1077.3729163218059,
+      "y": 130.1719695384054
     },
     {
       "anchors": [
@@ -1432,8 +856,8 @@
       "bkType": 0,
       "canvasLayer": 2,
       "center": {
-        "x": 1014.0591333874571,
-        "y": 136.346286625805
+        "x": 1017.2301261348521,
+        "y": 156.83049606805548
       },
       "children": [],
       "connectedLines": [
@@ -1445,15 +869,15 @@
       ],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.8745473524096109,
-      "ey": 0.07818466231992018,
+      "ex": 1077.7509594681856,
+      "ey": 181.03882940138897,
       "fontSize": 20,
       "fontWeight": "normal",
       "globalAlpha": 1,
-      "height": 0.07441860465116304,
+      "height": 48.416666666666934,
       "iconType": 0,
       "id": "3e235de0",
-      "image": "assets/enterprise-system.png",
+      "image": "icons/normal/desktop.webp",
       "imageRatio": true,
       "isBottom": true,
       "lineAnimateImages": [],
@@ -1477,11 +901,10 @@
       "toGif": true,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.10416666666666632,
-      "x": 0.7703806857429446,
-      "y": 0.003766057668757139,
-      "zIndex": 6,
-      "parentId": "f5323bc"
+      "width": 121.04166666666679,
+      "x": 956.7092928015187,
+      "y": 132.62216273472202,
+      "zIndex": 6
     },
     {
       "anchors": [
@@ -1514,28 +937,27 @@
       "bkType": 0,
       "canvasLayer": 2,
       "center": {
-        "x": 144.39297379085872,
-        "y": 300.6911800589287
+        "x": 136.50951633400513,
+        "y": 651.2997098886646
       },
       "children": [],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.12103694657508716,
-      "ey": 0.8367263725563104,
+      "ex": 202.17186788846487,
+      "ey": 674.5452759335707,
       "fontSize": 36,
       "fontWeight": "bold",
       "globalAlpha": 1,
-      "height": 0.07145897099022504,
+      "height": 46.491132089812396,
       "iconType": 0,
       "id": "568f15ef",
-      "image": "background/flow-light-3.png",
+      "image": "background/flow-light-3.webp",
       "imageRatio": true,
       "lineAnimateImages": [],
       "lineHeight": 1.5,
       "lineWidth": 1,
       "locked": 0,
       "name": "gif",
-      "parentId": "6f383601",
       "props": {
         "image": true,
         "text": true
@@ -1544,14 +966,14 @@
       "shadow": false,
       "strokeType": false,
       "tags": [],
-      "text": "现场设备\n\n",
+      "text": "设备层\n\n",
       "textType": 0,
       "toGif": true,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.11301609561869097,
-      "x": 0.008020850956396191,
-      "y": 0.7652674015660854,
+      "width": 131.3247031089195,
+      "x": 70.84716477954537,
+      "y": 628.0541438437583,
       "zIndex": 35
     },
     {
@@ -1585,8 +1007,8 @@
       "bkType": 0,
       "canvasLayer": 4,
       "center": {
-        "x": 410.74101578600784,
-        "y": 136.346286625805
+        "x": 413.9120085334025,
+        "y": 156.83049606805548
       },
       "children": [],
       "connectedLines": [
@@ -1598,15 +1020,15 @@
       ],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.35534071075604234,
-      "ey": 0.07818466231992018,
+      "ex": 474.43284186673594,
+      "ey": 181.03882940138897,
       "fontSize": 20,
       "fontWeight": "normal",
       "globalAlpha": 1,
-      "height": 0.07441860465116304,
+      "height": 48.416666666666934,
       "iconType": 0,
       "id": "14fbadee",
-      "image": "assets/enterprise-system.png",
+      "image": "icons/normal/desktop.webp",
       "imageRatio": true,
       "lineAnimateImages": [],
       "lineHeight": 1.5,
@@ -1628,10 +1050,9 @@
       "toGif": true,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.10416666666666632,
-      "x": 0.251174044089376,
-      "y": 0.003766057668757139,
-      "parentId": "f5323bc"
+      "width": 121.04166666666679,
+      "x": 353.39117520006914,
+      "y": 132.62216273472202
     },
     {
       "anchors": [
@@ -1670,8 +1091,8 @@
       "bkType": 0,
       "canvasLayer": 2,
       "center": {
-        "x": 367.28266793900207,
-        "y": 596.0713115683039
+        "x": 370.4536606863968,
+        "y": 616.5555210105545
       },
       "children": [],
       "connectedLines": [
@@ -1718,12 +1139,12 @@
       ],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.3036859042537257,
-      "ey": 0.7944852591542222,
+      "ex": 414.40995671104383,
+      "ey": 647.0632515553317,
       "fontSize": 22,
       "fontWeight": "normal",
       "globalAlpha": 1,
-      "height": 0.09378352102785466,
+      "height": 61.015461089554634,
       "iconType": 0,
       "id": "58845f75",
       "image": "icons/normal/wind.webp",
@@ -1749,10 +1170,9 @@
       "textType": 0,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.07565627542968476,
-      "x": 0.22802962882404096,
-      "y": 0.7007017381263675,
-      "parentId": "f5323bc"
+      "width": 87.91259204929408,
+      "x": 326.49736466174977,
+      "y": 586.0477904657771
     },
     {
       "anchors": [
@@ -1791,8 +1211,8 @@
       "bkType": 0,
       "canvasLayer": 2,
       "center": {
-        "x": 505.111365418226,
-        "y": 596.0713115683039
+        "x": 508.2823581656207,
+        "y": 616.5555210105545
       },
       "children": [],
       "connectedLines": [
@@ -1814,12 +1234,12 @@
       ],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.42229924115495066,
-      "ey": 0.7944852591542222,
+      "ex": 552.2386541902678,
+      "ey": 647.0632515553317,
       "fontSize": 22,
       "fontWeight": "normal",
       "globalAlpha": 1,
-      "height": 0.09378352102785466,
+      "height": 61.015461089554634,
       "iconType": 0,
       "id": "ac4cdcc",
       "image": "icons/normal/solar.webp",
@@ -1845,10 +1265,9 @@
       "textType": 0,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.07565627542968476,
-      "x": 0.3466429657252659,
-      "y": 0.7007017381263675,
-      "parentId": "f5323bc"
+      "width": 87.91259204929408,
+      "x": 464.32606214097365,
+      "y": 586.0477904657771
     },
     {
       "anchors": [
@@ -1887,8 +1306,8 @@
       "bkType": 0,
       "canvasLayer": 2,
       "center": {
-        "x": 642.9400628974514,
-        "y": 596.0713115683039
+        "x": 646.1110556448461,
+        "y": 616.5555210105545
       },
       "children": [],
       "connectedLines": [
@@ -1910,12 +1329,12 @@
       ],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.5409125780561768,
-      "ey": 0.7944852591542222,
+      "ex": 690.0673516694932,
+      "ey": 647.0632515553317,
       "fontSize": 22,
       "fontWeight": "normal",
       "globalAlpha": 1,
-      "height": 0.09378352102785466,
+      "height": 61.015461089554634,
       "iconType": 0,
       "id": "6eaf50f7",
       "image": "icons/normal/generator.webp",
@@ -1941,10 +1360,9 @@
       "textType": 0,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.07565627542968476,
-      "x": 0.46525630262649204,
-      "y": 0.7007017381263675,
-      "parentId": "f5323bc"
+      "width": 87.91259204929408,
+      "x": 602.1547596201991,
+      "y": 586.0477904657771
     },
     {
       "anchors": [
@@ -1983,8 +1401,8 @@
       "bkType": 0,
       "canvasLayer": 2,
       "center": {
-        "x": 780.7687603766775,
-        "y": 596.0713115683039
+        "x": 783.9397531240722,
+        "y": 616.5555210105545
       },
       "children": [],
       "connectedLines": [
@@ -2001,12 +1419,12 @@
       ],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.6595259149574036,
-      "ey": 0.7944852591542222,
+      "ex": 827.8960491487193,
+      "ey": 647.0632515553317,
       "fontSize": 22,
       "fontWeight": "normal",
       "globalAlpha": 1,
-      "height": 0.09378352102785466,
+      "height": 61.015461089554634,
       "iconType": 0,
       "id": "a6a3147",
       "image": "icons/normal/protection.webp",
@@ -2032,10 +1450,9 @@
       "textType": 0,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.07565627542968476,
-      "x": 0.5838696395277189,
-      "y": 0.7007017381263675,
-      "parentId": "f5323bc"
+      "width": 87.91259204929408,
+      "x": 739.9834570994252,
+      "y": 586.0477904657771
     },
     {
       "anchors": [
@@ -2074,8 +1491,8 @@
       "bkType": 0,
       "canvasLayer": 2,
       "center": {
-        "x": 918.5974578559014,
-        "y": 596.0713115683039
+        "x": 921.7684506032962,
+        "y": 616.5555210105545
       },
       "children": [],
       "connectedLines": [
@@ -2092,12 +1509,12 @@
       ],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.7781392518586284,
-      "ey": 0.7944852591542222,
+      "ex": 965.7247466279432,
+      "ey": 647.0632515553317,
       "fontSize": 22,
       "fontWeight": "normal",
       "globalAlpha": 1,
-      "height": 0.09378352102785466,
+      "height": 61.015461089554634,
       "iconType": 0,
       "id": "abf1410",
       "image": "icons/normal/charging.webp",
@@ -2123,10 +1540,9 @@
       "textType": 0,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.07565627542968476,
-      "x": 0.7024829764289436,
-      "y": 0.7007017381263675,
-      "parentId": "f5323bc"
+      "width": 87.91259204929408,
+      "x": 877.8121545786491,
+      "y": 586.0477904657771
     },
     {
       "anchors": [
@@ -2165,8 +1581,8 @@
       "bkType": 0,
       "canvasLayer": 2,
       "center": {
-        "x": 1056.426155335128,
-        "y": 596.0713115683039
+        "x": 1059.597148082523,
+        "y": 616.5555210105545
       },
       "children": [],
       "connectedLines": [
@@ -2183,12 +1599,12 @@
       ],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.8967525887598558,
-      "ey": 0.7944852591542222,
+      "ex": 1103.55344410717,
+      "ey": 647.0632515553317,
       "fontSize": 22,
       "fontWeight": "normal",
       "globalAlpha": 1,
-      "height": 0.09378352102785466,
+      "height": 61.015461089554634,
       "iconType": 0,
       "id": "30ecc688",
       "image": "icons/normal/protection.webp",
@@ -2214,10 +1630,9 @@
       "textType": 0,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.07565627542968476,
-      "x": 0.821096313330171,
-      "y": 0.7007017381263675,
-      "parentId": "f5323bc"
+      "width": 87.91259204929408,
+      "x": 1015.6408520578759,
+      "y": 586.0477904657771
     },
     {
       "anchors": [
@@ -2250,8 +1665,8 @@
       "bkType": 0,
       "canvasLayer": 4,
       "center": {
-        "x": 290.07739226571226,
-        "y": 136.346286625805
+        "x": 293.24838501310694,
+        "y": 156.83049606805548
       },
       "children": [],
       "connectedLines": [
@@ -2263,15 +1678,15 @@
       ],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.25149938242532366,
-      "ey": 0.07818466231992018,
+      "ex": 353.76921834644037,
+      "ey": 181.03882940138897,
       "fontSize": 20,
       "fontWeight": "normal",
       "globalAlpha": 1,
-      "height": 0.07441860465116304,
+      "height": 48.416666666666934,
       "iconType": 0,
       "id": "17097ec8",
-      "image": "assets/enterprise-system.png",
+      "image": "icons/normal/desktop.webp",
       "imageRatio": true,
       "lineAnimateImages": [],
       "lineHeight": 1.5,
@@ -2293,10 +1708,9 @@
       "toGif": true,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.10416666666666632,
-      "x": 0.14733271575865736,
-      "y": 0.003766057668757139,
-      "parentId": "f5323bc"
+      "width": 121.04166666666679,
+      "x": 232.72755167977357,
+      "y": 132.62216273472202
     },
     {
       "anchors": [
@@ -2329,8 +1743,8 @@
       "bkType": 0,
       "canvasLayer": 4,
       "center": {
-        "x": 652.068262826582,
-        "y": 136.346286625805
+        "x": 655.2392555739766,
+        "y": 156.83049606805548
       },
       "children": [],
       "connectedLines": [
@@ -2342,15 +1756,15 @@
       ],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.5630233674174648,
-      "ey": 0.07818466231992018,
+      "ex": 715.76008890731,
+      "ey": 181.03882940138897,
       "fontSize": 20,
       "fontWeight": "normal",
       "globalAlpha": 1,
-      "height": 0.07441860465116304,
+      "height": 48.416666666666934,
       "iconType": 0,
       "id": "51828752",
-      "image": "assets/enterprise-system.png",
+      "image": "icons/normal/desktop.webp",
       "imageRatio": true,
       "lineAnimateImages": [],
       "lineHeight": 1.5,
@@ -2372,10 +1786,9 @@
       "toGif": true,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.10416666666666632,
-      "x": 0.45885670075079854,
-      "y": 0.003766057668757139,
-      "parentId": "f5323bc"
+      "width": 121.04166666666679,
+      "x": 594.7184222406432,
+      "y": 132.62216273472202
     },
     {
       "anchors": [
@@ -2408,8 +1821,8 @@
       "bkType": 0,
       "canvasLayer": 4,
       "center": {
-        "x": 772.7318863468747,
-        "y": 136.346286625805
+        "x": 775.9028790942693,
+        "y": 156.83049606805548
       },
       "children": [],
       "connectedLines": [
@@ -2421,15 +1834,15 @@
       ],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.6668646957481811,
-      "ey": 0.07818466231992018,
+      "ex": 836.4237124276027,
+      "ey": 181.03882940138897,
       "fontSize": 20,
       "fontWeight": "normal",
       "globalAlpha": 1,
-      "height": 0.07441860465116304,
+      "height": 48.416666666666934,
       "iconType": 0,
       "id": "a297c60",
-      "image": "assets/enterprise-system.png",
+      "image": "icons/normal/desktop.webp",
       "imageRatio": true,
       "lineAnimateImages": [],
       "lineHeight": 1.5,
@@ -2451,10 +1864,9 @@
       "toGif": true,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.10416666666666632,
-      "x": 0.5626980290815148,
-      "y": 0.003766057668757139,
-      "parentId": "f5323bc"
+      "width": 121.04166666666679,
+      "x": 715.382045760936,
+      "y": 132.62216273472202
     },
     {
       "anchors": [
@@ -2487,8 +1899,8 @@
       "bkType": 0,
       "canvasLayer": 4,
       "center": {
-        "x": 893.3955098671642,
-        "y": 136.346286625805
+        "x": 896.5665026145587,
+        "y": 156.83049606805548
       },
       "children": [],
       "connectedLines": [
@@ -2500,15 +1912,15 @@
       ],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.7707060240788943,
-      "ey": 0.07818466231992018,
+      "ex": 957.087335947892,
+      "ey": 181.03882940138897,
       "fontSize": 20,
       "fontWeight": "normal",
       "globalAlpha": 1,
-      "height": 0.07441860465116304,
+      "height": 48.416666666666934,
       "iconType": 0,
       "id": "6fbbb88f",
-      "image": "assets/enterprise-system.png",
+      "image": "icons/normal/desktop.webp",
       "imageRatio": true,
       "lineAnimateImages": [],
       "lineHeight": 1.5,
@@ -2530,10 +1942,9 @@
       "toGif": true,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.10416666666666632,
-      "x": 0.666539357412228,
-      "y": 0.003766057668757139,
-      "parentId": "f5323bc"
+      "width": 121.04166666666679,
+      "x": 836.0456692812253,
+      "y": 132.62216273472202
     },
     {
       "anchors": [
@@ -2566,8 +1977,8 @@
       "bkType": 0,
       "canvasLayer": 4,
       "center": {
-        "x": 531.4046393062952,
-        "y": 136.346286625805
+        "x": 534.5756320536899,
+        "y": 156.83049606805548
       },
       "children": [],
       "connectedLines": [
@@ -2579,15 +1990,15 @@
       ],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.4591820390867539,
-      "ey": 0.07818466231992018,
+      "ex": 595.0964653870233,
+      "ey": 181.03882940138897,
       "fontSize": 20,
       "fontWeight": "normal",
       "globalAlpha": 1,
-      "height": 0.07441860465116304,
+      "height": 48.416666666666934,
       "iconType": 0,
       "id": "4c8a815",
-      "image": "assets/enterprise-system.png",
+      "image": "icons/normal/desktop.webp",
       "imageRatio": true,
       "lineAnimateImages": [],
       "lineHeight": 1.5,
@@ -2609,10 +2020,9 @@
       "toGif": true,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.10416666666666632,
-      "x": 0.35501537242008757,
-      "y": 0.003766057668757139,
-      "parentId": "f5323bc"
+      "width": 121.04166666666679,
+      "x": 474.05479872035653,
+      "y": 132.62216273472202
     },
     {
       "anchors": [
@@ -2651,8 +2061,8 @@
       "bkType": 0,
       "canvasLayer": 2,
       "center": {
-        "x": 712.0848381805874,
-        "y": 220.43637352818794
+        "x": 715.2558309279823,
+        "y": 240.92058297043843
       },
       "children": [],
       "connectedLines": [
@@ -2704,15 +2114,15 @@
       ],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.5834227437978483,
-      "ey": 0.20743492598126986,
+      "ex": 739.4641642613158,
+      "ey": 265.1289163037719,
       "fontSize": 24,
       "fontWeight": "normal",
       "globalAlpha": 1,
-      "height": 0.07441860465116304,
+      "height": 48.416666666666934,
       "iconType": 0,
       "id": "f1cd782",
-      "image": "assets/switch-compact.png",
+      "image": "icons/normal/router.webp",
       "imageRatio": true,
       "isBottom": true,
       "lineAnimateImages": [],
@@ -2736,10 +2146,9 @@
       "textType": 0,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.04166666666666671,
-      "x": 0.5417560771311816,
-      "y": 0.13301632133010682,
-      "parentId": "f5323bc"
+      "width": 48.416666666666934,
+      "x": 691.0474975946488,
+      "y": 216.71224963710497
     },
     {
       "anchors": [
@@ -2765,19 +2174,19 @@
       "animations": [],
       "bkType": 0,
       "center": {
-        "x": 561.476034399774,
-        "y": 195.97064822232363
+        "x": 564.6470271471687,
+        "y": 216.45485766457415
       },
       "children": [],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.5626980290815138,
-      "ey": 0.18705673415327018,
+      "ex": 715.3820457609348,
+      "ey": 251.87088592775842,
       "fontSize": 20,
       "fontWeight": "normal",
       "fromArrow": "",
       "globalAlpha": 1,
-      "height": 0.1088720718333486,
+      "height": 70.83205652636858,
       "iconType": 0,
       "id": "68df26",
       "length": 309.6794529472763,
@@ -2798,10 +2207,9 @@
       "type": 1,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.25944065165880453,
-      "x": 0.3032573774227093,
-      "y": 0.07818466231992156,
-      "parentId": "f5323bc"
+      "width": 301.47003722753215,
+      "x": 413.9120085334027,
+      "y": 181.03882940138985
     },
     {
       "anchors": [
@@ -2809,7 +2217,7 @@
           "anchorId": "65cb431f",
           "connectTo": "f1cd782",
           "id": "45f8bebb",
-          "lineLength": 92.92112484912874,
+          "lineLength": 92.92112484912872,
           "penId": "f64d786",
           "start": true,
           "x": 1,
@@ -2827,22 +2235,22 @@
       "animations": [],
       "bkType": 0,
       "center": {
-        "x": 682.1396579200631,
-        "y": 195.9706482223233
+        "x": 685.3106506674578,
+        "y": 216.4548576645738
       },
       "children": [],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.5626980290815159,
-      "ey": 0.18705673415327015,
+      "ex": 715.3820457609374,
+      "ey": 251.87088592775842,
       "fontSize": 20,
       "fontWeight": "normal",
       "fromArrow": "",
       "globalAlpha": 1,
-      "height": 0.10887207183334964,
+      "height": 70.83205652636923,
       "iconType": 0,
       "id": "f64d786",
-      "length": 92.92112484912874,
+      "length": 92.92112484912872,
       "lineAnimateImages": [],
       "lineHeight": 1.5,
       "lineName": "line",
@@ -2860,10 +2268,9 @@
       "type": 1,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.05175799499738295,
-      "x": 0.5109400340841329,
-      "y": 0.07818466231992051,
-      "parentId": "f5323bc"
+      "width": 60.142790186959246,
+      "x": 655.2392555739782,
+      "y": 181.0388294013892
     },
     {
       "anchors": [
@@ -2889,19 +2296,19 @@
       "animations": [],
       "bkType": 0,
       "center": {
-        "x": 742.4714696802081,
-        "y": 195.97064822232363
+        "x": 745.6424624276028,
+        "y": 216.45485766457415
       },
       "children": [],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.6147813624148482,
-      "ey": 0.18705673415327018,
+      "ex": 775.9028790942696,
+      "ey": 251.87088592775842,
       "fontSize": 20,
       "fontWeight": "normal",
       "fromArrow": "",
       "globalAlpha": 1,
-      "height": 0.1088720718333486,
+      "height": 70.83205652636858,
       "iconType": 0,
       "id": "fd6b772",
       "length": 93.16625729906625,
@@ -2922,10 +2329,9 @@
       "type": 1,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.052083333333333336,
-      "x": 0.5626980290815148,
-      "y": 0.07818466231992156,
-      "parentId": "f5323bc"
+      "width": 60.5208333333336,
+      "x": 715.382045760936,
+      "y": 181.03882940138985
     },
     {
       "anchors": [
@@ -2949,19 +2355,19 @@
       "animations": [],
       "bkType": 0,
       "center": {
-        "x": 863.1350932004975,
-        "y": 195.97064822232363
+        "x": 866.3060859478921,
+        "y": 216.45485766457415
       },
       "children": [],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.8224640190762749,
-      "ey": 0.18705673415327018,
+      "ex": 1017.2301261348484,
+      "ey": 251.87088592775842,
       "fontSize": 20,
       "fontWeight": "normal",
       "fromArrow": "",
       "globalAlpha": 1,
-      "height": 0.1088720718333486,
+      "height": 70.83205652636858,
       "iconType": 0,
       "id": "19f22ed",
       "lastConnected": {
@@ -3048,10 +2454,9 @@
       "type": 1,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.25976598999476,
-      "x": 0.5626980290815148,
-      "y": 0.07818466231992156,
-      "parentId": "f5323bc"
+      "width": 301.84808037391247,
+      "x": 715.382045760936,
+      "y": 181.03882940138985
     },
     {
       "anchors": [
@@ -3059,7 +2464,7 @@
           "anchorId": "2",
           "connectTo": "0e5e5ab",
           "id": "597ce189",
-          "lineLength": 428.00960171481046,
+          "lineLength": 428.0096017148106,
           "penId": "19364",
           "start": true,
           "x": 1,
@@ -3077,22 +2482,22 @@
       "animations": [],
       "bkType": 0,
       "center": {
-        "x": 923.4669049606416,
-        "y": 197.1957448204804
+        "x": 926.6378977080361,
+        "y": 217.67995426273092
       },
       "children": [],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.9263053474069868,
-      "ey": 0.18705673415326984,
+      "ex": 1137.8937496551364,
+      "ey": 251.87088592775825,
       "fontSize": 20,
       "fontWeight": "normal",
       "fromArrow": "",
       "globalAlpha": 1,
-      "height": 0.1051060141645957,
+      "height": 68.38186333005467,
       "iconType": 0,
       "id": "19364",
-      "length": 428.00960171481046,
+      "length": 428.0096017148106,
       "lineAnimateImages": [],
       "lineHeight": 1.5,
       "lineName": "line",
@@ -3110,10 +2515,9 @@
       "type": 1,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.363607318325472,
-      "x": 0.5626980290815148,
-      "y": 0.08195071998867415,
-      "parentId": "f5323bc"
+      "width": 422.5117038942004,
+      "x": 715.382045760936,
+      "y": 183.48902259770358
     },
     {
       "anchors": [
@@ -3151,20 +2555,20 @@
       ],
       "bkType": 0,
       "center": {
-        "x": 802.8032814403563,
-        "y": 195.97064822232363
+        "x": 805.9742741877509,
+        "y": 216.45485766457415
       },
       "children": [],
       "curveAnimate": false,
       "dash": 0,
       "description": "OA",
       "ellipsis": false,
-      "ex": 0.7186226907455673,
-      "ey": 0.18705673415327018,
+      "ex": 896.5665026145657,
+      "ey": 251.87088592775842,
       "fontSize": 20,
       "fontWeight": "normal",
       "globalAlpha": 1,
-      "height": 0.1088720718333486,
+      "height": 70.83205652636858,
       "iconType": 0,
       "id": "6239215",
       "length": 194.5378822674378,
@@ -3190,10 +2594,9 @@
       "type": 1,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.15592466166405247,
-      "x": 0.5626980290815148,
-      "y": 0.07818466231992156,
-      "parentId": "f5323bc"
+      "width": 181.18445685362974,
+      "x": 715.382045760936,
+      "y": 181.03882940138985
     },
     {
       "anchors": [
@@ -3219,18 +2622,18 @@
       "animations": [],
       "bkType": 0,
       "center": {
-        "x": 620.795872603511,
-        "y": 195.97064822232363
+        "x": 623.9668653509057,
+        "y": 216.45485766457415
       },
       "children": [],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.5626980290815138,
-      "ey": 0.18705673415327018,
+      "ex": 715.3820457609347,
+      "ey": 251.87088592775842,
       "fontSize": 20,
       "fontWeight": "normal",
       "globalAlpha": 1,
-      "height": 0.1088720718333486,
+      "height": 70.83205652636858,
       "iconType": 0,
       "id": "3ee7d2d",
       "length": 196.07172429839892,
@@ -3251,10 +2654,9 @@
       "type": 1,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.15734110225478265,
-      "x": 0.4053569268267311,
-      "y": 0.07818466231992156,
-      "parentId": "f5323bc"
+      "width": 182.83036082005822,
+      "x": 532.5516849408765,
+      "y": 181.03882940138985
     },
     {
       "anchors": [
@@ -3289,17 +2691,17 @@
       ],
       "bkType": 0,
       "center": {
-        "x": 501.1442226396279,
-        "y": 195.97064822232363
+        "x": 504.3152153870226,
+        "y": 216.45485766457415
       },
       "children": [],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.5626980290815142,
-      "ey": 0.18705673415327018,
+      "ex": 715.3820457609353,
+      "ey": 251.87088592775842,
       "fontSize": 12,
       "globalAlpha": 1,
-      "height": 0.1088720718333486,
+      "height": 70.83205652636858,
       "iconType": 0,
       "id": "6c3a2b7",
       "lastConnected": {
@@ -3392,10 +2794,9 @@
       "type": 1,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.3632819799895212,
-      "x": 0.199416049091993,
-      "y": 0.07818466231992156,
-      "parentId": "f5323bc"
+      "width": 422.13366074782545,
+      "x": 293.24838501310984,
+      "y": 181.03882940138985
     },
     {
       "anchors": [
@@ -3428,28 +2829,27 @@
       "bkType": 0,
       "canvasLayer": 2,
       "center": {
-        "x": 144.39297379085872,
-        "y": 399.41401996637984
+        "x": 136.50951633400513,
+        "y": 750.0225497961156
       },
       "children": [],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.12103694657508716,
-      "ey": 0.9884678388512357,
+      "ex": 202.17186788846487,
+      "ey": 773.2681158410218,
       "fontSize": 36,
       "fontWeight": "bold",
       "globalAlpha": 1,
-      "height": 0.07145897099022504,
+      "height": 46.491132089812396,
       "iconType": 0,
       "id": "f5278b0",
-      "image": "background/flow-light-3.png",
+      "image": "background/flow-light-3.webp",
       "imageRatio": true,
       "lineAnimateImages": [],
       "lineHeight": 1.5,
       "lineWidth": 1,
       "locked": 0,
       "name": "gif",
-      "parentId": "6f383601",
       "props": {
         "image": true,
         "text": true
@@ -3463,9 +2863,9 @@
       "toGif": true,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.11301609561869097,
-      "x": 0.008020850956396191,
-      "y": 0.9170088678610107,
+      "width": 131.3247031089195,
+      "x": 70.84716477954537,
+      "y": 726.7769837512094,
       "zIndex": 36
     },
     {
@@ -3483,29 +2883,29 @@
           "isTemp": false,
           "lineLength": 2.2953331765626217,
           "x": 1,
-          "y": 0.40665835794762656
+          "y": 0.4066583579476256
         },
         {
           "id": "c54aa89",
-          "lineLength": 1.3642420526593924E-12,
+          "lineLength": 1.3642420526593924e-12,
           "penId": "2508b825",
           "x": 1,
-          "y": 0.49999999999999306
+          "y": 0.4999999999999919
         },
         {
           "id": "6106579a",
           "lineLength": 2.2953331765629628,
           "penId": "2508b825",
           "x": 0,
-          "y": 0.49999999999999306
+          "y": 0.4999999999999919
         },
         {
           "id": "431c16ed",
           "isTemp": false,
-          "lineLength": 10,
+          "lineLength": 10.000000000000057,
           "penId": "2508b825",
           "x": 0,
-          "y": 0.5933416420523735
+          "y": 0.593341642052372
         },
         {
           "id": "2b8dd86",
@@ -3518,37 +2918,36 @@
       "animations": [],
       "bkType": 0,
       "center": {
-        "x": 712.0848381805882,
-        "y": 447.2825724393851
+        "x": 715.2558309279829,
+        "y": 467.76678188163567
       },
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.5625894104645162,
-      "ey": 0.5377969654549104,
+      "ex": 715.2558309279835,
+      "ey": 480.0621150581985,
       "fontSize": 12,
       "globalAlpha": 1,
-      "height": 0.03779696545491016,
+      "height": 24.59066635312564,
       "iconType": 0,
       "id": "2508b825",
-      "length": 24.59066635312695,
+      "length": 24.590666353127006,
+      "lineAnimateImages": [],
       "lineHeight": 1.5,
       "lineName": "polyline",
       "lineWidth": 1,
+      "locked": 0,
       "name": "line",
       "progress": 0,
+      "rotate": 0,
       "shadow": false,
       "tags": [],
       "textType": 0,
       "type": 1,
+      "visible": true,
       "whiteSpace": "break-all",
-      "width": 1.174046516918577E-15,
-      "x": 0.5625894104645149,
-      "y": 0.5000000000000002,
-      "parentId": "f5323bc",
-      "rotate": 0,
-      "lineAnimateImages": [],
-      "locked": 0,
-      "visible": true
+      "width": 1.3642420526593924e-12,
+      "x": 715.2558309279822,
+      "y": 455.4714487050729
     },
     {
       "anchors": [
@@ -3572,37 +2971,36 @@
       "animations": [],
       "bkType": 0,
       "center": {
-        "x": 712.0848381805876,
-        "y": 249.37917947501836
+        "x": 715.2558309279822,
+        "y": 269.8633889172689
       },
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.5625894104645149,
-      "ey": 0.2219891227037039,
+      "ex": 715.2558309279822,
+      "ey": 274.59786153076595,
       "fontSize": 12,
       "globalAlpha": 1,
-      "height": 0.014554196722434243,
+      "height": 9.468945226994151,
       "iconType": 0,
       "id": "ef7833e",
       "length": 9.468945226994151,
+      "lineAnimateImages": [],
       "lineHeight": 1.5,
       "lineName": "line",
       "lineWidth": 1,
+      "locked": 0,
       "name": "line",
       "progress": 0,
+      "rotate": 0,
       "shadow": false,
       "tags": [],
       "textType": 0,
       "type": 1,
+      "visible": true,
       "whiteSpace": "break-all",
       "width": 0,
-      "x": 0.5625894104645149,
-      "y": 0.20743492598126967,
-      "parentId": "f5323bc",
-      "rotate": 0,
-      "lineAnimateImages": [],
-      "locked": 0,
-      "visible": true
+      "x": 715.2558309279822,
+      "y": 265.1289163037718
     },
     {
       "anchors": [
@@ -3624,37 +3022,36 @@
       "animations": [],
       "bkType": 0,
       "center": {
-        "x": 712.0848381805876,
-        "y": 315.66338653735073
+        "x": 715.2558309279822,
+        "y": 336.14759597960125
       },
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.5625894104645149,
-      "ey": 0.33677996470308413,
+      "ex": 715.2558309279822,
+      "ey": 349.2806637617691,
       "fontSize": 12,
       "globalAlpha": 1,
-      "height": 0.040372237348216405,
+      "height": 26.26613556433574,
       "iconType": 0,
       "id": "b16f740",
       "length": 26.26613556433574,
+      "lineAnimateImages": [],
       "lineHeight": 1.5,
       "lineName": "line",
       "lineWidth": 1,
+      "locked": 0,
       "name": "line",
       "progress": 0,
+      "rotate": 0,
       "shadow": false,
       "tags": [],
       "textType": 0,
       "type": 1,
+      "visible": true,
       "whiteSpace": "break-all",
       "width": 0,
-      "x": 0.5625894104645149,
-      "y": 0.2964077273548677,
-      "parentId": "f5323bc",
-      "rotate": 0,
-      "lineAnimateImages": [],
-      "locked": 0,
-      "visible": true
+      "x": 715.2558309279822,
+      "y": 323.0145281974334
     },
     {
       "anchors": [
@@ -3687,8 +3084,8 @@
       "bkType": 0,
       "canvasLayer": 2,
       "center": {
-        "x": 712.0848381805876,
-        "y": 278.32198542184926
+        "x": 715.2558309279822,
+        "y": 298.8061948640998
       },
       "children": [],
       "connectedLines": [
@@ -3710,15 +3107,15 @@
       ],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.6016519104645146,
-      "ey": 0.2964077273548675,
+      "ex": 760.6464559279821,
+      "ey": 323.0145281974332,
       "fontSize": 24,
       "fontWeight": "normal",
       "globalAlpha": 1,
-      "height": 0.07441860465116304,
+      "height": 48.416666666666934,
       "iconType": 0,
       "id": "824c6f1",
-      "image": "assets/firewall-compact.png",
+      "image": "icons/normal/firewall.webp",
       "imageRatio": true,
       "isBottom": true,
       "lineAnimateImages": [],
@@ -3741,10 +3138,9 @@
       "textType": 0,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.07812499999999958,
-      "x": 0.523526910464515,
-      "y": 0.22198912270370444,
-      "parentId": "f5323bc"
+      "width": 90.7812499999999,
+      "x": 669.8652059279822,
+      "y": 274.5978615307663
     },
     {
       "anchors": [
@@ -3777,8 +3173,8 @@
       "bkType": 0,
       "canvasLayer": 2,
       "center": {
-        "x": 712.0848381805876,
-        "y": 351.79437098618536
+        "x": 715.2558309279822,
+        "y": 372.2785804284359
       },
       "children": [],
       "connectedLines": [
@@ -3790,15 +3186,15 @@
       ],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.6016519104645147,
-      "ey": 0.40747763912168883,
+      "ex": 760.6464559279822,
+      "ey": 395.27649709510257,
       "fontSize": 24,
       "fontWeight": "normal",
       "globalAlpha": 1,
-      "height": 0.07069767441860471,
+      "height": 45.995833333333465,
       "iconType": 0,
       "id": "4710e00e",
-      "image": "assets/workstation.png",
+      "image": "icons/normal/office.webp",
       "imageRatio": true,
       "isBottom": true,
       "lineAnimateImages": [],
@@ -3819,11 +3215,10 @@
       "textType": 0,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.07812499999999967,
-      "x": 0.523526910464515,
-      "y": 0.33677996470308413,
-      "zIndex": 8,
-      "parentId": "f5323bc"
+      "width": 90.78125000000001,
+      "x": 669.8652059279822,
+      "y": 349.2806637617691,
+      "zIndex": 8
     },
     {
       "anchors": [
@@ -3862,8 +3257,8 @@
       "bkType": 0,
       "canvasLayer": 2,
       "center": {
-        "x": 712.0848381805878,
-        "y": 413.19973926282205
+        "x": 715.2558309279826,
+        "y": 433.6839487050726
       },
       "children": [],
       "connectedLines": [
@@ -3910,15 +3305,15 @@
       ],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.5886310771311818,
-      "ey": 0.5130232558139532,
+      "ex": 745.5162475946493,
+      "ey": 463.94436537173925,
       "fontSize": 22,
       "fontWeight": "normal",
       "globalAlpha": 1,
-      "height": 0.09302325581395327,
+      "height": 60.52083333333332,
       "iconType": 0,
       "id": "42d33a06",
-      "image": "assets/switch-compact.png",
+      "image": "icons/normal/router.webp",
       "imageRatio": true,
       "isBottom": true,
       "lineAnimateImages": [],
@@ -3942,10 +3337,9 @@
       "textType": 0,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.05208333333333316,
-      "x": 0.5365477437978486,
-      "y": 0.42,
-      "parentId": "f5323bc"
+      "width": 60.52083333333339,
+      "x": 684.9954142613159,
+      "y": 403.42353203840594
     },
     {
       "anchors": [
@@ -3984,8 +3378,8 @@
       "bkType": 0,
       "canvasLayer": 2,
       "center": {
-        "x": 712.084838180585,
-        "y": 493.11167782739204
+        "x": 715.2558309279796,
+        "y": 513.5958872696426
       },
       "children": [],
       "connectedLines": [
@@ -4027,15 +3421,15 @@
       ],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.6004175481793551,
-      "ey": 0.636231649273463,
+      "ex": 759.2121269526266,
+      "ey": 544.10361781442,
       "fontSize": 24,
       "fontWeight": "normal",
       "globalAlpha": 1,
-      "height": 0.09378352102785466,
+      "height": 61.015461089554634,
       "iconType": 0,
       "id": "1f9c4eb4",
-      "image": "assets/coordination-control.png",
+      "image": "icons/normal/dcs.webp",
       "imageRatio": true,
       "isBottom": true,
       "lineAnimateImages": [],
@@ -4058,10 +3452,9 @@
       "textType": 0,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.07565627542968476,
-      "x": 0.5247612727496703,
-      "y": 0.5424481282456083,
-      "parentId": "f5323bc"
+      "width": 87.91259204929408,
+      "x": 671.2995349033325,
+      "y": 483.0881567248653
     },
     {
       "anchors": [
@@ -4087,37 +3480,36 @@
       "animations": [],
       "bkType": 0,
       "center": {
-        "x": 638.0257041869659,
-        "y": 400.9493043471073
+        "x": 641.1966969343605,
+        "y": 421.4335137893578
       },
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.5619227854955886,
-      "ey": 0.48788667254917145,
+      "ex": 714.4812127140897,
+      "ey": 447.59053048361307,
       "fontSize": 12,
       "globalAlpha": 1,
-      "height": 0.08040903342748273,
+      "height": 52.31403338851055,
       "iconType": 0,
       "id": "8d86b4c",
       "length": 155.62531639052713,
+      "lineAnimateImages": [],
       "lineHeight": 1.5,
       "lineName": "line",
       "lineWidth": 1,
+      "locked": 0,
       "name": "line",
       "progress": 0,
+      "rotate": 0,
       "shadow": false,
       "tags": [],
       "textType": 0,
       "type": 1,
+      "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.12613513903567783,
-      "x": 0.43578764645991075,
-      "y": 0.4074776391216887,
-      "parentId": "f5323bc",
-      "rotate": 0,
-      "lineAnimateImages": [],
-      "locked": 0,
-      "visible": true
+      "width": 146.56903155945827,
+      "x": 567.9121811546314,
+      "y": 395.2764970951025
     },
     {
       "anchors": [
@@ -4143,37 +3535,36 @@
       "animations": [],
       "bkType": 0,
       "center": {
-        "x": 711.6975290736419,
-        "y": 405.022821818759
+        "x": 714.8685218210366,
+        "y": 425.5070312610095
       },
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.562589410464516,
-      "ey": 0.48788667254917145,
+      "ex": 715.2558309279835,
+      "ey": 447.59053048361307,
       "fontSize": 12,
       "globalAlpha": 1,
-      "height": 0.06788667254917145,
+      "height": 44.16699844520713,
       "iconType": 0,
       "id": "1bb96f8",
       "length": 44.17379070258998,
+      "lineAnimateImages": [],
       "lineHeight": 1.5,
       "lineName": "line",
       "lineWidth": 1,
+      "locked": 0,
       "name": "line",
       "progress": 0,
+      "rotate": 0,
       "shadow": false,
       "tags": [],
       "textType": 0,
       "type": 1,
+      "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.0006666249689276847,
-      "x": 0.5619227854955884,
-      "y": 0.42,
-      "parentId": "f5323bc",
-      "rotate": 0,
-      "lineAnimateImages": [],
-      "locked": 0,
-      "visible": true
+      "width": 0.774618213893973,
+      "x": 714.4812127140896,
+      "y": 403.42353203840594
     },
     {
       "anchors": [
@@ -4199,37 +3590,36 @@
       "animations": [],
       "bkType": 0,
       "center": {
-        "x": 782.9354565785558,
-        "y": 400.9493043471073
+        "x": 786.1064493259504,
+        "y": 421.4335137893578
       },
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.6852020223490489,
-      "ey": 0.48788667254917145,
+      "ex": 857.7316859378113,
+      "ey": 447.59053048361307,
       "fontSize": 12,
       "globalAlpha": 1,
-      "height": 0.08040903342748273,
+      "height": 52.31403338851055,
       "iconType": 0,
       "id": "43b548c",
       "length": 152.50395459854286,
+      "lineAnimateImages": [],
       "lineHeight": 1.5,
       "lineName": "line",
       "lineWidth": 1,
+      "locked": 0,
       "name": "line",
       "progress": 0,
+      "rotate": 0,
       "shadow": false,
       "tags": [],
       "textType": 0,
       "type": 1,
+      "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.12327923685346054,
-      "x": 0.5619227854955884,
-      "y": 0.4074776391216887,
-      "parentId": "f5323bc",
-      "rotate": 0,
-      "lineAnimateImages": [],
-      "locked": 0,
-      "visible": true
+      "width": 143.25047322372177,
+      "x": 714.4812127140896,
+      "y": 395.2764970951025
     },
     {
       "anchors": [
@@ -4285,37 +3675,36 @@
       "animations": [],
       "bkType": 0,
       "center": {
-        "x": 539.683753059794,
-        "y": 544.5914946978477
+        "x": 542.8547458071887,
+        "y": 565.0757041400983
       },
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.5625894104645144,
-      "ey": 0.7007017381263669,
+      "ex": 715.2558309279815,
+      "ey": 586.0477904657768,
       "fontSize": 12,
       "globalAlpha": 1,
-      "height": 0.06447008885290421,
+      "height": 41.94417265135701,
       "iconType": 0,
       "id": "241c3b7",
       "length": 386.7463428929427,
+      "lineAnimateImages": [],
       "lineHeight": 1.5,
       "lineName": "polyline",
       "lineWidth": 1,
+      "locked": 0,
       "name": "line",
       "progress": 0,
+      "rotate": 0,
       "shadow": false,
       "tags": [],
       "textType": 0,
       "type": 1,
+      "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.2967316439256319,
-      "x": 0.2658577665388825,
-      "y": 0.6362316492734628,
-      "parentId": "f5323bc",
-      "rotate": 0,
-      "lineAnimateImages": [],
-      "locked": 0,
-      "visible": true
+      "width": 344.8021702415857,
+      "x": 370.4536606863958,
+      "y": 544.1036178144197
     },
     {
       "anchors": [
@@ -4338,7 +3727,7 @@
         },
         {
           "id": "d848952",
-          "lineLength": 206.97347276236172,
+          "lineLength": 206.97347276236178,
           "penId": "2df43f7b",
           "x": 1,
           "y": 0.7298606245115221
@@ -4371,37 +3760,36 @@
       "animations": [],
       "bkType": 0,
       "center": {
-        "x": 608.598101799408,
-        "y": 544.5914946978477
+        "x": 611.7690945468028,
+        "y": 565.0757041400983
       },
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.5625894104645162,
-      "ey": 0.7007017381263669,
+      "ex": 715.2558309279837,
+      "ey": 586.0477904657768,
       "fontSize": 12,
       "globalAlpha": 1,
-      "height": 0.06447008885290421,
+      "height": 41.94417265135701,
       "iconType": 0,
       "id": "2df43f7b",
-      "length": 248.91764541371873,
+      "length": 248.9176454137188,
+      "lineAnimateImages": [],
       "lineHeight": 1.5,
       "lineName": "polyline",
       "lineWidth": 1,
+      "locked": 0,
       "name": "line",
       "progress": 0,
+      "rotate": 0,
       "shadow": false,
       "tags": [],
       "textType": 0,
       "type": 1,
+      "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.17811830702440692,
-      "x": 0.3844711034401092,
-      "y": 0.6362316492734628,
-      "parentId": "f5323bc",
-      "rotate": 0,
-      "lineAnimateImages": [],
-      "locked": 0,
-      "visible": true
+      "width": 206.97347276236178,
+      "x": 508.2823581656219,
+      "y": 544.1036178144197
     },
     {
       "anchors": [
@@ -4457,37 +3845,36 @@
       "animations": [],
       "bkType": 0,
       "center": {
-        "x": 677.5124505390207,
-        "y": 544.5914946978476
+        "x": 680.6834432864155,
+        "y": 565.0757041400981
       },
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.562589410464516,
-      "ey": 0.7007017381263665,
+      "ex": 715.2558309279837,
+      "ey": 586.0477904657764,
       "fontSize": 12,
       "globalAlpha": 1,
-      "height": 0.06447008885290369,
+      "height": 41.944172651356666,
       "iconType": 0,
       "id": "2a5e86a3",
       "length": 111.08894793449304,
+      "lineAnimateImages": [],
       "lineHeight": 1.5,
       "lineName": "polyline",
       "lineWidth": 1,
+      "locked": 0,
       "name": "line",
       "progress": 0,
+      "rotate": 0,
       "shadow": false,
       "tags": [],
       "textType": 0,
       "type": 1,
+      "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.05950497012318078,
-      "x": 0.5030844403413353,
-      "y": 0.6362316492734628,
-      "parentId": "f5323bc",
-      "rotate": 0,
-      "lineAnimateImages": [],
-      "locked": 0,
-      "visible": true
+      "width": 69.14477528313637,
+      "x": 646.1110556448473,
+      "y": 544.1036178144197
     },
     {
       "anchors": [
@@ -4543,37 +3930,36 @@
       "animations": [],
       "bkType": 0,
       "center": {
-        "x": 746.4267992786328,
-        "y": 544.5914946978477
+        "x": 749.5977920260273,
+        "y": 565.0757041400983
       },
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.6216977772425614,
-      "ey": 0.7007017381263669,
+      "ex": 783.9397531240725,
+      "ey": 586.0477904657768,
       "fontSize": 12,
       "globalAlpha": 1,
-      "height": 0.06447008885290421,
+      "height": 41.94417265135701,
       "iconType": 0,
       "id": "6e32509",
       "length": 110.6280948474473,
+      "lineAnimateImages": [],
       "lineHeight": 1.5,
       "lineName": "polyline",
       "lineWidth": 1,
+      "locked": 0,
       "name": "line",
       "progress": 0,
+      "rotate": 0,
       "shadow": false,
       "tags": [],
       "textType": 0,
       "type": 1,
+      "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.05910836677804647,
-      "x": 0.5625894104645149,
-      "y": 0.6362316492734628,
-      "parentId": "f5323bc",
-      "rotate": 0,
-      "lineAnimateImages": [],
-      "locked": 0,
-      "visible": true
+      "width": 68.6839221960903,
+      "x": 715.2558309279822,
+      "y": 544.1036178144197
     },
     {
       "anchors": [
@@ -4629,37 +4015,36 @@
       "animations": [],
       "bkType": 0,
       "center": {
-        "x": 815.3411480182444,
-        "y": 544.5914946978477
+        "x": 818.5121407656391,
+        "y": 565.0757041400983
       },
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.7403111141437858,
-      "ey": 0.7007017381263669,
+      "ex": 921.7684506032958,
+      "ey": 586.0477904657768,
       "fontSize": 12,
       "globalAlpha": 1,
-      "height": 0.06447008885290421,
+      "height": 41.94417265135701,
       "iconType": 0,
       "id": "a4dc7a3",
       "length": 248.45679232667067,
+      "lineAnimateImages": [],
       "lineHeight": 1.5,
       "lineName": "polyline",
       "lineWidth": 1,
+      "locked": 0,
       "name": "line",
       "progress": 0,
+      "rotate": 0,
       "shadow": false,
       "tags": [],
       "textType": 0,
       "type": 1,
+      "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.1777217036792709,
-      "x": 0.5625894104645149,
-      "y": 0.6362316492734628,
-      "parentId": "f5323bc",
-      "rotate": 0,
-      "lineAnimateImages": [],
-      "locked": 0,
-      "visible": true
+      "width": 206.51261967531366,
+      "x": 715.2558309279822,
+      "y": 544.1036178144197
     },
     {
       "anchors": [
@@ -4682,7 +4067,7 @@
         },
         {
           "id": "d1ec898",
-          "lineLength": 344.3413171545392,
+          "lineLength": 344.3413171545393,
           "penId": "43d5c25",
           "x": 0,
           "y": 0.7059641101456673
@@ -4715,37 +4100,36 @@
       "animations": [],
       "bkType": 0,
       "center": {
-        "x": 884.2554967578571,
-        "y": 544.5914946978477
+        "x": 887.4264895052518,
+        "y": 565.0757041400983
       },
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.858924451045012,
-      "ey": 0.7007017381263669,
+      "ex": 1059.5971480825215,
+      "ey": 586.0477904657768,
       "fontSize": 12,
       "globalAlpha": 1,
-      "height": 0.06447008885290421,
+      "height": 41.94417265135701,
       "iconType": 0,
       "id": "43d5c25",
-      "length": 386.2854898058962,
+      "length": 386.2854898058963,
+      "lineAnimateImages": [],
       "lineHeight": 1.5,
       "lineName": "polyline",
       "lineWidth": 1,
+      "locked": 0,
       "name": "line",
       "progress": 0,
+      "rotate": 0,
       "shadow": false,
       "tags": [],
       "textType": 0,
       "type": 1,
+      "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.29633504058049714,
-      "x": 0.5625894104645149,
-      "y": 0.6362316492734628,
-      "parentId": "f5323bc",
-      "rotate": 0,
-      "lineAnimateImages": [],
-      "locked": 0,
-      "visible": true
+      "width": 344.3413171545393,
+      "x": 715.2558309279822,
+      "y": 544.1036178144197
     },
     {
       "anchors": [
@@ -4791,8 +4175,8 @@
       "bkType": 0,
       "borderRadius": 0.1,
       "center": {
-        "x": 367.2826679390011,
-        "y": 674.1068230654367
+        "x": 370.4536606863958,
+        "y": 694.5910325076873
       },
       "children": [],
       "connectedLines": [
@@ -4814,12 +4198,12 @@
       ],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.2971077665388824,
-      "ey": 0.8907934202465828,
+      "ex": 406.7661606863958,
+      "ey": 709.7212408410205,
       "fontSize": 20,
       "fontWeight": "normal",
       "globalAlpha": 1,
-      "height": 0.04651162790697667,
+      "height": 30.26041666666668,
       "iconType": 0,
       "id": "3451fb7",
       "lineAnimateImages": [],
@@ -4841,10 +4225,9 @@
       "textType": 0,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.06249999999999971,
-      "x": 0.23460776653888266,
-      "y": 0.8442817923396061,
-      "parentId": "f5323bc"
+      "width": 72.62499999999999,
+      "x": 334.1411606863958,
+      "y": 679.4608241743539
     },
     {
       "anchors": [
@@ -4890,8 +4273,8 @@
       "bkType": 0,
       "borderRadius": 0.1,
       "center": {
-        "x": 505.1113654182278,
-        "y": 674.1068230654367
+        "x": 508.2823581656225,
+        "y": 694.5910325076873
       },
       "children": [],
       "connectedLines": [
@@ -4908,12 +4291,12 @@
       ],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.41572110344010965,
-      "ey": 0.8907934202465828,
+      "ex": 544.5948581656224,
+      "ey": 709.7212408410205,
       "fontSize": 20,
       "fontWeight": "normal",
       "globalAlpha": 1,
-      "height": 0.04651162790697667,
+      "height": 30.26041666666668,
       "iconType": 0,
       "id": "40bc26a1",
       "lineAnimateImages": [],
@@ -4935,10 +4318,9 @@
       "textType": 0,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.06249999999999971,
-      "x": 0.35322110344010993,
-      "y": 0.8442817923396061,
-      "parentId": "f5323bc"
+      "width": 72.62499999999999,
+      "x": 471.9698581656225,
+      "y": 679.4608241743539
     },
     {
       "anchors": [
@@ -4984,8 +4366,8 @@
       "bkType": 0,
       "borderRadius": 0.1,
       "center": {
-        "x": 642.9400628974525,
-        "y": 674.1068230654367
+        "x": 646.1110556448473,
+        "y": 694.5910325076873
       },
       "children": [],
       "connectedLines": [
@@ -5002,12 +4384,12 @@
       ],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.5343344403413351,
-      "ey": 0.8907934202465828,
+      "ex": 682.4235556448473,
+      "ey": 709.7212408410205,
       "fontSize": 20,
       "fontWeight": "normal",
       "globalAlpha": 1,
-      "height": 0.04651162790697667,
+      "height": 30.26041666666668,
       "iconType": 0,
       "id": "5026136",
       "lineAnimateImages": [],
@@ -5029,10 +4411,9 @@
       "textType": 0,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.06249999999999971,
-      "x": 0.4718344403413354,
-      "y": 0.8442817923396061,
-      "parentId": "f5323bc"
+      "width": 72.62499999999999,
+      "x": 609.7985556448473,
+      "y": 679.4608241743539
     },
     {
       "anchors": [
@@ -5078,8 +4459,8 @@
       "bkType": 0,
       "borderRadius": 0.1,
       "center": {
-        "x": 710.25254723336,
-        "y": 728.7226373307116
+        "x": 713.4235399807548,
+        "y": 749.2068467729621
       },
       "children": [],
       "connectedLines": [
@@ -5121,12 +4502,12 @@
       ],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.5918769838572703,
-      "ey": 0.9726456475927326,
+      "ex": 749.2879912103641,
+      "ey": 762.9742146896889,
       "fontSize": 20,
       "fontWeight": "normal",
       "globalAlpha": 1,
-      "height": 0.04232213329082247,
+      "height": 27.534735833453645,
       "iconType": 0,
       "id": "64455435",
       "lineAnimateImages": [],
@@ -5148,10 +4529,9 @@
       "textType": 0,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.06172883172049772,
-      "x": 0.5301481521367726,
-      "y": 0.9303235143019102,
-      "parentId": "f5323bc"
+      "width": 71.72890245921867,
+      "x": 677.5590887511454,
+      "y": 735.4394788562353
     },
     {
       "anchors": [
@@ -5197,8 +4577,8 @@
       "bkType": 0,
       "borderRadius": 0.1,
       "center": {
-        "x": 876.448832131488,
-        "y": 728.7226373307116
+        "x": 879.6198248788827,
+        "y": 749.2068467729621
       },
       "children": [],
       "connectedLines": [
@@ -5210,12 +4590,12 @@
       ],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.7349030465923195,
-      "ey": 0.9726456475927326,
+      "ex": 915.484276108492,
+      "ey": 762.9742146896889,
       "fontSize": 20,
       "fontWeight": "normal",
       "globalAlpha": 1,
-      "height": 0.04232213329082247,
+      "height": 27.534735833453645,
       "iconType": 0,
       "id": "e893cf3",
       "lineAnimateImages": [],
@@ -5237,10 +4617,9 @@
       "textType": 0,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.06172883172049772,
-      "x": 0.6731742148718218,
-      "y": 0.9303235143019102,
-      "parentId": "f5323bc"
+      "width": 71.72890245921867,
+      "x": 843.7553736492733,
+      "y": 735.4394788562353
     },
     {
       "anchors": [
@@ -5286,8 +4665,8 @@
       "bkType": 0,
       "borderRadius": 0.1,
       "center": {
-        "x": 1056.426155335128,
-        "y": 674.1068230654367
+        "x": 1059.5971480825228,
+        "y": 694.5910325076873
       },
       "children": [],
       "connectedLines": [
@@ -5304,12 +4683,12 @@
       ],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.890174451045013,
-      "ey": 0.8907934202465828,
+      "ex": 1095.9096480825228,
+      "ey": 709.7212408410205,
       "fontSize": 20,
       "fontWeight": "normal",
       "globalAlpha": 1,
-      "height": 0.04651162790697667,
+      "height": 30.26041666666668,
       "iconType": 0,
       "id": "fa1adb7",
       "lineAnimateImages": [],
@@ -5331,10 +4710,9 @@
       "textType": 0,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.06249999999999971,
-      "x": 0.8276744510450134,
-      "y": 0.8442817923396061,
-      "parentId": "f5323bc"
+      "width": 72.62499999999999,
+      "x": 1023.2846480825228,
+      "y": 679.4608241743539
     },
     {
       "anchors": [
@@ -5380,8 +4758,8 @@
       "bkType": 0,
       "borderRadius": 0.1,
       "center": {
-        "x": 918.5974578558992,
-        "y": 674.1068230654367
+        "x": 921.7684506032939,
+        "y": 694.5910325076873
       },
       "children": [],
       "connectedLines": [
@@ -5398,12 +4776,12 @@
       ],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.7715611141437839,
-      "ey": 0.8907934202465828,
+      "ex": 958.0809506032939,
+      "ey": 709.7212408410205,
       "fontSize": 20,
       "fontWeight": "normal",
       "globalAlpha": 1,
-      "height": 0.04651162790697667,
+      "height": 30.26041666666668,
       "iconType": 0,
       "id": "040d6da",
       "lineAnimateImages": [],
@@ -5425,10 +4803,9 @@
       "textType": 0,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.06249999999999971,
-      "x": 0.7090611141437843,
-      "y": 0.8442817923396061,
-      "parentId": "f5323bc"
+      "width": 72.62499999999999,
+      "x": 885.4559506032939,
+      "y": 679.4608241743539
     },
     {
       "anchors": [
@@ -5474,8 +4851,8 @@
       "bkType": 0,
       "borderRadius": 0.1,
       "center": {
-        "x": 780.7687603766765,
-        "y": 674.1068230654367
+        "x": 783.9397531240713,
+        "y": 694.5910325076873
       },
       "children": [],
       "connectedLines": [
@@ -5492,12 +4869,12 @@
       ],
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.6529477772425601,
-      "ey": 0.8907934202465828,
+      "ex": 820.2522531240713,
+      "ey": 709.7212408410205,
       "fontSize": 20,
       "fontWeight": "normal",
       "globalAlpha": 1,
-      "height": 0.04651162790697667,
+      "height": 30.26041666666668,
       "iconType": 0,
       "id": "2bedebf2",
       "lineAnimateImages": [],
@@ -5519,10 +4896,9 @@
       "textType": 0,
       "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.06249999999999971,
-      "x": 0.5904477772425605,
-      "y": 0.8442817923396061,
-      "parentId": "f5323bc"
+      "width": 72.62499999999999,
+      "x": 747.6272531240713,
+      "y": 679.4608241743539
     },
     {
       "anchors": [
@@ -5548,37 +4924,36 @@
       "animations": [],
       "bkType": 0,
       "center": {
-        "x": 367.28266793900144,
-        "y": 642.7778284225923
+        "x": 370.4536606863961,
+        "y": 663.2620378648428
       },
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.2658577665388831,
-      "ey": 0.8442817923396062,
+      "ex": 370.45366068639646,
+      "ey": 679.4608241743539,
       "fontSize": 12,
       "globalAlpha": 1,
-      "height": 0.04979653318538421,
+      "height": 32.3975726190223,
       "iconType": 0,
       "id": "fb17791",
       "length": 32.3975726190223,
+      "lineAnimateImages": [],
       "lineHeight": 1.5,
       "lineName": "line",
       "lineWidth": 1,
+      "locked": 0,
       "name": "line",
       "progress": 0,
+      "rotate": 0,
       "shadow": false,
       "tags": [],
       "textType": 0,
       "type": 1,
+      "visible": true,
       "whiteSpace": "break-all",
-      "width": 5.870232584592885E-16,
-      "x": 0.2658577665388825,
-      "y": 0.794485259154222,
-      "parentId": "f5323bc",
-      "rotate": 0,
-      "lineAnimateImages": [],
-      "locked": 0,
-      "visible": true
+      "width": 6.821210263296962e-13,
+      "x": 370.4536606863958,
+      "y": 647.0632515553316
     },
     {
       "anchors": [
@@ -5604,37 +4979,36 @@
       "animations": [],
       "bkType": 0,
       "center": {
-        "x": 505.11136541822714,
-        "y": 642.7778284225923
+        "x": 508.2823581656218,
+        "y": 663.2620378648428
       },
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.3844711034401104,
-      "ey": 0.8442817923396062,
+      "ex": 508.2823581656232,
+      "ey": 679.4608241743539,
       "fontSize": 12,
       "globalAlpha": 1,
-      "height": 0.04979653318538421,
+      "height": 32.3975726190223,
       "iconType": 0,
       "id": "c054954",
       "length": 32.3975726190223,
+      "lineAnimateImages": [],
       "lineHeight": 1.5,
       "lineName": "line",
       "lineWidth": 1,
+      "locked": 0,
       "name": "line",
       "progress": 0,
+      "rotate": 0,
       "shadow": false,
       "tags": [],
       "textType": 0,
       "type": 1,
+      "visible": true,
       "whiteSpace": "break-all",
-      "width": 2.348093033837154E-15,
-      "x": 0.38447110344010804,
-      "y": 0.794485259154222,
-      "parentId": "f5323bc",
-      "rotate": 0,
-      "lineAnimateImages": [],
-      "locked": 0,
-      "visible": true
+      "width": 2.7284841053187847e-12,
+      "x": 508.28235816562045,
+      "y": 647.0632515553316
     },
     {
       "anchors": [
@@ -5660,37 +5034,36 @@
       "animations": [],
       "bkType": 0,
       "center": {
-        "x": 642.9400628974529,
-        "y": 642.7778284225923
+        "x": 646.1110556448476,
+        "y": 663.2620378648428
       },
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.5030844403413358,
-      "ey": 0.8442817923396062,
+      "ex": 646.111055644848,
+      "ey": 679.4608241743539,
       "fontSize": 12,
       "globalAlpha": 1,
-      "height": 0.04979653318538421,
+      "height": 32.3975726190223,
       "iconType": 0,
       "id": "68f532",
       "length": 32.3975726190223,
+      "lineAnimateImages": [],
       "lineHeight": 1.5,
       "lineName": "line",
       "lineWidth": 1,
+      "locked": 0,
       "name": "line",
       "progress": 0,
+      "rotate": 0,
       "shadow": false,
       "tags": [],
       "textType": 0,
       "type": 1,
+      "visible": true,
       "whiteSpace": "break-all",
-      "width": 5.870232584592885E-16,
-      "x": 0.5030844403413353,
-      "y": 0.794485259154222,
-      "parentId": "f5323bc",
-      "rotate": 0,
-      "lineAnimateImages": [],
-      "locked": 0,
-      "visible": true
+      "width": 6.821210263296962e-13,
+      "x": 646.1110556448473,
+      "y": 647.0632515553316
     },
     {
       "anchors": [
@@ -5716,37 +5089,36 @@
       "animations": [],
       "bkType": 0,
       "center": {
-        "x": 780.7687603766768,
-        "y": 642.7778284225923
+        "x": 783.9397531240713,
+        "y": 663.2620378648428
       },
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.6216977772425607,
-      "ey": 0.8442817923396062,
+      "ex": 783.9397531240717,
+      "ey": 679.4608241743539,
       "fontSize": 12,
       "globalAlpha": 1,
-      "height": 0.04979653318538421,
+      "height": 32.3975726190223,
       "iconType": 0,
       "id": "432e9b8",
       "length": 32.3975726190223,
+      "lineAnimateImages": [],
       "lineHeight": 1.5,
       "lineName": "line",
       "lineWidth": 1,
+      "locked": 0,
       "name": "line",
       "progress": 0,
+      "rotate": 0,
       "shadow": false,
       "tags": [],
       "textType": 0,
       "type": 1,
+      "visible": true,
       "whiteSpace": "break-all",
-      "width": 5.870232584592885E-16,
-      "x": 0.6216977772425601,
-      "y": 0.794485259154222,
-      "parentId": "f5323bc",
-      "rotate": 0,
-      "lineAnimateImages": [],
-      "locked": 0,
-      "visible": true
+      "width": 6.821210263296962e-13,
+      "x": 783.939753124071,
+      "y": 647.0632515553316
     },
     {
       "anchors": [
@@ -5772,37 +5144,36 @@
       "animations": [],
       "bkType": 0,
       "center": {
-        "x": 918.5974578558995,
-        "y": 642.7778284225923
+        "x": 921.7684506032944,
+        "y": 663.2620378648428
       },
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.7403111141437847,
-      "ey": 0.8442817923396062,
+      "ex": 921.7684506032947,
+      "ey": 679.4608241743539,
       "fontSize": 12,
       "globalAlpha": 1,
-      "height": 0.04979653318538421,
+      "height": 32.3975726190223,
       "iconType": 0,
       "id": "f0cb687",
       "length": 32.3975726190223,
+      "lineAnimateImages": [],
       "lineHeight": 1.5,
       "lineName": "line",
       "lineWidth": 1,
+      "locked": 0,
       "name": "line",
       "progress": 0,
+      "rotate": 0,
       "shadow": false,
       "tags": [],
       "textType": 0,
       "type": 1,
+      "visible": true,
       "whiteSpace": "break-all",
-      "width": 5.870232584592885E-16,
-      "x": 0.7403111141437841,
-      "y": 0.794485259154222,
-      "parentId": "f5323bc",
-      "rotate": 0,
-      "lineAnimateImages": [],
-      "locked": 0,
-      "visible": true
+      "width": 6.821210263296962e-13,
+      "x": 921.768450603294,
+      "y": 647.0632515553316
     },
     {
       "anchors": [
@@ -5828,37 +5199,36 @@
       "animations": [],
       "bkType": 0,
       "center": {
-        "x": 1056.4261553351275,
-        "y": 642.7778284225923
+        "x": 1059.5971480825224,
+        "y": 663.2620378648428
       },
       "dash": 0,
       "ellipsis": false,
-      "ex": 0.8589244510450132,
-      "ey": 0.8442817923396062,
+      "ex": 1059.5971480825228,
+      "ey": 679.4608241743539,
       "fontSize": 12,
       "globalAlpha": 1,
-      "height": 0.04979653318538421,
+      "height": 32.3975726190223,
       "iconType": 0,
       "id": "66ac78d",
       "length": 32.3975726190223,
+      "lineAnimateImages": [],
       "lineHeight": 1.5,
       "lineName": "line",
       "lineWidth": 1,
+      "locked": 0,
       "name": "line",
       "progress": 0,
+      "rotate": 0,
       "shadow": false,
       "tags": [],
       "textType": 0,
       "type": 1,
+      "visible": true,
       "whiteSpace": "break-all",
-      "width": 5.870232584592885E-16,
-      "x": 0.8589244510450127,
-      "y": 0.794485259154222,
-      "parentId": "f5323bc",
-      "rotate": 0,
-      "lineAnimateImages": [],
-      "locked": 0,
-      "visible": true
+      "width": 6.821210263296962e-13,
+      "x": 1059.5971480825222,
+      "y": 647.0632515553316
     },
     {
       "anchors": [
@@ -5882,7 +5252,7 @@
         },
         {
           "id": "487730c5",
-          "lineLength": 342.9698792943585,
+          "lineLength": 342.96987929435863,
           "penId": "2ac13fb0",
           "x": 0,
           "y": 0.5000000000000067
@@ -5914,19 +5284,20 @@
       "animations": [],
       "bkType": 0,
       "center": {
-        "x": 538.7676075861804,
-        "y": 702.0961504063774
+        "x": 541.9386003335751,
+        "y": 722.5803598486278
       },
       "dash": 1,
       "ellipsis": false,
-      "ex": 0.561012567997021,
-      "ey": 0.93032351430191,
+      "ex": 713.4235399807544,
+      "ey": 735.4394788562352,
       "fontSize": 12,
       "globalAlpha": 1,
-      "height": 0.03953009405532705,
+      "height": 25.718238015214524,
       "iconType": 0,
       "id": "2ac13fb0",
-      "length": 368.68811730957304,
+      "length": 368.68811730957316,
+      "lineAnimateImages": [],
       "lineDash": [
         5,
         5
@@ -5934,22 +5305,20 @@
       "lineHeight": 1.5,
       "lineName": "polyline",
       "lineWidth": 1,
+      "locked": 0,
       "name": "line",
       "progress": 0,
+      "rotate": 0,
       "shadow": false,
       "tags": [],
       "textType": 0,
       "toArrow": "line",
       "type": 1,
+      "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.2951548014581386,
-      "x": 0.2658577665388825,
-      "y": 0.8907934202465829,
-      "parentId": "f5323bc",
-      "rotate": 0,
-      "lineAnimateImages": [],
-      "locked": 0,
-      "visible": true
+      "width": 342.96987929435863,
+      "x": 370.4536606863958,
+      "y": 709.7212408410206
     },
     {
       "anchors": [
@@ -5973,7 +5342,7 @@
         },
         {
           "id": "69c4f6ab",
-          "lineLength": 205.14118181513174,
+          "lineLength": 205.1411818151318,
           "penId": "31c35bf3",
           "x": 0,
           "y": 0.5000000000000067
@@ -6005,19 +5374,20 @@
       "animations": [],
       "bkType": 0,
       "center": {
-        "x": 607.6819563257943,
-        "y": 702.0961504063774
+        "x": 610.8529490731892,
+        "y": 722.5803598486278
       },
       "dash": 1,
       "ellipsis": false,
-      "ex": 0.5610125679970217,
-      "ey": 0.93032351430191,
+      "ex": 713.4235399807551,
+      "ey": 735.4394788562352,
       "fontSize": 12,
       "globalAlpha": 1,
-      "height": 0.03953009405532705,
+      "height": 25.718238015214524,
       "iconType": 0,
       "id": "31c35bf3",
-      "length": 230.85941983034627,
+      "length": 230.85941983034633,
+      "lineAnimateImages": [],
       "lineDash": [
         5,
         5
@@ -6025,22 +5395,20 @@
       "lineHeight": 1.5,
       "lineName": "polyline",
       "lineWidth": 1,
+      "locked": 0,
       "name": "line",
       "progress": 0,
+      "rotate": 0,
       "shadow": false,
       "tags": [],
       "textType": 0,
       "toArrow": "line",
       "type": 1,
+      "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.17654146455691125,
-      "x": 0.38447110344011043,
-      "y": 0.8907934202465829,
-      "parentId": "f5323bc",
-      "rotate": 0,
-      "lineAnimateImages": [],
-      "locked": 0,
-      "visible": true
+      "width": 205.1411818151318,
+      "x": 508.2823581656233,
+      "y": 709.7212408410206
     },
     {
       "anchors": [
@@ -6096,19 +5464,20 @@
       "animations": [],
       "bkType": 0,
       "center": {
-        "x": 676.5963050654061,
-        "y": 702.0961504063774
+        "x": 679.7672978128007,
+        "y": 722.5803598486278
       },
       "dash": 1,
       "ellipsis": false,
-      "ex": 0.5610125679970209,
-      "ey": 0.93032351430191,
+      "ex": 713.4235399807543,
+      "ey": 735.4394788562352,
       "fontSize": 12,
       "globalAlpha": 1,
-      "height": 0.03953009405532705,
+      "height": 25.718238015214524,
       "iconType": 0,
       "id": "ff5d225",
       "length": 93.03072235112154,
+      "lineAnimateImages": [],
       "lineDash": [
         5,
         5
@@ -6116,22 +5485,20 @@
       "lineHeight": 1.5,
       "lineName": "polyline",
       "lineWidth": 1,
+      "locked": 0,
       "name": "line",
       "progress": 0,
+      "rotate": 0,
       "shadow": false,
       "tags": [],
       "textType": 0,
       "toArrow": "line",
       "type": 1,
+      "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.05792812765568565,
-      "x": 0.5030844403413353,
-      "y": 0.8907934202465829,
-      "parentId": "f5323bc",
-      "rotate": 0,
-      "lineAnimateImages": [],
-      "locked": 0,
-      "visible": true
+      "width": 67.31248433590702,
+      "x": 646.1110556448473,
+      "y": 709.7212408410206
     },
     {
       "anchors": [
@@ -6155,7 +5522,7 @@
         },
         {
           "id": "da311",
-          "lineLength": 70.51621314331692,
+          "lineLength": 70.51621314331703,
           "penId": "70d3f420",
           "x": 1,
           "y": 0.5000000000000067
@@ -6187,19 +5554,20 @@
       "animations": [],
       "bkType": 0,
       "center": {
-        "x": 745.5106538050173,
-        "y": 702.0961504063774
+        "x": 748.6816465524121,
+        "y": 722.5803598486278
       },
       "dash": 1,
       "ellipsis": false,
-      "ex": 0.6216977772425597,
-      "ey": 0.93032351430191,
+      "ex": 783.9397531240706,
+      "ey": 735.4394788562352,
       "fontSize": 12,
       "globalAlpha": 1,
-      "height": 0.03953009405532705,
+      "height": 25.718238015214524,
       "iconType": 0,
       "id": "70d3f420",
-      "length": 96.23445115853144,
+      "length": 96.23445115853156,
+      "lineAnimateImages": [],
       "lineDash": [
         5,
         5
@@ -6207,22 +5575,20 @@
       "lineHeight": 1.5,
       "lineName": "polyline",
       "lineWidth": 1,
+      "locked": 0,
       "name": "line",
       "progress": 0,
+      "rotate": 0,
       "shadow": false,
       "tags": [],
       "textType": 0,
       "toArrow": "line",
       "type": 1,
+      "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.06068520924553925,
-      "x": 0.5610125679970205,
-      "y": 0.8907934202465829,
-      "parentId": "f5323bc",
-      "rotate": 0,
-      "lineAnimateImages": [],
-      "locked": 0,
-      "visible": true
+      "width": 70.51621314331703,
+      "x": 713.4235399807536,
+      "y": 709.7212408410206
     },
     {
       "anchors": [
@@ -6246,7 +5612,7 @@
         },
         {
           "id": "1676761d",
-          "lineLength": 208.34491062254028,
+          "lineLength": 208.3449106225404,
           "penId": "02c17bc",
           "x": 1,
           "y": 0.5000000000000067
@@ -6278,19 +5644,20 @@
       "animations": [],
       "bkType": 0,
       "center": {
-        "x": 814.425002544629,
-        "y": 702.0961504063774
+        "x": 817.5959952920238,
+        "y": 722.5803598486278
       },
       "dash": 1,
       "ellipsis": false,
-      "ex": 0.7403111141437841,
-      "ey": 0.93032351430191,
+      "ex": 921.768450603294,
+      "ey": 735.4394788562352,
       "fontSize": 12,
       "globalAlpha": 1,
-      "height": 0.03953009405532705,
+      "height": 25.718238015214524,
       "iconType": 0,
       "id": "02c17bc",
-      "length": 234.0631486377548,
+      "length": 234.06314863775492,
+      "lineAnimateImages": [],
       "lineDash": [
         5,
         5
@@ -6298,22 +5665,20 @@
       "lineHeight": 1.5,
       "lineName": "polyline",
       "lineWidth": 1,
+      "locked": 0,
       "name": "line",
       "progress": 0,
+      "rotate": 0,
       "shadow": false,
       "tags": [],
       "textType": 0,
       "toArrow": "line",
       "type": 1,
+      "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.17929854614676366,
-      "x": 0.5610125679970205,
-      "y": 0.8907934202465829,
-      "parentId": "f5323bc",
-      "rotate": 0,
-      "lineAnimateImages": [],
-      "locked": 0,
-      "visible": true
+      "width": 208.3449106225404,
+      "x": 713.4235399807536,
+      "y": 709.7212408410206
     },
     {
       "anchors": [
@@ -6337,7 +5702,7 @@
         },
         {
           "id": "2911845",
-          "lineLength": 346.17360810176774,
+          "lineLength": 346.17360810176785,
           "penId": "752ee6fa",
           "x": 1,
           "y": 0.5000000000000067
@@ -6369,19 +5734,20 @@
       "animations": [],
       "bkType": 0,
       "center": {
-        "x": 883.3393512842428,
-        "y": 702.0961504063774
+        "x": 886.5103440316375,
+        "y": 722.5803598486278
       },
       "dash": 1,
       "ellipsis": false,
-      "ex": 0.858924451045012,
-      "ey": 0.93032351430191,
+      "ex": 1059.5971480825215,
+      "ey": 735.4394788562352,
       "fontSize": 12,
       "globalAlpha": 1,
-      "height": 0.03953009405532705,
+      "height": 25.718238015214524,
       "iconType": 0,
       "id": "752ee6fa",
-      "length": 371.89184611698226,
+      "length": 371.8918461169824,
+      "lineAnimateImages": [],
       "lineDash": [
         5,
         5
@@ -6389,22 +5755,20 @@
       "lineHeight": 1.5,
       "lineName": "polyline",
       "lineWidth": 1,
+      "locked": 0,
       "name": "line",
       "progress": 0,
+      "rotate": 0,
       "shadow": false,
       "tags": [],
       "textType": 0,
       "toArrow": "line",
       "type": 1,
+      "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.2979118830479916,
-      "x": 0.5610125679970205,
-      "y": 0.8907934202465829,
-      "parentId": "f5323bc",
-      "rotate": 0,
-      "lineAnimateImages": [],
-      "locked": 0,
-      "visible": true
+      "width": 346.17360810176785,
+      "x": 713.4235399807536,
+      "y": 709.7212408410206
     },
     {
       "anchors": [
@@ -6446,19 +5810,20 @@
       "animations": [],
       "bkType": 0,
       "center": {
-        "x": 793.3506896824239,
-        "y": 728.7226373307118
+        "x": 796.5216824298187,
+        "y": 749.2068467729623
       },
       "dash": 1,
       "ellipsis": false,
-      "ex": 0.6731742148718218,
-      "ey": 0.9514845809473217,
+      "ex": 843.7553736492735,
+      "ey": 749.2068467729623,
       "fontSize": 12,
       "globalAlpha": 1,
       "height": 0,
       "iconType": 0,
       "id": "05e5044",
       "length": 94.46738243890945,
+      "lineAnimateImages": [],
       "lineDash": [
         5,
         5
@@ -6466,31 +5831,118 @@
       "lineHeight": 1.5,
       "lineName": "polyline",
       "lineWidth": 1,
+      "locked": 0,
       "name": "line",
       "progress": 0,
+      "rotate": 0,
       "shadow": false,
       "tags": [],
       "textType": 0,
       "toArrow": "line",
       "type": 1,
+      "visible": true,
       "whiteSpace": "break-all",
-      "width": 0.08129723101455168,
-      "x": 0.5918769838572702,
-      "y": 0.9514845809473217,
-      "parentId": "f5323bc",
-      "rotate": 0,
+      "width": 94.46738243890945,
+      "x": 749.287991210364,
+      "y": 749.2068467729623
+    },
+    {
+      "anchors": [
+        {
+          "id": "0",
+          "penId": "7b0a884",
+          "x": 0.5,
+          "y": 0
+        },
+        {
+          "id": "1",
+          "penId": "7b0a884",
+          "x": 1,
+          "y": 0.5
+        },
+        {
+          "id": "2",
+          "penId": "7b0a884",
+          "x": 0.5,
+          "y": 1
+        },
+        {
+          "id": "3",
+          "penId": "7b0a884",
+          "x": 0,
+          "y": 0.5
+        }
+      ],
+      "animations": [],
+      "background": "rgba(255, 156, 110, 1)",
+      "bkType": 1,
+      "borderRadius": 0,
+      "center": {
+        "x": 715.2558309279812,
+        "y": 383.39447114360667
+      },
+      "children": [],
+      "color": "rgba(255, 255, 255, 1)",
+      "connectedLines": [
+        {
+          "anchor": "0",
+          "lineAnchor": "be052b8",
+          "lineId": "b16f740"
+        }
+      ],
+      "dash": 1,
+      "ellipsis": false,
+      "ex": 915.4842761084922,
+      "ey": 417.5082785254442,
+      "fontSize": 20,
+      "fontWeight": "normal",
+      "globalAlpha": 1,
+      "gradientColors": "",
+      "height": 68.22761476367512,
+      "iconType": 0,
+      "id": "7b0a884",
       "lineAnimateImages": [],
+      "lineCap": "butt",
+      "lineDash": [
+        5,
+        5
+      ],
+      "lineGradientColors": "linear-gradient(90deg,rgb(241, 29, 0) 0%,rgba(220, 115, 73, 1) 100%)",
+      "lineHeight": 1.5,
+      "lineWidth": 1,
       "locked": 0,
-      "visible": true
+      "name": "rectangle",
+      "progress": 0,
+      "props": {
+        "look": true,
+        "text": true
+      },
+      "rotate": 0,
+      "shadow": false,
+      "shadowBlur": 0,
+      "shadowColor": "",
+      "shadowOffsetX": 0,
+      "shadowOffsetY": 0,
+      "strokeType": false,
+      "tags": [],
+      "text": "",
+      "textBaseline": "top",
+      "textColor": "rgba(255, 255, 255, 1)",
+      "textType": 0,
+      "visible": true,
+      "whiteSpace": "break-all",
+      "width": 400.4568903610221,
+      "x": 515.0273857474701,
+      "y": 349.2806637617691
     }
   ],
   "origin": {
-    "x": 61.31738280950725,
-    "y": 119.0656521270032
+    "x": 61.52693596821295,
+    "y": 130.1719695384054
   },
   "center": {
-    "x": 559,
-    "y": 850
+    "x": 53,
+    "y": 82
   },
   "paths": {},
   "template": "edd6200",
@@ -6499,25 +5951,26 @@
   "background": "#1e2430",
   "color": "#bdc7db",
   "component": false,
+  "createdAt": "2026-09-26T18:03:41.124964+08:00",
   "dataPoints": [],
-  "enableMock": true,
+  "enableMock": false,
   "groups": [],
   "height": 1080,
   "iconUrls": [],
   "iot": {},
+  "networks": [],
+  "oldV": false,
+  "ownerId": "01a0471b-d73c-7ac5-99f0-1409bd66b006",
+  "ownerName": "18190952603",
   "scaleMode": "1",
   "tags": null,
   "version": "1.1.19",
   "width": 1920,
   "folder": "",
   "name": "微电网",
-  "image": "/cloud/28/5f/c2/01a0dd2f-2da8-7929-9057-7d9d2e94ea67.png",
-  "ownerId": "01a0471b-d73c-7ac5-99f0-1409bd66b006",
-  "ownerName": "18190952603",
+  "image": "",
   "isSystem": false,
   "isTemplate": false,
-  "createdAt": "2026-09-26T18:03:41.124964+08:00",
-  "oldV": false,
-  "networks": [],
-  "userId": "01a0471b-d73c-7ac5-99f0-1409bd66b006"
+  "userId": "01a0471b-d73c-7ac5-99f0-1409bd66b006",
+  "initJs": ""
 }

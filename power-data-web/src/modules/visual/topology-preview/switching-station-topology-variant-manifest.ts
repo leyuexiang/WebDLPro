@@ -40,8 +40,9 @@ export const SWITCHING_STATION_TOPOLOGY_VARIANTS = Object.freeze([
   { id: 'network-business', combinationKey: 'network+business', layerIds: Object.freeze(['network', 'business']), topologyPath: 'variants/network-business/topology.json', sourceSha256: '6e5ceb97cacf87f84ff30194ecaa67711291e73873bb4ec6fdff3f103756c179', expectedPenCount: 87 },
   { id: 'network-key-process', combinationKey: 'network+key-process', layerIds: Object.freeze(['network', 'key-process']), topologyPath: 'variants/network-key-process/topology.json', sourceSha256: 'c4c151e924da92a2d3aa39145bb87089740701c05b62f435a5daf90f88d99034', expectedPenCount: 86 },
   { id: 'business-key-process', combinationKey: 'business+key-process', layerIds: Object.freeze(['business', 'key-process']), topologyPath: 'variants/business-key-process/topology.json', sourceSha256: 'a5b7b5bdee2aa244ed6a276c65127c27d8821149aa21e514f16be2f9d9f3cd7f', expectedPenCount: 52 },
-  // 2026-10-16 按 开关站.json 更新；输入 SHA-256：64d03d6054d0693509067de91e61cc9eaa2501caebef6c8c6ed9d066307dfd51；清单散列锁定 WebP 本地化后的运行文件。
-  { id: 'network-business-key-process', combinationKey: 'network+business+key-process', layerIds: Object.freeze(['network', 'business', 'key-process']), topologyPath: 'variants/network-business-key-process/topology.json', sourceSha256: 'd260f9ad4a95a74c573d599737160959fdb2780af58b989260b2087f5ac07c9f', expectedPenCount: 85, isDefault: true },
+  // 2026-10-21 按最新“开关站.json”更新；源文件 SHA-256：ba1487863d28b28d83b689bdc6e63840643154e6e95e9bb87837fa33e59b5c3e。
+  // 运行文件已将源包图片显式本地化为公共 WebP，散列和图元数锁定本次可发布输入。
+  { id: 'network-business-key-process', combinationKey: 'network+business+key-process', layerIds: Object.freeze(['network', 'business', 'key-process']), topologyPath: 'variants/network-business-key-process/topology.json', sourceSha256: '7725e3d18477e7047f8f16a1fcc19d7a3f13a09434e00e576648b9c7f3099d4a', expectedPenCount: 94, isDefault: true },
 ] as const satisfies readonly SwitchingStationTopologyVariantManifestEntry[])
 
 /** 两个索引在模块初始化时各构建一次，切层热路径不扫描清单或图元。 */

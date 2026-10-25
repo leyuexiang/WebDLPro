@@ -12,21 +12,22 @@ const protectionTopologyDefinitions = Object.freeze({
 const protectionTopologyMetadata = Object.freeze({
   'transformer-protection': Object.freeze({
     topologyPath: 'process-detail/protection/transformer-protection/topology.json',
-    sourceSha256: 'cebf00fc7b375ff7bff26e29da3d722edc378f825d75813f384825b9a24f5431',
-    expectedPenCount: 37,
-    bindingPenIds: Object.freeze(['13641187', '3ca46467', '5c62b7c9', '638bfdc8', '4c977fd', '5ba41a5e', '2afc53b']),
+    // 最新参考图补入变压器图元并归一公共 WebP；合同同时锁定六个保护装置和原变压器绑定。
+    sourceSha256: 'f212e9bc772af3ee832707337d8ad852a515d8431806396899718959f056b4cf',
+    expectedPenCount: 45,
+    bindingPenIds: Object.freeze(['4d08c079', '1cc838c8', 'bfe233e', '5357ee02', '525ddd87', '10a7f4', 'b901fcf', '3934001', '2afc53b']),
   }),
   'busbar-protection': Object.freeze({
     topologyPath: 'process-detail/protection/busbar-protection/topology.json',
-    sourceSha256: '0b6ed18b48c7039cf3f0079642f1b9d2197c9a2890fd5a28d50839eca7161eb4',
-    expectedPenCount: 35,
-    bindingPenIds: Object.freeze(['764bd402', 'cb91449', '3e2176c6', '276dbcd0', '6c957795', '149e5ff']),
+    sourceSha256: 'c161e398a4a2ca6ae14a1fc08c2942ba02c89cb38e38aedf05e70d46ff75d648',
+    expectedPenCount: 30,
+    bindingPenIds: Object.freeze(['697c8274', '9feded4', '369ffe7d', '9ca0194']),
   }),
   'line-protection': Object.freeze({
     topologyPath: 'process-detail/protection/line-protection/topology.json',
-    sourceSha256: 'e635617e600c787442823d0887c79bc581bbb244a63a9dc1c51d732be6b2c08c',
-    expectedPenCount: 34,
-    bindingPenIds: Object.freeze(['c15baad', '692fe9ae', '16a5c2d1', 'b8f3ceb', 'a5f4bae', '31d8ffd']),
+    sourceSha256: 'f4edf30234dc7dd90b1bda72576adbe7a1a8e32dea6c41b95b37aa62c6cadc3b',
+    expectedPenCount: 39,
+    bindingPenIds: Object.freeze(['4a0e1cda', '26b1c4c0', '318d6252', '1c93d79', '53ce6f5c', '7a69ba60', '740db66c']),
   }),
 })
 
@@ -49,10 +50,10 @@ export const processDetailTopologyContracts = Object.freeze([
   Object.freeze({
     contextId: 'process-detail.wind-power.wind-turbine',
     topologyPath: 'process-detail/wind-power/wind-turbine/topology.json',
-    // 新旧文件均有四十个图元，发布门禁同时锁定内容散列，不能仅比较数量。
-    sourceSha256: '5770f9e3c402c04b081291850bc7dd32a5688ba4c398c3e866b3dc1525720fa4',
-    expectedPenCount: 40,
-    bindingPenIds: Object.freeze(['bb18bd', 'c236be3']),
+    // 最新输入含三十五个图元；发布门禁同时锁定散列和绑定图元，不能只比较数量。
+    sourceSha256: '41c4f6eb12126401c67207b85683ce4c2dea786af69b457c84d36b8c6184ef4c',
+    expectedPenCount: 35,
+    bindingPenIds: Object.freeze(['4e8f84e0', 'ff8e8e2', 'e1cb52b', 'f6eb29d', '4af3bcb7', '2167a855', '49b8df2', '7e83956', '76259d', 'a0a7e97']),
   }),
   Object.freeze({
     contextId: 'process-detail.wind-power.gearbox',
@@ -86,8 +87,9 @@ export const processDetailTopologyContracts = Object.freeze([
   Object.freeze({
     contextId: 'process-detail.solar-power.inverter',
     topologyPath: 'process-detail/solar-power/inverter/topology.json',
-    sourceSha256: '6391b1212c07664721cbccfea4bb9d5f7ef06487655b08fbf09d4b09e9018686',
-    expectedPenCount: 19,
+    // 2026-10-21 同步用户提供的光伏逆变器关键环节最新 JSON。
+    sourceSha256: '392c1bee67b66723fe0fb06f438637a34c85a763f6da72596309740cac2a2e88',
+    expectedPenCount: 18,
     bindingPenIds: Object.freeze(['df25e45', '2cf7b170']),
   }),
   ...protectionTopologyContracts,

@@ -246,38 +246,30 @@ const RESOURCE_MANIFEST_BY_VARIANT_ID: ReadonlyMap<SolarTopologyVariantId, Solar
     processNodePenIds: ["730f9118", "eb7d4da", "5b1b946", "53f5be", "f48a03d", "050e39b"],
   })],
   ['network-business-key-process', createResourceManifest({
-    dcs: ['49e49f47', '7ca1b67a'],
+    // 最新总图移除了旧版控制层图元 49e49f47、7ca1b67a，改以真实存在的网关图元承载控制节点。
+    dcs: ['d2e1410'],
     solar: ['6940ceef', 'ebd260c'],
-    // 最新组合图没有附带图片文件：不改变四态绑定，静态图元按稳定图元编号（penId）复用此前已本地化的公共资源。
+    // 最新组合图没有附带图片文件；现存设备图元按稳定编号复用公共资源，已删除不存在的旧控制层绑定。
     staticImagePathByPenId: {
       '176117dc': 'icons/normal/solar.webp',
       '1a5f8230': 'icons/normal/combiner.webp',
       '1caa4b93': 'icons/normal/desktop.webp',
       '22cfb42d': 'icons/static/31e08369011912241004d9da628aa4ac3a80ba97a8abd2e83289e7a7515f4c8b.webp',
-      '2c7bbcf5': 'icons/normal/office.webp',
       '305620f': 'icons/normal/solar.webp',
       '30736f12': 'icons/normal/combiner.webp',
-      '321a7111': 'icons/normal/plc.webp',
-      '366568c5': 'icons/normal/plc.webp',
-      '3c67edf6': 'icons/normal/firewall.webp',
       '3cac61f': 'icons/normal/office.webp',
       '4fd515e8': 'icons/normal/desktop.webp',
       '507e0573': 'icons/normal/server.webp',
       '55d264ac': 'icons/normal/desktop.webp',
       '5a941e2': 'icons/normal/firewall.webp',
-      '613a6c52': 'icons/normal/plc.webp',
       '64c758eb': 'icons/normal/box_transformer.webp',
       '6921ed0': 'icons/normal/desktop.webp',
-      '6ea99304': 'icons/normal/plc.webp',
-      '6f173de': 'icons/normal/plc.webp',
       '6f5e488': 'icons/static/cd6828e95bede9b2101c2444d65c367328521133720bd598d8be4b665b505b37.webp',
       '7413dc96': 'icons/normal/box_transformer.webp',
       '9d85e4e': 'icons/normal/desktop.webp',
       'b66d23f': 'icons/static/cd6828e95bede9b2101c2444d65c367328521133720bd598d8be4b665b505b37.webp',
-      'bdfc897': 'icons/normal/plc.webp',
-      'd12730b': 'icons/normal/plc.webp',
-      'e68be5c': 'icons/normal/server.webp',
-      'f3c8f69': 'icons/normal/plc.webp',
+      // 新总图新增网关图元；公共 DCS 图标同时作为控制节点四态资源。
+      'd2e1410': 'icons/normal/dcs.webp',
       'ff18287': 'icons/normal/router.webp',
     },
     // 五个分类标题背景作为装饰图元锁定，不进入设备提示或二维选中。
@@ -343,15 +335,16 @@ const RESOURCE_MANIFEST_BY_VARIANT_ID: ReadonlyMap<SolarTopologyVariantId, Solar
     dcs: ['df25e45'],
     solar: ['2cf7b170'],
     staticImagePathByPenId: {
-      // 机组主控制器没有业务状态映射，仅按来源散列复用公共静态图片。
+      // 关键环节图的 SCADA、汇流箱和光伏板没有三维状态绑定，仅按语义复用公共 WebP 图标。
       '7c547b4d': 'icons/normal/dcs.webp',
+      '2b8f249': 'icons/normal/combiner.webp',
+      '5e2e830': 'icons/normal/solar.webp',
       'b16b48b': 'background/flow-light-3.webp',
       'bf8082e': 'background/flow-light-3.webp',
-      '32d9c9c': 'background/flow-light-3.webp',
     },
-    titleBackgroundPenIds: ['b16b48b', 'bf8082e', '32d9c9c'],
-    // 工艺矩形仅允许本地只读选择，不生成设备提示或三维状态绑定。
-    processNodePenIds: ['1ff66281'],
+    titleBackgroundPenIds: ['b16b48b', 'bf8082e'],
+    // 最新关键环节图没有工艺流程矩形；设备图元仍可点击，但不生成额外绑定。
+    processNodePenIds: [],
   })],
 ])
 

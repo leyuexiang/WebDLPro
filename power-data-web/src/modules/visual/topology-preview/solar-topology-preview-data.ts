@@ -143,7 +143,10 @@ export async function loadSolarTopologyPreviewData(
 
   let sourceData = sourceDataCache.get(variantId)
   if (!sourceData) {
-    const response = await fetch(getSolarTopologyPreviewPublicAssetUrl(variant.topologyPath), {
+    const assetUrl = getSolarTopologyPreviewPublicAssetUrl(variant.topologyPath)
+    // 用来源散列做查询参数，确保同一路径替换 JSON 后不会命中合作方浏览器或静态服务器旧缓存。
+    const cacheBustedAssetUrl = `${assetUrl}${assetUrl.includes('?') ? '&' : '?'}v=${variant.sourceSha256}`
+    const response = await fetch(cacheBustedAssetUrl, {
       signal,
       cache: import.meta.env.DEV ? 'no-store' : 'force-cache',
     })

@@ -10,7 +10,7 @@ import {
 import { loadSwitchingStationTopologyPreviewData } from './switching-station-topology-preview-data'
 import { getSwitchingStationTopologyTooltipContent } from './switching-station-topology-tooltip'
 import { SWITCHING_STATION_TOPOLOGY_RUNTIME_BINDINGS } from './switching-station-topology-runtime-bindings'
-import { loadProtectionProcessDetailTopologyData } from './protection-process-detail-topology-data'
+import { getProtectionProcessDetailStatusImageUrl, loadProtectionProcessDetailTopologyData } from './protection-process-detail-topology-data'
 
 /** 开关站业务模块只提供清单能力，画布生命周期与风电共用同一实现。 */
 export const SWITCHING_STATION_TOPOLOGY_PREVIEW_PROFILE: ManifestTopologyPreviewProfile = Object.freeze({
@@ -18,6 +18,7 @@ export const SWITCHING_STATION_TOPOLOGY_PREVIEW_PROFILE: ManifestTopologyPreview
   defaultVariantId: 'network-business-key-process',
   filterGroups: SWITCHING_STATION_TOPOLOGY_FILTER_GROUPS,
   runtimeBindings: SWITCHING_STATION_TOPOLOGY_RUNTIME_BINDINGS,
+  getStatusImage: getProtectionProcessDetailStatusImageUrl,
   createDefaultSelection: () => createDefaultSwitchingStationTopologyFilterSelection(),
   toggleFilter: (current: ReadonlySet<string>, filterId: string, checked: boolean) => toggleSwitchingStationTopologyFilter(
     current as ReadonlySet<SwitchingStationTopologyFilterId>,

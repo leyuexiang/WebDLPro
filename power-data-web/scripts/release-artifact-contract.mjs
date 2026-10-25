@@ -114,6 +114,32 @@ const requiredMicrogridEquipmentMappings = Object.freeze([
   Object.freeze({ nodeId: 'asset.microgrid-storage-converter', title: '储能变流器', sceneNodeId: 'node.microgrid-storage-converter' }),
   Object.freeze({ nodeId: 'asset.microgrid-ats-controller', title: 'ATS控制器', sceneNodeId: 'node.microgrid-ats-controller' }),
 ])
+/** 升压站、降压站、换流站第二层的四类保护控制节点只向合作方提供状态，不进入 Unity 映射。 */
+const requiredSubstationPartnerControlNodes = Object.freeze({
+  'step-up-substation': Object.freeze([
+    Object.freeze({ nodeId: 'system.step-up-transformer-protection', title: '变压器保护' }),
+    Object.freeze({ nodeId: 'system.step-up-busbar-protection', title: '母线保护' }),
+    Object.freeze({ nodeId: 'system.step-up-line-protection', title: '线路保护' }),
+    Object.freeze({ nodeId: 'system.step-up-capacitor-protection', title: '电容器保护' }),
+  ]),
+  'step-down-substation': Object.freeze([
+    Object.freeze({ nodeId: 'system.step-down-transformer-protection', title: '变压器保护' }),
+    Object.freeze({ nodeId: 'system.step-down-busbar-protection', title: '母线保护' }),
+    Object.freeze({ nodeId: 'system.step-down-line-protection', title: '线路保护' }),
+    Object.freeze({ nodeId: 'system.step-down-capacitor-protection', title: '电容器保护' }),
+  ]),
+  'converter-station': Object.freeze([
+    Object.freeze({ nodeId: 'system.converter-transformer-protection', title: '变压器保护' }),
+    Object.freeze({ nodeId: 'system.converter-busbar-protection', title: '母线保护' }),
+    Object.freeze({ nodeId: 'system.converter-line-protection', title: '线路保护' }),
+    Object.freeze({ nodeId: 'system.converter-capacitor-protection', title: '电容器保护' }),
+  ]),
+  'switching-station': Object.freeze([
+    Object.freeze({ nodeId: 'system.switching-busbar-protection', title: '母线保护' }),
+    Object.freeze({ nodeId: 'system.switching-line-protection', title: '线路保护' }),
+    Object.freeze({ nodeId: 'system.switching-capacitor-protection', title: '电容器保护' }),
+  ]),
+})
 // 调度中心只交付二维拓扑导航；其 Unity 映射必须保留空节点、流程步骤和路线数组。
 const navigationOnlySceneIds = Object.freeze(['dispatch'])
 const deviceIdentifierSuffixes = new Set(['id', 'ids'])
@@ -516,6 +542,29 @@ export async function validateReleaseArtifact(rootDirectory) {
     }
 
     /**
+     * 四类保护控制节点必须同时出现在第二层来源拓扑和合作方状态清单中，
+     * 但不得带 sceneNodeId，也不得被误加入对应 Unity 场景节点集合。
+     */
+    const hasInvalidSubstationPartnerControlNodes = Object.entries(requiredSubstationPartnerControlNodes).some(([sceneId, expectedNodes]) => {
+      const topology = Array.isArray(topologyManifest.topologies)
+        ? topologyManifest.topologies.find((item) => item?.topologyId === `topology.${sceneId}.overview` && item?.sceneId === sceneId && item?.filter === undefined)
+        : undefined
+      const mapping = Array.isArray(topologyManifest.unitySceneMappings)
+        ? topologyManifest.unitySceneMappings.find((item) => item?.sceneId === sceneId)
+        : undefined
+      const nodesById = new Map((Array.isArray(topology?.nodes) ? topology.nodes : []).map((node) => [node?.nodeId, node]))
+      return !topology || !mapping || expectedNodes.some((expectedNode) => {
+        const node = nodesById.get(expectedNode.nodeId)
+        return !node || node.title !== expectedNode.title || node.doubleClickBehavior !== 'emit-node' ||
+          Object.prototype.hasOwnProperty.call(node, 'sceneNodeId') ||
+          !Array.isArray(mapping.sceneNodeIds) || mapping.sceneNodeIds.includes(expectedNode.nodeId)
+      })
+    })
+    if (hasInvalidSubstationPartnerControlNodes) {
+      issues.push('升压站、降压站、换流站必须发布四类保护控制节点，开关站必须发布母线保护、线路保护、电容器保护三个合作方状态节点，且均不得声明 Unity 映射。')
+    }
+
+    /**
      * 仅导航场景按显式闭集校验默认拓扑和无流程副作用；风电与开关站等已登记关键环节的场景不受此限制。
      * 该约束把“可从菜单进入场景”和“已实现三维工艺能力”明确分开。
      */
@@ -614,6 +663,7 @@ export async function validateReleaseArtifact(rootDirectory) {
         { nodeId: 'asset.wind-turbine-drivetrain-system', title: '传动系统' },
       ]],
       ['process-detail.wind-power.gearbox', [
+        { nodeId: 'asset.wind-gearbox-cooling-fan', title: '散热风扇' },
         { nodeId: 'asset.wind-gearbox-lubrication-unit', title: '润滑油装置' },
       ]],
       ['process-detail.wind-power.yaw-system', [
@@ -630,7 +680,7 @@ export async function validateReleaseArtifact(rootDirectory) {
       })
     })
     if (!hasExpectedWindNodeDirectory) {
-      issues.push('风电三个关键环节必须公布四个专属二维状态节点，编号与名称固定，且不得包含 Unity 场景节点映射。')
+      issues.push('风电三个关键环节必须公布五个专属二维状态节点，编号与名称固定，且不得包含 Unity 场景节点映射。')
     }
     const expectedSubstationDetails = [
       ['step-up-substation', 'transformer-protection', 'node.step-up-transformer'],
@@ -645,16 +695,41 @@ export async function validateReleaseArtifact(rootDirectory) {
       ['switching-station', 'busbar-protection', 'unit.switching-protection.control'],
       ['switching-station', 'line-protection', 'node.switching-breaker'],
     ]
+    const expectedSubstationBreakerNodes = new Map([
+      ['process-detail.step-up-substation.transformer-protection', ['asset.step-up-transformer-protection-breaker', 'asset.step-up-breaker']],
+      ['process-detail.step-up-substation.busbar-protection', ['asset.step-up-busbar-protection-breaker', 'asset.step-up-breaker']],
+      ['process-detail.step-up-substation.line-protection', ['asset.step-up-line-protection-breaker', 'asset.step-up-breaker']],
+      ['process-detail.step-down-substation.transformer-protection', ['asset.step-down-transformer-protection-breaker', 'asset.step-down-breaker']],
+      ['process-detail.step-down-substation.busbar-protection', ['asset.step-down-busbar-protection-breaker', 'asset.step-down-breaker']],
+      ['process-detail.step-down-substation.line-protection', ['asset.step-down-line-protection-breaker', 'asset.step-down-breaker']],
+      ['process-detail.converter-station.transformer-protection', ['asset.converter-transformer-protection-breaker', 'asset.converter-breaker']],
+      ['process-detail.converter-station.busbar-protection', ['asset.converter-busbar-protection-breaker', 'asset.converter-breaker']],
+      ['process-detail.converter-station.line-protection', ['asset.converter-line-protection-breaker', 'asset.converter-breaker']],
+      ['process-detail.switching-station.busbar-protection', ['asset.switching-busbar-protection-breaker', 'asset.switching-breaker']],
+      ['process-detail.switching-station.line-protection', ['asset.switching-line-protection-breaker', 'asset.switching-breaker']],
+    ])
     const hasInvalidSubstationDetail = expectedSubstationDetails.some(([sceneId, stepId, stateNodeId]) => {
       const detailId = `process-detail.${sceneId}.${stepId}`
       const detail = processDetails.find((item) => item?.processDetailId === detailId)
+      const expectedBreakerNode = expectedSubstationBreakerNodes.get(detailId)
+      const topologyNodes = Array.isArray(detail?.topologyNodes) ? detail.topologyNodes : []
+      const hasExpectedBreakerNode = topologyNodes.length === 1 && topologyNodes[0]?.nodeId === expectedBreakerNode?.[0] &&
+        topologyNodes[0]?.title === '断路器' && topologyNodes[0]?.statusTargetNodeId === expectedBreakerNode?.[1] &&
+        !Object.prototype.hasOwnProperty.call(topologyNodes[0] ?? {}, 'sceneNodeId')
       return !detail || detail.sceneId !== sceneId || detail.processId !== `${sceneId}-operation` ||
         detail.stepId !== stepId || detail.resourceId !== `process-detail-resource.${sceneId}.${stepId}` ||
         detail.cameraPoseId !== `camera-pose.${sceneId}.${stepId}` || detail.stateNodeId !== stateNodeId ||
-        detail.topologyDataContextId !== detailId
+        detail.topologyDataContextId !== detailId || !hasExpectedBreakerNode
     })
     if (hasInvalidSubstationDetail) {
-      issues.push('四个变电站类场景的十一项保护关键环节必须同时声明资源、相机位、状态节点和拓扑上下文。')
+      issues.push('四个变电站类场景的十一项保护关键环节必须同时声明资源、相机位、状态节点、拓扑上下文和独立断路器状态节点。')
+    }
+    const secondLevelBreakerNodeIds = new Set([
+      'asset.step-up-breaker', 'asset.step-down-breaker', 'asset.converter-breaker', 'asset.switching-breaker',
+    ])
+    if (processDetails.some((detail) => (Array.isArray(detail?.topologyNodes) ? detail.topologyNodes : [])
+      .some((node) => secondLevelBreakerNodeIds.has(node?.nodeId)))) {
+      issues.push('第二层断路器只能保留 Unity 映射，不能作为合作方第三层状态清单节点。')
     }
     if (!windTurbineAction || windTurbineAction.targetViewMode !== 'process-detail' ||
         windTurbineAction.processDetailId !== 'process-detail.wind-power.wind-turbine' ||

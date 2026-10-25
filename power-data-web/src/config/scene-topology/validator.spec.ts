@@ -155,6 +155,35 @@ describe('场景拓扑节点协议清单校验', () => {
     expect(issueCodes(colliding)).toContain('process-detail.topology-node-id-collision')
   })
 
+  it('校验第三层状态聚合目标必须指向同场景第二层来源节点', () => {
+    const base = createValidManifest()
+    const manifest: SceneTopologyManifest = {
+      ...base,
+      processDetails: [{
+        sceneId: toSceneId('gas-power'),
+        processId: toProcessId('gas-power-generation'),
+        stepId: toStepId('gas-turbine'),
+        processDetailId: toProcessDetailId('process-detail.gas-power.gas-turbine'),
+        resourceId: toProcessDetailResourceId('process-detail-resource.gas-power.gas-turbine'),
+        cameraPoseId: toCameraPoseId('camera-pose.gas-power.gas-turbine'),
+        stateNodeId: toSceneNodeId('scene-node.gas.turbine'),
+        topologyDataContextId: 'process-detail.gas-power.gas-turbine',
+        topologyNodes: [{
+          nodeId: toNodeId('asset.gas-turbine-detail-breaker'),
+          title: '断路器',
+          statusTargetNodeId: toNodeId('node.gas.turbine'),
+        }],
+      }],
+    }
+    expect(validateSceneTopologyManifest(manifest)).toEqual([])
+
+    const invalid = structuredClone(manifest) as unknown as Record<string, unknown>
+    const details = invalid.processDetails as Array<Record<string, unknown>>
+    const nodes = details[0]!.topologyNodes as Array<Record<string, unknown>>
+    nodes[0]!.statusTargetNodeId = 'node.other-scene-device'
+    expect(issueCodes(invalid)).toContain('process-detail.topology-node-target-reference')
+  })
+
   it('接受总览重点区域，并拒绝未绑定锚点或关键环节区域声明', () => {
     const baseManifest = createValidManifest()
     const gasTopology = baseManifest.topologies.find((topology) => topology.sceneId === 'gas-power')!

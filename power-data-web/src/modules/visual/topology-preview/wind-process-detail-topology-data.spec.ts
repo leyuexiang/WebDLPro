@@ -19,10 +19,11 @@ beforeEach(() => vi.resetModules())
 afterEach(() => vi.unstubAllGlobals())
 
 describe('偏航专属第三层拓扑', () => {
-  it('四个合作方状态节点只使用已登记的公共四态 WebP 图', async () => {
+  it('五个合作方状态节点只使用已登记的公共四态 WebP 图', async () => {
     const { getWindProcessDetailStatusImageUrl } = await import('./wind-process-detail-topology-data')
     expect(getWindProcessDetailStatusImageUrl(toProcessNodeId('asset.wind-turbine-yaw-system'), 'alarm')).toContain('/icons/alarm/wind-yaw-system.webp')
     expect(getWindProcessDetailStatusImageUrl(toProcessNodeId('asset.wind-turbine-drivetrain-system'), 'fault')).toContain('/icons/fault/gearbox.webp')
+    expect(getWindProcessDetailStatusImageUrl(toProcessNodeId('asset.wind-gearbox-cooling-fan'), 'fault')).toContain('/icons/fault/gearbox.webp')
     expect(getWindProcessDetailStatusImageUrl(toProcessNodeId('asset.wind-gearbox-lubrication-unit'), 'offline')).toContain('/icons/offline/gearbox.webp')
     expect(getWindProcessDetailStatusImageUrl(toProcessNodeId('asset.wind-yaw-angle-sensor'), 'normal')).toContain('/icons/normal/gearbox.webp')
     expect(getWindProcessDetailStatusImageUrl(toProcessNodeId('asset.wind-yaw-angle-sensor'), 'alarm')).toContain('/icons/alarm/gearbox.webp')
@@ -110,8 +111,11 @@ describe('齿轮箱最新第三层拓扑', () => {
         expect(getWindTopologyTooltipContent(pen)).toBeUndefined()
       }
     }
-    expect(gearboxContext.bindings).toEqual([{ penId: 'a7d5ad8', nodeId: 'asset.wind-gearbox-lubrication-unit' }])
-    expect(gearboxContext.bindings[0]?.sceneNodeId).toBeUndefined()
+    expect(gearboxContext.bindings).toEqual([
+      { penId: '310a9d42', nodeId: 'asset.wind-gearbox-cooling-fan' },
+      { penId: 'a7d5ad8', nodeId: 'asset.wind-gearbox-lubrication-unit' },
+    ])
+    expect(gearboxContext.bindings.every((binding) => binding.sceneNodeId === undefined)).toBe(true)
     expect(data.pens.find((pen) => pen.id === '229c868c')?.text?.trim()).toBe('太阳能')
     expect((data as Meta2dData & { image?: string }).image).toBeUndefined()
     expect(fetchMock).toHaveBeenCalledTimes(1)
@@ -134,11 +138,15 @@ describe('风机最新第三层拓扑', () => {
   const turbineContext = getProcessDetailTopologyDataContext('process-detail.wind-power.wind-turbine')!
   const turbineText = readFileSync(`${process.cwd()}/public/topology/process-detail/wind-power/wind-turbine/topology.json`, 'utf8')
   const turbineSource = JSON.parse(turbineText) as Meta2dData
-  const turbineDeviceIds = new Set(['0ac4afe', '3e288cbd', '43a646d3', 'f0f2767', '271b18a0', '7cd2eb0', '10fa25ae', '25ed876', 'bb18bd', 'c236be3', '777c77b'])
-  const processPenIds = new Set(['2513e8', 'cacede1', 'bc1e364'])
+  // 新输入中两张区域流光图是背景，其余带设备图片的图元均可独立二维选中。
+  const turbineDeviceIds = new Set([
+    '0ac4afe', '6e0816e5', '79f70443', '2154966', '4e8f84e0', '2167a855', '49b8df2', '7e83956',
+    'a0a7e97', '76259d', 'ff8e8e2', 'e1cb52b', '4af3bcb7', 'f6eb29d', '212e50f6', '4267a74',
+    '4868b38e', '2f8876c5', '870cde', '77af5a85', '612c859',
+  ])
 
-  it('同为四十图元时仍通过新版本请求取得最新文案，原样保留布局并区分设备、工艺和背景命中', async () => {
-    // 旧文件与新文件数量相同；只验证图元数量无法发现陈旧缓存，须同时覆盖版本化请求和最新可见文字。
+  it('加载三十五个图元并通过新版本请求取得最新文案，原样保留布局并区分设备和背景命中', async () => {
+    // 版本化请求同时覆盖旧四十图元缓存，不能只依赖数量检查发现陈旧内容。
     const staleSource = structuredClone(turbineSource)
     staleSource.pens.find((pen) => pen.id === '0ac4afe')!.text = '\n\n\n\n机组主控制器'
     staleSource.pens.find((pen) => pen.id === '15c5cd3')!.text = '现场控制\n与保护\n\n'
@@ -147,15 +155,16 @@ describe('风机最新第三层拓扑', () => {
     vi.stubGlobal('fetch', fetchMock)
     const { loadWindProcessDetailTopologyData } = await import('./wind-process-detail-topology-data')
     const data = await loadWindProcessDetailTopologyData(turbineContext)
-    expect(data.pens).toHaveLength(40)
+    expect(data.pens).toHaveLength(35)
     const visualFields = (pens: Meta2dData['pens']) => pens.map(({ image: _image, locked: _locked, events: _events, ...visual }) => visual)
     expect(visualFields(data.pens)).toEqual(visualFields(turbineSource.pens))
     expect(data.pens.find((pen) => pen.id === '0ac4afe')?.text?.trim()).toBe('主控制器')
     expect(data.pens.find((pen) => pen.id === '15c5cd3')?.text?.trim()).toBe('控制层')
     expect(data.pens.find((pen) => pen.id === '3707c3af')?.text?.trim()).toBe('设备层')
-    expect(data.pens.filter((pen) => pen.image)).toHaveLength(14)
+    expect(data.pens.filter((pen) => pen.image)).toHaveLength(23)
+    expect(JSON.stringify(turbineSource)).not.toMatch(/\.png(?:$|[?#\"])/i)
     for (const pen of data.pens) {
-      const isSelectable = turbineDeviceIds.has(pen.id!) || processPenIds.has(pen.id!)
+      const isSelectable = turbineDeviceIds.has(pen.id!)
       expect(pen.locked).toBe(isSelectable ? LockState.DisableEdit : LockState.Disable)
       if (pen.image) expect(pen.image).toMatch(/\/topology\/shared\/(icons|background)\/.+\.webp$/)
       expect(resolveManifestTopologyClickSelection(pen, new Map()))
@@ -163,11 +172,21 @@ describe('风机最新第三层拓扑', () => {
       if (turbineDeviceIds.has(pen.id!)) expect(getWindTopologyTooltipContent(pen)?.status).toBe('正常')
       else expect(getWindTopologyTooltipContent(pen)).toBeUndefined()
     }
-    // 第二层五系统绑定不属于本关键环节文件，工艺矩形和十一设备均不能被自动推导为整机三维节点。
+    // 截图列出的偏航、传动两组设备全部共用对应整机状态；系统区域框不伪造图片绑定。
     expect(turbineContext.bindings).toEqual([
-      { penId: 'bb18bd', nodeId: 'asset.wind-turbine-yaw-system' },
-      { penId: 'c236be3', nodeId: 'asset.wind-turbine-drivetrain-system' },
+      { penId: '4e8f84e0', nodeId: 'asset.wind-turbine-yaw-system' },
+      { penId: 'ff8e8e2', nodeId: 'asset.wind-turbine-yaw-system' },
+      { penId: 'e1cb52b', nodeId: 'asset.wind-turbine-yaw-system' },
+      { penId: 'f6eb29d', nodeId: 'asset.wind-turbine-yaw-system' },
+      { penId: '4af3bcb7', nodeId: 'asset.wind-turbine-yaw-system' },
+      { penId: '2167a855', nodeId: 'asset.wind-turbine-drivetrain-system' },
+      { penId: '49b8df2', nodeId: 'asset.wind-turbine-drivetrain-system' },
+      { penId: '7e83956', nodeId: 'asset.wind-turbine-drivetrain-system' },
+      { penId: '76259d', nodeId: 'asset.wind-turbine-drivetrain-system' },
+      { penId: 'a0a7e97', nodeId: 'asset.wind-turbine-drivetrain-system' },
     ])
+    expect(turbineContext.bindings.filter((binding) => binding.nodeId === 'asset.wind-turbine-yaw-system')).toHaveLength(5)
+    expect(turbineContext.bindings.filter((binding) => binding.nodeId === 'asset.wind-turbine-drivetrain-system')).toHaveLength(5)
     expect(turbineContext.bindings.every((binding) => binding.sceneNodeId === undefined)).toBe(true)
   })
 
@@ -178,9 +197,9 @@ describe('风机最新第三层拓扑', () => {
     const index = createGasTopologyConnectedLineIndex(data.pens)
     expect([...resolveGasTopologyConnectedLineIds(['0ac4afe'], index)])
       .toEqual(['cb9edf', '7924dce4', '7e085d80', '3e49088', '1fb7bf6'])
-    expect([...resolveGasTopologyConnectedLineIds(['2513e8'], index)])
-      .toEqual(['9083127', '4d1741c7', '60aac4a8'])
-    expect(data.pens.filter((pen) => pen.name === 'line')).toHaveLength(15)
+    // 齿轮箱设备没有直接挂线；索引不能按视觉邻近关系虚构连线。
+    expect([...resolveGasTopologyConnectedLineIds(['7e83956'], index)]).toEqual([])
+    expect(data.pens.filter((pen) => pen.name === 'line')).toHaveLength(5)
     expect([...resolveGasTopologyConnectedLineIds([], index)]).toEqual([])
   })
 })

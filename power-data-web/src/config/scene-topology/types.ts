@@ -162,10 +162,15 @@ export interface ProcessDetailDefinition {
   topologyNodes?: readonly ProcessDetailTopologyNodeDefinition[]
 }
 
-/** 关键环节专属二维状态节点；仅公开稳定编号和显示名，不包含三维目标或图片路径。 */
+/** 关键环节专属二维状态节点；仅公开稳定编号、显示名和可选的第二层状态聚合目标。 */
 export interface ProcessDetailTopologyNodeDefinition {
   nodeId: NodeId
   title: string
+  /**
+   * 状态聚合目标。第三层节点上报的异常会投影到此第二层节点；该字段不是 Unity 映射，
+   * 第三层节点自身仍禁止声明 sceneNodeId（场景三维节点标识）。
+   */
+  statusTargetNodeId?: NodeId
 }
 
 /** 说明节点只在单份内容内部唯一，不拥有正式节点标识、设备状态或三维映射。 */

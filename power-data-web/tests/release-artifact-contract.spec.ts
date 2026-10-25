@@ -29,6 +29,37 @@ function createTopologyManifest() {
     ['consumption', '用电'],
     ['dispatch', '调度中心'],
   ]
+  // 正向夹具同步真实发布器的第二层合作方保护控制节点，验证新契约不会把它们误判为缺项。
+  const stationPartnerControlNodes = {
+    'step-up-substation': ['变压器保护', '母线保护', '线路保护', '电容器保护'].map((title, index) => ({
+      nodeId: [
+        'system.step-up-transformer-protection', 'system.step-up-busbar-protection',
+        'system.step-up-line-protection', 'system.step-up-capacitor-protection',
+      ][index], title, iconKey: 'plc', x: 10 + index * 20, y: 35,
+      deviceStatus: 'normal', doubleClickBehavior: 'emit-node',
+    })),
+    'step-down-substation': ['变压器保护', '母线保护', '线路保护', '电容器保护'].map((title, index) => ({
+      nodeId: [
+        'system.step-down-transformer-protection', 'system.step-down-busbar-protection',
+        'system.step-down-line-protection', 'system.step-down-capacitor-protection',
+      ][index], title, iconKey: 'plc', x: 10 + index * 20, y: 35,
+      deviceStatus: 'normal', doubleClickBehavior: 'emit-node',
+    })),
+    'converter-station': ['变压器保护', '母线保护', '线路保护', '电容器保护'].map((title, index) => ({
+      nodeId: [
+        'system.converter-transformer-protection', 'system.converter-busbar-protection',
+        'system.converter-line-protection', 'system.converter-capacitor-protection',
+      ][index], title, iconKey: 'plc', x: 10 + index * 20, y: 30,
+      deviceStatus: 'normal', doubleClickBehavior: 'emit-node',
+    })),
+    'switching-station': ['母线保护', '线路保护', '电容器保护'].map((title, index) => ({
+      nodeId: [
+        'system.switching-busbar-protection', 'system.switching-line-protection',
+        'system.switching-capacitor-protection',
+      ][index], title, iconKey: 'plc', x: 10 + index * 30, y: 35,
+      deviceStatus: 'normal', doubleClickBehavior: 'emit-node',
+    })),
+  }
   return {
     manifestVersion,
     unityBuildId: 'unity-contract',
@@ -110,7 +141,7 @@ function createTopologyManifest() {
       ].map(([nodeId, title, sceneNodeId], index) => ({
         nodeId, title, sceneNodeId, iconKey: 'server', x: index * 10, y: 75,
         deviceStatus: 'offline', doubleClickBehavior: 'emit-node',
-      })) : [],
+      })) : stationPartnerControlNodes[sceneId] ?? [],
       edges: [],
     }))],
     actions: [{
@@ -317,7 +348,10 @@ function createTopologyManifest() {
       cameraPoseId: 'camera-pose.wind-power.gearbox',
       stateNodeId: 'node.wind-gearbox',
       topologyDataContextId: 'process-detail.wind-power.gearbox',
-      topologyNodes: [{ nodeId: 'asset.wind-gearbox-lubrication-unit', title: '润滑油装置' }],
+      topologyNodes: [
+        { nodeId: 'asset.wind-gearbox-cooling-fan', title: '散热风扇' },
+        { nodeId: 'asset.wind-gearbox-lubrication-unit', title: '润滑油装置' },
+      ],
     }, {
       sceneId: 'wind-power',
       processId: 'wind-power-generation',
@@ -343,6 +377,11 @@ function createTopologyManifest() {
         cameraPoseId: `camera-pose.${sceneId}.${stepId}`,
         stateNodeId,
         topologyDataContextId: `process-detail.${sceneId}.${stepId}`,
+        topologyNodes: [{
+          nodeId: `asset.${nodePrefix}-${stepId}-breaker`,
+          title: '断路器',
+          statusTargetNodeId: `asset.${nodePrefix}-breaker`,
+        }],
       }))
     }), ...['switching-station'].flatMap((sceneId) => [
       ['busbar-protection', 'unit.switching-protection.control'],
@@ -356,6 +395,11 @@ function createTopologyManifest() {
       cameraPoseId: `camera-pose.${sceneId}.${stepId}`,
       stateNodeId,
       topologyDataContextId: `process-detail.${sceneId}.${stepId}`,
+      topologyNodes: [{
+        nodeId: `asset.switching-${stepId}-breaker`,
+        title: '断路器',
+        statusTargetNodeId: 'asset.switching-breaker',
+      }],
     })))],
     unitySceneMappings: [{
       sceneId: 'gas-power',
@@ -558,7 +602,7 @@ describe('发布产物输出标准', () => {
       writeFileSync(manifestPath, JSON.stringify(manifest), 'utf8')
       await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
       expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
-        expect.stringContaining('风电三个关键环节必须公布四个专属二维状态节点'),
+        expect.stringContaining('风电三个关键环节必须公布五个专属二维状态节点'),
       ]))
     } finally { rmSync(root, { recursive: true, force: true }) }
   })
@@ -573,7 +617,7 @@ describe('发布产物输出标准', () => {
       writeFileSync(manifestPath, JSON.stringify(manifest), 'utf8')
       await writeReleaseArtifactIntegrity(root, 'artifact-contract-release')
       expect(await validateReleaseArtifact(root)).toEqual(expect.arrayContaining([
-        expect.stringContaining('风电三个关键环节必须公布四个专属二维状态节点'),
+        expect.stringContaining('风电三个关键环节必须公布五个专属二维状态节点'),
       ]))
     } finally { rmSync(root, { recursive: true, force: true }) }
   })

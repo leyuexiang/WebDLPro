@@ -151,21 +151,19 @@ const RESOURCE_MANIFEST_BY_VARIANT_ID = new Map<
     processNodePenIds: ['220e4fc', 'b3a0d3', '599c15e', '6240fb4e', '8b440ac', '3ac2dfde'],
   })],
   ['network-business-key-process', createResourceManifest({
-    // 三层最新图仅保留实际出现的图元编号；旧版设备图元和标题编号已从默认映射移除。
+    // 2026-10-21 最新三层图：仅登记本次源 JSON 实际出现的图元编号，避免旧编号继续进入打包。
     staticImagePenIdsByPath: {
       'icons/normal/firewall.webp': ['0b59ba2', '1d6dc46', '3a412a8', '9ddf8'],
-      'icons/normal/desktop.webp': ['53787573', '4ff1e1f', '6f0a2c0', '3771b5aa', '476a2497', '3bb522e1'],
-      'icons/normal/protection.webp': ['231062e0', '28846a8b', 'b896e48'],
-      'icons/static/f6ce2eb85bb851727eb46af15e165bd4dc0c3d718b251ddf3dad5d59d546ca4a.webp': ['3094af3', '69ccc050'],
+      'icons/normal/desktop.webp': ['53787573', '4ff1e1f', '0404d2a', '6f0a2c0', '3771b5aa', '476a2497', '3bb522e1'],
+      'icons/normal/protection.webp': ['51a13e4f', '577d774', 'f94f960', '69ccc050', '358597c2', '80b9d96', '4030a3f7', 'b896e48'],
       'icons/normal/server.webp': ['f21af61', '3d15ad6'],
       'icons/static/fc0d7f043c577c6c378f47d2dbdebba016d21fe1080819ffae5f14d4a7416a0d.webp': ['2d57f754'],
       'icons/static/3c55a879863799ca393401c68510aca17af14fdff71e330d1300e7ca5567e5fa.webp': ['7e74f5dd'],
       'icons/static/e7843f4b2ea238b8249953825efe7429c7d03c3b386d883c312bddc52cd497e2.webp': ['2facfc78'],
-      'icons/static/daf2fb1b44161fe4932687c9c6b6506bc5c31d7a4ed899070c8844cac9cccda2.webp': ['0404d2a'],
-      'icons/static/8d0315d77f6a8912efa50b79ed1e4ac44d276d699a9fd722ac76412e89bb6bd3.webp': ['2c20d783', '5effb979'],
-      'icons/static/86f82e4489853e4ee9eb849071eb8d3d8f34de00b771ba6615a43fb0da1b204c.webp': ['460b2f3c', 'bdb5432'],
+      'icons/static/8d0315d77f6a8912efa50b79ed1e4ac44d276d699a9fd722ac76412e89bb6bd3.webp': ['05f7fc1', '5effb979'],
+      'icons/static/86f82e4489853e4ee9eb849071eb8d3d8f34de00b771ba6615a43fb0da1b204c.webp': ['731b2739', 'bdb5432'],
       'icons/static/31e08369011912241004d9da628aa4ac3a80ba97a8abd2e83289e7a7515f4c8b.webp': ['a938209', '601f21c', 'b11d114'],
-      'icons/normal/transformer.webp': ['74048c89', '3b0bb6bd'],
+      'icons/normal/transformer.webp': ['c02122e', '3b0bb6bd'],
     },
     // 只登记最新参考图内实际存在的五个区域标题背景。
     titleBackgroundPenIds: ['a4ae075', '1e22435', 'cd8cecf', '61650b4', '54c6b28'],

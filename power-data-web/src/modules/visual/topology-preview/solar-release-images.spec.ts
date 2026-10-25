@@ -31,8 +31,11 @@ describe('光伏发布图片地址', () => {
       const source = JSON.parse(readFileSync(resolve('public/topology/solar-json-preview', variant.topologyPath), 'utf8'))
       // 第三层来源仍保留压缩包原始云端路径；用快照验证加载器没有把部署地址写回缓存或源对象。
       const sourceImageByPenId = new Map(source.pens.map((pen: { id?: string; image?: string }) => [pen.id, pen.image]))
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(source))))
+      const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(source)))
+      vi.stubGlobal('fetch', fetchMock)
       const loaded = await loadSolarTopologyPreviewData(variant.id)
+      // 版本散列必须进入请求地址，避免同一拓扑路径被壳或静态服务器缓存为旧图。
+      expect(fetchMock.mock.calls[0]?.[0]).toContain(`?v=${variant.sourceSha256}`)
       const sourceImages = source.pens.filter((pen: { image?: string }) => Boolean(pen.image))
       const loadedImages = loaded.pens.filter((pen) => Boolean(pen.image))
       expect(loadedImages).toHaveLength(sourceImages.length)

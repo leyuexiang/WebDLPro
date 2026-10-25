@@ -36,7 +36,8 @@ const EXPECTED_DEVICE_PENS: Readonly<Record<SolarTopologyVariantId, {
   network: { control: ['7c5436', '32f050f8'], inverter: [] },
   'network-business': { control: ['0e822c6', '3a0e7852'], inverter: [] },
   'network-business-key-process': {
-    control: ['49e49f47', '7ca1b67a'],
+    // 最新“光伏-new.json”用网关图元承载控制节点，旧控制层编号不再存在。
+    control: ['d2e1410'],
     inverter: ['6940ceef', 'ebd260c'],
   },
   'network-key-process': {

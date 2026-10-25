@@ -1,11 +1,17 @@
 import { toProcessNodeId, type ProcessNodeId } from '@/config/process/identifiers'
 import { toSceneNodeId, type SceneNodeId } from '@/config/scene-topology/identifiers'
 
-/** 拓扑图元到业务节点、三维场景节点的正式绑定记录。 */
+/**
+ * 拓扑图元到业务节点、三维场景节点的正式绑定记录。
+ *
+ * `sceneNodeId`（三维场景节点标识）是可选字段：第二层四类保护控制节点只需要
+ * 让合作方按 `nodeId`（业务节点标识）上报状态，不对应 Unity（统一开发平台）节点，
+ * 因此不能为了凑齐字段而伪造三维映射。
+ */
 export interface SubstationTopologyRuntimeBinding {
   readonly penId: string
   readonly nodeId: ProcessNodeId
-  readonly sceneNodeId: SceneNodeId
+  readonly sceneNodeId?: SceneNodeId
 }
 
 /**
@@ -20,7 +26,8 @@ export function createSubstationTopologyRuntimeBindingIndex(
   const penIdsByNodeId = new Map<ProcessNodeId, string[]>()
   for (const binding of bindings) {
     nodeIdByPenId.set(binding.penId, binding.nodeId)
-    sceneNodeIdByPenId.set(binding.penId, binding.sceneNodeId)
+    // 合作方状态绑定可以没有三维目标；索引只收录真实的 Unity 映射，避免出现 undefined 键。
+    if (binding.sceneNodeId) sceneNodeIdByPenId.set(binding.penId, binding.sceneNodeId)
     const penIds = penIdsByNodeId.get(binding.nodeId)
     if (penIds) penIds.push(binding.penId)
     else penIdsByNodeId.set(binding.nodeId, [binding.penId])
@@ -40,3 +47,12 @@ export const stationNode = (nodeId: string, sceneNodeId: string): Omit<Substatio
 /** 同一业务节点在多个筛选组合中的图元编号汇聚为一条映射（升压站、配电站共用）。 */
 export const bindNode = (nodeId: string, sceneNodeId: string, penIds: readonly string[]): readonly SubstationTopologyRuntimeBinding[] =>
   penIds.map((penId) => ({ penId, ...stationNode(nodeId, sceneNodeId) }))
+
+/**
+ * 登记只面向合作方的二维节点。
+ *
+ * 这类图元仍可点击、接收状态并进入合作方清单，但刻意不写入 `sceneNodeId`，
+ * 从而不会进入 Unity 场景映射，也不会触发三维选中回路。
+ */
+export const bindPartnerNode = (nodeId: string, penIds: readonly string[]): readonly SubstationTopologyRuntimeBinding[] =>
+  penIds.map((penId) => ({ penId, nodeId: toProcessNodeId(nodeId) }))

@@ -12,14 +12,15 @@ const PATH_BY_CONTEXT = new Map([
 ])
 /**
  * 按当前完整文件登记可单独命中的设备和工艺节点；相同图元编号跨文件不代表同一业务设备。
- * 风机设备、齿轮箱设备和偏航设备仅四个经发布清单声明的节点接收合作方状态，且均不推测独立 Unity 编号。
+ * 风机设备、齿轮箱设备和偏航设备仅五个经发布清单声明的节点接收合作方状态，且均不推测独立 Unity 编号。
  * 公共提示层还会检查图片字段，因此三个工艺矩形可选、高亮但不会生成设备状态提示。
  */
 const SELECTABLE_PEN_IDS_BY_CONTEXT: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ['process-detail.wind-power.wind-turbine', new Set([
-    '0ac4afe', '3e288cbd', '43a646d3', 'f0f2767', '271b18a0', '7cd2eb0',
-    '10fa25ae', '25ed876', 'bb18bd', 'c236be3', '777c77b',
-    '2513e8', 'cacede1', 'bc1e364',
+    // 新风机关键环节文件只把带设备图片的图元列为二维设备；两张区域流光图和系统区域框保持背景命中策略。
+    '0ac4afe', '6e0816e5', '79f70443', '2154966', '4e8f84e0', '2167a855', '49b8df2', '7e83956',
+    'a0a7e97', '76259d', 'ff8e8e2', 'e1cb52b', '4af3bcb7', 'f6eb29d', '212e50f6', '4267a74',
+    '4868b38e', '2f8876c5', '870cde', '77af5a85', '612c859',
   ])],
   ['process-detail.wind-power.gearbox', new Set(['57e6a4bd', '310a9d42', 'a7d5ad8', '229c868c', '127fdca', '3e772cb3', '778ca658'])],
   ['process-detail.wind-power.yaw-system', new Set(['35d10e8d', '3a61df5', '5221dc0', 'b6b1b5', '64b6ac4b', '7675822'])],
@@ -42,9 +43,13 @@ const IMAGE_MAP: Readonly<Record<string, string>> = Object.freeze({
   '/cloud/2026/09/15/17/01a0a44f-0f9d-7d98-bf20-22d7f35114f5.png': 'icons/static/3f298fdca1e67c404570bede325564faebedad1ef887ad355bca07ee0be56767.webp',
   '/cloud/2026/09/09/20/01a08639-799b-7a65-8a8f-e31e02cb35fe.png': 'icons/static/e2e275e4a94ef6d9f2313aee8ee7857b2ba21ac4d323bd53378144dc47169f7f.webp',
   '/cloud/2026/09/09/20/01a08639-15ae-7ed0-9ab4-539dee85ade1.png': 'icons/static/cd8655f8bcede28c1a381160c4a696c93556459006d8fd8c2583a261b312d755.webp',
+  // 新版风机文件已直接登记公共 WebP；保留幂等映射，使历史输入键和已归一化输入共用同一加载路径。
+  'background/flow-light-3.webp': 'background/flow-light-3.webp',
+  'icons/normal/dcs.webp': 'icons/normal/dcs.webp',
+  'icons/normal/plc.webp': 'icons/normal/plc.webp',
 })
 
-/** 仅给本次登记的四个第三层节点提供四态图；路径复用已存在且与源 JSON 图元类型一致的公共 WebP。 */
+/** 仅给本次登记的五个第三层节点提供四态图；路径复用已存在且与源 JSON 图元类型一致的公共 WebP。 */
 const WIND_PROCESS_DETAIL_STATUS_PATHS: ReadonlyMap<ProcessNodeId, Readonly<Record<TopologyDeviceStatus, string>>> = new Map<ProcessNodeId, Readonly<Record<TopologyDeviceStatus, string>>>([
   [toProcessNodeId('asset.wind-turbine-yaw-system'), Object.freeze({
     normal: 'icons/static/def6155598057373934ea3668fa58a2ed4cf26f9d1722fae22f6a06af732859a.webp',
@@ -53,6 +58,12 @@ const WIND_PROCESS_DETAIL_STATUS_PATHS: ReadonlyMap<ProcessNodeId, Readonly<Reco
     offline: 'icons/offline/wind-yaw-system.webp',
   })],
   [toProcessNodeId('asset.wind-turbine-drivetrain-system'), Object.freeze({
+    normal: 'icons/normal/gearbox.webp',
+    alarm: 'icons/alarm/gearbox.webp',
+    fault: 'icons/fault/gearbox.webp',
+    offline: 'icons/offline/gearbox.webp',
+  })],
+  [toProcessNodeId('asset.wind-gearbox-cooling-fan'), Object.freeze({
     normal: 'icons/normal/gearbox.webp',
     alarm: 'icons/alarm/gearbox.webp',
     fault: 'icons/fault/gearbox.webp',
